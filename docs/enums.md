@@ -272,6 +272,15 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 > There are no password or lockout events — the system has no local passwords ([Auth §2](auth.md#2-design-principles)).
 
+**Datasource audit events** (same `audit_log` table, defined in [Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)):
+
+| Value | Trigger |
+|---|---|
+| `datasource.pool_build` | Credential decrypted to build a connection pool |
+| `datasource.pool_rebuild` | Pool rebuilt after a datasource update |
+| `datasource.connection_test` | Explicit connection test (`POST .../test`) |
+| `datasource.key_rotation` | Master-key rotation re-encryption pass |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -279,7 +288,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `rate_limit.exceeded`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `rate_limit.exceeded`). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|

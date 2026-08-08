@@ -56,7 +56,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 
 | Doc | Status | One line |
 |---|---|---|
-| [deployment.md](deployment.md) | v1.2 draft | Docker image, compose/k8s, multi-instance model, Redis requirements, graceful shutdown, sizing |
+| [deployment.md](deployment.md) | v1.2 | Docker image, compose/k8s, multi-instance model, Redis requirements, graceful shutdown, sizing |
 | [observability.md](observability.md) | v1.1 draft | JSON logs + correlation IDs, metric naming/cardinality rules, redaction (normative), health endpoints |
 | [module-structure.md](module-structure.md) | v1.2 | Gradle modules, exhaustive dependency table, persistence ownership, version catalog + implementation gates |
 

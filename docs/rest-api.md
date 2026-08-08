@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.3 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
-**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md)
-**Last updated:** 2026-08-05
+**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
+**Last updated:** 2026-08-07
 
 ---
 
@@ -610,7 +610,7 @@ Auth: `read` scope + ownership of the execution (`admin` may read any). The URL 
 }
 ```
 
-Pagination: `offset` + `limit`. Default `limit` is `datapipelines.result.page-size-rows`; max 100,000 per page.
+Pagination: `offset` + `limit`. Default `limit` is `datapipelines.result.page-size-rows`; maximum is `datapipelines.result.page-max-rows`.
 
 ### 7.4 TTL — fixed, client-influenced, clamped
 
@@ -765,11 +765,18 @@ Content-Type: application/json
   "username": "readonly_user",
   "password": "...",                // write-only; never returned in GET
   "properties": {
-    "maximum_pool_size": 10,
-    "connection_timeout_seconds": 30
+    "hikari": {
+      "maximumPoolSize": 10,
+      "connectionTimeout": 30000
+    },
+    "jdbc": {
+      "sslmode": "verify-full"
+    }
   }
 }
 ```
+
+`properties` has exactly two reserved namespaces — `hikari` (HikariCP's own camelCase property names, durations in milliseconds) and `jdbc` (driver connection properties) — validated by a test pool build at save time. See [Datasources §5](datasources.md#5-connection-pool-configuration).
 
 Response: `201 Created` with the datasource entity (excluding password).
 
@@ -921,7 +928,7 @@ All limits are **per user** — an API key draws from its owner's budget, so min
 
 - Requests: `rate-limit.requests-per-second` (100), `rate-limit.requests-per-minute` (1000).
 - Pipeline execution: `executor.max-concurrent-executions-per-user` (10) → `pipeline.execution.concurrency_limit`.
-- SSE connections: 50 concurrent streams per user.
+- SSE connections: `sse.max-streams-per-user` (50) concurrent streams per user.
 
 Counters are tracked in Redis, so limits hold across instances in a multi-instance deployment.
 

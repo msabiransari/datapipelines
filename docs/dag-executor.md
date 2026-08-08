@@ -597,7 +597,7 @@ fun stage(resultSet: ResultSet, tableName: String): Long = mutex.withLock {
 
     connection.prepareStatement(buildInsertSql(tableName, columnCount)).use { insert ->
         var rowCount = 0L
-        val batchSize = config.stagingBatchSize   // datapipelines.staging.h2.result-batch-size
+        val batchSize = config.insertBatchSize    // datapipelines.staging.h2.insert-batch-size
         while (resultSet.next()) {
             for (i in 1..columnCount) {
                 insert.setObject(i, readValue(resultSet, i, columnTypes[i - 1]))
@@ -835,6 +835,8 @@ Cancellation (§8.3) is deliberately absent from this table: an aborted executio
 
 Cancellation is a first-class path, not a side effect of failure. Three triggers produce it, all converging on the same mechanism:
 
+> A fourth `ABORTED` source exists but is **not** a cancellation: the crash sweep ([Metadata DB §8](metadata-db.md#8-operational-jobs)) flips RUNNING executions whose instance died. Nothing runs anymore, so there is no statement to cancel and no `execution_aborted` event — only the persisted status changes (recorded as `pipeline.execution.instance_lost`).
+
 | Trigger | Initiated by | `execution_aborted.reason` |
 |---|---|---|
 | `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) | The owner (or an `admin`) | `cancelled` |
@@ -900,11 +902,15 @@ interface StagingFactory {
 
 interface Staging : AutoCloseable {
     val connection: Connection       // single connection in v1, Mutex-guarded
-    suspend fun stage(resultSet: ResultSet, tableName: String): Long
+    suspend fun stage(resultSet: ResultSet, tableName: String): StageResult
     suspend fun query(sql: String): ResultSet
+    suspend fun execute(sql: String): Long     // DDL/DML against tempdb
+    fun stats(): StagingStats
     override fun close()
 }
 ```
+
+(`StageResult` — `tableName`, `rowsStaged`, `columns: List<ColumnSchema>` — and `StagingStats` are defined in [Staging §10](staging.md#10-the-staging-interface), which owns the `Staging` interface; only the `StagingFactory.create` signature is canonical here.)
 
 This `StagingFactory.create(executionId, engine)` signature is **canonical** — the [Staging spec](staging.md) aligns to it. `engine` defaults to `StagingEngine.H2`; the executor passes `pipeline.settings.tempdb.engine` explicitly. Pipeline-level `settings.tempdb.config` overrides the global `datapipelines.staging.*` keys ([Configuration §3.3](configuration.md#33-staging-tempdb)).
 
@@ -1058,7 +1064,7 @@ Implemented in the `dag` Gradle module:
 ### 15.3 Monitoring
 
 The executor exports Micrometer metrics:
-- `datapipelines.executions.total{status=success|failed}` — counter
+- `datapipelines.executions.total{status=success|failed|aborted, pipeline_id}` — counter (tag set is normative in [Observability §4](observability.md#4-metrics))
 - `datapipelines.executions.duration{pipeline_id=...}` — timer
 - `datapipelines.executions.concurrent` — gauge
 - `datapipelines.nodes.duration{pipeline_id=...,node_id=...}` — timer

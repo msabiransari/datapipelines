@@ -345,7 +345,7 @@ An audit event is written at each of those points — **never per lease**. The e
 Each event records:
 - Timestamp (`TIMESTAMPTZ`, UTC)
 - Datasource name
-- Trigger: `pool_build` | `pool_rebuild` | `connection_test` | `key_rotation`
+- Event name: `datasource.pool_build` | `datasource.pool_rebuild` | `datasource.connection_test` | `datasource.key_rotation` (registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events) alongside the auth audit events)
 - Actor (user id for operator-initiated actions, or the system principal for executor-initiated pool builds)
 - Cause, when the trigger is `pool_build` from an execution: the execution id and node id that took the first lease
 

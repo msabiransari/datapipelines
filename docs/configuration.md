@@ -98,6 +98,7 @@ Every completed execution's caller result is stored in Redis and read through th
 | `datapipelines.result.ttl-max-seconds` | `3600` | Upper clamp for client-requested TTL |
 | `datapipelines.result.max-size-bytes` | `104857600` | Hard cap on a caller result (100 MB). Exceeding it fails the execution with `result.too_large` |
 | `datapipelines.result.page-size-rows` | `1000` | Rows in the inline first page of `data_ready`, and the default `limit` for cursor reads |
+| `datapipelines.result.page-max-rows` | `100000` | Upper bound on the cursor `limit` parameter |
 
 ### 3.6 SSE
 
@@ -105,6 +106,7 @@ Every completed execution's caller result is stored in Redis and read through th
 |---|---|---|
 | `datapipelines.sse.heartbeat-interval-seconds` | `15` | SSE heartbeat comment interval |
 | `datapipelines.sse.disconnect-grace-seconds` | `30` | Grace period after client disconnect before the in-flight execution is cancelled ([REST API §6.8](rest-api.md#68-client-disconnect)) |
+| `datapipelines.sse.max-streams-per-user` | `50` | Concurrent SSE streams per user |
 
 ### 3.7 Rate Limiting
 
@@ -249,10 +251,12 @@ datapipelines:
     ttl-max-seconds: ${DATAPIPELINES_RESULT_TTL_MAX_SECONDS:3600}
     max-size-bytes: ${DATAPIPELINES_RESULT_MAX_SIZE_BYTES:104857600}
     page-size-rows: ${DATAPIPELINES_RESULT_PAGE_SIZE_ROWS:1000}
+    page-max-rows: ${DATAPIPELINES_RESULT_PAGE_MAX_ROWS:100000}
 
   sse:
     heartbeat-interval-seconds: ${DATAPIPELINES_SSE_HEARTBEAT_INTERVAL_SECONDS:15}
     disconnect-grace-seconds: ${DATAPIPELINES_SSE_DISCONNECT_GRACE_SECONDS:30}
+    max-streams-per-user: ${DATAPIPELINES_SSE_MAX_STREAMS_PER_USER:50}
 
   rate-limit:
     requests-per-second: ${DATAPIPELINES_RATE_LIMIT_REQUESTS_PER_SECOND:100}

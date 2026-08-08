@@ -153,7 +153,7 @@ CREATE INDEX idx_audit_event ON audit_log(event, timestamp DESC);
 **Notes:**
 - Append-only: rows are INSERTed and never UPDATEd, so there is no `updated_at`. The only DELETE is the retention job ([§8.2](#82-audit-log-retention)).
 - `key_id` is deliberately **not** a foreign key to `api_keys(id)` — the audit trail must survive deletion of the key it names.
-- `details_json` holds the per-event payload defined in [Auth §10.1](auth.md#101-events); it is subject to the redaction rules in [Observability §3](observability.md#3-logging) — no credentials, no `jdbc_url`.
+- `details_json` holds the per-event payload defined by the emitting spec — [Auth §10.1](auth.md#101-events) for `auth.*` events, [Datasources §7.4](datasources.md#74-decryption-points-and-audit-log) for `datasource.*` events (both vocabularies registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)); it is subject to the redaction rules in [Observability §3](observability.md#3-logging) — no credentials, no `jdbc_url`.
 - Retention: [`datapipelines.audit.retention-days`](configuration.md#312-audit).
 
 **Partitioning candidate:** For high-volume deployments, partition by month (`PARTITION BY RANGE (timestamp)`). v1 ships as a single partition.

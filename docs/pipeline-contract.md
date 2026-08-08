@@ -732,7 +732,14 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 
 | Code | HTTP | Description |
 |---|---|---|
-| `datasource.validation.*` | 400 | Datasource CRUD validation failures (full set in Datasources §9) |
+| `datasource.validation.name_invalid` | 400 | `name` fails the identifier rules |
+| `datasource.validation.dialect_invalid` | 400 | `dialect` not in the supported set |
+| `datasource.validation.jdbc_url_malformed` | 400 | URL fails the dialect adapter's parse |
+| `datasource.validation.jdbc_url_scheme_invalid` | 400 | URL scheme doesn't match the dialect |
+| `datasource.validation.password_missing` | 400 | `password` required on create |
+| `datasource.validation.properties_invalid` | 400 | Test pool build rejected a `hikari`/`jdbc` property |
+| `datasource.validation.query_timeout_invalid` | 400 | `query_timeout_seconds` present but < 1 |
+| `datasource.validation.duplicate_name` | 409 | Name already exists |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
