@@ -247,7 +247,7 @@ Some concerns touch every module:
 
 **Public API:**
 - `Datasource` data class
-- `Dialect` enum
+- `Dialect` enum — **declared in `typesystem`** (2026-08-08: the single authoring authority is [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) per enums.md §5, and `TypeMappers.forDialect(dialect: Dialect)` lives in typesystem, which depends on nothing internal — so the type cannot be declared here). This module consumes and re-exposes it through its typesystem dependency.
 - `DatasourceRegistry` interface
 - `DialectAdapter` interface + per-dialect implementations
 - `JdbcDrivers` — driver class lookup / availability check

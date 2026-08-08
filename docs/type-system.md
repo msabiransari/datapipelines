@@ -117,6 +117,7 @@ These rules fix the exact bytes a client receives. They apply to every egress pa
 - `scale` is still declared (`0`, as the driver reports it), so the BIGDECIMAL wire contract — a JSON string carrying the exact decimal — is unchanged.
 - Clients that need a bound must impose their own (or `CAST` in the source query). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2).
 - Dialects that *do* define a default precision for their unsized numeric (Oracle `NUMBER` → 38) report that default; they are not affected by this rule.
+- **Defensive generalization (2026-08-08):** ANY driver reporting precision ≤ 0 on an exact numeric takes this same unbounded encoding (`BIGDECIMAL`, precision omitted) — a `DECIMAL(0)` descriptor would violate §7.1's `minimum: 1`, and throwing on a driver quirk would violate §8.2's never-fail rule. Written for PG; applies everywhere the situation arises.
 
 ### 4.1 Why scale is omitted for approximate numerics
 
@@ -125,6 +126,8 @@ Approximate numerics have variable scale per value: `3.14` and `6.022e23` are bo
 ### 4.2 H2 staging behavior for approximate numerics
 
 Staging in H2 uses H2's native `DOUBLE` type for approximate-numeric origins (lossless round-trip), not `DECIMAL(p, ?)`. The canonical label `DECIMAL(15)` is the API contract; the H2 storage choice is internal and invisible to clients.
+
+**Approximate precision is not preserved across staging (adjudicated 2026-08-08).** A single-precision origin (`DECIMAL(7)`) that passes through tempdb reads back as `DECIMAL(15)` — H2 `DOUBLE` metadata cannot distinguish the two. The same source column therefore advertises `DECIMAL(7)` when read directly and `DECIMAL(15)` after staging. This widening is accepted: the value is approximate by definition, scale stays omitted either way, and widening is the safe direction for clients sizing buffers — treat any approximate `DECIMAL` as "≤ 15 representable digits".
 
 ---
 
@@ -179,7 +182,7 @@ Oracle has significant quirks; the **most important gotcha is that Oracle's `DAT
 | `FLOAT(p)` (Oracle's FLOAT — p in binary bits, 1-126) | `FLOAT` (6) | `DECIMAL(15)` | treated as double-precision |
 | `BINARY_FLOAT` | `REAL` (7) | `DECIMAL(7)` | no scale |
 | `BINARY_DOUBLE` | `DOUBLE` (8) | `DECIMAL(15)` | no scale |
-| `DATE` (Oracle DATE has time component!) | `TIMESTAMP` (93) | `TIMESTAMP` | **Gotcha**: not a DATE — see note below |
+| `DATE` (Oracle DATE has time component!) | `TIMESTAMP` (93) — some driver versions report `DATE` (91) | `TIMESTAMP` | **Gotcha**: not a DATE, whichever JDBC code the driver reports — the §5.2 policy is unconditional and canonical `DATE` is unreachable from Oracle |
 | `TIMESTAMP` | `TIMESTAMP` (93) | `TIMESTAMP` | normalized to UTC |
 | `TIMESTAMP WITH TIME ZONE` | `TIMESTAMP_WITH_TIMEZONE` (2014) | `TIMESTAMP` | normalized to UTC |
 | `TIMESTAMP WITH LOCAL TIME ZONE` | `TIMESTAMP_WITH_TIMEZONE` (2014) | `TIMESTAMP` | normalized to UTC |
@@ -335,6 +338,8 @@ SQLite is **dynamically typed**: columns have "type affinity" (INTEGER, TEXT, BL
 ## 6. H2 Staging Type Mapping (Canonical → H2)
 
 When the executor stages data from a source into H2 (`CREATE TABLE staging.x ...`), each canonical type maps to a specific H2 column type.
+
+**Round-trip rule (normative, 2026-08-08):** an unbounded `BIGDECIMAL` (precision omitted, §4) stages as `DECIMAL(100000, s)` — but on the way BACK (reading staged data through the H2 ingress mapper), a reported exact-numeric precision **at the ceiling (≥ 100000) reads as the unbounded encoding again**: `BIGDECIMAL` with precision omitted. Without this rule the storage ceiling leaks into the schema envelope as exactly the fabricated bound §4 forbids. Consequence, accepted as truthful: a genuine H2 *source* column declared `DECIMAL(100000, s)` also reports unbounded — it sits at H2's own maximum, so "unbounded" is not a lie about it.
 
 | Canonical | H2 type | Notes |
 |---|---|---|
@@ -631,7 +636,8 @@ This section is informational; the normative content is in Sections 3–10.
 The type system is implemented in the `typesystem` Gradle module:
 
 - `LogicalType` enum (the 11 types)
-- `ColumnSchema` data class (name, type, precision?, scale?)
+- `Dialect` enum (the 7 dialects, §5 — declared HERE, not in datasources: `forDialect` below needs it and this module depends on nothing internal; consumers get it transitively)
+- `ColumnSchema` data class (name, type, precision?, scale?, nullable?)
 - `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, `MssqlTypeMapper`, `MysqlTypeMapper`, `H2IngressMapper`, `DuckDbTypeMapper`, `SqliteTypeMapper`)
 - `FallbackTypeMapper` (unknown dialect / unrecognized JDBC type → `STRING` + warning, per §8.2)
 - `H2EgressMapper` (canonical → H2 column type). Note the split: `H2IngressMapper` reads H2 JDBC metadata back into canonical types, `H2EgressMapper` produces the H2 DDL type for a canonical type. There is no `H2TypeMapper` — see [Staging §5.3](staging.md#53-mappers-and-helper-signatures).
@@ -681,7 +687,9 @@ object FallbackTypeMapper : IngressTypeMapper {
 }
 ```
 
-**Fallback contract (§8.2 restated for implementers):** unrecognized input never fails an execution. Both fallback paths — unknown `Dialect` at dispatch, and unknown JDBC type code inside a per-dialect mapper — resolve to canonical `STRING`, serialize values via `toString()`, and emit exactly one `type_mapping.unknown_source_type` warning naming the column and the source type. The `when` above is therefore total by construction: adding a `Dialect` enum value can never produce a compile-time hole that becomes a runtime crash.
+**Fallback contract (§8.2 restated for implementers):** unrecognized input never fails an execution. Both fallback paths — unknown `Dialect` at dispatch, and unknown JDBC type code inside a per-dialect mapper — resolve to canonical `STRING`, serialize values via `toString()`, and emit exactly one `type_mapping.unknown_source_type` warning naming the column and the source type.
+
+> **The block above is illustrative, not compilable (2026-08-08).** A `when` over the enum is exhaustive, so Kotlin flags the `else` as redundant — a hard error under §7.1's `allWarningsAsErrors`. Implementations use any equivalent total dispatch (v1 ships a map lookup with an elvis fallback); since neither form gets compile-time exhaustiveness back, a test must assert every `Dialect` resolves to a non-fallback mapper — that test is the guard when a dialect is added. Additionally, `IngressTypeMapper` carries a `mapColumn(...)` overload alongside `map(...)`: §8.2's warning must name the affected column, which `map`'s signature cannot do.
 
 ### 11.3 Testing the type system
 

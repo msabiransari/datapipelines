@@ -5,6 +5,7 @@ import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
+import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
@@ -15,6 +16,8 @@ import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
+import java.io.File
+import java.util.zip.ZipFile
 
 /**
  * Build conventions applied to every module (module-structure.md §7).
@@ -163,6 +166,10 @@ class CommonConventionsPlugin : Plugin<Project> {
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
+            // The ONE-TestEngine rule (see this class's KDoc) enforced instead of merely
+            // written down. `classpath` is this task's own input, so reading it here is
+            // configuration-cache safe.
+            doFirst { assertSingleTestEngine(classpath, path) }
             testLogging {
                 events("passed", "skipped", "failed")
                 showExceptions = true
@@ -228,10 +235,90 @@ class CommonConventionsPlugin : Plugin<Project> {
         }
 
         project.tasks.named("check").configure { dependsOn(guard) }
+        // Also finalize `test` itself, not just `check`. Running `gradlew :m:test`
+        // directly — which is what everyone does while iterating — otherwise skips the
+        // guard entirely, so the one command most likely to be trusted mid-change was
+        // the one command the control did not cover. `finalizedBy` runs the guard even
+        // when the test task fails, which is correct: a task that died without reporting
+        // is exactly the case it exists to catch.
+        project.tasks.named("test").configure { finalizedBy(guard) }
     }
 
     private companion object {
         const val JDK_VERSION = 21
         const val KTLINT_VERSION = "1.8.0"
     }
+}
+
+/** The JUnit Platform's engine service descriptor, one per providing artifact. */
+private const val TEST_ENGINE_SERVICE = "META-INF/services/org.junit.platform.engine.TestEngine"
+
+/**
+ * Fails a [Test] task whose runtime classpath registers more than one JUnit Platform
+ * `TestEngine`.
+ *
+ * This is the mechanism behind the ONE-TestEngine rule documented on
+ * [CommonConventionsPlugin]. That rule previously existed only as a comment plus the
+ * absence of one catalog entry — and a comment does not survive someone adding
+ * `kotest-runner-junit5` (or `junit-vintage-engine`, or a transitive dependency that
+ * drags one in) to a module build file. The A/B that produced the rule measured 2 failed
+ * builds in 8 with two engines present, both of them corrupted Gradle test-result state
+ * rather than test failures — including one run that reported success having executed
+ * ZERO tests. A false green is exactly the failure mode a comment cannot prevent.
+ *
+ * The check reads the service descriptors actually on the classpath rather than the
+ * declared dependency coordinates, so it also catches an engine arriving transitively,
+ * which is the case nobody reviews.
+ */
+private fun assertSingleTestEngine(
+    classpath: FileCollection,
+    taskPath: String,
+) {
+    val engines = declaredTestEngines(classpath)
+    if (engines.size > 1) {
+        throw GradleException(
+            buildString {
+                append("$taskPath has ${engines.size} JUnit Platform TestEngines on its runtime classpath; ")
+                append("exactly one (Jupiter) is allowed.\n")
+                engines.forEach { (engine, source) -> append("  - $engine  (from $source)\n") }
+                append(
+                    "A second engine participates in result reporting while discovering nothing, and has " +
+                        "produced truncated Gradle test-result stores here before — a build that reports " +
+                        "success having run zero tests. See the CommonConventionsPlugin KDoc. A module that " +
+                        "deliberately wants Kotest spec styles gives them their OWN Test task so the two " +
+                        "engines never share one task run.",
+                )
+            },
+        )
+    }
+}
+
+/** Engine implementation class → the classpath entry that registers it. */
+private fun declaredTestEngines(classpath: FileCollection): Map<String, String> {
+    val found = linkedMapOf<String, String>()
+
+    fun record(
+        lines: List<String>,
+        source: String,
+    ) = lines
+        .map { it.substringBefore('#').trim() }
+        .filter { it.isNotEmpty() }
+        .forEach { found.putIfAbsent(it, source) }
+
+    classpath.files.forEach { entry ->
+        when {
+            entry.isDirectory ->
+                File(entry, TEST_ENGINE_SERVICE)
+                    .takeIf { it.isFile }
+                    ?.let { record(it.readLines(), entry.name) }
+
+            entry.isFile && entry.name.endsWith(".jar") ->
+                ZipFile(entry).use { jar ->
+                    jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
+                        record(jar.getInputStream(service).bufferedReader().readLines(), entry.name)
+                    }
+                }
+        }
+    }
+    return found
 }

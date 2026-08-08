@@ -243,7 +243,10 @@ The column list is written explicitly (not positional `INSERT INTO t VALUES (...
 
 ### 4.4 Value reading
 
-Per canonical type, the value is read from the source ResultSet and converted to the appropriate Java type for the H2 insert (`readValue`, signature in §5.3):
+Per canonical type, the value is read from the source ResultSet and converted to the appropriate Java type for the H2 insert (`readValue`, signature in §5.3). Two normative read rules (2026-08-08):
+
+- **`STRING`-canonical columns are read with `getString(index)`, never `getObject`.** Several §5.x mappings assign binary-coded or driver-object JDBC columns to canonical `STRING` (MySQL geometry as WKT, PG arrays, Oracle XMLType, CLOBs); `getObject(...).toString()` on those yields Java identity text (`[B@6d06d69c`) shipped as a plausible-looking value with no warning. `getString` makes the driver do the conversion.
+- **Temporal columns are read with JDBC 4.2 `getObject(index, OffsetDateTime/LocalDate/LocalTime::class.java)`, never `getTimestamp`/`getDate`/`getTime`** — the `java.sql` temporal types convert through the JVM default zone, and the typesystem's `JsonEncoder`/`UtcNormalization` reject them by design (§8.4 machine-independence).
 
 | Canonical | Read from source as | Insert into H2 as |
 |---|---|---|
