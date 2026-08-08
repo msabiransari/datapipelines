@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1 (living document — updated as enums evolve)
+**Status:** v1.1 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -13,6 +13,27 @@
 - If a value appears in code or a spec that doesn't match this document, the spec/code is wrong.
 - When adding a new enum value: add it here first, then propagate to specs and code.
 - Values are **additive-only** per the stability promises in individual specs.
+- Each enum has exactly ONE authoring spec (see the cross-reference table). Other specs are consumers.
+- Values marked **(reserved)** are registered for future use — they MUST NOT appear in generated code or be accepted by validators in v1.
+
+### Case & serialization convention
+
+The strings cataloged here are the **wire values** — what appears in JSON payloads, exactly as written (case included). Kotlin enum classes use UPPER_SNAKE_CASE constants with an explicit mapping to the wire value:
+
+```kotlin
+enum class WriteMode(@JsonValue val wire: String) {
+    REPLACE("replace"),
+    APPEND("append");
+
+    companion object {
+        @JsonCreator @JvmStatic
+        fun fromWire(v: String) = entries.firstOrNull { it.wire == v }
+            ?: throw IllegalArgumentException("Unknown WriteMode: $v")
+    }
+}
+```
+
+Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire and constant coincide. Never rely on default `Enum.name` serialization for lowercase/kebab/snake wire values — the explicit `@JsonValue` mapping is mandatory so the catalog string stays the single source of truth.
 
 ---
 
@@ -27,8 +48,8 @@
 | `BOOLEAN` | `boolean` | Two-valued logic: true / false / null |
 | `INTEGER` | `number` | Exact integer, int32 range (≤ 2^31 − 1) |
 | `BIGINTEGER` | `string` | Exact integer, int64 range (≤ 2^63 − 1). Exceeds IEEE 754 double safe integer range. |
-| `DECIMAL` | `number` | Exact numeric with precision ≤ 15 |
-| `BIGDECIMAL` | `string` | Exact numeric with precision > 15 |
+| `DECIMAL` | `number` | Numeric with precision ≤ 15. Scale present = exact origin; scale omitted = approximate origin (REAL → `DECIMAL(7)`, DOUBLE → `DECIMAL(15)`) — see [Type System §3.4](type-system.md#34-the-realdouble-collapse) |
+| `BIGDECIMAL` | `string` | Numeric with precision > 15 (or unbounded — precision omitted) |
 | `STRING` | `string` | Variable-length text. Includes source UUIDs, JSON, XML, enums, intervals. |
 | `BINARY` | `string` (base64) | Variable-length bytes |
 | `DATE` | `string` (ISO 8601 date) | Calendar date, no time |
@@ -61,8 +82,8 @@
 
 | Value | Required fields | Description |
 |---|---|---|
-| `tempdb` | `table` | Stage ResultSet into in-memory tempdb table. Default if `output` block is omitted. |
-| `caller` | (none) | Return ResultSet as pipeline output. **Exactly one node** per pipeline may use this. |
+| `tempdb` | `table` | Stage ResultSet into in-memory tempdb table for downstream nodes to query. |
+| `caller` | (none) | Return ResultSet as the pipeline's result. **Default if the `output` block is omitted.** At most one node per pipeline may resolve to `caller`; zero is legal (pure write-back pipelines emit no `data_ready`). |
 | `datasource` | `datasource`, `table`, `mode` | Stream ResultSet to an external datasource's table. |
 
 **Reserved for future:** `kafka`, `s3`, `email`, `webhook` (see [ROADMAP](ROADMAP.md)).
@@ -83,8 +104,8 @@
 
 ## 5. `Dialect` — supported source database dialects
 
-**Source:** [Type System §5](type-system.md#5-source-to-canonical-mapping-tables), [Datasources §4](datasources.md#4-supported-dialects)
-**Used by:** type-system (per-dialect type mappers), datasources (driver dispatch), templates (template targets a dialect), pipeline-contract (validation: template dialect must match datasource dialect).
+**Source:** [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) (single authority)
+**Used by:** datasources (driver dispatch), templates (template targets a dialect), pipeline-contract (validation: template dialect must match datasource dialect).
 
 | Value | JDBC driver |
 |---|---|
@@ -128,8 +149,8 @@
 
 ## 8. `Scope` — API key authorization scope
 
-**Source:** [Auth §5](auth.md#5-scopes)
-**Used by:** auth, every endpoint (scope enforcement).
+**Source:** [Auth §7.5](auth.md#75-scopes)
+**Used by:** auth, every endpoint and MCP tool (scope enforcement — see the scope↔operation matrix in auth.md).
 
 Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope has all lower scopes too.
 
@@ -165,7 +186,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `RUNNING` | Execution in progress |
 | `SUCCESS` | All nodes completed; result returned |
 | `FAILED` | A node failed; execution aborted |
-| `ABORTED` | Execution cancelled externally (client disconnect beyond grace period, admin kill, shutdown) |
+| `ABORTED` | Execution cancelled: client disconnect beyond `sse.disconnect-grace-seconds`, explicit `DELETE /api/v1/executions/{id}`, server shutdown, or the crash sweep ([Metadata DB §8](metadata-db.md#8-operational-jobs)) |
 
 **Reserved for future:** `PARTIAL` (partial-result mode where some nodes succeeded but a non-critical path failed — see [ROADMAP](ROADMAP.md)).
 
@@ -184,7 +205,8 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `node_failed` | A node fails | After matching `node_started`; pipeline then halts |
 | `pipeline_completed` | All nodes succeeded; final result imminent | After all `node_completed` |
 | `pipeline_failed` | Execution halts due to node failure | After the matching `node_failed` |
-| `data_ready` | Result data is available (inline or claim-check) | Last event on success; follows `pipeline_completed` |
+| `execution_aborted` | Execution cancelled (explicit `DELETE`, disconnect grace elapsed, shutdown) | Terminal; replaces `pipeline_completed`/`pipeline_failed` |
+| `data_ready` | Result stored; payload carries schema, inline first page, and `result_url` cursor | Last event when a caller node exists; follows `pipeline_completed` |
 
 **Order guarantees:** see [REST API §6.5](rest-api.md#65-event-ordering-guarantee).
 
@@ -192,21 +214,15 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ---
 
-## 12. `ResultDelivery` — how `data_ready` payload is delivered
+## 12. `ResultDelivery` — REMOVED (v1.1)
 
-**Source:** [REST API §6.4.7](rest-api.md#647-data_ready)
-**Used by:** rest-api, dag-executor, mcp-server.
-
-| Value | Description |
-|---|---|
-| `inline` | Schema + rows in the `data_ready` event payload. Used when result size ≤ `LARGE_RESULT_THRESHOLD` (default 1 MB). |
-| `claim_check` | Schema + `result_url` in the `data_ready` event; rows fetched via separate paginated endpoint from Redis. Used for large results. |
+**Removed 2026-08-07** ([SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md), decision D9). The inline-vs-claim-check split no longer exists: every caller result is stored in Redis and `data_ready` always carries schema + inline first page + `result_url` cursor. See [REST API §7](rest-api.md#7-result-delivery). Section number retained so later sections keep their numbering.
 
 ---
 
 ## 13. `ResultFormat` — wire format for result data
 
-**Source:** [REST API §7](rest-api.md#7-claim-check-result-retrieval)
+**Source:** [REST API §7](rest-api.md#7-result-delivery)
 **Used by:** rest-api, mcp-server.
 
 | Value | MIME type | Description |
@@ -234,34 +250,38 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ## 15. `AuthAuditEvent` — auth audit log events
 
-**Source:** [Auth §9.1](auth.md#91-events-logged)
+**Source:** [Auth §10.1](auth.md#101-events)
 **Used by:** auth, observability.
 
 | Value | Trigger |
 |---|---|
-| `auth.login.success` | Successful login |
-| `auth.login.failure` | Failed login (bad password, unknown user) |
-| `auth.login.locked` | Account locked from failed attempts |
-| `auth.logout` | Explicit logout |
+| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.domain_not_allowed` | User's email domain not in allowlist |
+| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
-| `auth.api_key.used` | API key successfully authenticated (sampled 1/100) |
-| `auth.api_key.rejected` | API key failed validation (revoked, expired, invalid) |
+| `auth.api_key.used` | API key validated (sampled 1/100) |
+| `auth.api_key.rejected` | API key validation failed |
 | `auth.scope.denied` | Request rejected for insufficient scope |
-| `auth.user.created` | New user account (admin action) |
-| `auth.user.deactivated` | User account deactivated |
-| `auth.password.changed` | Password change |
+| `auth.user.deactivated` | Admin deactivated a user |
+| `auth.user.activated` | Admin reactivated a user |
+| `auth.user.admin_granted` | Admin granted admin scope to user |
+| `auth.user.admin_revoked` | Admin revoked admin scope from user |
+
+> There are no password or lockout events — the system has no local passwords ([Auth §2](auth.md#2-design-principles)).
 
 ---
 
 ## 16. Error Code Domains (prefix catalog)
 
-**Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog), [Auth §7](auth.md#7-auth-errors)
+**Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}`. Domains:
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `rate_limit.exceeded`). Additive-only — never reused, never renamed.
 
-| Domain | Description | Source spec |
+| Domain | Description | Catalog section |
 |---|---|---|
 | `pipeline.validation.*` | Pipeline JSON validation failures (write-time) | pipeline-contract §13.1 |
 | `pipeline.import.*` | Pipeline import failures | pipeline-contract §13.2 |
@@ -269,33 +289,20 @@ Error codes follow `{domain}.{entity}.{failure}`. Domains:
 | `pipeline.node.*` | Individual node execution failures | pipeline-contract §13.4 |
 | `pipeline.staging.*` | Tempdb / staging failures | pipeline-contract §13.5 |
 | `type_mapping.*` | Type mapping warnings (not errors — in response `warnings` array) | pipeline-contract §13.6 |
-| `auth.*` | Authentication / authorization errors | auth §7 |
-| `auth.api_key.*` | API-key-specific auth events | auth |
-| `auth.scope.*` | Authorization scope checks | auth |
-| `auth.session.*` | Session token (JWT) checks | auth |
-| `auth.login.*` | Login flow events | auth |
-| `auth.csrf.*` | CSRF protection | auth |
-| `auth.rate_limit.*` | Auth-related rate limiting | auth |
-| `datasource.validation.*` | Datasource CRUD validation | datasources §9 |
-| `datasource.in_use` | Delete blocked by pipeline references | datasources |
-| `datasource.driver_not_loaded` | JDBC driver JAR missing for dialect | datasources |
-| `template.validation.*` | Template validation failures | templates §7 |
-| `template.import.*` | Template import failures | templates |
-| `rate_limit.exceeded` | General API rate limit hit | rest-api §12 |
-| `idempotency_key.reuse_for_different_request` | Same key, different body | dag-executor §11.2 |
-| `result.claim_check_expired` | Large result TTL expired | rest-api §7.6 |
-| `result.execution_not_found` | Execution ID unknown | rest-api §7.6 |
-| `result.execution_incomplete` | Execution not yet at `data_ready` | rest-api §7.6 |
-| `result.execution_failed` | Execution ended in failure | rest-api §7.6 |
-| `result.format_unsupported` | Unknown `format` parameter | rest-api §7.6 |
+| `auth.api_key.*`, `auth.scope.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
+| `datasource.*` (incl. `datasource.validation.*`) | Datasource CRUD, validation, driver availability | pipeline-contract §13.8 (defined in [Datasources §9](datasources.md#9-validation-rules)) |
+| `template.validation.*` | Template validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation)) |
+| `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
+| `rate_limit.exceeded` | Rate limit hit (single code for all layers) | pipeline-contract §13.11 |
+| `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
 
-**Convention:** all lowercase, dot-separated, ASCII. Additive-only — never reused, never renamed.
+**Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
 ---
 
 ## 17. HTTP Status Code Conventions
 
-**Source:** [REST API §2.6](rest-api.md#26-http-status-codes-used-correctly)
+**Source:** [REST API §2](rest-api.md#2-design-principles)
 **Used by:** every spec that defines HTTP behavior.
 
 | Code | Meaning | When used |
@@ -303,14 +310,14 @@ Error codes follow `{domain}.{entity}.{failure}`. Domains:
 | `200 OK` | Success (synchronous); SSE stream established | GET, PUT (update), successful POST |
 | `201 Created` | Resource created | POST that creates a new entity |
 | `204 No Content` | Success, no body | DELETE |
-| `400 Bad Request` | Client-side validation failure | All `pipeline.validation.*`, `template.validation.*`, `datasource.validation.*` |
-| `401 Unauthorized` | Auth missing or invalid | All `auth.api_key_missing`, `auth.api_key_invalid`, `auth.session.*` |
-| `403 Forbidden` | Auth valid but insufficient scope | `auth.scope_insufficient`, `auth.datasource_forbidden`, `auth.csrf.*` |
-| `404 Not Found` | Resource doesn't exist | `pipeline.execution.not_found`, etc. |
-| `409 Conflict` | State conflict | `pipeline.import.version_conflict`, `result.execution_incomplete` |
-| `410 Gone` | Resource expired | `result.claim_check_expired`, `result.execution_failed` |
-| `429 Too Many Requests` | Rate limited | `rate_limit.exceeded`, `pipeline.execution.concurrency_limit`, `auth.rate_limit.exceeded` |
-| `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.execution.aborted`, `pipeline.staging.*` |
+| `400 Bad Request` | Client-side validation failure | All `pipeline.validation.*`, `template.validation.*`, `datasource.validation.*`, `result.format_unsupported` |
+| `401 Unauthorized` | Auth missing or invalid | `auth.api_key.missing`, `auth.api_key.invalid`, `auth.session.*` |
+| `403 Forbidden` | Auth valid but insufficient scope | `auth.scope.insufficient`, `auth.csrf.*` |
+| `404 Not Found` | Resource doesn't exist | `pipeline.execution.not_found`, `result.execution_not_found`, etc. |
+| `409 Conflict` | State conflict | `pipeline.import.version_conflict`, `result.execution_incomplete`, `idempotency.key_reused_for_different_request` |
+| `410 Gone` | Resource expired / terminally unavailable | `result.expired`, `result.execution_failed` |
+| `429 Too Many Requests` | Rate limited | `rate_limit.exceeded`, `pipeline.execution.concurrency_limit` |
+| `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*`, `result.storage_unavailable` |
 | `502 Bad Gateway` | Upstream failure | `pipeline.node.datasource_connection_failed`, `pipeline.node.query_execution_failed` |
 | `503 Service Unavailable` | Service not ready | Readiness check failure |
 | `504 Gateway Timeout` | Execution timeout | `pipeline.execution.timeout` |
@@ -340,14 +347,13 @@ Error codes follow `{domain}.{entity}.{failure}`. Domains:
 | `NodeType` | pipeline-contract | dag-executor |
 | `OutputTarget` | pipeline-contract | dag-executor, staging |
 | `WriteMode` | pipeline-contract | dag-executor |
-| `Dialect` | datasources (canonical list), type-system (per-dialect mappers) | templates, pipeline-contract, mcp-server |
+| `Dialect` | type-system | datasources, templates, pipeline-contract, mcp-server |
 | `TemplateEngine` | templates | templates |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `Scope` | auth | every endpoint |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
 | `ExecutionStatus` | rest-api | dag-executor, mcp-server, persistence |
 | `SseEventType` | rest-api | dag-executor, mcp-server |
-| `ResultDelivery` | rest-api | dag-executor, mcp-server |
 | `ResultFormat` | rest-api | mcp-server |
 | `SslMode` | datasources | datasources |
 | `AuthAuditEvent` | auth | observability |
@@ -364,6 +370,7 @@ When a spec or code change introduces or renames an enum value:
 3. **Search the codebase** — `grep` for the value across `modules/**/*.kt`.
 4. **Bump the spec's `schema_version`** if the change is non-additive (per the spec's stability promise).
 5. **Document the change** in the spec's Change Log appendix and in [ROADMAP](ROADMAP.md) if it was previously tracked there.
+6. **Run `scripts/docs-audit.sh`** — it mechanically enforces steps 2's doc sweep (cross-references, error codes, config keys, forbidden legacy spellings) and must exit 0 before the change lands.
 
 This document itself is **additive-only** — values are never removed (only marked deprecated). The authoring spec governs its own stability promise; this doc tracks usage.
 
@@ -374,3 +381,4 @@ This document itself is **additive-only** — values are never removed (only mar
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial enums reference: 18 enum categories cataloged, cross-reference table, validation discipline |
+| 2026-08-07 | v1.1 | consistency campaign | Case/serialization convention added; `OutputTarget` default → `caller` (D1); `ResultDelivery` removed (D9); `execution_aborted` SSE event added (D7); `AuthAuditEvent` synced to auth §10.1 (no password/lockout events); §16 reduced to domain registry pointing at the single concrete catalog (pipeline-contract §13), D5 renames applied; single authority per enum; broken source links fixed. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
