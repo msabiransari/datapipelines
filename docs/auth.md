@@ -1,0 +1,806 @@
+# Auth & Security Specification
+
+**Status:** v2.1 (revised — generic OIDC provider support)
+**Owner:** datapipelines.co core
+**Depends on:** [Type System](type-system.md)
+**Last updated:** 2026-08-05
+
+---
+
+## 1. Purpose
+
+This spec defines **how users authenticate** (OIDC via any provider — Google, Microsoft, Okta, Auth0, Keycloak, etc.), **how sessions work** (internal JWT after OIDC login), **how agents authenticate** (API keys), **what authenticated principals can do** (scopes), and the **Spring Security wiring** that ties it all together.
+
+The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect. No local passwords are stored. After OIDC login, the server issues its own JWT for stateless session management.
+
+---
+
+## 2. Design Principles
+
+1. **No passwords.** Identity is delegated to an external OIDC provider. The server never sees or stores user passwords.
+2. **Generic OIDC, not provider-specific.** Any OIDC-compliant provider works — Google, Microsoft, Okta, Auth0, Keycloak, Ping, AWS Cognito, etc. The deployment configures which provider(s) to enable; the code is provider-agnostic.
+3. **OIDC for humans, API keys for agents.** Users log in via browser (OIDC redirect flow). Agents (Claude, GLM, Copilot) authenticate via API keys issued from the UI.
+4. **Internal JWT after OIDC.** Once OIDC validates the user, the server issues its own JWT (8h TTL). The JWT is the session — any instance can validate it statelessly. OIDC tokens are NOT used for ongoing session management.
+5. **API keys per agent, not global.** A user generates one key per agent. Compromised keys are individually revocable. Per-agent usage visible in audit logs.
+6. **Keys hashed at rest.** Same protection as passwords would be. A database leak does not expose working credentials.
+7. **Scopes are explicit and hierarchical.** Every key and session has a scope set. Default: `read`. Higher scopes require deliberate choice.
+8. **Stateless server.** JWT + API key validation are both stateless (backed by Postgres lookups). Multiple server instances validate identically.
+
+---
+
+## 3. Authentication Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Browser (Human User)                      │
+│                                                                │
+│  1. User visits /login                                         │
+│  2. Sees buttons for each configured OIDC provider             │
+│  3. Clicks one (e.g., "Sign in with Google", "Sign in with     │
+│     Okta", "Sign in with Company SSO")                         │
+│  4. Redirected to OIDC provider                                │
+│  5. Authenticates at provider                                  │
+│  6. Provider redirects back with authorization code           │
+│  7. Server exchanges code for OIDC tokens                     │
+│  8. Server validates ID token, extracts user identity         │
+│  9. Server creates/updates user record in Postgres            │
+│ 10. Server issues internal JWT (8h TTL)                       │
+│ 11. Server sets HttpOnly cookie: dp_session=<JWT>             │
+│ 12. Redirect to /                                               │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                    Agent (Claude / GLM / Copilot)              │
+│                                                                │
+│ 1. User has previously logged in and generated an API key     │
+│ 2. Agent sends: X-API-Key: dpk_<id>.<secret>                  │
+│ 3. Server validates key hash (Argon2id) against Postgres      │
+│ 4. Server resolves user + scopes from key record              │
+│ 5. Request authenticated                                       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Both paths resolve to the same internal principal:
+```kotlin
+data class AuthenticatedPrincipal(
+    val userId: UUID,
+    val email: String,
+    val displayName: String,
+    val scopes: Set<Scope>,
+    val authMethod: AuthMethod,       // OIDC or API_KEY
+    val keyId: String?                // present when authMethod = API_KEY
+)
+```
+
+---
+
+## 4. User Identity
+
+### 4.1 User entity
+
+```json
+{
+  "id": "uuid",
+  "email": "alice@company.com",
+  "display_name": "Alice Wang",
+  "profile_picture_url": "https://lh3.googleusercontent.com/...",
+  "provider": "google",
+  "provider_subject": "108214793245678901234",
+  "is_active": true,
+  "is_admin": false,
+  "created_at": "2026-08-01T10:00:00Z",
+  "last_login_at": "2026-08-05T14:30:00Z"
+}
+```
+
+The `provider` field stores the **OIDC registration name** as configured by the deployment (e.g., `google`, `microsoft`, `okta`, `company-sso`). It's free text — any provider name the deployment configures. Not constrained to a fixed enum.
+
+### 4.2 User provisioning
+
+**First login:** When a user logs in via OIDC for the first time:
+1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token.
+2. Checks if a user with that `email` already exists.
+   - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url`. (The user previously logged in via a different provider — link them.)
+   - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
+3. Checks the email domain allowlist (if configured — see §10).
+   - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
+4. Issues internal JWT, sets cookie, redirects to `/`.
+
+**Subsequent logins:** Same flow — user record updated, JWT reissued.
+
+**Account deactivation:** Admin marks user `is_active: false` via UI. Subsequent OIDC logins rejected with `auth.login.user_inactive`. Existing JWTs for that user are not automatically invalidated (they expire at TTL); API keys are also not auto-revoked (admin can revoke separately).
+
+### 4.3 Email domain allowlist
+
+Configurable per deployment:
+- `DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=company.com,subsidiary.com`
+- If set, only users with emails from these domains can log in.
+- If empty (default), any Google/Microsoft user can log in (open provisioning).
+
+For internal-only deployments, **always set the allowlist** to prevent random Google accounts from accessing the instance.
+
+---
+
+## 5. OIDC Login Flow
+
+### 5.1 Provider configuration (generic)
+
+OIDC providers are configured as a **list** in the deployment config. Each provider requires only three values — `client-id`, `client-secret`, and `issuer-uri`. The issuer URI triggers OIDC discovery (`/.well-known/openid-configuration`), which auto-configures all authorization, token, userinfo, and JWKS endpoints.
+
+```yaml
+datapipelines:
+  auth:
+    oidc:
+      providers:
+        - name: google               # registration ID (used in URLs, stored in users.provider)
+          client-id: ${GOOGLE_CLIENT_ID}
+          client-secret: ${GOOGLE_CLIENT_SECRET}
+          issuer-uri: https://accounts.google.com
+          display-name: "Sign in with Google"   # shown on login button
+
+        - name: microsoft
+          client-id: ${MS_CLIENT_ID}
+          client-secret: ${MS_CLIENT_SECRET}
+          issuer-uri: https://login.microsoftonline.com/common/v2.0
+          display-name: "Sign in with Microsoft"
+
+        # Any other OIDC provider:
+        # - name: okta
+        #   client-id: ${OKTA_CLIENT_ID}
+        #   client-secret: ${OKTA_CLIENT_SECRET}
+        #   issuer-uri: https://company.okta.com
+        #   display-name: "Sign in with Okta"
+        #
+        # - name: keycloak
+        #   client-id: ${KEYCLOAK_CLIENT_ID}
+        #   client-secret: ${KEYCLOAK_CLIENT_SECRET}
+        #   issuer-uri: https://sso.company.com/realms/main
+        #   display-name: "Company SSO"
+```
+
+Scopes requested for every provider: `openid`, `profile`, `email`. These are the standard OIDC scopes that give us the user's identity.
+
+### 5.2 ClientRegistration bean (built at startup)
+
+The provider list is converted into Spring Security `ClientRegistration` objects at startup. OIDC discovery fetches each provider's `.well-known/openid-configuration` to auto-detect all endpoints.
+
+```kotlin
+@Configuration
+class OidcConfig {
+
+    @Bean
+    fun clientRegistrationRepository(
+        authConfig: AuthConfig
+    ): ClientRegistrationRepository {
+        val registrations = authConfig.oidc.providers.map { p ->
+            ClientRegistration.withRegistrationId(p.name)
+                .clientId(p.clientId)
+                .clientSecret(p.clientSecret)
+                .scope("openid", "profile", "email")
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                .issuerUri(p.issuerUri)        // triggers OIDC discovery
+                .clientName(p.displayName)
+                .build()
+        }
+
+        if (registrations.isEmpty()) {
+            error("No OIDC providers configured. Set datapipelines.auth.oidc.providers in config.")
+        }
+
+        return InMemoryClientRegistrationRepository(registrations)
+    }
+}
+```
+
+### 5.3 Login page (dynamic — renders buttons for each configured provider)
+
+```kotlin
+@Controller
+class LoginController(
+    private val clientRegistrationRepository: ClientRegistrationRepository
+) {
+    @GetMapping("/login")
+    fun login(model: Model): String {
+        val providers = clientRegistrationRepository.toList().map { reg ->
+            mapOf(
+                "name" to reg.registrationId,
+                "displayName" to reg.clientName
+            )
+        }
+        model.addAttribute("providers", providers)
+        return "login"
+    }
+
+    private fun ClientRegistrationRepository.toList(): List<ClientRegistration> {
+        // Spring's Iterable → Kotlin List
+        return this.asIterable().toList()
+    }
+}
+```
+
+```html
+<!-- login.html (Thymeleaf) — renders one button per configured provider -->
+<div class="ds-card login-card">
+    <h1 class="ds-h2">Sign in to datapipelines.co</h1>
+    <div th:each="p : ${providers}" class="login-buttons">
+        <a th:href="@{'/oauth2/authorization/' + ${p.name}}"
+           class="ds-button ds-button--secondary"
+           th:text="${p.displayName}">
+            Sign in
+        </a>
+    </div>
+</div>
+```
+
+The login page shows **only the providers the deployment configured** — one button, two buttons, or five buttons. No hardcoded provider names.
+
+### 5.4 OIDC redirect flow (Spring Security handles automatically)
+
+```
+1. User clicks a provider button (e.g., "Sign in with Okta")
+   → GET /oauth2/authorization/okta
+   → Spring Security redirects to Okta's authorization endpoint
+
+2. User authenticates at Okta
+   → Okta redirects to: GET /login/oauth2/code/okta?code={auth_code}&state={state}
+
+3. Spring Security exchanges code for OIDC tokens (server-side)
+   → Calls Okta's token endpoint with client_id + client_secret + code
+   → Receives: id_token, access_token, refresh_token
+
+4. Spring Security validates ID token (signature, audience, issuer, expiry)
+   → Extracts claims: sub, email, name, picture
+
+5. OidcSuccessHandler (our custom code):
+   → user = userService.findOrCreateByEmail(claims, registrationId)
+   → jwt = jwtService.issue(user)
+   → response.setCookie("dp_session", jwt, httpOnly=true, secure=true, sameSite="Strict")
+   → response.sendRedirect("/")
+```
+
+### 5.5 OIDC success handler
+
+```kotlin
+@Component
+class OidcSuccessHandler(
+    private val userService: UserService,
+    private val jwtService: JwtService,
+    private val auditLogger: AuditLogger,
+    private val authConfig: AuthConfig
+) : SimpleUrlAuthenticationSuccessHandler() {
+
+    override fun onAuthenticationSuccess(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        authentication: Authentication
+    ) {
+        val oidcUser = authentication.principal as OidcUser
+        val claims = oidcUser.idToken.claims
+        val clientRegistration = (authentication as OAuth2AuthenticationToken)
+            .authorizedClientRegistrationId     // "google", "okta", "company-sso", etc.
+
+        val email = claims["email"] as String
+        val displayName = claims["name"] as String? ?: email
+        val pictureUrl = claims["picture"] as String?
+        val providerSubject = claims["sub"] as String
+
+        // Check allowlist
+        if (!authConfig.isDomainAllowed(email)) {
+            auditLogger.log("auth.login.domain_not_allowed", email = email)
+            redirectStrategy.sendRedirect(request, response, "/login?error=domain_not_allowed")
+            return
+        }
+
+        // Find or create user
+        val user = userService.findOrCreateByEmail(
+            email = email,
+            displayName = displayName,
+            pictureUrl = pictureUrl,
+            provider = clientRegistration,        // whatever registration name was configured
+            providerSubject = providerSubject
+        )
+
+        if (!user.isActive) {
+            auditLogger.log("auth.login.user_inactive", userId = user.id)
+            redirectStrategy.sendRedirect(request, response, "/login?error=inactive")
+            return
+        }
+
+        // Issue internal JWT
+        val jwt = jwtService.issue(user)
+        val cookie = Cookie("dp_session", jwt).apply {
+            isHttpOnly = true
+            secure = true
+            setAttribute("SameSite", "Strict")
+            maxAge = authConfig.jwt.ttlHours * 3600
+            path = "/"
+        }
+        response.addCookie(cookie)
+
+        userService.updateLastLogin(user.id)
+        auditLogger.log("auth.login.success", userId = user.id,
+            details = mapOf("provider" to clientRegistration))
+
+        redirectStrategy.sendRedirect(request, response, "/")
+    }
+}
+```
+
+The success handler is **fully provider-agnostic.** It reads `authorizedClientRegistrationId` from the authentication token — that's whatever provider name the deployment configured. It doesn't know or care whether it's Google, Okta, or Keycloak.
+
+---
+
+## 6. Session Tokens (Internal JWT)
+
+### 6.1 JWT format
+
+After OIDC login, the server issues its own JWT:
+
+- **Algorithm:** HS256 (HMAC-SHA256, symmetric).
+- **TTL:** 8 hours (configurable via `DATAPIPELINES_AUTH_JWT_TTL_HOURS`).
+- **Claims:**
+  ```json
+  {
+    "sub": "user-uuid",
+    "email": "alice@company.com",
+    "name": "Alice Wang",
+    "scopes": ["read", "execute", "author"],
+    "iat": 1691234567,
+    "exp": 1691263367,
+    "iss": "datapipelines"
+  }
+  ```
+- **Signing secret:** `DATAPIPELINES_JWT_SECRET` env var (≥ 32 bytes random, base64). Required at startup.
+
+### 6.2 Why not use OIDC tokens directly?
+
+- **Decoupled TTL.** Our JWT has its own TTL (8h). OIDC access tokens have provider-specific TTLs (Google = 1h). Using OIDC tokens would require refreshing mid-session.
+- **Scope management.** Our JWT carries our own scopes (`read`, `execute`, `author`, `admin`). OIDC tokens carry provider scopes which don't map to our authorization model.
+- **Stateless validation.** Our JWT is validated with a local HMAC secret. OIDC token validation requires fetching the provider's JWKS (network call).
+- **No vendor lock-in.** If we add a third provider (GitHub, Okta), the internal JWT is identical regardless of which provider authenticated the user.
+
+### 6.3 JWT validation (on every request)
+
+```kotlin
+class JwtAuthenticationFilter(
+    private val jwtService: JwtService
+) : OncePerRequestFilter() {
+
+    override fun doFilterInternal(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        filterChain: FilterChain
+    ) {
+        // Extract JWT from cookie
+        val cookie = request.cookies?.firstOrNull { it.name == "dp_session" }
+        val jwt = cookie?.value
+
+        if (jwt != null) {
+            try {
+                val claims = jwtService.validate(jwt)
+                val principal = AuthenticatedPrincipal(
+                    userId = UUID.fromString(claims.subject),
+                    email = claims["email"] as String,
+                    displayName = claims["name"] as String,
+                    scopes = (claims["scopes"] as List<*>).map { Scope.valueOf(it as String) }.toSet(),
+                    authMethod = AuthMethod.OIDC,
+                    keyId = null
+                )
+                SecurityContextHolder.getContext().authentication =
+                    UsernamePasswordAuthenticationToken(principal, null, principal.authorities)
+            } catch (e: Exception) {
+                // Invalid/expired JWT — clear cookie, proceed unauthenticated
+                response.addCookie(Cookie("dp_session", "").apply { maxAge = 0 })
+            }
+        }
+
+        filterChain.doFilter(request, response)
+    }
+}
+```
+
+### 6.4 Session expiration
+
+JWT expires after 8h (configurable). On expiry:
+- API calls return `401 auth.session.expired`.
+- UI redirects to `/login`.
+- No refresh token flow. User re-authenticates via OIDC.
+
+### 6.5 Logout
+
+```
+POST /logout
+Cookie: dp_session=<jwt>
+```
+
+Server clears `dp_session` cookie. The JWT itself is stateless and not revoked server-side — but with the cookie cleared and the JWT gone from the client, the session is effectively dead. The OIDC provider's session is NOT terminated (user may need to sign out separately at Google/Microsoft if they want full logout).
+
+---
+
+## 7. API Keys
+
+Unchanged from the previous auth spec — API keys are independent of the OIDC login mechanism. A user logs in via OIDC, generates API keys from the UI, and those keys are used by agents.
+
+### 7.1 Anatomy
+
+```
+dpk_<key_id>.<random_secret>
+```
+
+- `dpk_` — literal prefix (secret-scanner detectable).
+- `key_id` — 12-char base32, unique per key.
+- `random_secret` — 48-char base32.
+- Total length: ~64 chars.
+
+### 7.2 Storage
+
+Argon2id hash (same as before). Schema in [Metadata DB spec](metadata-db.md).
+
+### 7.3 Validation flow
+
+```
+1. Client sends X-API-Key: dpk_<id>.<secret>
+2. Parse id and secret.
+3. Look up api_keys WHERE id = 'dpk_<id>' AND is_revoked = false.
+4. Not found → 401 auth.api_key_invalid.
+5. expires_at < now → 401 auth.api_key_expired.
+6. Argon2id.verify(key_hash, full_key).
+7. Verify fails → 401 auth.api_key_invalid.
+8. Update last_used_at, last_used_ip (async).
+9. Build principal with userId + scopes from key record.
+```
+
+In-memory cache (60s TTL) for recently-validated keys, invalidated on revocation.
+
+### 7.4 Issuance
+
+User logs in via OIDC → navigates to API Keys page → clicks "Generate new key" → names it, selects scopes, optionally sets expiration → server generates key, hashes it, stores hash, returns plaintext **once**.
+
+### 7.5 Scopes
+
+Same hierarchical scope system:
+
+| Scope | Includes | Description |
+|---|---|---|
+| `read` | — | Read pipelines, templates, datasources, executions |
+| `execute` | `read` | Execute pipelines; retrieve results |
+| `author` | `execute`, `read` | Create/modify pipelines and templates |
+| `admin` | all | Manage datasources, users, system config |
+
+Default scope on key creation: `read`. Higher scopes require explicit selection.
+
+---
+
+## 8. Spring Security Configuration
+
+### 8.1 Filter chain
+
+```kotlin
+@Configuration
+@EnableWebSecurity
+class SecurityConfig(
+    private val jwtAuthenticationFilter: JwtAuthenticationFilter,
+    private val apiKeyFilter: ApiKeyFilter,
+    private val oidcSuccessHandler: OidcSuccessHandler,
+    private val scopeInterceptor: ScopeInterceptor
+) {
+
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .csrf { csrf ->
+                csrf.csrfTokenRepository(CookieCsrfTokenRepository.withDefaults())
+                csrf.ignoringRequestMatchers("/api/**")  // API uses X-API-Key, not CSRF
+            }
+            .authorizeHttpRequests { auth ->
+                auth
+                    .requestMatchers(
+                        "/health", "/ready", "/info",
+                        "/login", "/login/**",
+                        "/oauth2/**",
+                        "/vendor/**", "/css/**", "/js/**", "/favicon.ico"
+                    ).permitAll()
+                    .anyRequest().authenticated()
+            }
+            .oauth2Login { oauth ->
+                oauth.successHandler(oidcSuccessHandler)
+            }
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
+            .addFilterBefore(apiKeyFilter, JwtAuthenticationFilter::class.java)
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .logout { logout ->
+                logout.logoutUrl("/logout")
+                       .deleteCookies("dp_session")
+                       .logoutSuccessUrl("/login")
+            }
+
+        return http.build()
+    }
+
+    @Bean
+    fun mvcInterceptor(): WebMvcConfigurer {
+        return object : WebMvcConfigurer {
+            override fun addInterceptors(registry: InterceptorRegistry) {
+                registry.addInterceptor(scopeInterceptor)
+            }
+        }
+    }
+}
+```
+
+### 8.2 Filter order (per request)
+
+```
+1. CORS filter                     — adds CORS headers
+2. CSRF filter                     — validates CSRF token on state-changing requests (UI only; API paths excluded)
+3. ApiKeyFilter                    — checks X-API-Key header; if present, validates and sets SecurityContext
+4. JwtAuthenticationFilter         — checks dp_session cookie; if present, validates and sets SecurityContext
+5. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
+6. AuthorizationFilter             — checks authenticated() for protected paths
+7. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods
+8. Controller                      — handles the request
+```
+
+If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter returns `401`. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
+
+### 8.3 Public endpoints (no auth required)
+
+| Path pattern | Why public |
+|---|---|
+| `/health`, `/ready` | Health checks for orchestrators |
+| `/info` | Build info |
+| `/login`, `/login/**` | Login page + error redirects |
+| `/oauth2/**` | OIDC authorization + callback |
+| `/vendor/**`, `/css/**`, `/js/**` | Static assets (design system, Cytoscape, Alpine, app CSS/JS) |
+
+### 8.4 API endpoints (auth via API key OR JWT)
+
+All `/api/v1/**` endpoints accept either:
+- `X-API-Key: dpk_...` header (agent/MCP).
+- `Cookie: dp_session=<jwt>` (browser UI calling REST directly).
+
+The filter chain tries API key first, then JWT. If both present, API key wins.
+
+CSRF is disabled for `/api/**` because API key auth is inherently CSRF-immune (no cookie). When JWT cookie is used for API calls from the browser, the CSRF token IS required (enforced by the frontend including `X-CSRF-Token` header on state-changing requests).
+
+---
+
+## 9. Auth Errors
+
+| Code | HTTP | Description |
+|---|---|---|
+| `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist |
+| `auth.login.user_inactive` | 403 | User account deactivated |
+| `auth.login.oidc_error` | 500 | OIDC provider returned an error during login |
+| `auth.session.expired` | 401 | JWT expired |
+| `auth.session.invalid` | 401 | JWT signature invalid or malformed |
+| `auth.api_key_missing` | 401 | No `X-API-Key` or `dp_session` cookie |
+| `auth.api_key_invalid` | 401 | Key id not found, revoked, or hash mismatch |
+| `auth.api_key_expired` | 401 | Key's `expires_at` is in the past |
+| `auth.scope_insufficient` | 403 | Principal lacks required scope |
+| `auth.csrf.missing_token` | 403 | CSRF token missing on state-changing UI request |
+| `auth.csrf.token_mismatch` | 403 | CSRF token doesn't match session |
+| `auth.rate_limit.exceeded` | 429 | Rate limit hit |
+
+---
+
+## 10. Audit Log
+
+### 10.1 Events
+
+| Event | Trigger |
+|---|---|
+| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.domain_not_allowed` | User's email domain not in allowlist |
+| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.logout` | User logged out (cookie cleared) |
+| `auth.api_key.created` | New API key issued |
+| `auth.api_key.revoked` | API key revoked |
+| `auth.api_key.used` | API key validated (sampled 1/100) |
+| `auth.api_key.rejected` | API key validation failed |
+| `auth.scope.denied` | Request rejected for insufficient scope |
+| `auth.user.deactivated` | Admin deactivated a user |
+| `auth.user.activated` | Admin reactivated a user |
+| `auth.user.admin_granted` | Admin granted admin scope to user |
+| `auth.user.admin_revoked` | Admin revoked admin scope from user |
+
+### 10.2 Log shape
+
+```json
+{
+  "timestamp": "2026-08-05T14:30:00.123Z",
+  "event": "auth.login.success",
+  "user_id": "uuid",
+  "provider": "GOOGLE",
+  "source_ip": "10.0.0.42",
+  "user_agent": "Mozilla/5.0...",
+  "details": {
+    "email": "alice@company.com"
+  }
+}
+```
+
+---
+
+## 11. Configuration
+
+OIDC providers are configured as a **generic list**. The deployment chooses which provider(s) to enable — any OIDC-compliant provider works.
+
+### 11.1 OIDC provider configuration
+
+Providers are defined in `application.yml` (structural config) with secrets referenced from env vars:
+
+```yaml
+datapipelines:
+  auth:
+    oidc:
+      providers:
+        - name: google               # registration ID
+          client-id: ${GOOGLE_CLIENT_ID}
+          client-secret: ${GOOGLE_CLIENT_SECRET}
+          issuer-uri: https://accounts.google.com
+          display-name: "Sign in with Google"
+
+        - name: microsoft
+          client-id: ${MICROSOFT_CLIENT_ID}
+          client-secret: ${MICROSOFT_CLIENT_SECRET}
+          issuer-uri: https://login.microsoftonline.com/common/v2.0
+          display-name: "Sign in with Microsoft"
+
+        # Add any OIDC provider the company uses:
+        # - name: okta
+        #   client-id: ${OKTA_CLIENT_ID}
+        #   client-secret: ${OKTA_CLIENT_SECRET}
+        #   issuer-uri: https://company.okta.com
+        #   display-name: "Sign in with Okta"
+        #
+        # - name: keycloak
+        #   client-id: ${KEYCLOAK_CLIENT_ID}
+        #   client-secret: ${KEYCLOAK_CLIENT_SECRET}
+        #   issuer-uri: https://sso.company.com/realms/main
+        #   display-name: "Company SSO"
+
+    jwt:
+      secret: ${DATAPIPELINES_JWT_SECRET}
+      ttl-hours: 8
+      algorithm: HS256
+
+    allowlist:
+      domains: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:}    # comma-separated, empty = open
+
+    api-keys:
+      cache-ttl-seconds: 60
+      default-scopes: [read]
+```
+
+**Per provider, three values are required:**
+- `client-id` — from the OIDC provider's app registration.
+- `client-secret` — from the provider's app registration.
+- `issuer-uri` — the provider's OIDC issuer URL. Triggers auto-discovery of all endpoints.
+
+**Two values are optional:**
+- `name` — registration ID used in URLs (`/oauth2/authorization/{name}`). Default: derived from display name.
+- `display-name` — text shown on the login button.
+
+### 11.2 Common provider issuer URIs (reference)
+
+| Provider | issuer-uri |
+|---|---|
+| Google | `https://accounts.google.com` |
+| Microsoft (multi-tenant) | `https://login.microsoftonline.com/common/v2.0` |
+| Microsoft (single tenant) | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
+| Okta | `https://{your-org}.okta.com` |
+| Auth0 | `https://{your-tenant}.auth0.com` |
+| Keycloak | `https://{host}/realms/{realm}` |
+| AWS Cognito | `https://cognito-idp.{region}.amazonaws.com/{user-pool-id}` |
+| Ping Identity | `https://{host}/as` |
+
+### 11.3 Required environment variables
+
+The env vars depend on which providers the deployment configures. The structural config (which providers, issuer URIs) is in `application.yml`; secrets are in env vars:
+
+| Variable | Required? | Description |
+|---|---|---|
+| `DATAPIPELINES_JWT_SECRET` | **yes** | Internal JWT signing secret (≥ 32 bytes random, base64) |
+| Provider-specific client-id/secret env vars | **yes** | One pair per configured provider (names defined in `application.yml`) |
+
+For example, a deployment using Google + Okta would set:
+```bash
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+OKTA_CLIENT_ID=...
+OKTA_CLIENT_SECRET=...
+DATAPIPELINES_JWT_SECRET=...
+```
+
+### 11.4 Optional environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS` | (empty = open) | Comma-separated email domains allowed to log in |
+| `DATAPIPELINES_AUTH_JWT_TTL_HOURS` | 8 | Session JWT TTL |
+| `DATAPIPELINES_AUTH_API_KEY_CACHE_TTL_SECONDS` | 60 | In-memory cache for recently-validated API keys |
+
+---
+
+## 12. Implementation Notes
+
+### 12.1 Where this lives
+
+`auth` Gradle module:
+- `co.datapipelines.auth.User` data class
+- `co.datapipelines.auth.ApiKey` data class
+- `co.datapipelines.auth.Scope` enum
+- `co.datapipelines.auth.AuthenticatedPrincipal` data class
+- `co.datapipelines.auth.JwtService` — issue + validate internal JWTs
+- `co.datapipelines.auth.ApiKeyService` — issue + validate + revoke API keys
+- `co.datapipelines.auth.UserService` — find-or-create by OIDC identity
+- `co.datapipelines.auth.OidcSuccessHandler` — OIDC login callback
+- `co.datapipelines.auth.JwtAuthenticationFilter` — cookie → JWT → principal
+- `co.datapipelines.auth.ApiKeyFilter` — header → key → principal
+- `co.datapipelines.auth.ScopeInterceptor` — `@RequiredScope` enforcement
+- `co.datapipelines.auth.AuditLogger`
+- `co.datapipelines.auth.SecurityConfig` — Spring Security wiring
+
+### 12.2 Dependencies
+
+- Spring Security (OAuth2 client, CSRF, filter chain).
+- Spring Security OAuth2Jose (JWT validation for OIDC ID tokens).
+- `de.mkammerer:argon2-jvm` — API key hashing.
+- `io.jsonwebtoken:jjwt` — internal JWT issue/validate.
+
+### 12.3 Persistence (JDBC)
+
+All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata DB spec](metadata-db.md) for table definitions.
+
+---
+
+## 13. Security Checklist
+
+- [ ] OIDC client secrets stored in env vars or secret manager, not in source.
+- [ ] `DATAPIPELINES_JWT_SECRET` is high-entropy (≥ 32 bytes random).
+- [ ] Email domain allowlist configured for internal-only deployments.
+- [ ] API keys hashed with Argon2id, never stored plaintext.
+- [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Strict`.
+- [ ] CSRF protection on all state-changing UI endpoints.
+- [ ] `/actuator/*` endpoints (except `/health`, `/ready`, `/info`, `/prometheus`) disabled or admin-scoped.
+- [ ] All auth events audited.
+- [ ] All traffic over TLS.
+- [ ] OIDC redirect URI locked to the deployment's exact domain (not `localhost` in production).
+
+---
+
+## 14. What Changed from v1.0
+
+| v1.0 (local auth) | v2.0 (OIDC) |
+|---|---|
+| Local username + password | Google/Microsoft OIDC |
+| `users.password_hash` (Argon2id) | Removed — no passwords stored |
+| `POST /auth/login` (JSON body) | `GET /oauth2/authorization/google` (browser redirect) |
+| No identity provider | Google + Microsoft OIDC providers |
+| `users.provider`, `users.provider_subject` | New fields for OIDC identity |
+| Email domain allowlist | New — restricts who can log in |
+| JWT, API keys, scopes, audit log | **Unchanged** |
+
+---
+
+## 15. Open Questions / Future
+
+- **Additional OIDC providers** (GitHub, Okta, Auth0) — easy to add; just another Spring Security registration.
+- **SAML** — for enterprises that require SAML instead of OIDC. Spring Security SAML extension.
+- **Group/role sync from provider** — map OIDC groups to internal scopes automatically.
+- **Per-datasource ACLs** — fine-grained access beyond scopes.
+- **Service accounts** — non-human principals for CI/CD.
+- **MFA** — if provider enforces it (Google/Microsoft MFA is provider-side, transparent to us).
+
+---
+
+## Appendix A: Change Log
+
+| Date | Version | Author | Change |
+|---|---|---|---|
+| 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |
+| 2026-08-05 | v2.0 | OIDC migration | Replaced local auth with Google/Microsoft OIDC. No passwords stored. Internal JWT issued after OIDC login. Added email domain allowlist. Added Spring Security filter chain configuration. Added OIDC success handler. Users provisioned automatically on first login. |
+| 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |
