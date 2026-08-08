@@ -160,6 +160,7 @@ POST /pipelines
 Content-Type: application/json
 
 {
+  "schema_version": 1,
   "name": "monthly_revenue",
   "display_name": "Monthly Revenue",
   "description": "...",
@@ -355,6 +356,8 @@ data: {json_payload}
 `event_id` is monotonic per execution. Used for gap detection (§6.7).
 
 ### 6.4 Event types
+
+Every event payload additionally carries `correlation_id` (normative — [Observability §3.3](observability.md#33-correlation-id-propagation)); the examples below omit it for brevity except where shown.
 
 #### 6.4.1 `execution_started`
 

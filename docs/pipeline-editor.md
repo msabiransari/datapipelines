@@ -76,7 +76,7 @@ The entire UI — not just the editor — uses **`@acme/design-tokens`** (v0.2.0
 - **Base reset** (`base.css`): global typography + reset.
 - **Motion** (`motion.css`): animations + keyframes, all `prefers-reduced-motion` aware.
 
-The active theme is resolved **per request**, not fixed at deployment: `${uiTheme} = users.theme_preference ?: datapipelines.ui.theme` — the authenticated user's stored preference when set ([UI Screens §4.11](ui-screens.md#411-user-settings)), otherwise the deployment default from [Configuration §3.10](configuration.md#310-ui) (name, default and valid theme list defined once there, not restated here). The controller passes the resolved value to the template as `${uiTheme}` (§4.2); both sources are validated against the vendored theme list (config at startup, preference on write), so the editor may assume it names a vendored theme file. The runtime theme-swap mechanism (Appendix A.5's `readDesignTokens()` re-read) is unaffected by which source won.
+The active theme is resolved **per request**, not fixed at deployment: `${activeTheme} = users.theme_preference ?: datapipelines.ui.theme` — the authenticated user's stored preference when set ([UI Screens §4.11](ui-screens.md#411-user-settings)), otherwise the deployment default from [Configuration §3.10](configuration.md#310-ui) (name, default and valid theme list defined once there, not restated here). The controller passes the resolved value to the template as `${activeTheme}` (§4.2); both sources are validated against the vendored theme list (config at startup, preference on write), so the editor may assume it names a vendored theme file. The runtime theme-swap mechanism (Appendix A.5's `readDesignTokens()` re-read) is unaffected by which source won.
 
 **Design system CSS load order** (in every page's `<head>`, before app CSS):
 
@@ -157,7 +157,7 @@ Authentication: session cookie carrying the internal JWT (browser flow). See [Au
 
     <!-- Design System (load order per @acme/design-tokens spec) -->
     <link rel="stylesheet" href="/vendor/design-system/tokens.css">
-    <link rel="stylesheet" th:href="@{/vendor/design-system/themes/{theme}.css(theme=${uiTheme})}"
+    <link rel="stylesheet" th:href="@{/vendor/design-system/themes/{theme}.css(theme=${activeTheme})}"
           id="theme-link">
     <link rel="stylesheet" href="/vendor/design-system/base.css">
     <link rel="stylesheet" href="/vendor/design-system/motion.css">
@@ -1562,10 +1562,10 @@ These design system tokens are used directly in the editor CSS and HTML because 
 
 The design system supports runtime theme switching by swapping the `#theme-link` href. The editor supports this:
 
-1. User selects theme from a dropdown (in the global nav, not the editor itself).
-2. JS swaps `document.getElementById('theme-link').href = '/vendor/design-system/themes/' + themeName + '.css'`.
+1. The user selects a theme on the profile screen (global nav, not the editor itself). That choice is **persisted to `users.theme_preference`** via `PATCH /partials/profile/theme` ([UI Screens §4.11](ui-screens.md#411-user-settings)) — never held in session state — and becomes the left-hand side of the §3.4 resolution on every subsequent request.
+2. The server's response swaps the `#theme-link` stylesheet element out-of-band, so the new theme applies without a page reload (equivalently: `document.getElementById('theme-link').href = '/vendor/design-system/themes/' + themeName + '.css'`).
 3. All CSS custom properties update instantly across the page.
-4. The editor's `PipelineGraph` listens for theme changes and re-reads tokens:
+4. The editor's `PipelineGraph` listens for theme changes and re-reads tokens — this mechanism is indifferent to whether the active theme came from the user row or the deployment default:
    ```javascript
    window.addEventListener('theme-change', () => {
        const newTokens = readDesignTokens();
@@ -1574,13 +1574,7 @@ The design system supports runtime theme switching by swapping the `#theme-link`
    ```
 5. Graph re-styles without re-rendering (Cytoscape's `.style().update()` is incremental).
 
-Available themes (from the design system):
-- `saas` (default — modern indigo, ideal for devtools)
-- `light` (clean neutral)
-- `dark` (dark mode)
-- `auto` (follows OS `prefers-color-scheme`)
-- `professional` (navy/enterprise)
-- `healthcare`, `minimal`, `forest`, `ocean` (domain-specific)
+Themes shipped by the design system — `saas` (modern indigo, devtool-oriented), `light` (clean neutral), `dark`, `auto` (follows OS `prefers-color-scheme`), `professional` (navy/enterprise), plus `healthcare`, `minimal`, `forest`, `ocean`. The **authoritative** valid-value list and the deployment default live in [Configuration §3.10](configuration.md#310-ui); this paragraph describes their character, not their validity.
 
 ---
 
@@ -1589,5 +1583,5 @@ Available themes (from the design system):
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline editor UI spec: Thymeleaf + Alpine.js + Cytoscape.js 3.34.0 + cytoscape-dagre. Three-panel layout, 5 node states, SSE-driven graph updates, vendoring strategy, accessibility, keyboard nav. |
-| 2026-08-07 | v1.2 | consistency campaign | **[D7]** §15 rewritten: no SSE reconnection and no `Last-Event-Id` — a dropped stream cancels the execution after the grace period; the editor warns, polls `GET /executions/{id}` at most twice for the final status, and renders `ABORTED`. `execution_aborted` (rest-api §6.4.8) wired into §6.3/§6.4 as a terminal event; explicit Cancel (`DELETE /executions/{id}`) added (§15.2). **[D9]** §10 rewritten for uniform result delivery: one panel shape, inline first page from `data_ready`, cursor paging/downloads within a fixed TTL, `result.expired` handling; inline-vs-claim-check split deleted. **[D1]** "terminal node" → **caller node** throughout; `.terminal` Cytoscape class renamed `.caller` and actually applied in `buildElements()`; zero-caller pipelines documented (no `data_ready`). **[D8]** `DATAPIPELINES_UI_THEME` now references configuration.md §3.10 instead of restating the default. **[M]** "Native EventSource" removed from the §3.2 stack (contradicted §7.3). Styling wiring fixed: `nodeType*` and `idle` classes added at build time, `.selected` managed in `selectNode()`/`clearSelection()`. §4.2 adds `result.js`, `a11y.js` and the `x-on:show-error.window` listener that gives §9.1's dispatch a consumer. **[M]** §7.2 `collectParameters()` coerces values to declared wire types (pipeline-contract §6.3) instead of posting FormData strings. **[M]** §14 accessibility rewritten honestly for canvas rendering: per-node `role="button"` is impossible, replaced by a parallel visually-hidden `<ul role="listbox">`, `role="img"` canvas, and an `aria-live` status region. **[M]** Progressive-enhancement overclaim removed (no-JS = metadata + node list, no graph). **[M]** §11 edit mode removed from v1 scope (`?edit=true` deleted) — authoring is LLM/MCP-first, UI edit mode is a ROADMAP item. **[M]** `vendor-manifest.json` unified to `static/vendor/design-system/`. **[M]** Duplicate `### 13.2` renumbered (version upgrades → §13.3). Anchor fixes: auth §6, dag-executor/rest-api cross-links; `jdbc_url` removed from the §9.2 error mockup. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.13. |
+| 2026-08-07 | v1.2 | consistency campaign | **[D7]** §15 rewritten: no SSE reconnection and no `Last-Event-Id` — a dropped stream cancels the execution after the grace period; the editor warns, polls `GET /executions/{id}` at most twice for the final status, and renders `ABORTED`. `execution_aborted` (rest-api §6.4.8) wired into §6.3/§6.4 as a terminal event; explicit Cancel (`DELETE /executions/{id}`) added (§15.2). **[D9]** §10 rewritten for uniform result delivery: one panel shape, inline first page from `data_ready`, cursor paging/downloads within a fixed TTL, `result.expired` handling; inline-vs-claim-check split deleted. **[D1]** "terminal node" → **caller node** throughout; `.terminal` Cytoscape class renamed `.caller` and actually applied in `buildElements()`; zero-caller pipelines documented (no `data_ready`). **[D8]** Theme resolution corrected to `${activeTheme} = users.theme_preference ?: datapipelines.ui.theme` (per-user override, deployment value as default — ui-screens.md v1.1 §4.11); the config key, its default and the valid theme list are referenced from configuration.md §3.10 instead of restated (§3.4, Appendix A.5). **[M]** "Native EventSource" removed from the §3.2 stack (contradicted §7.3). Styling wiring fixed: `nodeType*` and `idle` classes added at build time, `.selected` managed in `selectNode()`/`clearSelection()`. §4.2 adds `result.js`, `a11y.js` and the `x-on:show-error.window` listener that gives §9.1's dispatch a consumer. **[M]** §7.2 `collectParameters()` coerces values to declared wire types (pipeline-contract §6.3) instead of posting FormData strings. **[M]** §14 accessibility rewritten honestly for canvas rendering: per-node `role="button"` is impossible, replaced by a parallel visually-hidden `<ul role="listbox">`, `role="img"` canvas, and an `aria-live` status region. **[M]** Progressive-enhancement overclaim removed (no-JS = metadata + node list, no graph). **[M]** §11 edit mode removed from v1 scope (`?edit=true` deleted) — authoring is LLM/MCP-first, UI edit mode is a ROADMAP item. **[M]** `vendor-manifest.json` unified to `static/vendor/design-system/`. **[M]** Duplicate `### 13.2` renumbered (version upgrades → §13.3). Anchor fixes: auth §6, dag-executor/rest-api cross-links; `jdbc_url` removed from the §9.2 error mockup. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.13. |
 | 2026-08-05 | v1.1 | design system integration | Integrated `@acme/design-tokens` design system as the styling foundation. All hardcoded colors replaced with design system tokens (`--surface-*`, `--text-*`, `--accent-*`). HTML uses `.ds-*` primitives (`.ds-button`, `.ds-card`, `.ds-modal`, etc.). Cytoscape stylesheet reads tokens via `readDesignTokens()` bridge. App-specific node-state tokens (`--node-*-bg/text`) derive from design system accent tokens. Theme switching (9 themes including dark mode) works at runtime without page reload. Replaced Appendix A entirely. Updated vendoring to include design system CSS. |

@@ -147,7 +147,7 @@ cd ../datapipelines
 ./scripts/sync-design-system.sh   # copies dist/ → modules/web/src/main/resources/static/vendor/design-system/
 ```
 
-Run this whenever the design system changes. The script records the version in `vendor-manifest.json`.
+Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure).
 
 ---
 
@@ -173,16 +173,19 @@ The app starts on `http://localhost:8080`.
 ## 7. Verify
 
 ```bash
-# Health check
+# Health check (root-level, no auth — not under /api/v1)
 curl http://localhost:8080/health
 
-# Should return: {"status":"UP","components":{...}}
+# Should return:
+# {"status":"UP","version":"...","components":{"database":"UP","redis":"UP","h2_factory":"UP"}}
 
 # Open browser
 open http://localhost:8080/login
 ```
 
-You should see the login page with "Sign in with Google" and "Sign in with Microsoft" buttons.
+The health payload shape is specified in [REST API §11.1](docs/rest-api.md#111-health-check).
+
+You should see the login page with one "Sign in with …" button per provider configured in `application-dev.yml` (Google and Microsoft if you set up both) — the buttons are rendered from the provider registry, not hard-coded ([Auth §5.3](docs/auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)).
 
 ---
 
@@ -191,10 +194,11 @@ You should see the login page with "Sign in with Google" and "Sign in with Micro
 ### 8.1 Register a datasource (after first login)
 
 ```bash
-# After logging in, get your session cookie from browser devtools, or use an API key
+# After logging in, mint an API key from the UI (or POST /api/v1/auth/api-keys — the
+# secret is returned exactly once). All custom headers use the DP- prefix.
 curl -X POST http://localhost:8080/api/v1/datasources \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dpk_..." \
+  -H "DP-API-Key: dpk_..." \
   -d '{
     "name": "pg-local",
     "display_name": "Local Postgres",
@@ -210,23 +214,26 @@ curl -X POST http://localhost:8080/api/v1/datasources \
 ```bash
 curl -X POST http://localhost:8080/api/v1/templates \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dpk_..." \
+  -H "DP-API-Key: dpk_..." \
   -d '{
     "id": "active_users.sql",
     "dialect": "POSTGRES",
-    "description": "Get all active users",
-    "params_schema": {},
+    "description": "Get all active users. Declares no parameters.",
+    "imports": [],
     "body": "SELECT id, email, name, created_at FROM users WHERE is_active = true ORDER BY created_at DESC"
   }'
 ```
+
+Templates declare no parameter schema — the variables a body may reference are exactly the keys of the calling pipeline's `parameters` map, validated by dry-render when the *pipeline* is saved ([Templates §3.2](docs/templates.md#32-field-reference)). `imports` binds library templates to namespace aliases; the body never contains `<#import>` ([Templates §6](docs/templates.md#6-library-templates)).
 
 ### 8.3 Create a pipeline
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/pipelines \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dpk_..." \
+  -H "DP-API-Key: dpk_..." \
   -d '{
+    "schema_version": 1,
     "name": "active_users",
     "display_name": "Active Users",
     "description": "List all active users from local PG",
@@ -237,11 +244,12 @@ curl -X POST http://localhost:8080/api/v1/pipelines \
       "type": "DQL",
       "source": "pg-local",
       "template": {"id": "active_users.sql", "version": 1},
-      "output": {"target": "caller"},
       "depends_on": []
     }]
   }'
 ```
+
+No `output` block: an omitted `output` on a DQL node defaults to `target: caller`, so this single node **is** the caller node — the one whose rows come back to you. At most one node per pipeline may resolve to `caller`; zero is also legal (a pure write-back pipeline just returns stats). See [Pipeline Contract §16.1](docs/pipeline-contract.md#161-minimal-pipeline-single-source-read).
 
 ### 8.4 Execute the pipeline
 
@@ -286,6 +294,20 @@ Integration tests use **Testcontainers** to spin up real Postgres, Redis, and so
 
 CI runs all three. No code merges with violations.
 
+### 10.1 Documentation audit
+
+Any change under `docs/` (or to this file) must pass the documentation audit:
+
+```bash
+./scripts/docs-audit.sh    # must exit 0
+```
+
+It mechanically checks cross-document links and anchors, error codes against the
+[Pipeline Contract §13 catalog](docs/pipeline-contract.md#13-error-code-catalog), configuration keys
+against [configuration.md](docs/configuration.md), and forbidden legacy spellings (superseded header
+names, removed entity fields). CI runs it alongside the Kotlin checks — **exit 0 is required before
+merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
+
 ---
 
 ## 11. Project Structure
@@ -296,12 +318,15 @@ datapipelines/
 ├── settings.gradle.kts
 ├── build.gradle.kts
 ├── gradle/libs.versions.toml   ← dependency versions (single source of truth)
-├── docs/                       ← specifications (15+ docs)
+├── docs/                       ← specifications — see docs/README.md for the index
+│   ├── README.md               ← spec index (start here)
+│   └── SPEC-REVIEW-2026-08.md  ← ratified cross-doc decisions D1–D15 (permanent record)
 ├── deploy/
 │   ├── docker-compose.dev.yml  ← local dev infra (Postgres + Redis)
 │   └── docker-compose.yml      ← reference production compose
 ├── scripts/
-│   └── sync-design-system.sh   ← copies design system CSS from ../design-system-starter
+│   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter
+│   └── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
 ├── modules/
 │   ├── typesystem/             ← canonical types, per-dialect mappers
 │   ├── pipeline-contract/      ← pipeline model, validation
@@ -370,7 +395,8 @@ git add .
 git commit -m "Add DuckDB as staging engine option"
 
 # Run full verification before pushing
-./gradlew verify    # lint + test + build
+./gradlew verify         # lint + test + build
+./scripts/docs-audit.sh  # required if the change touches docs/ or DEVELOPMENT.md (§10.1)
 
 # Push and create PR
 git push -u origin feature/add-duckdb-staging

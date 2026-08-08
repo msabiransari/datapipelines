@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.2 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-07
 
 ---
 
@@ -60,19 +60,26 @@ datapipelines/
 
 ### 3.1 Module responsibility matrix
 
-| Module | Spec | Responsibility |
-|---|---|---|
-| `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. |
-| `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. |
-| `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. |
-| `datasources` | [datasources.md](datasources.md) | Connection registry, HikariCP pools, dialect adapters, credential encryption. |
-| `staging` | [staging.md](staging.md) | H2 lifecycle, staging interface, type-aware batch inserts. |
-| `dag` | [dag-executor.md](dag-executor.md) | DAG data structure, executor (coroutines), node runner, SSE event emitter interface. |
-| `auth` | [auth.md](auth.md) | Users, API keys, JWT sessions, scopes, audit log. |
-| `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over REST. |
-| `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. |
-| `app` | (this spec) | Spring Boot `main()`, assembles all modules, configuration, runnable JAR. |
-| `tests/integration-tests` | (this spec) | Cross-module integration tests (Testcontainers for real databases). |
+| Module | Spec | Responsibility | Owns persistence for |
+|---|---|---|---|
+| `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
+| `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
+| `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
+| `datasources` | [datasources.md](datasources.md) | Connection registry, HikariCP pools, dialect adapters, credential encryption. | `DatasourceRepository` → `datasources` |
+| `staging` | [staging.md](staging.md) | H2 lifecycle, staging interface, type-aware batch inserts. | — (tempdb is per-execution, never persisted) |
+| `dag` | [dag-executor.md](dag-executor.md) | DAG data structure, executor (coroutines), node runner, SSE event emitter interface, Redis-backed result store. | `ExecutionRepository` → `pipeline_executions`; `ExecutionEventRepository` → `execution_events`; Redis keys for results / idempotency / cancel flags |
+| `auth` | [auth.md](auth.md) | Users, API keys, JWT sessions, scopes, audit log. | `UserRepository` → `users`; `ApiKeyRepository` → `api_keys`; `AuditLogger` → `audit_log` |
+| `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
+| `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
+| `app` | (this spec) | Spring Boot `main()`, assembles all modules, configuration, runnable JAR, **Flyway dependency + migration scripts**. | Owns schema *creation* (Flyway), not data access |
+| `tests/integration-tests` | (this spec) | Cross-module integration tests (Testcontainers for real databases). | — |
+
+#### Persistence ownership rule (normative)
+
+1. **Repositories live in their owning domain module**, never in a shared `persistence` module and never in `web`. Each owning module takes `org.springframework:spring-jdbc` (via `spring-boot-starter-jdbc`) and uses `NamedParameterJdbcTemplate` per §8.1.
+2. **The schema is owned by one module: `app`.** The Flyway dependency (`flyway-core` + `flyway-database-postgresql`) and every migration script under `src/main/resources/db/migration/` live in `app` only. Domain modules read and write tables; they never create or alter them. DDL authority is [Metadata DB §4](metadata-db.md#4-table-definitions); the migration file layout is [Metadata DB §7.1](metadata-db.md#71-file-structure).
+3. **Redis is a dependency of exactly two modules**: `dag` (result store, idempotency keys, cancellation flags) and `web` (post-completion SSE event log, per-user rate-limit counters). Both take `spring-boot-starter-data-redis` (Lettuce client, the starter's default). No other module talks to Redis.
+4. **The `DataSource` bean for the metadata DB is a single app-level bean** (Spring Boot autoconfiguration from the `spring.datasource.*` keys defined in [configuration.md §3](configuration.md)). Modules inject `NamedParameterJdbcTemplate`, never construct their own pool. This is distinct from the *user* datasource pools owned by `ConnectionPoolManager` in the `datasources` module.
 
 ---
 
@@ -80,53 +87,79 @@ datapipelines/
 
 ### 4.1 Layered dependency graph
 
+This diagram is a **rendering of the normative table in §4.2** — it carries no information the table does not. When the two disagree, §4.2 wins and the diagram is the bug.
+
 ```
-                          ┌─────────────────────────────┐
-                          │          typesystem          │   ← foundation
-                          └──────────┬──────────────────┘
-                                     │
-       ┌───────────────┬─────────────┼─────────────┬────────────────┐
-       │               │             │             │                │
-┌──────▼──────┐ ┌──────▼─────┐ ┌─────▼──────┐ ┌────▼──────┐ ┌──────▼─────┐
-│   auth      │ │ datasources│ │ templates  │ │ staging   │ │ pipeline-  │
-│             │ │            │ │            │ │           │ │ contract   │
-└──────┬──────┘ └──────┬─────┘ └─────┬──────┘ └────┬──────┘ └──────┬─────┘
-       │               │             │             │               │
-       │               │             │             │       ┌───────▼────────┐
-       │               │             │             │       │      dag       │
-       │               │             │             │       │   (executor)   │
-       │               │             │             │       └───────┬────────┘
-       │               │             │             │               │
-       │               │             │             │       ┌───────▼────────┐
-       │               │             │             │       │  mcp-server    │
-       │               │             │             │       │                │
-       │               │             │             │       └───────┬────────┘
-       │               │             │             │               │
-       └───────────────┴─────────────┴─────────────┴───────────────┤
-                                                                   │
-                                                          ┌────────▼────────┐
-                                                          │       web       │
-                                                          └────────┬────────┘
-                                                                   │
-                                                          ┌────────▼────────┐
-                                                          │       app       │
-                                                          └─────────────────┘
+                              ┌──────────────┐
+                              │  typesystem  │              layer 0 — no internal deps
+                              └──────┬───────┘
+             ┌──────────────┬────────┴────────┬──────────────┐
+             │              │                 │              │
+      ┌──────▼──────┐ ┌─────▼──────┐   ┌──────▼──────┐ ┌─────▼─────┐
+      │  pipeline-  │ │ datasources│   │   staging   │ │   auth    │  layer 1
+      │  contract   │ │            │   │             │ │           │
+      └──┬───────┬──┘ └─────┬──────┘   └──────┬──────┘ └─────┬─────┘
+         │       │          │                 │              │
+   ┌─────▼─────┐ │          │                 │              │
+   │ templates │ │          │                 │              │        layer 2
+   └─────┬─────┘ │          │                 │              │
+         │       │          │                 │              │
+         └───────┴────┬─────┴─────────────────┘              │
+                      │                                      │
+               ┌──────▼──────┐                               │
+               │     dag     │  ← + typesystem               │        layer 3
+               │  (executor) │                               │
+               └──────┬──────┘                               │
+                      │                                      │
+               ┌──────▼──────┐                               │
+               │  mcp-server │ ◄─────────────────────────────┘        layer 4
+               │             │  ← + typesystem, pipeline-contract,
+               └──────┬──────┘    templates, datasources
+                      │
+               ┌──────▼──────┐
+               │     web     │  ← + every module in layers 0–3          layer 5
+               └──────┬──────┘    (declared explicitly, not transitively)
+                      │
+               ┌──────▼──────┐
+               │     app     │  ← web only                              layer 6
+               └─────────────┘
 ```
 
-### 4.2 Rules
+### 4.2 The dependency rule (machine-checkable)
 
-1. **No cycles.** Enforced by Gradle. A module may not transitively depend on itself.
-2. **No upward dependencies.** A module may only depend on modules in the same layer or below.
-3. **No skipping layers.** `dag` (high layer) does not depend on `auth` directly — that's a sibling. It depends on lower-layer modules only.
-4. **`typesystem` is the foundation.** No internal dependencies. Pure type definitions and mappers.
-5. **`web` aggregates everything.** Has the most internal dependencies.
-6. **`app` is the bootstrap.** Depends on `web` only (which transitively pulls everything else). Contains `main()` and configuration.
+There is **one** layering rule, and it is a table lookup, not a judgment call:
+
+> **A module's `dependencies { implementation(project(...)) }` block MUST list a subset of its row below, and every module it uses at compile time MUST be listed explicitly (no reliance on transitive `api` leakage).**
+
+| Module | Allowed internal dependencies (exhaustive) |
+|---|---|
+| `typesystem` | *(none)* |
+| `pipeline-contract` | `typesystem` |
+| `templates` | `typesystem`, `pipeline-contract` |
+| `datasources` | `typesystem` |
+| `staging` | `typesystem` |
+| `auth` | `typesystem` |
+| `dag` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging` |
+| `mcp-server` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
+| `web` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `mcp-server` |
+| `app` | `web` |
+| `tests/integration-tests` | `app` |
+
+Notes on the shape (explanatory, not additional rules):
+
+- The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
+- `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
+- `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
+- `app` lists `web` only. It contains `main()`, configuration, logback config, and the Flyway migrations (§3.1) — no domain code.
+- A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
+
+**Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
 
 ### 4.3 Cross-cutting concerns
 
 Some concerns touch every module:
 - **Logging** — SLF4J + Logback (or structured logging via `minlog`/`logstash-logback-encoder`). Each module logs via SLF4J API; the actual logback config lives in `app`.
-- **Error handling** — every module's exceptions extend a base `DatapipelinesException` (in `typesystem` or a tiny `common` module).
+- **Error handling** — every module's exceptions extend a base `DatapipelinesException`, which lives in `typesystem`. There is deliberately **no `common` module**: the §4.2 table is exhaustive, and a catch-all module is where layering rules go to die.
 - **Configuration** — typed config classes per module, composed into the global `app` config.
 - **Metrics** — Micrometer API in modules, actual metrics registry configured in `app`.
 
@@ -138,13 +171,13 @@ Some concerns touch every module:
 
 **Dependencies (internal):** none.
 
-**Dependencies (external):** `kotlinx.serialization.json` (JSON for schema envelope).
+**Dependencies (external):** `com.fasterxml.jackson.module:jackson-module-kotlin` (JSON for the schema envelope). Jackson is the project-wide JSON library — the `@JsonValue` / `@JsonCreator` enum mapping in [Enums §1](enums.md) is normative, so there is no second serialization stack.
 
 **Public API:**
 - `LogicalType` enum
 - `ColumnSchema` data class
-- `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, `MssqlTypeMapper`, `MysqlTypeMapper`, `H2TypeMapper`, `DuckDbTypeMapper`, `SqliteTypeMapper`)
-- `H2TypeMapper` (canonical → H2 type)
+- `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, `MssqlTypeMapper`, `MysqlTypeMapper`, `H2IngressMapper`, `DuckDbTypeMapper`, `SqliteTypeMapper`)
+- `H2IngressMapper` (H2 JDBC metadata → canonical `ColumnSchema`) and `H2EgressMapper` (canonical → H2 DDL type string + `java.sql.Types` code) — **two objects, not inverses**; signatures in [Staging §5.3](staging.md#53-mappers-and-helper-signatures)
 - `JsonEncoder` (canonical value → wire representation)
 - `SchemaEnvelope` data class
 
@@ -154,33 +187,46 @@ Some concerns touch every module:
 
 **Dependencies (internal):** `typesystem`.
 
-**Dependencies (external):** `kotlinx.serialization.json`.
+**Dependencies (external):**
+- `com.fasterxml.jackson.module:jackson-module-kotlin` — Pipeline JSON ser/deser ([Pipeline Contract §17.1](pipeline-contract.md#171-where-this-lives-in-the-codebase) specifies Jackson).
+- `org.springframework.boot:spring-boot-starter-jdbc` (brings `org.springframework:spring-jdbc`) — for `PipelineRepository`.
 
 **Public API:**
 - `Pipeline` data class (top-level entity)
 - `Node`, `NodeType`, `NodeSource` data classes
-- `Parameter`, `ParameterSchema` data classes
-- `TemplateRef` data class
-- `PipelineValidator` — runs all §10 validations from the spec
-- `PipelineSerializer` / `PipelineDeserializer` (kotlinx.serialization)
+- `NodeOutput` — flat sealed interface (`Tempdb`, `Caller`, `Datasource`)
+- `PipelineSettings` (with nested `TempdbSettings`)
+- `Parameter` data class
+- `TemplateRef` data class (`{id, version}`)
+- `PipelineValidator` — runs all [§12](pipeline-contract.md#12-validation-rules) validations from the spec
+- `PipelineSerializer` / `PipelineDeserializer` (Jackson; an omitted `output` on a DQL node deserializes to `NodeOutput.Caller`)
+- `CallerNodeResolver` — resolves the caller node per [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node). **Replaces topology-based terminal-node detection, which no longer exists in any form** (D1).
 - `ExecutionContext` — runtime mutable map
+- `PipelineRepository` — `NamedParameterJdbcTemplate` access to `pipelines` / `pipeline_versions` (§8.1)
 
-**Tests:** unit tests for validator (every check + every code path); serialization round-trip tests.
+**Tests:** unit tests for validator (every check + every code path); serialization round-trip tests; `PipelineRepository` integration tests against a Postgres Testcontainer.
 
 ### 5.3 `templates`
 
 **Dependencies (internal):** `typesystem`, `pipeline-contract` (for `Parameter` shape).
 
-**Dependencies (external):** `org.freemarker:freemarker` (pinned).
+**Dependencies (external):**
+- `org.freemarker:freemarker` (pinned).
+- `org.springframework.boot:spring-boot-starter-jdbc` — for `TemplateRepository`.
 
 **Public API:**
 - `Template`, `TemplateVersion` data classes
-- `TemplateRegistry` interface
-- `TemplateEngine` — wraps Freemarker
+- `TemplateImport` data class (`{id, version, alias}`) — D12
+- `TemplateRegistry` interface — lookup by `id@version`, caching
+- `RegistryTemplateLoader` — the Freemarker `TemplateLoader`; resolves only `"{id}@{version}"` keys against the registry
+- `TemplateEngine` — wraps Freemarker; owns the render guards ([Templates §4.3](templates.md))
 - `TemplateValidator`
-- `LibraryResolver` — transitive import resolution
+- `LibraryResolver` — transitive import resolution (depth cap, cycle detection, alias uniqueness)
+- `TemplateRepository` — `NamedParameterJdbcTemplate` access to `templates` / `template_versions` (§8.1)
 
-**Tests:** unit tests for validator; round-trip tests for sample templates; security tests for forbidden-construct rejection.
+**The module's public API carries no parameter-schema types.** The template entity's parameter-schema field was removed entirely (D3) — pipeline `parameters` is the single declaration point, so there is no `ParamsSchema`, `ParamSpec`, or equivalent type here. Matches [Templates §12.1](templates.md#121-where-this-lives).
+
+**Tests:** unit tests for validator; round-trip tests for sample templates; security tests for forbidden-construct rejection; `TemplateRepository` integration tests against a Postgres Testcontainer.
 
 ### 5.4 `datasources`
 
@@ -194,30 +240,98 @@ Some concerns touch every module:
 - `org.duckdb:duckdb_jdbc` — bundled DuckDB driver.
 - `org.xerial:sqlite-jdbc` — bundled SQLite driver.
 - `org.bouncycastle:bcprov-jdk18on` — crypto primitives.
-- Optional: `com.oracle.database.jdbc:ojdbc11` (via `-Poracle` Gradle profile).
-- Optional: `com.mysql:mysql-connector-j` (via `-Pmysql` profile).
+- `org.springframework.boot:spring-boot-starter-jdbc` — for `DatasourceRegistry`'s `DatasourceRepository`.
+- Optional: `com.oracle.database.jdbc:ojdbc11` (via `-Poracle` Gradle property).
+- Optional: `com.mysql:mysql-connector-j` (via `-Pmysql` Gradle property).
 
 **Public API:**
 - `Datasource` data class
 - `Dialect` enum
 - `DatasourceRegistry` interface
 - `DialectAdapter` interface + per-dialect implementations
+- `JdbcDrivers` — driver class lookup / availability check
 - `CredentialEncryptor` — AES-256-GCM
-- `ConnectionPoolManager`
+- `ConnectionPoolManager` — HikariCP wrapper for **user** datasources (distinct from the metadata-DB pool, §3.1 rule 4)
+- `DatasourceRepository` — `NamedParameterJdbcTemplate` access to `datasources` (§8.1)
 
-**Tests:** unit tests for adapter URL validation; integration tests via Testcontainers (real DB containers).
+#### 5.4.1 Optional driver profiles — implementation sketch
+
+Both optional drivers are `runtimeOnly` (nothing compiles against them; `JdbcDrivers` resolves them reflectively by class name — [Datasources §10.3](datasources.md#103-driver-class-lookup)). They are gated on Gradle **project properties**, not Gradle *profiles* (Gradle has no profiles):
+
+```kotlin
+// modules/datasources/build.gradle.kts
+dependencies {
+    implementation(project(":modules:typesystem"))
+    implementation(libs.hikaricp)
+    implementation(libs.spring.boot.starter.jdbc)
+
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.mssql.jdbc)
+    runtimeOnly(libs.h2)
+    runtimeOnly(libs.duckdb.jdbc)
+    runtimeOnly(libs.sqlite.jdbc)
+
+    // ./gradlew -Poracle build   → OTN-licensed driver bundled (operator accepts the licence)
+    if (project.hasProperty("oracle")) {
+        runtimeOnly(libs.ojdbc11)
+    }
+    // ./gradlew -Pmysql build    → GPL+FOSS-exception driver bundled
+    if (project.hasProperty("mysql")) {
+        runtimeOnly(libs.mysql.connector.j)
+    }
+}
+```
+
+Two consequences worth stating, because both are easy to get wrong:
+
+- **The flag must be passed to every task that builds the artifact.** `-Poracle` on `build` and not on `bootJar` produces a JAR without the driver. CI publishes the optional variants as separate jobs (`./gradlew -Poracle bootJar`), never as a post-hoc patch of the default JAR.
+- **Property presence, not value, is the switch.** `-Poracle=false` still enables it (`hasProperty` is true). Documented here so nobody "disables" it that way.
+
+**`lib/` drop-in (no rebuild).** The licence-clean alternative is deploy-time: the operator drops `ojdbc11.jar` into a `lib/` directory beside the application JAR. This is **not** automatic — the default `JarLauncher` only reads `BOOT-INF/lib/`. Extra classpath entries require `PropertiesLauncher`, selected by the JAR manifest:
+
+```kotlin
+// modules/app/build.gradle.kts
+tasks.named<BootJar>("bootJar") {
+    // PropertiesLauncher is the only launcher that honours loader.path.
+    manifest {
+        attributes("Main-Class" to "org.springframework.boot.loader.launch.PropertiesLauncher")
+    }
+}
+
+tasks.named<BootRun>("bootRun") {
+    classpath += files("lib")   // dev parity: same drop-in directory, no packaging
+}
+```
+
+At runtime the operator points the launcher at the directory with `loader.path` — a comma-separated list of directories, archives, or directories within archives, resolved relative to `loader.home` (default: the process working directory). It can be supplied as a system property, the `LOADER_PATH` environment variable, or a `loader.properties` file:
+
+```
+java -Dloader.path=lib -jar datapipelines-app.jar
+# or, in the container image:
+ENV LOADER_PATH=lib
+```
+
+The deployment image therefore ships an empty `lib/` and sets `LOADER_PATH=lib` so a drop-in works with no rebuild and no re-configuration ([Deployment §6](deployment.md) owns the image contents).
+
+The wiring lives in `app` (it owns the runnable artifact) even though the drivers are a `datasources` concern. A driver that is neither bundled nor dropped in fails datasource save with `datasource.driver_not_loaded` — see [Datasources §10](datasources.md#10-jdbc-driver-packaging) for the licensing rationale and the full driver matrix.
+
+**Tests:** unit tests for adapter URL validation; integration tests via Testcontainers (real DB containers); a build-level check that `-Poracle bootJar` contains `ojdbc11` and the default `bootJar` does not.
 
 ### 5.5 `staging`
 
 **Dependencies (internal):** `typesystem`.
 
-**Dependencies (external):** `com.h2database:h2`.
+**Dependencies (external):**
+- `com.h2database:h2`
+- `org.jetbrains.kotlinx:kotlinx-coroutines-core` — the single staging connection is serialized by an explicit `Mutex` ([Staging §9.2](staging.md#92-serialization-is-explicit--mutex-not-the-driver)).
 
 **Public API:**
 - `Staging` interface
-- `StagingFactory` interface
+- `StagingFactory` interface — `create(executionId, engine: StagingEngine = H2)`
 - `H2Staging`, `H2StagingFactory` implementations
-- `StageResult`, `StagingStats` data classes
+- `StageResult` (`columns: List<ColumnSchema>`), `StagingStats` data classes
+
+No repository: tempdb lives and dies with one execution and is never persisted (§3.1).
 
 **Tests:** unit tests for type mapping; integration tests for staging round-trip; streaming tests for memory-bounded behavior.
 
@@ -227,46 +341,67 @@ Some concerns touch every module:
 
 **Dependencies (external):**
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core`
-- `io.projectreactor:reactor-core` (for SSE event emission, optional)
+- `org.springframework.boot:spring-boot-starter-data-redis` (Lettuce, the starter's default client) — result store, idempotency keys, cancellation flags
+- `org.springframework.boot:spring-boot-starter-jdbc` — for the execution repositories
+- `io.micrometer:micrometer-core` — executor metrics ([DAG Executor §15.3](dag-executor.md#153-monitoring))
 
 **Public API:**
 - `Dag<T>` data structure (the ~150-line implementation)
 - `PipelineExecutor`
 - `ExecutableNode`, `NodeSource`, `NodeType`
-- `NodeStats`, `NodeStatus`
+- `NodeResult` — the executor's **internal** in-flight per-node value ([§7.1](dag-executor.md#71-noderesult--the-executors-in-flight-per-node-value)); carries `callerResultRef`, a Redis key, never a live `ResultSet`
+- `NodeStats`, `NodeStatus` — the wire-facing projection of `NodeResult`
+- `CancellationRegistry`, `CancellationHandle` — per-node `Statement` registration and cancel ([§8.3.1](dag-executor.md#831-the-registry))
+- `ExecutionAbortedException`, `AbortReason` (`CLIENT_DISCONNECT`, `CANCELLED`, `SHUTDOWN`) — `ExecutionAbortedException` extends `CancellationException`, maps to no error code
+- `ResultStore` — Redis-backed caller-result materialization + paging cursor (D9)
+- `ExecutionSlots` — per-user + global concurrency permits
+- `ExecutorDispatcher` — the module's own bounded IO dispatcher (executor code never touches `Dispatchers.IO`)
 - `EventEmitter` interface
 - `ExecutionEvent` sealed class
+- `ExecutionRepository` — `pipeline_executions`; `ExecutionEventRepository` — `execution_events` (durable 7-day record; the 1h Redis event log is `web`'s, §5.9)
 
-**Tests:** unit tests for `Dag<T>` algorithms; unit tests for executor (mocked dependencies); integration tests with real H2 + Testcontainers sources.
+**Tests:** unit tests for `Dag<T>` algorithms; unit tests for executor (mocked dependencies); cancellation tests covering all three `AbortReason` paths incl. the cross-instance Redis flag; integration tests with real H2 + Testcontainers sources + a Redis container.
 
 ### 5.7 `auth`
 
-**Dependencies (internal):** none beyond `typesystem` (for shared exceptions, if needed).
+**Dependencies (internal):** `typesystem` (shared exception base only).
 
 **Dependencies (external):**
 - `de.mkammerer:argon2-jvm`
 - `io.jsonwebtoken:jjwt-api`, `jjwt-impl`, `jjwt-jackson`
-- `org.springframework.security:spring-security-web`, `spring-security-config`
+- `org.springframework.boot:spring-boot-starter-oauth2-client` (Spring Security web/config + OAuth2 client + Jose, per [Auth §12.2](auth.md#122-dependencies))
 - `org.bouncycastle:bcprov-jdk18on`
+- `org.springframework.boot:spring-boot-starter-jdbc` — for the user / key / audit repositories
 
 **Public API:**
-- `User`, `ApiKey` data classes
+- `User`, `ApiKey`, `AuthenticatedPrincipal` data classes
 - `Scope` enum
-- `PasswordHasher`, `JwtService`, `ApiKeyService`
-- `AuthFilter` — Spring web filter
-- `@RequiredScope` annotation + interceptor
-- `AuditLogger`
+- `JwtService`, `ApiKeyService`, `UserService`
+- `OidcSuccessHandler`, `JwtAuthenticationFilter`, `ApiKeyFilter`, `SecurityConfig`
+- `@RequiredScope` annotation + `ScopeInterceptor`
+- `AuditLogger` — writes `audit_log`
+- `UserRepository` — `users`; `ApiKeyRepository` — `api_keys` (§8.1)
 
-**Tests:** unit tests for each component; integration tests for full auth flow.
+The per-request `is_active` / revocation re-check (D13) reads through the same 60s cache as the key-hash lookup; the cache is owned by this module and is **in-process per instance, not Redis** — it is a read-through cache of Postgres truth, not shared state ([Auth §11.4](auth.md#114-api-key-validation-cache)).
+
+**Tests:** unit tests for each component; integration tests for full auth flow; repository integration tests against a Postgres Testcontainer.
 
 ### 5.8 `mcp-server`
 
-**Dependencies (internal):** `pipeline-contract`, `templates`, `datasources`, `typesystem`, `auth` (for principal lookup).
+**Dependencies (internal):** `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`.
+
+`dag` is a real dependency, not an accident of layering: `pipelines_execute` and the `executions_*` tools drive `PipelineExecutor` and `ResultStore` directly. `mcp-server` is a thin adapter over the same **service layer** the REST controllers use — it never loops back through HTTP, and it must not (that would make `web` a dependency and create a cycle).
 
 **Dependencies (external):**
-- `io.modelcontextprotocol:mcp-core` (the MCP SDK — pinned, currently `0.x`).
+- The MCP SDK — coordinates and version resolved at the implementation gate below.
 
-> **Verification needed:** Confirm the canonical Maven coordinates for the MCP SDK against current releases. This is fast-moving; pin to a specific version at implementation time.
+> **Implementation gate G1 — MCP SDK coordinates.** The `io.modelcontextprotocol:mcp-core` coordinate in earlier drafts is **unverified** and must not be copied into a build file as-is. Before the first `mcp-server` commit:
+> 1. Search Maven Central for the official artifact: `curl -s 'https://search.maven.org/solrsearch/select?q=g:io.modelcontextprotocol&rows=50&wt=json' | jq -r '.response.docs[] | "\(.g):\(.a) \(.latestVersion)"'` (cross-check against the SDK's own README, which is the authority on the artifact name).
+> 2. Confirm the artifact implements the **Streamable HTTP** transport at the protocol version asserted in [MCP Server §3.1](mcp-server.md).
+> 3. Pin the exact version in `gradle/libs.versions.toml` — no range, no `+`, no SNAPSHOT (§6.1).
+> 4. Replace this gate block with the resolved coordinate + version and record the date checked.
+>
+> Rationale for keeping the gate rather than guessing: the SDK is pre-1.0 and its coordinates have moved. A plausible-but-wrong coordinate in a frozen spec gets copied into the build and debugged as a build failure instead of a spec error.
 
 **Public API:**
 - `McpServer` — Spring Boot autoconfiguration
@@ -278,12 +413,13 @@ Some concerns touch every module:
 
 ### 5.9 `web`
 
-**Dependencies (internal):** everything — this is the aggregation layer.
+**Dependencies (internal):** `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `mcp-server` — the aggregation layer, declared explicitly per §4.2.
 
 **Dependencies (external):**
 - `org.springframework.boot:spring-boot-starter-web`
 - `org.springframework.boot:spring-boot-starter-thymeleaf`
 - `org.springframework.boot:spring-boot-starter-validation`
+- `org.springframework.boot:spring-boot-starter-data-redis` — post-completion SSE event log (1h) and per-user rate-limit counters. The durable 7-day event record is `dag`'s `ExecutionEventRepository`; these are two different stores for two different retention windows (D9).
 - `io.micrometer:micrometer-core`
 - `com.fasterxml.jackson.module:jackson-module-kotlin`
 - `org.webjars:bootstrap` (for UI)
@@ -308,13 +444,17 @@ Some concerns touch every module:
 **Dependencies (external):**
 - `org.springframework.boot:spring-boot-starter`
 - `org.springframework.boot:spring-boot-starter-actuator`
+- `org.flywaydb:flyway-core` + `org.flywaydb:flyway-database-postgresql` — schema migration. **This module is the only one that depends on Flyway** (§3.1 rule 2). The Postgres module is a separate artifact since Flyway 10 and is required for a Postgres target.
+- `org.postgresql:postgresql` — the metadata-DB driver at runtime (also bundled by `datasources` for user datasources; the version catalog pins it once).
 
 **Public API:**
 - `DatapipelinesApplication.kt` — `@SpringBootApplication main()`
 - `application.yml` — top-level config
 - `logback-spring.xml` — logging config
+- `src/main/resources/db/migration/V*.sql` — the Flyway migrations, generated from [Metadata DB §4](metadata-db.md#4-table-definitions) per [§7.1](metadata-db.md#71-file-structure)
+- `bootJar` manifest wiring for the `lib/` driver drop-in (§5.4.1)
 
-**Tests:** smoke tests via `@SpringBootTest` (full context load).
+**Tests:** smoke tests via `@SpringBootTest` (full context load); a migration test that runs Flyway against a clean Postgres Testcontainer and asserts the resulting schema matches [Metadata DB §4](metadata-db.md#4-table-definitions).
 
 ### 5.11 `tests/integration-tests`
 
@@ -322,7 +462,8 @@ Some concerns touch every module:
 
 **Dependencies (external):**
 - `org.springframework.boot:spring-boot-starter-test`
-- `org.testcontainers:postgresql`, `mysql`, `mssql`, `oracle-xe`, `db2` (only the ones we test)
+- `org.testcontainers:postgresql`, `mysql`, `mssql`, `oracle-xe` — one container module per **supported dialect** that needs a real server. DuckDB, SQLite and H2 are embedded (no container). There is **no DB2 container — DB2 is not a supported dialect** ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables) / [Datasources §4.1](datasources.md#41-dialect-catalog) list the seven).
+- A Redis container (`org.testcontainers:testcontainers` generic container, or the Redis module) — required for result delivery, idempotency, and cancellation tests (D9/D7).
 - `io.rest-assured:rest-assured` or `spring-boot-starter-webflux` (for reactive test client)
 
 **Purpose:** end-to-end tests that spin up real database containers, register datasources, create templates, build pipelines, execute them, verify results. The "cold executable" check — if the integration tests pass, the app works.
@@ -338,8 +479,8 @@ Some concerns touch every module:
 kotlin = "1.9.24"
 spring-boot = "3.3.2"
 kotlinx-coroutines = "1.8.1"
-kotlinx-serialization = "1.6.3"
 jackson = "2.17.2"
+flyway = "10.17.0"
 slf4j = "2.0.13"
 logback = "1.5.6"
 freemarker = "2.3.33"
@@ -367,14 +508,31 @@ kotest = "5.9.1"
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
-kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
 # ... (every dependency declared here, used by ref from build.gradle.kts files)
 
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web", version.ref = "spring-boot" }
+spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc", version.ref = "spring-boot" }
+spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis", version.ref = "spring-boot" }
+spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client", version.ref = "spring-boot" }
+
+# Flyway — `app` module only (§3.1 rule 2). Since Flyway 10 the Postgres support is a
+# separate artifact; flyway-core alone cannot migrate a Postgres target.
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
 # etc.
 ```
 
-> **Verification needed:** All versions are illustrative — must be checked against Maven Central at implementation time for current stable. Pin to specific versions (no `+`, no `latest.integration`, no SNAPSHOT in production).
+**Redis client:** no explicit entry — `spring-boot-starter-data-redis` brings **Lettuce** as its default client, version-managed by the Spring Boot BOM. Adding a second, separately-pinned Lettuce entry would let it drift from the BOM; if Jedis is ever wanted instead, that is an explicit exclusion + dependency, and a spec change here.
+
+> **Implementation gate G2 — version catalog vs Maven Central.** Every version above is **illustrative**, written 2026-08 from a spec author's desk, and none has been checked against a repository. Before the first build lands, for each entry:
+> 1. Resolve the current stable release: `curl -s 'https://search.maven.org/solrsearch/select?q=g:"org.flywaydb"+AND+a:"flyway-core"&core=gav&rows=5&wt=json' | jq -r '.response.docs[].v'` (repeat per artifact; or run `./gradlew dependencyUpdates` once the build exists).
+> 2. Reject anything that is not a released stable version — **no ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta** (§6.1, and the project-wide version-pinning rule).
+> 3. Check BOM-managed artifacts are **not** pinned here at all: anything the `spring-boot` BOM manages (Jackson, Micrometer, Lettuce, HikariCP, the Spring modules) takes its version from the BOM. A local pin that disagrees with the BOM is a silent runtime-incompatibility source.
+> 4. Verify JDK 21 compatibility for each pinned artifact, then commit `gradle.lockfile` (§6.1) in the same commit as the catalog.
+> 5. Record the date the catalog was verified in the change log below.
+>
+> This gate is the reason the versions above are safe to leave stale: they are explicitly labelled unverified, so nobody builds on them believing otherwise.
 
 ### 6.1 Versioning rules
 
@@ -478,7 +636,9 @@ Reasons:
 - **Lighter** — no Hibernate dependency, no second-level cache, no entity manager.
 - **Spring-native** — `NamedParameterJdbcTemplate` is part of Spring JDBC, auto-configured by Spring Boot.
 
-Pattern per module:
+**Where repositories live:** in the module that owns the entity, never in `web` and never in a shared persistence module — see the §3.1 persistence-ownership rule for the full mapping and the Flyway/Redis boundaries. Each owning module takes `spring-boot-starter-jdbc`; the `DataSource` bean itself is app-level.
+
+Pattern per module (`pipeline-contract`):
 ```kotlin
 @Repository
 class PipelineRepository(private val jdbc: NamedParameterJdbcTemplate) {
@@ -527,7 +687,7 @@ class TemplatesAutoConfiguration {
 }
 ```
 
-### 8.2 Configuration properties per module
+### 8.3 Configuration properties per module
 
 Each module exposes typed configuration:
 
@@ -539,7 +699,7 @@ data class TemplatesProperties(
 )
 ```
 
-Composed into `application.yml` in `app`:
+Key names, defaults, and env-var bindings are defined **once** in [configuration.md](configuration.md) (D8); the snippets here are shape illustrations, not a second definition. Composed into `application.yml` in `app`:
 
 ```yaml
 datapipelines:
@@ -556,7 +716,7 @@ datapipelines:
       ttl-hours: 12
 ```
 
-### 8.3 Beans and DI
+### 8.4 Beans and DI
 
 - **Constructor injection only.** No `@Autowired` on fields (per the user's global rules).
 - **`@Service` / `@Repository` / `@Configuration`** used per Spring conventions.
@@ -625,7 +785,8 @@ Each `modules/{name}/README.md` is one page:
 ### 11.1 Frozen in v1
 
 - The module list (the 10 modules + integration tests).
-- The dependency direction (the layered graph in §4).
+- The dependency direction — specifically the **allowed-dependency table in §4.2**, which is the normative form. Adding an edge is a spec change, not a build-file change.
+- Persistence ownership (§3.1): repositories in their owning module, Flyway only in `app`, Redis only in `dag` and `web`.
 - The version catalog as the single source of dependency versions.
 - Kotlin + JDK 21 as the language/runtime baseline.
 - Spring Boot 3.x as the application framework.
@@ -653,9 +814,23 @@ Out of scope for v1:
 
 ## 13. Verification Checklist
 
+### 13.1 Implementation gates (must be closed before the first build lands)
+
+These are the two items this spec deliberately does **not** resolve on paper. Each has an exact check; neither may be closed by recall.
+
+- [ ] **G1 — MCP SDK coordinates** (§5.8): artifact resolved against Maven Central + the SDK README, Streamable HTTP transport confirmed at the [MCP Server §3.1](mcp-server.md) protocol version, exact version pinned, gate block replaced with the resolved coordinate + date.
+- [ ] **G2 — version catalog vs Maven Central** (§6): every entry resolved to a current stable release, BOM-managed artifacts removed from the catalog, no ranges/`+`/SNAPSHOT/pre-release, JDK 21 compatibility checked, `gradle.lockfile` committed, verification date recorded in the change log.
+
+### 13.2 Build checklist
+
 Before considering the module structure "ready":
 
 - [ ] `./gradlew build` succeeds from clean state.
+- [ ] The §4.2 allowed-dependency verification task passes (no module declares an edge outside its row).
+- [ ] `./gradlew -Poracle bootJar` produces a JAR containing `ojdbc11`; the default `bootJar` does not.
+- [ ] A driver dropped into `lib/` is picked up at runtime with `LOADER_PATH=lib` (§5.4.1).
+- [ ] Flyway migrations live only in `app`; no other module declares a Flyway dependency.
+- [ ] Only `dag` and `web` declare a Redis dependency.
 - [ ] All unit tests pass.
 - [ ] All integration tests pass.
 - [ ] ktlint and detekt clean.
@@ -676,3 +851,4 @@ Before considering the module structure "ready":
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial module structure spec: 10 modules + integration tests, dependency graph, version catalog, build conventions, Spring Boot conventions |
 | 2026-08-05 | v1.1 | design system integration | Added `@acme/design-tokens` as the styling foundation for the `web` module. Documented vendoring approach (CSS files, not npm). Referenced Pipeline Editor spec for integration details. |
+| 2026-08-07 | v1.2 | consistency campaign | **Persistence ownership** (§3.1): repositories live in their owning domain module (`PipelineRepository`, `TemplateRepository`, `DatasourceRepository`, `UserRepository`/`ApiKeyRepository`, `ExecutionRepository`/`ExecutionEventRepository`), each taking `spring-boot-starter-jdbc`; Flyway dep + migrations confined to `app`; Redis (`spring-boot-starter-data-redis`, Lettuce) confined to `dag` and `web`; catalog gains flyway-core + flyway-database-postgresql. **§4.1** graph regenerated to match the §5.x lists; **§4.2** ambiguous layering rules replaced by one machine-checkable allowed-dependency table (+ Gradle verification task). **§5.1** `H2TypeMapper` → `H2IngressMapper` / `H2EgressMapper` (staging §5.3). **§5.2** `TerminalDetector` → `CallerNodeResolver` [D1], `PipelineRepository` added, Jackson named as the ser/deser stack. **§5.3** params-schema types dropped [D3]. **§5.4.1** new: `-Poracle`/`-Pmysql` conditional `runtimeOnly` sketch + `lib/` drop-in via `PropertiesLauncher`/`loader.path`. **§5.6** dag API gains `NodeResult`, `CancellationRegistry`, `CancellationHandle`, `ResultStore`, `ExecutionSlots`, `ExecutionAbortedException`, `AbortReason`, `ExecutorDispatcher`. **§5.11** `db2` Testcontainer removed (not a supported dialect); Redis container added. Both "Verification needed" markers converted to implementation gates G1/G2 with exact commands (§13.1). Duplicate `### 8.2` renumbered (→ 8.3/8.4). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

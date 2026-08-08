@@ -1,9 +1,9 @@
 # Type System Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.1 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** none (foundational spec — other specs depend on this)
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-07
 
 ---
 
@@ -19,7 +19,7 @@ It defines:
 4. **H2 staging type mappings** for the in-memory staging layer.
 5. The **schema envelope structure** that travels with every result set.
 
-The canonical types are deliberately small (11 types) and **versioned with an additive-only stability promise** (Section 11). Clients build against this contract; churn breaks them.
+The canonical types are deliberately small (11 types) and **versioned with an additive-only stability promise** ([§9](#9-stability-promise)). Clients build against this contract; churn breaks them.
 
 ---
 
@@ -30,7 +30,7 @@ The canonical types are deliberately small (11 types) and **versioned with an ad
 3. **Lossless where loss matters, pragmatic elsewhere.** Numeric precision is preserved for types that exceed IEEE 754 (BIG*). Approximate numerics (REAL/DOUBLE) collapse to DECIMAL with their representable precision because they were never exact to begin with — false precision is not a virtue.
 4. **Mapping by type and precision, never by value.** A DECIMAL(18,2) column serializes as BIGDECIMAL → string, even if every actual value would fit in a double. Wire format is stable per-column, declared once in the schema, joins and parsers do not break.
 5. **Source-timezone normalization.** All timestamp-bearing types normalize to UTC on ingest. The canonical type system has no notion of "TIMESTAMP WITH source TIME ZONE" — UTC is the canonical zone.
-6. **Additive-only evolution.** Types and rules never removed or renamed; new types added under new version bumps. Clients coded against v1 will continue to work against vN.
+6. **Additive-only evolution.** Types and rules never removed or renamed; new types added under new version bumps. Clients coded against v1 will continue to work against vN. The full promise is stated in [§9 Stability Promise](#9-stability-promise); its client-side counterpart is the unknown-field rule in [§7.1](#71-column-descriptor-json-schema) — clients MUST ignore fields they do not recognize.
 
 ---
 
@@ -45,7 +45,7 @@ The canonical type set is **11 types**.
 | `INTEGER` | `number` | Exact integer fitting in int32 (≤ 2^31 − 1, ~2.1 × 10^9). | int32 and smaller |
 | `BIGINTEGER` | `string` | Exact integer up to int64 (≤ 2^63 − 1, ~9.2 × 10^18). Exceeds IEEE 754 double safe integer range (2^53 − 1). | int64 |
 | `DECIMAL(p, s?)` | `number` | Exact numeric with precision ≤ 15. Scale is required for exact-numeric origins, omitted for approximate-numeric origins. | precision ≤ 15 |
-| `BIGDECIMAL(p, s)` | `string` | Exact numeric with precision > 15. Scale always declared. | precision > 15 |
+| `BIGDECIMAL(p, s)` | `string` | Exact numeric with precision > 15. Scale always declared. Precision is **omitted** when the source numeric is unsized (unbounded precision — see [§4](#4-precision-and-scale-semantics)). | precision > 15 or unbounded |
 | `STRING` | `string` | Variable-length text. Includes source JSON/JSONB, XML, enums, UUIDs, intervals, geospatial WKT, and any type without a clean canonical mapping. | — |
 | `BINARY` | `string` (base64) | Variable-length bytes. | — |
 | `DATE` | `string` (ISO 8601 date) | Calendar date, no time component. | — |
@@ -88,6 +88,17 @@ The schema marks these by **omitting the scale field**: `{type: "DECIMAL", preci
 
 This collapses the type system (no separate REAL/DOUBLE) without losing meaningful information — clients that need to know "this was approximate" infer it from the absent scale field.
 
+### 3.5 Egress serialization rules (normative)
+
+These rules fix the exact bytes a client receives. They apply to every egress path uniformly — SSE `data_ready` payloads, the REST result cursor, and MCP tool results.
+
+1. **`TIMESTAMP`** — ISO 8601 with a literal `Z` suffix and **exactly 6 fractional digits** (microseconds), zero-padded: `"2026-08-05T19:30:00.123456Z"`, `"2026-08-05T19:30:00.000000Z"`. Never fewer digits, never more; sub-microsecond source precision is truncated (not rounded up) at ingest. Fixed width means clients can parse and sort lexicographically.
+2. **`TIME`** — ISO 8601 time-of-day with **exactly 6 fractional digits**, zero-padded, and **no** zone designator: `"14:30:00.123456"`, `"00:00:00.000000"`.
+3. **`DATE`** — ISO 8601 calendar date, no time component, no zone: `"2026-08-05"`.
+4. **`BINARY`** — **standard** base64 as defined by [RFC 4648 §4](https://www.rfc-editor.org/rfc/rfc4648#section-4), **with** `=` padding. The URL-safe alphabet (RFC 4648 §5, `-`/`_`) is **not** used, and the encoded string carries no line breaks and no `data:` prefix.
+5. **`BIGINTEGER` / `BIGDECIMAL`** — JSON string holding the plain decimal representation; no exponent notation, no thousands separators. `BIGDECIMAL` preserves the source's trailing zeros to its declared scale (`"12345.60"`, not `"12345.6"`).
+6. **`NULL` values** — a NULL in any column serializes as JSON `null`, regardless of the column's canonical type.
+
 ---
 
 ## 4. Precision and Scale Semantics
@@ -97,7 +108,15 @@ This collapses the type system (no separate REAL/DOUBLE) without losing meaningf
 | Exact numeric (`NUMERIC(p,s)`, `DECIMAL(p,s)`) | from source metadata | from source metadata | `{"type": "DECIMAL", "precision": 12, "scale": 2}` (p ≤ 15) or `{"type": "BIGDECIMAL", "precision": 20, "scale": 4}` (p > 15) |
 | Approximate numeric (`REAL`, `FLOAT`, `DOUBLE`) | fixed by source bit-width (7 or 15) | **omitted** | `{"type": "DECIMAL", "precision": 7}` or `{"type": "DECIMAL", "precision": 15}` |
 | Money/currency (e.g., PG `money`, MSSQL `money`) | from source (PG money = 19, MSSQL money = 19, smallmoney = 10) | from source (PG = 2, MSSQL = 4) | `{"type": "BIGDECIMAL", "precision": 19, "scale": 2}` |
-| Unsized exact numeric (`NUMBER` in Oracle with no precision, `numeric` in PG with no precision) | default max (Oracle = 38, PG = 131072) | 0 | `{"type": "BIGDECIMAL", "precision": 38, "scale": 0}` |
+| Unsized exact numeric with a bounded source default (`NUMBER` in Oracle with no precision) | the dialect's documented default (Oracle = 38) | 0 | `{"type": "BIGDECIMAL", "precision": 38, "scale": 0}` |
+| Unsized exact numeric with unbounded source precision (`numeric` / `decimal` in PG with no precision) | **omitted** (= unbounded) | 0 | `{"type": "BIGDECIMAL", "scale": 0}` |
+
+**Omitted precision on BIGDECIMAL means unbounded (normative).** There is exactly **one** rule for an unsized source numeric whose dialect imposes no precision ceiling (today: PostgreSQL `numeric`/`decimal` declared without precision): the envelope reports **`BIGDECIMAL` with the `precision` field omitted**. Omitted precision is normative shorthand for "the source declares no precision limit; assume unbounded."
+
+- The envelope never reports a synthetic ceiling for this case — neither PostgreSQL's internal maximum digit count nor another dialect's default precision may be substituted. A fabricated bound would be a lie about the source column and would break clients that size their local decimal buffers from it.
+- `scale` is still declared (`0`, as the driver reports it), so the BIGDECIMAL wire contract — a JSON string carrying the exact decimal — is unchanged.
+- Clients that need a bound must impose their own (or `CAST` in the source query). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2).
+- Dialects that *do* define a default precision for their unsized numeric (Oracle `NUMBER` → 38) report that default; they are not affected by this rule.
 
 ### 4.1 Why scale is omitted for approximate numerics
 
@@ -122,7 +141,7 @@ Each supported source dialect has a deterministic mapping from JDBC `java.sql.Ty
 | `int8`, `bigint`, `bigserial` | `BIGINT` (-5) | `BIGINTEGER` | |
 | `real`, `float4` | `REAL` (7) | `DECIMAL(7)` | no scale |
 | `float8`, `double precision`, `double` | `DOUBLE` (8) | `DECIMAL(15)` | no scale |
-| `numeric`, `decimal` (no precision) | `NUMERIC` (2) | `BIGDECIMAL(38, 0)` | PG default |
+| `numeric`, `decimal` (no precision) | `NUMERIC` (2) | `BIGDECIMAL`, **precision omitted**, `scale: 0` | PG unsized numeric is unbounded — omitted precision is the normative encoding for that (§4) |
 | `numeric(p,s)`, `decimal(p,s)` (p ≤ 15) | `NUMERIC` (2) | `DECIMAL(p, s)` | |
 | `numeric(p,s)`, `decimal(p,s)` (p > 15) | `NUMERIC` (2) | `BIGDECIMAL(p, s)` | |
 | `money` | — | `BIGDECIMAL(19, 2)` | PG fixed at 19,2 |
@@ -300,12 +319,14 @@ SQLite is **dynamically typed**: columns have "type affinity" (INTEGER, TEXT, BL
 
 | SQLite declared type / affinity | Canonical | Notes |
 |---|---|---|
-| `INTEGER` affinity (matches `int`, `integer`) | `INTEGER` | |
-| `REAL` / `FLOATA` affinity | `DECIMAL(15)` | no scale |
+| `INTEGER` affinity (declared type contains `INT`) | `INTEGER` | |
+| `REAL` affinity (declared type contains `REAL`, `FLOA`, or `DOUB`) | `DECIMAL(15)` | no scale |
 | `NUMERIC` affinity (mixed int/float) | `DECIMAL(15)` | conservative; no scale |
-| `TEXT` affinity | `STRING` | |
-| `BLOB` affinity | `BINARY` | |
-| No declared type (BLOB affinity by default) | `STRING` | conservative default |
+| `TEXT` affinity (declared type contains `CHAR`, `CLOB`, or `TEXT`) | `STRING` | |
+| `BLOB` affinity — column **has** a declared type containing `BLOB` | `BINARY` | an explicit `BLOB` declaration is a real byte column |
+| **No declared type at all** (SQLite assigns BLOB affinity by default) | `STRING` | untyped column; no declaration to trust, so the conservative text fallback wins over `BINARY` |
+
+**The two BLOB-affinity rows are not in conflict — the discriminator is the declared type string, not the affinity:** a column *declared* `BLOB` (or any type whose name contains `BLOB`) maps to canonical `BINARY`; a column declared with **no type at all** (e.g. `CREATE TABLE t (c)`), which SQLite also gives BLOB affinity, maps to canonical `STRING`. Untyped SQLite columns in practice hold text, and base64-encoding text as `BINARY` would be the more damaging error. Affinity names follow the SQLite determination rules (substring match on the declared type, in order INT → CHAR/CLOB/TEXT → BLOB/none → REAL/FLOA/DOUB → NUMERIC).
 
 **SQLite DATE/TIME/TIMESTAMP policy:** SQLite has no native temporal types. Conventions vary widely: ISO 8601 text, Unix epoch seconds (INTEGER), Unix epoch millis (INTEGER), Julian day (REAL). In v1, we map all temporal-looking columns from SQLite to `STRING` and do not attempt heuristic parsing. Pipeline authors who know their storage convention should `CAST` in their query template or post-process the result.
 
@@ -323,14 +344,14 @@ When the executor stages data from a source into H2 (`CREATE TABLE staging.x ...
 | `BIGINTEGER` | `BIGINT` | H2 BIGINT = int64 |
 | `DECIMAL(p, s?)` (exact, scale declared) | `DECIMAL(p, s)` | |
 | `DECIMAL(p)` (approximate, no scale) | `DOUBLE` | preserve IEEE 754 representation |
-| `BIGDECIMAL(p, s)` | `DECIMAL(p, s)` | H2 DECIMAL supports up to precision 38+. For larger, use `DECFLOAT` or document overflow. |
+| `BIGDECIMAL(p, s)` | `DECIMAL(p, s)` | H2 2.x `DECIMAL` supports precision up to 100000 — every bounded source precision fits. `BIGDECIMAL` with **omitted** (unbounded) precision stages as `DECIMAL(100000, s)`; see the overflow policy below. |
 | `STRING` | `VARCHAR` | length unbounded; H2 supports `VARCHAR` with no length spec |
 | `BINARY` | `VARBINARY` | |
 | `DATE` | `DATE` | |
 | `TIME` | `TIME` | |
 | `TIMESTAMP` | `TIMESTAMP WITH TIME ZONE` | H2 stores in UTC; egress reads back as UTC ISO 8601 |
 
-**Overflow policy:** If a source value exceeds H2's `DECIMAL` precision limits (extremely rare — H2 supports precision up to ~100k+), the staging step fails with error code `pipeline.staging.precision_overflow`. Pipeline authors should reduce precision in the source query (`CAST` to a smaller type) or restructure.
+**Overflow policy:** H2 2.x supports `DECIMAL` precision up to **100000**. Every bounded precision any supported dialect can declare fits well inside that. If a staged value's precision exceeds **100000** digits — only reachable from an unbounded source numeric (§4) carrying an extreme value — the staging step fails with error code `pipeline.staging.precision_overflow`. Pipeline authors should reduce precision in the source query (`CAST` to a smaller type) or restructure. The same threshold is stated in [Staging §5.2](staging.md#52-precision-overflow-handling); the two MUST stay identical.
 
 ---
 
@@ -344,7 +365,7 @@ Every result set carries a **schema** describing its columns. The schema is an a
 {
   "$schema": "https://datapipelines.co/schema/column.schema.json",
   "type": "object",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "required": ["name", "type"],
   "properties": {
     "name": {
@@ -364,12 +385,16 @@ Every result set carries a **schema** describing its columns. The schema is an a
     "precision": {
       "type": "integer",
       "minimum": 1,
-      "description": "Required for DECIMAL and BIGDECIMAL. Always present for those types."
+      "description": "Required for DECIMAL. Present for BIGDECIMAL except when the source numeric is unsized — an omitted precision on BIGDECIMAL means unbounded (see §4)."
     },
     "scale": {
       "type": "integer",
       "minimum": 0,
       "description": "Required for exact-numeric DECIMAL and all BIGDECIMAL. Omitted for approximate-numeric DECIMAL (source was REAL/DOUBLE)."
+    },
+    "nullable": {
+      "type": "boolean",
+      "description": "Optional. True when the source column may contain NULL, false when the source declares it NOT NULL. Omitted when the driver does not report nullability (JDBC columnNullableUnknown) — an absent field means unknown, NOT 'not nullable'."
     }
   },
   "allOf": [
@@ -379,11 +404,18 @@ Every result set carries a **schema** describing its columns. The schema is an a
     },
     {
       "if": { "properties": { "type": { "const": "BIGDECIMAL" } } },
-      "then": { "required": ["precision", "scale"] }
+      "then": { "required": ["scale"] }
     }
   ]
 }
 ```
+
+**Unknown fields (normative).** `additionalProperties` is `true` by design: [§9.2](#92-what-is-not-frozen) promises that new *optional* fields may be added to the schema envelope without a version bump, and a closed schema would make every such addition breaking. Therefore:
+
+- Producers MUST emit only the fields defined here plus fields introduced by a later revision of this spec.
+- **Clients MUST ignore fields they do not recognize.** A client MUST NOT reject, error on, or fail validation of a column descriptor because it carries an unknown property. Strict-mode deserializers (Jackson `FAIL_ON_UNKNOWN_PROPERTIES`, `System.Text.Json` `UnmappedMemberHandling.Disallow`, Pydantic `extra="forbid"`) MUST be configured off for this type.
+- A client that rejects unknown fields is non-conformant, and breakage from a future additive field is that client's defect, not a contract break.
+- Field *removal* or *meaning change* remains forbidden ([§9.3](#93-evolution-rules)) — the open object buys additive room, not licence to churn.
 
 ### 7.2 Schema envelope example
 
@@ -391,9 +423,10 @@ Every result set carries a **schema** describing its columns. The schema is an a
 {
   "schema_version": 1,
   "schema": [
-    {"name": "customer_id",   "type": "INTEGER"},
-    {"name": "customer_name", "type": "STRING"},
-    {"name": "total_amount",  "type": "BIGDECIMAL", "precision": 18, "scale": 2},
+    {"name": "customer_id",   "type": "INTEGER", "nullable": false},
+    {"name": "customer_name", "type": "STRING", "nullable": false},
+    {"name": "total_amount",  "type": "BIGDECIMAL", "precision": 18, "scale": 2, "nullable": true},
+    {"name": "unbounded_total", "type": "BIGDECIMAL", "scale": 0},
     {"name": "lifetime_value", "type": "DECIMAL", "precision": 12, "scale": 2},
     {"name": "measurement",   "type": "DECIMAL", "precision": 15},
     {"name": "order_count",   "type": "INTEGER"},
@@ -410,11 +443,12 @@ Every result set carries a **schema** describing its columns. The schema is an a
 
 - `name` — always present. From the OUTPUT node's SQL column alias.
 - `type` — always present. One of the 11 canonical types.
-- `precision` — present iff `type ∈ {DECIMAL, BIGDECIMAL}`.
+- `precision` — present iff `type ∈ {DECIMAL, BIGDECIMAL}`, with one exception: omitted for `BIGDECIMAL` when the source numeric is unsized/unbounded (§4). Omitted precision on `BIGDECIMAL` means unbounded; it never means "unknown".
 - `scale` — present iff:
   - `type = BIGDECIMAL` (always), or
   - `type = DECIMAL` AND the source was exact-numeric (NUMERIC/DECIMAL/MONEY).
   - Omitted when `type = DECIMAL` AND the source was approximate-numeric (REAL/FLOAT/DOUBLE).
+- `nullable` — **optional**, any type. `true`/`false` mirror the driver's `ResultSetMetaData.isNullable()` verdict (`columnNullable` / `columnNoNulls`); the field is omitted when the driver reports `columnNullableUnknown`. Absence means unknown — clients MUST NOT read an absent `nullable` as `false`. Being optional and additive, it does not bump `schema_version` ([§9.2](#92-what-is-not-frozen)).
 
 ---
 
@@ -444,7 +478,7 @@ When a source column has a type the dialect mapper doesn't recognize (exotic Ora
 }
 ```
 
-The pipeline does not fail. The pipeline author sees the warning and fixes it (usually with a `CAST` in the template).
+The pipeline does not fail. The pipeline author sees the warning and fixes it (usually with a `CAST` in the template). The dispatch-level and mapper-level fallback branches that implement this policy are shown in [§11.2](#112-mapper-dispatch).
 
 ### 8.3 Mixed-precision values in a single column (impossible in practice)
 
@@ -457,6 +491,14 @@ Cannot occur: a single column has one declared type in any source database, and 
 **For TIMESTAMP WITHOUT TIME ZONE:** the source value is assumed to be in UTC (no conversion possible — the source has no TZ info). This is the documented assumption; pipeline authors working with non-UTC naive timestamps should declare their convention in source SQL.
 
 **Policy rationale:** federated queries joining multiple sources with different TZ conventions produce inconsistent results if TZ is preserved per-source. UTC normalization is the only defensible default. Matches industry practice (Snowflake, BigQuery, Databricks).
+
+**Deployment precondition — the JVM default zone MUST be UTC (normative).** The server **REQUIRES** `-Duser.timezone=UTC` (equivalently, `TZ=UTC` in the container environment). This is a hard precondition of every rule above, not an operational nicety:
+
+- JDBC reads of zone-less types (`ResultSet.getTimestamp()` / `getTime()` / `getDate()` without an explicit `Calendar`) resolve against the **JVM default zone**. Under a non-UTC default, a source `TIMESTAMP WITHOUT TIME ZONE` is silently shifted by the offset before it ever reaches the mapper — a correctness bug the type system cannot detect or repair downstream.
+- Zone-aware source values are likewise rendered through the default zone by several drivers on the way back out, so egress ISO 8601 strings would carry the wrong instant while still ending in `Z`. Silent, plausible, and wrong: the worst failure shape.
+- The same precondition backs "TIMESTAMP WITHOUT TIME ZONE is assumed UTC" above and the `TIMESTAMPTZ`-everywhere rule for internal metadata storage.
+
+The flag is baked into the Docker image entrypoint; bare-JVM and JAR deployments MUST pass it themselves — see [Deployment §3.1](deployment.md#31-docker-image). Deployments that cannot guarantee a UTC JVM are unsupported: every timestamp guarantee in this document is void without it.
 
 ### 8.5 Boolean-from-non-boolean sources
 
@@ -590,8 +632,9 @@ The type system is implemented in the `typesystem` Gradle module:
 
 - `LogicalType` enum (the 11 types)
 - `ColumnSchema` data class (name, type, precision?, scale?)
-- `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, etc.)
-- `H2TypeMapper` (canonical → H2 column type)
+- `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, `MssqlTypeMapper`, `MysqlTypeMapper`, `H2IngressMapper`, `DuckDbTypeMapper`, `SqliteTypeMapper`)
+- `FallbackTypeMapper` (unknown dialect / unrecognized JDBC type → `STRING` + warning, per §8.2)
+- `H2EgressMapper` (canonical → H2 column type). Note the split: `H2IngressMapper` reads H2 JDBC metadata back into canonical types, `H2EgressMapper` produces the H2 DDL type for a canonical type. There is no `H2TypeMapper` — see [Staging §5.3](staging.md#53-mappers-and-helper-signatures).
 - `JsonEncoder` (canonical → wire representation)
 - `SchemaEnvelope` data class (schema_version + schema array)
 
@@ -616,12 +659,29 @@ object TypeMappers {
         ORACLE      -> OracleTypeMapper
         MSSQL       -> MssqlTypeMapper
         MYSQL       -> MysqlTypeMapper
-        H2          -> H2TypeMapper
+        H2          -> H2IngressMapper
         DUCKDB      -> DuckDbTypeMapper
         SQLITE      -> SqliteTypeMapper
+        // Documented else path: a Dialect value this build does not know
+        // (e.g. one added to the enum ahead of its mapper) degrades instead
+        // of throwing — every column maps to STRING with the §8.2 warning.
+        else        -> FallbackTypeMapper
     }
 }
+
+/**
+ * Implements the §8.2 unknown-type policy. Also the delegate every
+ * per-dialect mapper calls for a JDBC type code it does not recognize:
+ * never throw, map to STRING, and attach one
+ * `type_mapping.unknown_source_type` warning per affected column.
+ */
+object FallbackTypeMapper : IngressTypeMapper {
+    override fun map(sqlType: Int, precision: Int, scale: Int, typeName: String) =
+        LogicalTypeMapping(type = LogicalType.STRING)   // + warning, see §8.2
+}
 ```
+
+**Fallback contract (§8.2 restated for implementers):** unrecognized input never fails an execution. Both fallback paths — unknown `Dialect` at dispatch, and unknown JDBC type code inside a per-dialect mapper — resolve to canonical `STRING`, serialize values via `toString()`, and emit exactly one `type_mapping.unknown_source_type` warning naming the column and the source type. The `when` above is therefore total by construction: adding a `Dialect` enum value can never produce a compile-time hole that becomes a runtime crash.
 
 ### 11.3 Testing the type system
 
@@ -631,6 +691,10 @@ The type system must have:
 - **Round-trip tests**: source value → H2 staging → JSON wire → client parsed value (lossless where expected).
 - **Edge case tests**: NULL columns, mixed-precision overflow, Oracle `DATE` (not `DATE`), MSSQL `sql_variant` warnings, etc.
 - **Wire encoding tests**: every canonical type serializes to the declared wire representation; `JSON.parse` on the serialized output preserves exact values for BIG* types.
+- **Egress format tests** (§3.5): TIMESTAMP and TIME render exactly 6 fractional digits including the all-zero case; BINARY round-trips through a standard padded base64 decoder and contains no `-`/`_` characters.
+- **Fallback tests** (§8.2/§11.2): an unrecognized JDBC type code yields `STRING` plus exactly one `type_mapping.unknown_source_type` warning, and never throws.
+- **Unbounded-precision tests** (§4): a PG `numeric` with no declared precision produces a `BIGDECIMAL` descriptor with no `precision` key, and that descriptor validates against the §7.1 JSON Schema.
+- **Unknown-field tests** (§7.1): a column descriptor carrying an unrecognized property still deserializes successfully in the reference clients.
 
 ---
 
@@ -654,3 +718,4 @@ These are explicitly **out of scope for v1** but tracked for future versions. Li
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial type system specification: 11 canonical types, wire encoding, 7 dialect mappings, edge cases, stability promise |
+| 2026-08-07 | v1.1 | spec review | Per [SPEC-REVIEW-2026-08 §2.17](SPEC-REVIEW-2026-08.md#217-type-systemmd) (all [M]): §7.1 column descriptor gains optional `nullable` and opens `additionalProperties` with a normative clients-MUST-ignore-unknown-fields rule (resolves the §9.2 additive-evolution contradiction); PG unsized `numeric` adjudicated to `BIGDECIMAL` with **precision omitted = unbounded** — §3/§4/§5.1/§6/§7.1/§7.3 aligned on that single rule and the two conflicting synthetic-ceiling values deleted; §6 H2 `DECIMAL` limit and `pipeline.staging.precision_overflow` threshold both fixed at 100000 (matches staging.md §5.2); §5.7 REAL-affinity typo fixed and the two BLOB-affinity rows disambiguated (declared BLOB → `BINARY`, no declared type → `STRING`); §1/§2 principle 6 stability-promise pointer corrected to §9; new §3.5 normative egress rules (TIMESTAMP/TIME exactly 6 fractional digits, BINARY = RFC 4648 §4 base64 with padding); §8.4 promotes the UTC-JVM deployment precondition (`-Duser.timezone=UTC`) to a normative rule linked to deployment.md §3.1; §11.2 `forDialect` gains the documented `else` fallback wired to §8.2 (`FallbackTypeMapper` → STRING + `type_mapping.unknown_source_type`); §11.1 `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` per staging.md §5.3; §11.3 test list extended to cover the new rules. |
