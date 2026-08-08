@@ -48,7 +48,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `BOOLEAN` | `boolean` | Two-valued logic: true / false / null |
 | `INTEGER` | `number` | Exact integer, int32 range (≤ 2^31 − 1) |
 | `BIGINTEGER` | `string` | Exact integer, int64 range (≤ 2^63 − 1). Exceeds IEEE 754 double safe integer range. |
-| `DECIMAL` | `number` | Numeric with precision ≤ 15. Scale present = exact origin; scale omitted = approximate origin (REAL → `DECIMAL(7)`, DOUBLE → `DECIMAL(15)`) — see [Type System §3.4](type-system.md#34-the-realdouble-collapse) |
+| `DECIMAL` | `number` | Numeric with precision ≤ 15. Scale present = exact origin; scale omitted = approximate origin (REAL → `DECIMAL(7)`, DOUBLE → `DECIMAL(15)`) — see [Type System §3.4](type-system.md#34-why-realdouble-collapse-into-decimal) |
 | `BIGDECIMAL` | `string` | Numeric with precision > 15 (or unbounded — precision omitted) |
 | `STRING` | `string` | Variable-length text. Includes source UUIDs, JSON, XML, enums, intervals. |
 | `BINARY` | `string` (base64) | Variable-length bytes |
@@ -291,7 +291,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `type_mapping.*` | Type mapping warnings (not errors — in response `warnings` array) | pipeline-contract §13.6 |
 | `auth.api_key.*`, `auth.scope.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
 | `datasource.*` (incl. `datasource.validation.*`) | Datasource CRUD, validation, driver availability | pipeline-contract §13.8 (defined in [Datasources §9](datasources.md#9-validation-rules)) |
-| `template.validation.*` | Template validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation)) |
+| `template.validation.*` | Template validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation-rules)) |
 | `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
 | `rate_limit.exceeded` | Rate limit hit (single code for all layers) | pipeline-contract §13.11 |
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
