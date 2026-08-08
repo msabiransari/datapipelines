@@ -1,0 +1,53 @@
+# detekt configuration — module-structure.md §7.3.
+# Layered on top of detekt's default config (`buildUponDefaultConfig = true`),
+# so only deliberate deviations appear here.
+
+build:
+  maxIssues: 0
+
+complexity:
+  LongParameterList:
+    # Constructor injection (§8.4) legitimately produces wide constructors;
+    # detekt's default of 6 would penalise the pattern the spec mandates.
+    functionThreshold: 8
+    constructorThreshold: 10
+    ignoreDefaultParameters: true
+  TooManyFunctions:
+    # Repositories and registries are naturally function-dense.
+    thresholdInClasses: 20
+    thresholdInObjects: 20
+    ignorePrivate: true
+
+style:
+  MaxLineLength:
+    maxLineLength: 140
+  ReturnCount:
+    max: 4
+  MagicNumber:
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotation: true
+    ignoreNamedArgument: true
+  # `data class` copy() + named args is the idiom the Kotlin style rules ask for.
+  DataClassContainsFunctions:
+    active: false
+  ForbiddenComment:
+    # TODO markers are tracked in the roadmap / task list, not by the linter.
+    active: false
+
+naming:
+  FunctionNaming:
+    # Kotest spec bodies and @Nested test classes use descriptive names.
+    excludes: ['**/test/**', '**/integrationTest/**']
+
+exceptions:
+  TooGenericExceptionCaught:
+    excludes: ['**/test/**', '**/integrationTest/**']
+  SwallowedException:
+    active: true
+
+# NOTE: there is deliberately no `formatting:` section. That ruleset ships in the
+# separate `detekt-formatting` artifact, which is not on the classpath — ktlint
+# owns formatting (§7.3) and running both would duplicate the checks. detekt
+# rejects config sections for rulesets it cannot see, so the section must be absent
+# rather than present-and-disabled.

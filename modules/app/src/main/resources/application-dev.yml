@@ -1,0 +1,48 @@
+# Dev profile — reproduced from configuration.md §6.
+# Activated via --spring.profiles.active=dev. Targets the local infrastructure
+# started by deploy/docker-compose.dev.yml (DEVELOPMENT.md §2).
+#
+# NO LITERAL SECRETS, EVEN IN DEV (2026-08-07 security review HIGH-2).
+# This file is packaged into src/main/resources and therefore ships inside every
+# production jar. A working literal here means one stray SPRING_PROFILES_ACTIVE=dev
+# on a production manifest runs real infrastructure on publicly-known keys —
+# forgeable admin JWTs and decryptable datasource credentials.
+# The secrets below resolve from the developer's git-ignored .env.local, generated
+# with `openssl rand -base64 32` (DEVELOPMENT.md §4), exactly as in production.
+# Do not reintroduce literals here or in any test fixture.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/datapipelines
+    username: datapipelines
+    password: datapipelines
+
+  # Mirrors the datapipelines.redis.* values below; see the bridge note in
+  # application.yml. Dev Redis has no password.
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ""
+
+datapipelines:
+  redis:
+    host: localhost
+    port: 6379
+
+  jwt:
+    secret: ${DATAPIPELINES_JWT_SECRET}         # from .env.local — never a literal, even in dev (see note above)
+
+  db:
+    encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}   # from .env.local — never a literal, even in dev
+
+  auth:
+    allowlist:
+      domains: ""                  # open provisioning in dev
+
+  ui:
+    theme: saas
+
+  observability:
+    logging:
+      format: console               # human-readable in dev

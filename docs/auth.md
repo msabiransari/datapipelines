@@ -120,6 +120,17 @@ Configurable per deployment:
 
 For internal-only deployments, **always set the allowlist** to prevent random Google accounts from accessing the instance.
 
+### 4.4 Bootstrap admin
+
+A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) and no local login — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11):
+
+- The operator sets `datapipelines.auth.bootstrap-admin-email` ([Configuration §3.4](configuration.md#34-auth)) before first start.
+- During user provisioning (§4.2), when the provisioned email matches exactly, `is_admin` is set true. Idempotent — a later login by the same user changes nothing; the flag is never *revoked* by this path.
+- Audit-logged as `auth.user.admin_granted` with actor `bootstrap` (§10.1).
+- If the key is unset, no bootstrap occurs — the deployment simply has no admin until the key is set and that user logs in.
+
+**Explicitly rejected: "first user to log in becomes admin."** Combined with the open-provisioning default (§4.3), that rule is a land-grab race on any reachable instance — whoever hits `/login` first owns every datasource credential. Do not reintroduce it as a convenience.
+
 ---
 
 ## 5. OIDC Login Flow
@@ -827,7 +838,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 - [ ] API keys hashed with Argon2id, never stored plaintext.
 - [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Strict`.
 - [ ] CSRF protection on all state-changing UI endpoints.
-- [ ] `/actuator/*` endpoints (except `/health`, `/ready`, `/info`, `/prometheus`) disabled or admin-scoped.
+- [ ] No `/actuator/*` path reachable without auth on the application port; `/actuator/prometheus` served only on the separate management port ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the only public probes.
 - [ ] All auth events audited.
 - [ ] All traffic over TLS.
 - [ ] OIDC redirect URI locked to the deployment's exact domain (not `localhost` in production).

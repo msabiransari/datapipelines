@@ -155,7 +155,7 @@ The app **fail-fasts** on startup if any of the following is missing. Full defin
 2. Redis: `datapipelines.redis.host`.
 3. `datapipelines.jwt.secret` — internal JWT signing secret.
 4. `datapipelines.db.encryption-key` — AES-256 master key for datasource credentials. **There is no fallback source**: no KMS lookup, no auto-generated key file. Lose it and every stored datasource credential is unrecoverable, so it belongs in a secret manager and in the operator's backup plan. (KMS sourcing is a [ROADMAP §2](ROADMAP.md#2-v11-candidates) item.)
-5. **At least one OIDC provider** under `datapipelines.auth.oidc.providers`, each with `client-id`, `client-secret`, and `issuer-uri`. There is no local password login and no bootstrap admin account — with zero providers the `ClientRegistrationRepository` bean fails construction and the context never starts ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.2](auth.md#52-clientregistration-bean-built-at-startup)). The client-id/secret env var names are chosen by the deployment (`GOOGLE_CLIENT_ID`, `OKTA_CLIENT_ID`, …) — they are the one deliberate exception to the derivation rule above.
+5. **At least one OIDC provider** under `datapipelines.auth.oidc.providers`, each with `client-id`, `client-secret`, and `issuer-uri`. There is no local password login; the first admin comes only from `datapipelines.auth.bootstrap-admin-email` ([Auth §4.4](auth.md#44-bootstrap-admin)). With zero providers the `ClientRegistrationRepository` bean fails construction and the context never starts ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.2](auth.md#52-clientregistration-bean-built-at-startup)). The client-id/secret env var names are chosen by the deployment (`GOOGLE_CLIENT_ID`, `OKTA_CLIENT_ID`, …) — they are the one deliberate exception to the derivation rule above.
 
 Everything else has a default and is optional.
 
@@ -395,7 +395,10 @@ A long `execution-timeout-seconds` therefore has a real deployment cost: it is a
 - [ ] Container filesystem read-only except for configured volume mounts.
 - [ ] Resource limits set (CPU + memory) per deployment.
 - [ ] Audit log retained per compliance policy.
-- [ ] `/actuator/*` endpoints except `/health`, `/ready`, `/info`, `/prometheus` either disabled or admin-scoped.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
+- [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
+- [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
+- [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback ([Configuration §7](configuration.md#7-config-validation)).
 
 ---
 
@@ -447,7 +450,8 @@ services:
       DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
 
       # REQUIRED: at least ONE OIDC provider must be configured, or startup fails
-      # (auth.md §5.2 — no local password login, no bootstrap admin account exists).
+      # (auth.md §5.2 — no local password login; set DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL
+      #  to make your OIDC user the first admin — auth.md §4.4).
       # These names are referenced by the providers list in application.yml below;
       # Google is only an example — Microsoft/Okta/Keycloak/any OIDC IdP works.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}

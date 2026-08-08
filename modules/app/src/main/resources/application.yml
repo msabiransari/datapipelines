@@ -1,0 +1,173 @@
+# Base configuration — reproduced from configuration.md §5, which is the ONLY
+# place a configuration key is defined. Do not add a key here that does not
+# appear there; add it there first (enforced by scripts/docs-audit.sh).
+
+spring:
+  application:
+    name: datapipelines
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+
+  # Spring Boot's Redis autoconfiguration reads `spring.data.redis.*`, while the
+  # operator-facing contract is `datapipelines.redis.*` (configuration.md §2/§3.1).
+  # This block is a BINDING, not a new configuration key: the only names an
+  # operator ever sets are still DATAPIPELINES_REDIS_*.
+  #
+  # TODO(dag / web modules — module-structure.md §3.1 rule 3): replace this bridge
+  #  with an explicit LettuceConnectionFactory built from a
+  #  @ConfigurationProperties("datapipelines.redis") class owned by the module that
+  #  actually talks to Redis, and drop this block.
+  data:
+    redis:
+      host: ${DATAPIPELINES_REDIS_HOST}
+      port: ${DATAPIPELINES_REDIS_PORT:6379}
+      password: ${DATAPIPELINES_REDIS_PASSWORD:}
+
+  # Flyway runs on startup against the metadata DB. Migrations live only in this
+  # module (module-structure.md §3.1 rule 2); the DDL authority is metadata-db.md §4.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
+# controllers (observability.md §6). NO /actuator path is reachable on the
+# application port (§6.4); /actuator/prometheus arrives later on the SEPARATE
+# management port (§4.2), never here.
+management:
+  # SEPARATE MANAGEMENT PORT (observability.md §4.2). This is the mechanism that
+  # keeps /actuator off the application port, and it is not interchangeable with
+  # tuning `exposure`. Two non-obvious facts learned the hard way here:
+  #   1. An empty/omitted `exposure.include` does NOT mean "expose nothing" —
+  #      Spring Boot falls back to its default include set (`health`), so
+  #      /actuator/health answered 200 on the app port.
+  #   2. `exposure.exclude: "*"` does close the HTTP surface, but it ALSO deletes
+  #      the HealthEndpoint bean: @ConditionalOnAvailableEndpoint keys off
+  #      exposure, so the endpoint HealthController depends on disappears and the
+  #      context fails to start.
+  # Moving management to its own port satisfies both — the bean exists, and
+  # nothing under /actuator is routable on the application port.
+  # `management.server.port` is Spring Boot's own framework wiring key;
+  # datapipelines defines no key of its own for it (observability.md §4.2).
+  # ApplicationSmokeTest's "no actuator endpoint is reachable" case guards this.
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:9090}
+    # LOOPBACK BY DEFAULT (configuration.md §3.14). Without this, the management
+    # port binds 0.0.0.0 and /actuator/health is reachable from anywhere that can
+    # route to the host — an unauthenticated surface, silently public, on a port
+    # nobody thinks to firewall because it isn't the application port. Nothing in
+    # the test suite can catch that regression: the smoke test sets port 0, so it
+    # exercises the port but never the bind address. This line is the control.
+    # Kubernetes scraping (scraper → pod IP) needs 0.0.0.0 EXPLICITLY, paired with
+    # a NetworkPolicy limiting the port to the monitoring namespace
+    # (deployment.md §9). Explicit opt-open, never default-open.
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
+  endpoints:
+    web:
+      exposure:
+        # On the management port only, reachable from the cluster-internal network.
+        # /actuator/prometheus joins this list with the metrics registry.
+        include: "health"
+  health:
+    # observability.md §6.1: nothing in this architecture writes to local disk, so
+    # a disk-space signal would restart a perfectly healthy pod.
+    diskspace:
+      enabled: false
+
+datapipelines:
+  redis:
+    host: ${DATAPIPELINES_REDIS_HOST}
+    port: ${DATAPIPELINES_REDIS_PORT:6379}
+    password: ${DATAPIPELINES_REDIS_PASSWORD:}
+
+  jwt:
+    secret: ${DATAPIPELINES_JWT_SECRET}
+
+  db:
+    encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
+
+  auth:
+    oidc:
+      providers:
+        - name: google
+          client-id: ${GOOGLE_CLIENT_ID}
+          client-secret: ${GOOGLE_CLIENT_SECRET}
+          issuer-uri: https://accounts.google.com
+          display-name: "Sign in with Google"
+        - name: microsoft
+          client-id: ${MICROSOFT_CLIENT_ID}
+          client-secret: ${MICROSOFT_CLIENT_SECRET}
+          issuer-uri: https://login.microsoftonline.com/common/v2.0
+          display-name: "Sign in with Microsoft"
+        # Add more providers as needed (Okta, Auth0, Keycloak, etc.)
+    jwt:
+      ttl-hours: ${DATAPIPELINES_AUTH_JWT_TTL_HOURS:8}
+    allowlist:
+      domains: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:}
+    api-keys:
+      cache-ttl-seconds: ${DATAPIPELINES_AUTH_API_KEYS_CACHE_TTL_SECONDS:60}
+      default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
+    rate-limit:
+      login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
+
+  executor:
+    max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
+    max-concurrent-executions-per-user: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_USER:10}
+    max-concurrent-executions-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_GLOBAL:100}
+    node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
+    execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
+
+  staging:
+    h2:
+      mode: ${DATAPIPELINES_STAGING_H2_MODE:PostgreSQL}
+      max-memory-mb: ${DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB:1024}
+      insert-batch-size: ${DATAPIPELINES_STAGING_H2_INSERT_BATCH_SIZE:1000}
+      result-batch-size: ${DATAPIPELINES_STAGING_H2_RESULT_BATCH_SIZE:10000}
+      query-timeout-seconds: ${DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT_SECONDS:60}
+
+  result:
+    ttl-default-seconds: ${DATAPIPELINES_RESULT_TTL_DEFAULT_SECONDS:300}
+    ttl-min-seconds: ${DATAPIPELINES_RESULT_TTL_MIN_SECONDS:60}
+    ttl-max-seconds: ${DATAPIPELINES_RESULT_TTL_MAX_SECONDS:3600}
+    max-size-bytes: ${DATAPIPELINES_RESULT_MAX_SIZE_BYTES:104857600}
+    page-size-rows: ${DATAPIPELINES_RESULT_PAGE_SIZE_ROWS:1000}
+    page-max-rows: ${DATAPIPELINES_RESULT_PAGE_MAX_ROWS:100000}
+
+  sse:
+    heartbeat-interval-seconds: ${DATAPIPELINES_SSE_HEARTBEAT_INTERVAL_SECONDS:15}
+    disconnect-grace-seconds: ${DATAPIPELINES_SSE_DISCONNECT_GRACE_SECONDS:30}
+    max-streams-per-user: ${DATAPIPELINES_SSE_MAX_STREAMS_PER_USER:50}
+
+  rate-limit:
+    requests-per-second: ${DATAPIPELINES_RATE_LIMIT_REQUESTS_PER_SECOND:100}
+    requests-per-minute: ${DATAPIPELINES_RATE_LIMIT_REQUESTS_PER_MINUTE:1000}
+
+  idempotency:
+    ttl-seconds: ${DATAPIPELINES_IDEMPOTENCY_TTL_SECONDS:86400}
+
+  templates:
+    cache-size: ${DATAPIPELINES_TEMPLATES_CACHE_SIZE:500}
+    render-timeout-ms: ${DATAPIPELINES_TEMPLATES_RENDER_TIMEOUT_MS:5000}
+
+  ui:
+    theme: ${DATAPIPELINES_UI_THEME:saas}
+
+  executions:
+    event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}
+    stale-timeout-minutes: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES:60}
+
+  audit:
+    retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
+
+  observability:
+    tracing:
+      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
+    logging:
+      format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}

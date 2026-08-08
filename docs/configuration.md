@@ -86,6 +86,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.auth.api-keys.cache-ttl-seconds` | `60` | Cache TTL for validated API keys and user `is_active` checks ([Auth §11.4](auth.md#114-api-key-validation-cache)) |
 | `datapipelines.auth.api-keys.default-scopes` | `read` | Default scope for new API keys |
 | `datapipelines.auth.rate-limit.login-per-minute` | `10` | Per-IP OIDC login attempts per minute |
+| `datapipelines.auth.bootstrap-admin-email` | (none) | Bootstrap admin: when a user with exactly this email is provisioned via OIDC first login, `is_admin` is set true (idempotent, audit-logged as `auth.user.admin_granted` with actor `bootstrap`). The ONLY way a fresh deployment gets its first admin — "first login wins" is explicitly rejected ([Auth §4.4](auth.md#44-bootstrap-admin)) |
 
 ### 3.5 Results
 
@@ -156,7 +157,26 @@ Limits are **per user** (an API key inherits its owner's budget — minting more
 | `server.port` | `SERVER_PORT` | `8080` | HTTP port |
 | `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Metadata DB connection pool size |
 
-### 3.14 Observability
+### 3.14 Framework wiring keys
+
+These framework key paths appear in `application.yml` as internal wiring. They are listed here so the §1 authority sentence stays literally true. With the single exception of `management.server.port` (below), operators do not set them and deployments must not override them:
+
+| Path | Why it exists |
+|---|---|
+| `spring.application.name` | Log/metric attribution (`datapipelines`) |
+| `spring.data.redis.host` / `.port` / `.password` | Bridge binding the canonical `DATAPIPELINES_REDIS_*` env vars onto Spring Boot's Redis autoconfiguration (see the binding note under §5) |
+| `spring.flyway.enabled` / `.locations` / `.baseline-on-migrate` | Migration wiring — Flyway always runs on startup ([Deployment §8.2](deployment.md#82-database-migrations)) |
+| `management.endpoints.web.exposure.include` | `"health"` — served on the **management port** only; `prometheus` joins it when the metrics registry lands ([Observability §6.4](observability.md#64-actuator-security)). **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
+| `management.health.diskspace.enabled` | `false` — the health contract has no disk component ([REST API §11.1](rest-api.md#111-health-check)) |
+
+**Operator-tunable exception:**
+
+| YAML path | Env var | Default | Description |
+|---|---|---|---|
+| `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` (and later `/actuator/prometheus`) — never publish it; nothing actuator is routable on the application port. |
+| `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy restricting the port to the monitoring namespace ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. |
+
+### 3.15 Observability
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
@@ -182,17 +202,42 @@ Two documented per-entity overrides sit above global config at runtime (they are
 
 ## 5. Full `application.yml` Template
 
+Complete — a deployment assembled from this block gets the framework wiring (§3.14) too. Omitting the `management:` block in particular re-serves the actuator on the application port, which is exactly the exposure the management port exists to prevent.
+
 ```yaml
 spring:
+  application:
+    name: datapipelines
   datasource:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
     password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+  data:
+    redis:                       # §3.14 bridge — operators set only DATAPIPELINES_REDIS_*
+      host: ${DATAPIPELINES_REDIS_HOST}
+      port: ${DATAPIPELINES_REDIS_PORT:6379}
+      password: ${DATAPIPELINES_REDIS_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
 
 server:
   port: ${SERVER_PORT:8080}
+
+management:                      # §3.14 — actuator on the management port ONLY
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:9090}
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}   # loopback default; 0.0.0.0 only with a NetworkPolicy
+  endpoints:
+    web:
+      exposure:
+        include: "health"        # never "" and never exclude:"*" — see §3.14
+  health:
+    diskspace:
+      enabled: false
 
 datapipelines:
   redis:
@@ -288,11 +333,15 @@ datapipelines:
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
 
+> **Internal binding note (Redis, 2026-08-07):** Spring Boot's Redis autoconfiguration reads `spring.data.redis.*`, so `application.yml` carries an internal bridge (`spring.data.redis.host: ${DATAPIPELINES_REDIS_HOST}` etc.) mapping the canonical `datapipelines.redis.*` keys onto it. This introduces NO operator-facing keys — operators set only the `DATAPIPELINES_REDIS_*` variables defined here. The bridge is an implementation detail and may be replaced by an explicit `LettuceConnectionFactory` bound to `@ConfigurationProperties("datapipelines.redis")`.
+
 ---
 
 ## 6. Dev Profile (`application-dev.yml`)
 
 Overrides for local development. Activated via `--spring.profiles.active=dev`.
+
+**No literal secrets, even in dev (2026-08-07 security review):** the dev profile references `${DATAPIPELINES_JWT_SECRET}` and `${DATAPIPELINES_DB_ENCRYPTION_KEY}` exactly like production — the values come from the developer's git-ignored `.env.local` ([DEVELOPMENT.md §4](../DEVELOPMENT.md), generated with `openssl rand -base64 32`). Earlier revisions embedded working literals here; those were packaged into every production jar (`src/main/resources`), meaning one stray `SPRING_PROFILES_ACTIVE=dev` in a production manifest would have run real infrastructure on publicly-known keys — forgeable admin JWTs and decryptable datasource credentials. (The literals were also invalid: the "32-byte" AES key decoded to 28 bytes, and the JWT secret was not legal base64 — either would have failed the §7 validator.) The `ConfigValidator` additionally refuses to start when the `dev` profile is active against non-localhost infrastructure (§7).
 
 ```yaml
 spring:
@@ -307,10 +356,10 @@ datapipelines:
     port: 6379
 
   jwt:
-    secret: dev-secret-only-not-for-production-use-at-least-32-bytes
+    secret: ${DATAPIPELINES_JWT_SECRET}         # from .env.local — never a literal, even in dev (see note below)
 
   db:
-    encryption-key: ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==
+    encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}   # from .env.local — never a literal, even in dev
 
   auth:
     allowlist:
@@ -335,6 +384,10 @@ On startup, the app validates:
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
 - At least one OIDC provider with non-empty `client-id`, `client-secret`, and `issuer-uri`.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
+- **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
+- **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
+
+The validator's own test suite must assert that the documented dev setup (env vars from `.env.local`) passes the **production** rules — so a broken dev value gets fixed at the data, never by weakening the check.
 
 Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop startup with a clear log message listing every missing/invalid key.
 

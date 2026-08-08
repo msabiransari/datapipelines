@@ -99,11 +99,12 @@ SPRING_DATASOURCE_PASSWORD=datapipelines
 DATAPIPELINES_REDIS_HOST=localhost
 DATAPIPELINES_REDIS_PORT=6379
 
-# JWT signing secret (generate: openssl rand -base64 32)
-DATAPIPELINES_JWT_SECRET=your-jwt-secret-at-least-32-bytes-long
+# JWT signing secret — MUST be real base64 of ≥32 random bytes; a placeholder here
+# fails startup validation (configuration.md §7) by design
+DATAPIPELINES_JWT_SECRET=<paste output of: openssl rand -base64 32>
 
-# DB encryption key (generate: openssl rand -base64 32)
-DATAPIPELINES_DB_ENCRYPTION_KEY=your-encryption-key-at-least-32-bytes
+# DB encryption key — MUST decode to exactly 32 bytes
+DATAPIPELINES_DB_ENCRYPTION_KEY=<paste output of: openssl rand -base64 32>
 
 # Email allowlist (optional — your email domain)
 DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=yourdomain.com

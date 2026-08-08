@@ -1,2 +1,57 @@
 .env.local
 .DS_Store
+
+# --- Gradle ---
+.gradle/
+build/
+**/build/
+!buildSrc/src/**/build/
+buildSrc/.gradle/
+buildSrc/build/
+out/
+# Kotlin 2.x per-project analysis state (trailing comments are NOT supported
+# in .gitignore — they become part of the pattern, so keep them on their own line)
+.kotlin/
+# Gate A run logs (scripts/gate.sh)
+.gate-logs/
+
+# The wrapper JAR and scripts ARE committed (they are how the build is reproducible);
+# only local Gradle state is ignored.
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# --- JVM crash / profiling artefacts ---
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+
+# --- Runtime drop-in directory (module-structure.md §5.4.1) ---
+# The directory exists in the image; the JARs an operator drops in are never committed.
+lib/*.jar
+
+# --- Local secrets ---
+# (2026-08-07 security review LOW-8: keystore/truststore and private-key formats
+#  added — a committed .p12 or .jks leaks a private key just as a .pem does.)
+.env
+.env.*
+# ...but .env.example is the committed template DEVELOPMENT.md Appendix A tells
+# developers to copy. The negation must stay BELOW the `.env.*` line to win.
+!.env.example
+*.key
+*.pem
+*.p8
+*.jks
+*.p12
+*.pfx
+*.keystore
+*.truststore
+credentials.*
+secrets.*

@@ -1,0 +1,56 @@
+# Local development infrastructure — DEVELOPMENT.md §2.
+#
+#   docker compose -f deploy/docker-compose.dev.yml up -d
+#   docker compose -f deploy/docker-compose.dev.yml ps
+#   docker compose -f deploy/docker-compose.dev.yml down -v    # reset a dirty Flyway state
+#
+# Dev only: credentials are fixed and public, no passwords on Redis, no TLS.
+# The production shape is deployment.md Appendix A — do not copy this file there.
+# The app itself is NOT in this file; it runs from Gradle (DEVELOPMENT.md §6).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: datapipelines-dev-postgres
+    environment:
+      POSTGRES_DB: datapipelines
+      POSTGRES_USER: datapipelines
+      POSTGRES_PASSWORD: datapipelines
+    ports:
+      # Loopback-only bind (2026-08-07 security review MEDIUM-4). A bare
+      # "5432:5432" publishes the container on 0.0.0.0 — on any laptop sharing a
+      # coffee-shop or conference LAN that is a fixed-credential Postgres open to
+      # the network. Dev infra must never be reachable off-host.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datapipelines -d datapipelines"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: datapipelines-dev-redis
+    # noeviction is REQUIRED (deployment.md §4.2.1): eviction silently destroys
+    # results, idempotency keys and cancellation flags. Same policy as production;
+    # only the password and the memory ceiling differ.
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
+    ports:
+      # Loopback-only bind (2026-08-07 security review MEDIUM-4). Dev Redis has no
+      # password at all, so an 0.0.0.0 bind is an unauthenticated open Redis.
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-dev-data:

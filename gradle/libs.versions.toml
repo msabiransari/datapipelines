@@ -1,0 +1,206 @@
+# Version catalog — single source of truth for third-party versions.
+# See module-structure.md §6.
+#
+# GATE G2 CLOSED — every coordinate below was resolved against Maven Central
+# (repo1.maven.org maven-metadata.xml, the authoritative index) on 2026-08-07.
+# No ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta.
+#
+# BOM RULE (§6 gate G2 step 3): artifacts managed by the Spring Boot BOM
+# (`org.springframework.boot:spring-boot-dependencies`, imported as a Gradle
+# platform by CommonConventionsPlugin) are declared here WITHOUT a version so
+# the BOM supplies it. A local pin that disagrees with the BOM is a silent
+# runtime-incompatibility source. Which artifacts those are was determined
+# mechanically by parsing the 3.5.16 POM and its 43 imported BOMs, not recalled.
+#
+# The two documented exceptions to that rule are `kotlin` and `spring-boot`
+# itself — see the comments at each.
+#
+# ---------------------------------------------------------------------------
+# SECURITY OVERRIDE clause (added 2026-08-07, security review HIGH-1 / MEDIUM-3)
+# ---------------------------------------------------------------------------
+# A local pin MAY exceed the BOM's version — and MUST NOT be reverted as a "BOM
+# rule violation" — when, and only when, all four of these hold and are recorded
+# inline at the pin:
+#
+#   1. A named published advisory (GHSA / CVE id) covers the BOM's version.
+#   2. The advisory's own `first_patched_version` is cited.
+#   3. The date the advisory was verified is cited.
+#   4. The override is the SMALLEST step that clears the advisory — stay on the
+#      BOM's minor line where a patch release exists, so the override closes a
+#      vulnerability rather than smuggling in a feature upgrade.
+#
+# Every override below was verified against the GitHub Advisory API
+# (`api.github.com/advisories/<GHSA>`) on 2026-08-07 — the vulnerable range and
+# the first-patched version quoted are the API's own values, not a changelog's
+# and not recalled.
+#
+# An override is RETIRED, not kept forever: once the Spring Boot BOM ships a
+# version >= the cited `first_patched_version`, delete the pin and its comment so
+# the artifact returns to BOM management.
+
+[versions]
+# --- Toolchain / plugins -----------------------------------------------------
+# Kotlin: latest stable (2.4.20-Beta2 exists and is rejected as pre-release).
+# EXCEPTION to the BOM rule: the Spring Boot 3.5.16 BOM imports kotlin-bom 1.9.25,
+# which predates the compiler we run. The Kotlin Gradle plugin contributes
+# kotlin-stdlib at its own version; because the BOM is applied as a non-enforced
+# platform, Gradle conflict resolution selects the higher (2.4.10). Verified by
+# `./gradlew :modules:typesystem:dependencies --configuration compileClasspath`.
+kotlin = "2.4.10"
+# Spring Boot: latest stable 3.x. module-structure.md §11.1 FREEZES "Spring Boot 3.x"
+# in v1, so 4.1.0 (the current overall latest) is deliberately not taken.
+spring-boot = "3.5.16"
+foojay-resolver = "1.0.0"
+ktlint-plugin = "14.2.0"
+detekt = "1.23.8"
+
+# --- SECURITY OVERRIDES (see the clause above) -------------------------------
+# postgresql — GHSA-j92g-9f8w-j867 (HIGH, silent channel-binding authentication
+# downgrade). Advisory API, verified 2026-08-07:
+#   vulnerable = ">= 42.7.4, < 42.7.12"   first_patched_version = "42.7.12"
+# The Spring Boot 3.5.16 BOM pins 42.7.11 — inside the vulnerable range.
+# Pinned to 42.7.13, the current stable on the same 42.7 line (42.7.12 is the
+# minimum fix; .13 is the latest patch of that same line, so this is still the
+# smallest-step rule, not a minor bump). RETIRE when the BOM reaches >= 42.7.12.
+postgresql = "42.7.13"
+
+# jackson — GHSA-5gvw-p9qm-jgwh, GHSA-5jmj-h7xm-6q6v, GHSA-mhm7-754m-9p8w
+# (MEDIUM; @JsonView / @JsonIgnoreProperties deserialization bypasses).
+# Advisory API, verified 2026-08-07 — all three agree on the 2.x line:
+#   vulnerable includes 2.21.4         first_patched_version = "2.21.5"
+# The BOM imports jackson-bom 2.21.4 — vulnerable.
+# Pinned to 2.21.5, NOT the newer 2.22.1: 2.21.5 is the patch release on the
+# BOM's own minor line and closes all three advisories, so it satisfies the
+# smallest-step rule. 2.22.x is a minor upgrade with no advisory forcing it and
+# untested Spring Boot 3.5.16 compatibility.
+# Applied as a BOM (jackson-bom) rather than a per-artifact pin so that
+# jackson-databind — the artifact the advisories actually name, which we never
+# declare directly — is covered along with every other Jackson module.
+# RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.5.
+jackson = "2.21.5"
+
+# --- Not managed by the Spring Boot BOM: exact pins required -----------------
+duckdb-jdbc = "1.5.5.1"
+argon2-jvm = "2.12"
+jjwt = "0.13.0"
+mockk = "1.14.11"
+kotest = "6.2.3"
+webjars-bootstrap = "5.3.8"
+# htmx: 4.0.0-beta6 is the newest artifact and is rejected as pre-release.
+htmx = "2.0.10"
+# MCP SDK — GATE G1 CLOSED, see [libraries] below.
+mcp-sdk = "2.0.0"
+
+[libraries]
+# --- Spring Boot starters (version from the BOM) -----------------------------
+spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
+spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
+spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client" }
+spring-boot-starter-thymeleaf = { module = "org.springframework.boot:spring-boot-starter-thymeleaf" }
+spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+
+# --- Kotlin / coroutines -----------------------------------------------------
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+# BOM-managed (kotlinx-coroutines-bom 1.8.1 via Spring Boot 3.5.16).
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
+
+# --- JSON --------------------------------------------------------------------
+# SECURITY OVERRIDE: jackson-bom is applied as a second Gradle platform by
+# CommonConventionsPlugin, after the Spring Boot BOM. Both are non-enforced
+# platforms, so conflict resolution selects the higher version (2.21.5 > the
+# BOM's 2.21.4) across every Jackson artifact, including the transitively-pulled
+# jackson-databind the advisories name. Rationale + retirement condition are in
+# the `jackson` entry under [versions].
+jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+
+# --- Flyway — `app` module ONLY (module-structure §3.1 rule 2) ---------------
+# BOM-managed (11.7.2). Since Flyway 10 the Postgres support is a separate
+# artifact; flyway-core alone cannot migrate a Postgres target.
+flyway-core = { module = "org.flywaydb:flyway-core" }
+flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
+
+# --- Templating / pooling (BOM-managed) --------------------------------------
+freemarker = { module = "org.freemarker:freemarker" }
+hikaricp = { module = "com.zaxxer:HikariCP" }
+
+# --- JDBC drivers ------------------------------------------------------------
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }  # SECURITY OVERRIDE — GHSA-j92g-9f8w-j867
+mssql-jdbc = { module = "com.microsoft.sqlserver:mssql-jdbc" }              # BOM 12.10.2.jre11
+mysql-connector-j = { module = "com.mysql:mysql-connector-j" }              # BOM 9.7.0
+h2 = { module = "com.h2database:h2" }                                       # BOM 2.3.232
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc" }                         # BOM 3.49.1.0
+ojdbc11 = { module = "com.oracle.database.jdbc:ojdbc11" }                   # BOM 23.7.0.25.01
+duckdb-jdbc = { module = "org.duckdb:duckdb_jdbc", version.ref = "duckdb-jdbc" }
+
+# --- Auth / crypto (NOT BOM-managed) -----------------------------------------
+argon2-jvm = { module = "de.mkammerer:argon2-jvm", version.ref = "argon2-jvm" }
+jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
+jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
+jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
+# NOTE: no BouncyCastle entry. Removed 2026-08-07 (security review MEDIUM-6,
+# module-structure.md §5.4). AES-256-GCM for the credential store is served by the
+# JDK's own SunJCE (`AES/GCM/NoPadding`); no spec names a primitive needing an
+# external provider. Re-adding it requires the spec-deviation flow with the
+# primitive named — do not restore this entry to "fix" a missing import.
+
+# --- Metrics / logging (BOM-managed) -----------------------------------------
+micrometer-core = { module = "io.micrometer:micrometer-core" }
+slf4j-api = { module = "org.slf4j:slf4j-api" }
+
+# --- MCP SDK — GATE G1 -------------------------------------------------------
+# RESOLVED 2026-08-07 against repo1.maven.org. The official Java MCP SDK is
+# published under `io.modelcontextprotocol.sdk`. The 2.0.0 release ships the
+# Streamable HTTP server transport as plain servlet classes inside mcp-core:
+#   io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider
+#   io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport
+# (verified by listing the published jar). Both work directly on Spring MVC /
+# embedded Tomcat, so no Spring-specific artifact is needed — which matters,
+# because `mcp-spring-webmvc` stopped at 0.18.3 and has no 2.0.0 release.
+#
+# Protocol versions compiled into mcp-core 2.0.0: 2024-11-05, 2025-03-26,
+# 2025-06-18, 2025-11-25. mcp-server.md §3.1 writes 2025-06-18 as a placeholder;
+# that version IS supported, and 2025-11-25 is additionally available. Which one
+# to advertise is the mcp-server module's call (its own §3.1 gate), not P0's.
+#
+# We pin mcp-core + mcp-json-jackson2 rather than the `mcp` aggregator: the
+# aggregator depends on mcp-json-jackson3 (Jackson 3.x), and Spring Boot 3.5.x
+# is a Jackson 2.x stack (jackson-bom 2.21.4). Mixing the two would put two
+# Jackson majors on one classpath.
+mcp-core = { module = "io.modelcontextprotocol.sdk:mcp-core", version.ref = "mcp-sdk" }
+mcp-json-jackson2 = { module = "io.modelcontextprotocol.sdk:mcp-json-jackson2", version.ref = "mcp-sdk" }
+
+# --- UI assets (NOT BOM-managed) ---------------------------------------------
+webjars-bootstrap = { module = "org.webjars:bootstrap", version.ref = "webjars-bootstrap" }
+webjars-htmx = { module = "org.webjars.npm:htmx.org", version.ref = "htmx" }
+
+# --- Test (junit/testcontainers/rest-assured are BOM-managed) ----------------
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }              # junit-bom 5.12.2
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+# NOT applied by convention — see the "ONE TestEngine per Test task" rule in the
+# CommonConventionsPlugin KDoc. Kept only so a module that deliberately writes
+# Kotest SPEC classes can add it to its own build file with its own Test task.
+kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
+testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
+testcontainers-mysql = { module = "org.testcontainers:mysql" }
+testcontainers-mssqlserver = { module = "org.testcontainers:mssqlserver" }
+testcontainers-oracle-xe = { module = "org.testcontainers:oracle-xe" }
+rest-assured = { module = "io.rest-assured:rest-assured" }                  # rest-assured-bom 5.5.7
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+foojay-resolver = { id = "org.gradle.toolchains.foojay-resolver-convention", version.ref = "foojay-resolver" }

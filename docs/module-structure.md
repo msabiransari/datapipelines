@@ -239,8 +239,9 @@ Some concerns touch every module:
 - `com.h2database:h2` — bundled H2 driver (also for staging).
 - `org.duckdb:duckdb_jdbc` — bundled DuckDB driver.
 - `org.xerial:sqlite-jdbc` — bundled SQLite driver.
-- `org.bouncycastle:bcprov-jdk18on` — crypto primitives.
 - `org.springframework.boot:spring-boot-starter-jdbc` — for `DatasourceRegistry`'s `DatasourceRepository`.
+
+> **BouncyCastle removed (2026-08-07, security review MEDIUM-6).** The AES-256-GCM the credential store needs ([Datasources §7](datasources.md#7-credential-storage)) is fully served by the JDK's SunJCE (`AES/GCM/NoPadding`); no spec names a primitive requiring an external provider, and carrying an 8 MB provider with a steady advisory cadence for an unnamed capability fails the dependency rules. If a future implementation genuinely needs one, it comes back through the spec-deviation flow with the primitive named.
 - Optional: `com.oracle.database.jdbc:ojdbc11` (via `-Poracle` Gradle property).
 - Optional: `com.mysql:mysql-connector-j` (via `-Pmysql` Gradle property).
 
@@ -369,8 +370,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 **Dependencies (external):**
 - `de.mkammerer:argon2-jvm`
 - `io.jsonwebtoken:jjwt-api`, `jjwt-impl`, `jjwt-jackson`
-- `org.springframework.boot:spring-boot-starter-oauth2-client` (Spring Security web/config + OAuth2 client + Jose, per [Auth §12.2](auth.md#122-dependencies))
-- `org.bouncycastle:bcprov-jdk18on`
+- `org.springframework.boot:spring-boot-starter-oauth2-client` (Spring Security web/config + OAuth2 client + Jose, per [Auth §12.2](auth.md#122-dependencies) — which correctly lists no BouncyCastle; see the §5.4 removal note)
 - `org.springframework.boot:spring-boot-starter-jdbc` — for the user / key / audit repositories
 
 **Public API:**
@@ -393,15 +393,13 @@ The per-request `is_active` / revocation re-check (D13) reads through the same 6
 `dag` is a real dependency, not an accident of layering: `pipelines_execute` and the `executions_*` tools drive `PipelineExecutor` and `ResultStore` directly. `mcp-server` is a thin adapter over the same **service layer** the REST controllers use — it never loops back through HTTP, and it must not (that would make `web` a dependency and create a cycle).
 
 **Dependencies (external):**
-- The MCP SDK — coordinates and version resolved at the implementation gate below.
+- `io.modelcontextprotocol.sdk:mcp-core` **2.0.0** and `io.modelcontextprotocol.sdk:mcp-json-jackson2` **2.0.0**.
 
-> **Implementation gate G1 — MCP SDK coordinates.** The `io.modelcontextprotocol:mcp-core` coordinate in earlier drafts is **unverified** and must not be copied into a build file as-is. Before the first `mcp-server` commit:
-> 1. Search Maven Central for the official artifact: `curl -s 'https://search.maven.org/solrsearch/select?q=g:io.modelcontextprotocol&rows=50&wt=json' | jq -r '.response.docs[] | "\(.g):\(.a) \(.latestVersion)"'` (cross-check against the SDK's own README, which is the authority on the artifact name).
-> 2. Confirm the artifact implements the **Streamable HTTP** transport at the protocol version asserted in [MCP Server §3.1](mcp-server.md).
-> 3. Pin the exact version in `gradle/libs.versions.toml` — no range, no `+`, no SNAPSHOT (§6.1).
-> 4. Replace this gate block with the resolved coordinate + version and record the date checked.
->
-> Rationale for keeping the gate rather than guessing: the SDK is pre-1.0 and its coordinates have moved. A plausible-but-wrong coordinate in a frozen spec gets copied into the build and debugged as a build failure instead of a spec error.
+> **Gate G1 — RESOLVED 2026-08-07** (verified by downloading and inspecting the published jars, not docs). The earlier draft's `io.modelcontextprotocol:mcp-core` group id was indeed wrong — the real group is `io.modelcontextprotocol.sdk`. Facts that bind the `mcp-server` implementation:
+> - `mcp-core-2.0.0` ships plain Jakarta-servlet Streamable HTTP transports (`HttpServletStreamableServerTransportProvider`, `HttpServletStatelessServerTransport`) — drop onto Spring MVC directly. The stateless variant matches [MCP Server §3.3](mcp-server.md#33-session-lifecycle).
+> - **Use `mcp-json-jackson2`, never the `mcp` aggregator** — the aggregator pulls `mcp-json-jackson3` (Jackson 3.x) onto a Jackson 2.x classpath.
+> - `mcp-spring-webmvc` stopped at 0.18.3 (two majors stale) — do not use it. The Ktor-based `io.modelcontextprotocol:kotlin-sdk` was rejected (second HTTP stack).
+> - Protocol versions compiled into 2.0.0: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`. Which to advertise remains the [MCP Server §3.1](mcp-server.md) gate.
 
 **Public API:**
 - `McpServer` — Spring Boot autoconfiguration
@@ -443,6 +441,7 @@ The per-request `is_active` / revocation re-check (D13) reads through the same 6
 
 **Dependencies (external):**
 - `org.springframework.boot:spring-boot-starter`
+- `org.springframework.boot:spring-boot-starter-web` — serves the root-level `/health` and `/ready` probes (rest-api.md §11), which lived here from P0 (added 2026-08-07; if the probe controller moves to `web`, this dependency reverts with it — the §4.2 internal table is unaffected either way).
 - `org.springframework.boot:spring-boot-starter-actuator`
 - `org.flywaydb:flyway-core` + `org.flywaydb:flyway-database-postgresql` — schema migration. **This module is the only one that depends on Flyway** (§3.1 rule 2). The Postgres module is a separate artifact since Flyway 10 and is required for a Postgres target.
 - `org.postgresql:postgresql` — the metadata-DB driver at runtime (also bundled by `datasources` for user datasources; the version catalog pins it once).
@@ -494,7 +493,6 @@ sqlite-jdbc = "3.46.1.0"
 ojdbc11 = "23.4.0.24.114"
 argon2-jvm = "2.11"
 jjwt = "0.12.6"
-bouncycastle = "1.78.1"
 micrometer = "1.13.2"
 spring-boot-starter-test = "3.3.2"
 testcontainers = "1.20.1"
@@ -525,7 +523,7 @@ flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql
 
 **Redis client:** no explicit entry — `spring-boot-starter-data-redis` brings **Lettuce** as its default client, version-managed by the Spring Boot BOM. Adding a second, separately-pinned Lettuce entry would let it drift from the BOM; if Jedis is ever wanted instead, that is an explicit exclusion + dependency, and a spec change here.
 
-> **Implementation gate G2 — version catalog vs Maven Central.** Every version above is **illustrative**, written 2026-08 from a spec author's desk, and none has been checked against a repository. Before the first build lands, for each entry:
+> **Gate G2 — RESOLVED 2026-08-07** (except the lockfile, deliberately deferred to P9 — see below). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the table above is historical.** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) lands at P9 when the dependency set is stable, so mid-build module additions don't fight the lock. The original G2 procedure is retained below for future catalog changes:
 > 1. Resolve the current stable release: `curl -s 'https://search.maven.org/solrsearch/select?q=g:"org.flywaydb"+AND+a:"flyway-core"&core=gav&rows=5&wt=json' | jq -r '.response.docs[].v'` (repeat per artifact; or run `./gradlew dependencyUpdates` once the build exists).
 > 2. Reject anything that is not a released stable version — **no ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta** (§6.1, and the project-wide version-pinning rule).
 > 3. Check BOM-managed artifacts are **not** pinned here at all: anything the `spring-boot` BOM manages (Jackson, Micrometer, Lettuce, HikariCP, the Spring modules) takes its version from the BOM. A local pin that disagrees with the BOM is a silent runtime-incompatibility source.
@@ -564,7 +562,9 @@ class CommonConventionsPlugin : Plugin<Project> {
             jvmToolchain(21)
             compilerOptions {
                 freeCompilerArgs.add("-Xjsr305=strict")
-                freeCompilerArgs.add("-Xcontext-receivers")
+                // NOTE (2026-08-07): -Xcontext-receivers deliberately NOT set — the flag
+                // was removed from the Kotlin compiler in 2.2 and is a hard error on 2.4.x.
+                // Its successor (-Xcontext-parameters) is unused by v1.
                 allWarningsAsErrors = true           // strict
             }
         }
@@ -572,7 +572,14 @@ class CommonConventionsPlugin : Plugin<Project> {
         project.dependencies {
             testImplementation(libs.junit.jupiter)
             testImplementation(libs.mockk)
-            testImplementation(libs.kotest.runner)
+            // Kotest ASSERTIONS only — deliberately NOT kotest-runner-junit5 (2026-08-08).
+            // The runner registers a second JUnit Platform TestEngine in every test JVM;
+            // with zero Kotest spec classes it discovers nothing but participates in
+            // result reporting, and it has open Gradle 9 incompatibilities that surface
+            // as truncated test-result stores (intermittent EOFException in
+            // SerializableTestResultStore). §7.4's convention is JUnit 5 as the platform,
+            // Kotest as the assertion library. A module that wants Kotest SPECS adds the
+            // runner to its own build file and owns that engine's Gradle compatibility.
             testImplementation(libs.kotest.assertions)
         }
 
@@ -606,7 +613,7 @@ class CommonConventionsPlugin : Plugin<Project> {
 - **Kotest** for assertion library (more expressive than JUnit's built-in).
 - **Testcontainers** for integration tests requiring real databases.
 - Test file naming: `*Test.kt` for unit tests, `*IntegrationTest.kt` for integration tests (different Gradle task).
-- Test source root convention: `src/test/kotlin`, `src/integrationTest/kotlin`.
+- Test source root convention: unit tests in each module's `src/test/kotlin`. Cross-module integration tests live in `tests/integration-tests/src/test/kotlin` — there is **no per-module `src/integrationTest` source set in v1**; the root `integrationTest` task simply depends on `:tests:integration-tests:test`. A module needing module-local integration tests (e.g. against a Testcontainer) puts them in its own `src/test/kotlin` with a `*IntegrationTest` name; the `verifyTestsExecuted` guard scans `src/test/kotlin` only, so tests placed anywhere else are unguarded — don't.
 
 ### 7.5 Build commands
 
@@ -736,8 +743,8 @@ datapipelines:
 
 ### 9.2 Integration tests
 
-- Live in `src/integrationTest/kotlin` of each module OR in `tests/integration-tests/` (for cross-module).
-- Run on `./gradlew integrationTest`.
+- Live in `tests/integration-tests/src/test/kotlin` (cross-module), or in the owning module's `src/test/kotlin` named `*IntegrationTest` (module-local, e.g. against a Testcontainer) — see §7.4; no per-module `src/integrationTest` source set exists in v1.
+- Cross-module suite runs on `./gradlew integrationTest` (delegates to `:tests:integration-tests:test`); module-local ones run with the module's normal `test` task.
 - Slower; use real databases (Testcontainers), real H2, real HTTP layer.
 - Cover: end-to-end pipeline execution, MCP tool calls, REST endpoints, SSE streams.
 
@@ -818,8 +825,8 @@ Out of scope for v1:
 
 These are the two items this spec deliberately does **not** resolve on paper. Each has an exact check; neither may be closed by recall.
 
-- [ ] **G1 — MCP SDK coordinates** (§5.8): artifact resolved against Maven Central + the SDK README, Streamable HTTP transport confirmed at the [MCP Server §3.1](mcp-server.md) protocol version, exact version pinned, gate block replaced with the resolved coordinate + date.
-- [ ] **G2 — version catalog vs Maven Central** (§6): every entry resolved to a current stable release, BOM-managed artifacts removed from the catalog, no ranges/`+`/SNAPSHOT/pre-release, JDK 21 compatibility checked, `gradle.lockfile` committed, verification date recorded in the change log.
+- [x] **G1 — MCP SDK coordinates** (§5.8): **resolved 2026-08-07** — `io.modelcontextprotocol.sdk:mcp-core:2.0.0` + `mcp-json-jackson2:2.0.0`, Streamable HTTP transports confirmed by jar inspection; see the resolved gate note in §5.8.
+- [x] **G2 — version catalog vs Maven Central** (§6): **resolved 2026-08-07** — all entries verified, BOM-managed artifacts version-less, `gradle/libs.versions.toml` is the ratified source. Remaining sub-item: `gradle.lockfile` deferred to P9 (see §6 gate note).
 
 ### 13.2 Build checklist
 
