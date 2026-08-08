@@ -1,14 +1,20 @@
 # Configuration Reference
 
-**Status:** v1 (single source of truth for every config key)
+**Status:** v1.1 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-07
 
 ---
 
 ## 1. Purpose
 
 Every configuration key for datapipelines.co, in one place. Environment variables, YAML paths, defaults, and descriptions. A developer or operator should never need to search across 15 specs to find a config key.
+
+**Authority rule:** this document is the ONLY place a configuration key is defined. Other specs reference keys by name and link here — they never restate defaults or introduce keys of their own. A key that does not appear in this document does not exist. (Enforced by `scripts/docs-audit.sh`.)
+
+**Naming rules:**
+- YAML paths carry explicit units as suffixes: `-seconds`, `-minutes`, `-hours`, `-days`, `-ms`, `-bytes`, `-mb`, `-rows`.
+- Env var names are derived mechanically: `datapipelines.` prefix → `DATAPIPELINES_`, then the YAML path upper-snake-cased. Example: `datapipelines.executor.node-query-timeout-seconds` → `DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS`. No abbreviations, no exceptions — the env var is always derivable from the YAML path.
 
 ---
 
@@ -21,9 +27,9 @@ Every configuration key for datapipelines.co, in one place. Environment variable
 | `spring.datasource.url` | `SPRING_DATASOURCE_URL` | Metadata DB JDBC URL. Example: `jdbc:postgresql://host:5432/datapipelines` |
 | `spring.datasource.username` | `SPRING_DATASOURCE_USERNAME` | Metadata DB username |
 | `spring.datasource.password` | `SPRING_DATASOURCE_PASSWORD` | Metadata DB password |
-| `datapipelines.redis.host` | `DATAPIPELINES_REDIS_HOST` | Redis host (claim-check cache + idempotency) |
+| `datapipelines.redis.host` | `DATAPIPELINES_REDIS_HOST` | Redis host (results, idempotency, post-completion event log) |
 | `datapipelines.jwt.secret` | `DATAPIPELINES_JWT_SECRET` | Internal JWT signing secret. ≥ 32 bytes random, base64-encoded |
-| `datapipelines.db.encryption-key` | `DATAPIPELINES_DB_ENCRYPTION_KEY` | AES-256 master key for datasource password encryption. 32 bytes, base64-encoded |
+| `datapipelines.db.encryption-key` | `DATAPIPELINES_DB_ENCRYPTION_KEY` | AES-256 master key for datasource password encryption. Exactly 32 bytes, base64-encoded. **Required — there is no fallback source.** (KMS-sourced keys are a v1.1 item, see [ROADMAP §2](ROADMAP.md#2-v11-candidates).) |
 
 **OIDC provider configuration** is also required — at least one provider must be configured in `datapipelines.auth.oidc.providers` (in `application.yml`). Each provider requires `client-id`, `client-secret`, and `issuer-uri`. The client-id and client-secret are typically referenced from env vars. See [Auth spec §11.1](auth.md#111-oidc-provider-configuration) for the full format.
 
@@ -36,7 +42,7 @@ The specific env var names depend on which provider(s) the deployment chooses. E
 | `OKTA_CLIENT_ID`, `OKTA_CLIENT_SECRET` | Okta |
 | `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | Keycloak |
 
-The deployment defines these env var names in `application.yml` — they're not hardcoded by the app.
+The deployment defines these env var names in `application.yml` — they're not hardcoded by the app. (OIDC provider env vars are the one deliberate exception to the naming derivation rule in §1, since the deployment names them.)
 
 ---
 
@@ -44,80 +50,135 @@ The deployment defines these env var names in `application.yml` — they're not 
 
 ### 3.1 Redis
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.redis.port` | `DATAPIPELINES_REDIS_PORT` | `6379` | Redis port |
-| `datapipelines.redis.password` | `DATAPIPELINES_REDIS_PASSWORD` | (none) | Redis password |
-| `datapipelines.redis.ttl-seconds` | `DATAPIPELINES_REDIS_TTL_SECONDS` | `300` | Claim-check result TTL |
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.redis.port` | `6379` | Redis port |
+| `datapipelines.redis.password` | (none) | Redis password |
+
+> Env vars are derived per §1 (e.g. `DATAPIPELINES_REDIS_PORT`) and are omitted from the tables below for brevity.
 
 ### 3.2 Executor
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.executor.max-parallel-nodes` | `DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES` | `4` | Max parallel nodes within one execution |
-| `datapipelines.executor.max-concurrent-executions-per-user` | `DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_PER_USER` | `10` | Per-user concurrent execution limit |
-| `datapipelines.executor.max-concurrent-executions-global` | `DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_GLOBAL` | `100` | Global concurrent execution limit |
-| `datapipelines.executor.node-query-timeout-seconds` | `DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT` | `60` | Per-node JDBC query timeout |
-| `datapipelines.executor.execution-timeout-seconds` | `DATAPIPELINES_EXECUTOR_TIMEOUT` | `600` | Overall execution timeout |
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.executor.max-parallel-nodes` | `4` | Max parallel nodes within one execution |
+| `datapipelines.executor.max-concurrent-executions-per-user` | `10` | Per-user concurrent execution limit |
+| `datapipelines.executor.max-concurrent-executions-global` | `100` | Global concurrent execution limit |
+| `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pooling)) |
+| `datapipelines.executor.execution-timeout-seconds` | `600` | Overall execution timeout |
 
 ### 3.3 Staging (tempdb)
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.staging.h2.mode` | `DATAPIPELINES_STAGING_H2_MODE` | `PostgreSQL` | H2 compatibility mode |
-| `datapipelines.staging.h2.max-memory-mb` | `DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB` | `1024` | Per-execution memory limit |
-| `datapipelines.staging.h2.insert-batch-size` | `DATAPIPELINES_STAGING_H2_INSERT_BATCH` | `1000` | Rows per INSERT batch |
-| `datapipelines.staging.h2.query-timeout-seconds` | `DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT` | `60` | H2 query timeout |
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.staging.h2.mode` | `PostgreSQL` | H2 compatibility mode |
+| `datapipelines.staging.h2.max-memory-mb` | `1024` | Per-execution memory limit. A pipeline's `settings.tempdb.config.max_memory_mb`, when present, overrides this for that pipeline ([Pipeline Contract §5](pipeline-contract.md#5-settings)) |
+| `datapipelines.staging.h2.insert-batch-size` | `1000` | Rows per INSERT batch when staging source data |
+| `datapipelines.staging.h2.result-batch-size` | `10000` | Rows per fetch batch when reading staged data out |
+| `datapipelines.staging.h2.query-timeout-seconds` | `60` | H2 query timeout |
 
 ### 3.4 Auth
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.auth.jwt.ttl-hours` | `DATAPIPELINES_AUTH_JWT_TTL_HOURS` | `8` | Session JWT TTL |
-| `datapipelines.auth.allowlist.domains` | `DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS` | (empty) | Comma-separated allowed email domains. Empty = open provisioning |
-| `datapipelines.auth.api-keys.cache-ttl-seconds` | `DATAPIPELINES_AUTH_API_KEY_CACHE_TTL` | `60` | In-memory cache TTL for validated API keys |
-| `datapipelines.auth.api-keys.default-scopes` | `DATAPIPELINES_AUTH_API_KEY_DEFAULT_SCOPES` | `read` | Default scope for new API keys |
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.auth.jwt.ttl-hours` | `8` | Session JWT TTL |
+| `datapipelines.auth.allowlist.domains` | (empty) | Comma-separated allowed email domains. Binds to `List<String>` (comma-split; empty string = empty list = open provisioning) |
+| `datapipelines.auth.api-keys.cache-ttl-seconds` | `60` | Cache TTL for validated API keys and user `is_active` checks ([Auth §11.4](auth.md#114-api-key-validation-cache)) |
+| `datapipelines.auth.api-keys.default-scopes` | `read` | Default scope for new API keys |
+| `datapipelines.auth.rate-limit.login-per-minute` | `10` | Per-IP OIDC login attempts per minute |
 
-### 3.5 REST API + SSE
+### 3.5 Results
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.large-result-threshold-bytes` | `DATAPIPELINES_LARGE_RESULT_THRESHOLD` | `1048576` | Inline vs claim-check threshold (1 MB) |
-| `datapipelines.sse.heartbeat-interval-seconds` | `DATAPIPELINES_SSE_HEARTBEAT_INTERVAL` | `15` | SSE heartbeat interval |
-| `datapipelines.rate-limit.requests-per-second` | `DATAPIPELINES_RATE_LIMIT_RPS` | `100` | Per-API-key requests per second |
-| `datapipelines.rate-limit.requests-per-minute` | `DATAPIPELINES_RATE_LIMIT_RPM` | `1000` | Per-API-key requests per minute |
+Every completed execution's caller result is stored in Redis and read through the result cursor ([REST API §7](rest-api.md#7-result-delivery)).
 
-### 3.6 UI
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.result.ttl-default-seconds` | `300` | Result TTL when the client sends no `DP-Result-TTL-Seconds` header |
+| `datapipelines.result.ttl-min-seconds` | `60` | Lower clamp for client-requested TTL |
+| `datapipelines.result.ttl-max-seconds` | `3600` | Upper clamp for client-requested TTL |
+| `datapipelines.result.max-size-bytes` | `104857600` | Hard cap on a caller result (100 MB). Exceeding it fails the execution with `result.too_large` |
+| `datapipelines.result.page-size-rows` | `1000` | Rows in the inline first page of `data_ready`, and the default `limit` for cursor reads |
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.ui.theme` | `DATAPIPELINES_UI_THEME` | `saas` | Design system theme name |
+### 3.6 SSE
 
-### 3.7 Execution History
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.sse.heartbeat-interval-seconds` | `15` | SSE heartbeat comment interval |
+| `datapipelines.sse.disconnect-grace-seconds` | `30` | Grace period after client disconnect before the in-flight execution is cancelled ([REST API §6.8](rest-api.md#68-client-disconnect)) |
 
-| YAML path | Env var | Default | Description |
-|---|---|---|---|
-| `datapipelines.executions.event-retention-days` | `DATAPIPELINES_EXECUTIONS_EVENT_RETENTION` | `7` | How long to keep execution_events rows |
-| `datapipelines.executions.stale-timeout-minutes` | `DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT` | `60` | Mark RUNNING executions older than this as ABORTED |
+### 3.7 Rate Limiting
 
-### 3.8 Server
+Limits are **per user** (an API key inherits its owner's budget — minting more keys does not raise the limit).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.rate-limit.requests-per-second` | `100` | Per-user requests per second |
+| `datapipelines.rate-limit.requests-per-minute` | `1000` | Per-user requests per minute |
+
+### 3.8 Idempotency
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.idempotency.ttl-seconds` | `86400` | Retention of `Idempotency-Key` records in Redis |
+
+### 3.9 Templates
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.templates.cache-size` | `500` | Parsed-template cache entries |
+| `datapipelines.templates.render-timeout-ms` | `5000` | Hard limit on a single template render |
+
+### 3.10 UI
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.ui.theme` | `saas` | Design system theme name. Validated at startup against the vendored themes in `modules/web/src/main/resources/static/vendor/design-system/` |
+
+### 3.11 Execution History
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record). The post-completion Redis event log lives for 1 hour, not configurable |
+| `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
+
+### 3.12 Audit
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.audit.retention-days` | `365` | Retention of audit-log rows |
+
+### 3.13 Server
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
 | `server.port` | `SERVER_PORT` | `8080` | HTTP port |
-| `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAX_POOL` | `10` | Metadata DB connection pool size |
+| `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Metadata DB connection pool size |
 
-### 3.9 Observability
+### 3.14 Observability
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_TRACING_ENABLED` | `false` | Enable OpenTelemetry tracing |
-| `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint |
-| `datapipelines.observability.logging.format` | `DATAPIPELINES_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format |
+| `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED` | `false` | Enable OpenTelemetry tracing |
+| `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (standard OTel env var, exception to §1 derivation) |
+| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format |
 
 ---
 
-## 4. Full `application.yml` Template
+## 4. Precedence
+
+Resolution order for any key, highest first:
+
+1. Environment variable (via the `${ENV:default}` placeholder).
+2. Active profile YAML (`application-dev.yml`, etc.).
+3. Base `application.yml` default.
+
+Two documented per-entity overrides sit above global config at runtime (they are data, not config):
+- Pipeline `settings.tempdb.config.max_memory_mb` overrides `datapipelines.staging.h2.max-memory-mb` for that pipeline.
+- Datasource `query_timeout_seconds` overrides `datapipelines.executor.node-query-timeout-seconds` for nodes on that datasource.
+
+---
+
+## 5. Full `application.yml` Template
 
 ```yaml
 spring:
@@ -126,7 +187,7 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME}
     password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
-      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAX_POOL:10}
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -136,7 +197,6 @@ datapipelines:
     host: ${DATAPIPELINES_REDIS_HOST}
     port: ${DATAPIPELINES_REDIS_PORT:6379}
     password: ${DATAPIPELINES_REDIS_PASSWORD:}
-    ttl-seconds: ${DATAPIPELINES_REDIS_TTL_SECONDS:300}
 
   jwt:
     secret: ${DATAPIPELINES_JWT_SECRET}
@@ -163,51 +223,70 @@ datapipelines:
     allowlist:
       domains: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:}
     api-keys:
-      cache-ttl-seconds: ${DATAPIPELINES_AUTH_API_KEY_CACHE_TTL:60}
-      default-scopes: ${DATAPIPELINES_AUTH_API_KEY_DEFAULT_SCOPES:read}
+      cache-ttl-seconds: ${DATAPIPELINES_AUTH_API_KEYS_CACHE_TTL_SECONDS:60}
+      default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
+    rate-limit:
+      login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
 
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
-    max-concurrent-per-user: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_PER_USER:10}
-    max-concurrent-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_GLOBAL:100}
-    node-query-timeout: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT:60}
-    execution-timeout: ${DATAPIPELINES_EXECUTOR_TIMEOUT:600}
+    max-concurrent-executions-per-user: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_USER:10}
+    max-concurrent-executions-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_GLOBAL:100}
+    node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
+    execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
 
   staging:
     h2:
       mode: ${DATAPIPELINES_STAGING_H2_MODE:PostgreSQL}
       max-memory-mb: ${DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB:1024}
-      insert-batch-size: ${DATAPIPELINES_STAGING_H2_INSERT_BATCH:1000}
-      query-timeout: ${DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT:60}
+      insert-batch-size: ${DATAPIPELINES_STAGING_H2_INSERT_BATCH_SIZE:1000}
+      result-batch-size: ${DATAPIPELINES_STAGING_H2_RESULT_BATCH_SIZE:10000}
+      query-timeout-seconds: ${DATAPIPELINES_STAGING_H2_QUERY_TIMEOUT_SECONDS:60}
 
-  large-result-threshold-bytes: ${DATAPIPELINES_LARGE_RESULT_THRESHOLD:1048576}
+  result:
+    ttl-default-seconds: ${DATAPIPELINES_RESULT_TTL_DEFAULT_SECONDS:300}
+    ttl-min-seconds: ${DATAPIPELINES_RESULT_TTL_MIN_SECONDS:60}
+    ttl-max-seconds: ${DATAPIPELINES_RESULT_TTL_MAX_SECONDS:3600}
+    max-size-bytes: ${DATAPIPELINES_RESULT_MAX_SIZE_BYTES:104857600}
+    page-size-rows: ${DATAPIPELINES_RESULT_PAGE_SIZE_ROWS:1000}
 
   sse:
-    heartbeat-interval-seconds: ${DATAPIPELINES_SSE_HEARTBEAT_INTERVAL:15}
+    heartbeat-interval-seconds: ${DATAPIPELINES_SSE_HEARTBEAT_INTERVAL_SECONDS:15}
+    disconnect-grace-seconds: ${DATAPIPELINES_SSE_DISCONNECT_GRACE_SECONDS:30}
 
   rate-limit:
-    requests-per-second: ${DATAPIPELINES_RATE_LIMIT_RPS:100}
-    requests-per-minute: ${DATAPIPELINES_RATE_LIMIT_RPM:1000}
+    requests-per-second: ${DATAPIPELINES_RATE_LIMIT_REQUESTS_PER_SECOND:100}
+    requests-per-minute: ${DATAPIPELINES_RATE_LIMIT_REQUESTS_PER_MINUTE:1000}
+
+  idempotency:
+    ttl-seconds: ${DATAPIPELINES_IDEMPOTENCY_TTL_SECONDS:86400}
+
+  templates:
+    cache-size: ${DATAPIPELINES_TEMPLATES_CACHE_SIZE:500}
+    render-timeout-ms: ${DATAPIPELINES_TEMPLATES_RENDER_TIMEOUT_MS:5000}
 
   ui:
     theme: ${DATAPIPELINES_UI_THEME:saas}
 
   executions:
-    event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION:7}
-    stale-timeout-minutes: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT:60}
+    event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}
+    stale-timeout-minutes: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES:60}
+
+  audit:
+    retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
 
   observability:
     tracing:
-      enabled: ${DATAPIPELINES_TRACING_ENABLED:false}
+      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
-      format: ${DATAPIPELINES_LOGGING_FORMAT:json}
+      format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
 
 ---
 
-## 5. Dev Profile (`application-dev.yml`)
+## 6. Dev Profile (`application-dev.yml`)
 
 Overrides for local development. Activated via `--spring.profiles.active=dev`.
 
@@ -243,14 +322,15 @@ datapipelines:
 
 ---
 
-## 6. Config Validation
+## 7. Config Validation
 
 On startup, the app validates:
-- All required env vars present → fail-fast with clear error if missing.
+- All required keys present → fail-fast with a clear error if missing.
 - `DATAPIPELINES_JWT_SECRET` ≥ 32 bytes decoded.
 - `DATAPIPELINES_DB_ENCRYPTION_KEY` is exactly 32 bytes decoded.
-- `DATAPIPELINES_UI_THEME` is one of the vendored theme names.
-- OIDC client IDs and secrets are non-empty.
+- `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
+- At least one OIDC provider with non-empty `client-id`, `client-secret`, and `issuer-uri`.
+- `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
 
 Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop startup with a clear log message listing every missing/invalid key.
 
@@ -260,4 +340,5 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 10 required keys, ~30 optional keys, full application.yml template, dev profile, startup validation |
+| 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |
+| 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
