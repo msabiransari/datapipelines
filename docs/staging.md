@@ -71,21 +71,26 @@ Key points:
 For each node whose `output.target` is `tempdb`, the executor stages the source ResultSet:
 
 ```kotlin
-suspend fun stage(resultSet: ResultSet, tableName: String): StageResult = mutex.withLock {
+suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult = mutex.withLock {
     val metadata = resultSet.metaData
     val indices = 1..metadata.columnCount
 
     // Column names come from user SQL — validate before they touch generated DDL (§4.5).
     val columnNames = validateColumnNames(indices.map { metadata.getColumnLabel(it) })
 
-    val mappings: List<LogicalTypeMapping> = indices.map { i ->
-        dialectMapper.map(
-            metadata.getColumnType(i),
-            metadata.getPrecision(i),
-            metadata.getScale(i),
-            metadata.getColumnTypeName(i),
-        )
+    // CRITICAL: the SOURCE dialect's mapper, not H2's. A Postgres/Oracle/MySQL source's
+    // JDBC type codes and type names mean different things than H2's — Oracle DATE (91) is a
+    // TIMESTAMP, MySQL bit(n>1) is BINARY, etc. Mapping source metadata through H2IngressMapper
+    // silently picks the wrong H2 storage type and loses data (e.g. Oracle DATE's time
+    // component) BEFORE egress re-derivation can see it. The executor knows the dialect from
+    // node.source; for a tempdb→tempdb node it passes Dialect.H2.
+    val dialectMapper = TypeMappers.forDialect(sourceDialect)
+    // mapColumn (not map) so an unknown source type's §8.2 warning names the column.
+    val mapped = columnNames.mapIndexed { j, name ->
+        dialectMapper.mapColumn(name, metadata.getColumnType(j + 1), metadata.getPrecision(j + 1),
+            metadata.getScale(j + 1), metadata.getColumnTypeName(j + 1))    // → MappedColumn(column, warnings)
     }
+    val warnings = mapped.flatMap { it.warnings }   // surfaced on StageResult; dag rolls them into the execution result
     val columns: List<ColumnSchema> = columnNames.zip(mappings) { name, m -> m.toColumnSchema(name) }
 
     val h2ColumnDecls = columns.map { c -> "\"${c.name}\" ${H2EgressMapper.toH2Type(c)}" }
@@ -258,9 +263,9 @@ Per canonical type, the value is read from the source ResultSet and converted to
 | `BOOLEAN` | `getBoolean` (check `wasNull`) | `Boolean` or null |
 | `STRING` | `getString` | `String` |
 | `BINARY` | `getBytes` | `byte[]` |
-| `DATE` | `getDate` → normalized | `java.sql.Date` |
-| `TIME` | `getTime` | `java.sql.Time` |
-| `TIMESTAMP` | `getTimestamp` → UTC normalized | `java.sql.Timestamp` (UTC) |
+| `DATE` | `getObject(i, LocalDate::class.java)` | `LocalDate` |
+| `TIME` | `getObject(i, LocalTime::class.java)` | `LocalTime` |
+| `TIMESTAMP` | `getObject(i, OffsetDateTime::class.java)` → UTC-normalized | `OffsetDateTime` at `Z` |
 | `NULL` | `getObject` (returns null) | null |
 
 ### 4.5 Identifier safety (normative)
@@ -533,7 +538,7 @@ interface Staging : AutoCloseable {
     val executionId: UUID
     val connection: Connection        // direct access for SQL nodes; caller must hold the mutex (§9.2)
 
-    suspend fun stage(resultSet: ResultSet, tableName: String): StageResult
+    suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
     suspend fun query(sql: String): ResultSet
     suspend fun execute(sql: String): Long    // INSERT/UPDATE/DELETE against staging; returns row count
 
@@ -545,7 +550,8 @@ interface Staging : AutoCloseable {
 data class StageResult(
     val tableName: String,
     val rowsStaged: Long,
-    val columns: List<ColumnSchema>
+    val columns: List<ColumnSchema>,
+    val warnings: List<TypeMappingWarning> = emptyList()   // §8.2 warnings from the source→canonical mapping
 )
 
 data class StagingStats(

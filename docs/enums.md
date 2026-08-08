@@ -145,6 +145,8 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 
 **Reserved for future:** `DUCKDB` (in-memory DuckDB — better for analytical workloads; see [ROADMAP](ROADMAP.md)).
 
+> **Declaration reality (2026-08-08).** The frozen module dependency graph ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)) makes the "pipeline-contract authors, staging consumes" line above impossible: `staging` depends only on `typesystem`, so it cannot see a type declared in `pipeline-contract`. In v1 the enum has a single value (`H2`), so `pipeline-contract` declares it (for the `settings.tempdb.engine` wire value, with `@JsonValue`) and `staging` declares an identical local `enum class StagingEngine { H2 }` for `StagingFactory` dispatch; `dag` (which depends on both) maps between them — trivial while there is one value. **Consolidation is a P4/dag decision:** when a second engine (`DUCKDB`) lands, move `StagingEngine` into `typesystem` (the shared lower layer, exactly as `Dialect` resolved the same class of problem) so there is one authority. Until then the duplication is bounded to a single constant and dag owns the mapping.
+
 ---
 
 ## 8. `Scope` — API key authorization scope

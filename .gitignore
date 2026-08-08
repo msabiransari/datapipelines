@@ -55,3 +55,5 @@ lib/*.jar
 *.truststore
 credentials.*
 secrets.*
+.claude/worktrees/
+.gate-logs/
