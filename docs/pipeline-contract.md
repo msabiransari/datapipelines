@@ -715,7 +715,8 @@ Defined and described in [Auth §9](auth.md#9-auth-errors); cataloged here as th
 | `auth.api_key.missing` | 401 | No credentials provided |
 | `auth.api_key.invalid` | 401 | API key not recognized or revoked |
 | `auth.api_key.expired` | 401 | API key past expiration |
-| `auth.session.invalid` | 401 | Session JWT missing, malformed, or expired |
+| `auth.session.invalid` | 401 | Session JWT malformed or signature invalid |
+| `auth.session.expired` | 401 | Session JWT past its expiry |
 | `auth.scope.insufficient` | 403 | Principal lacks required scope for this operation |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched (browser flows) |
 | `auth.login.domain_not_allowed` | 403 | OIDC login rejected: email domain not in allowlist |

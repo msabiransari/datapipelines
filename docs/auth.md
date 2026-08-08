@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.1 (revised — generic OIDC provider support)
+**Status:** v2.2 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-08-05
+**Last updated:** 2026-08-07
 
 ---
 
@@ -24,7 +24,7 @@ The product is self-hosted, internal-users-only. Identity is delegated to **any 
 5. **API keys per agent, not global.** A user generates one key per agent. Compromised keys are individually revocable. Per-agent usage visible in audit logs.
 6. **Keys hashed at rest.** Same protection as passwords would be. A database leak does not expose working credentials.
 7. **Scopes are explicit and hierarchical.** Every key and session has a scope set. Default: `read`. Higher scopes require deliberate choice.
-8. **Stateless server.** JWT + API key validation are both stateless (backed by Postgres lookups). Multiple server instances validate identically.
+8. **Stateless server, near-live revocation.** JWT + API key validation are stateless across instances; both paths re-check the principal's liveness (user `is_active`, key revocation) through a short-TTL cache backed by Postgres (§6.3, §7.3). Deactivating a user or revoking a key takes effect within ~1 minute — never the full JWT lifetime.
 
 ---
 
@@ -53,7 +53,8 @@ The product is self-hosted, internal-users-only. Identity is delegated to **any 
 │                    Agent (Claude / GLM / Copilot)              │
 │                                                                │
 │ 1. User has previously logged in and generated an API key     │
-│ 2. Agent sends: X-API-Key: dpk_<id>.<secret>                  │
+│ 2. Agent sends: DP-API-Key: dpk_<id>.<secret>                 │
+│    (or, on /mcp: Authorization: Bearer dpk_<id>.<secret>)     │
 │ 3. Server validates key hash (Argon2id) against Postgres      │
 │ 4. Server resolves user + scopes from key record              │
 │ 5. Request authenticated                                       │
@@ -102,13 +103,13 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 2. Checks if a user with that `email` already exists.
    - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url`. (The user previously logged in via a different provider — link them.)
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
-3. Checks the email domain allowlist (if configured — see §10).
+3. Checks the email domain allowlist (if configured — see §4.3).
    - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
 4. Issues internal JWT, sets cookie, redirects to `/`.
 
 **Subsequent logins:** Same flow — user record updated, JWT reissued.
 
-**Account deactivation:** Admin marks user `is_active: false` via UI. Subsequent OIDC logins rejected with `auth.login.user_inactive`. Existing JWTs for that user are not automatically invalidated (they expire at TTL); API keys are also not auto-revoked (admin can revoke separately).
+**Account deactivation:** Admin marks user `is_active: false` via UI. Subsequent OIDC logins are rejected with `auth.login.user_inactive`. Existing sessions and API keys stop working within the liveness-cache TTL (~60s): every authenticated request re-checks `is_active` through the cache (§6.3, §7.3), so a deactivated user's JWT and keys are dead within a minute, not at the 8h JWT expiry. API keys additionally remain individually revocable.
 
 ### 4.3 Email domain allowlist
 
@@ -353,6 +354,8 @@ After OIDC login, the server issues its own JWT:
   ```
 - **Signing secret:** `DATAPIPELINES_JWT_SECRET` env var (≥ 32 bytes random, base64). Required at startup.
 
+**Scope derivation at token issue (v1 rule):** the `scopes` claim is derived from the user record at login: `is_admin = true` → `["read", "execute", "author", "admin"]`; every other active user → `["read", "execute", "author"]`. Finer per-user scope assignment and IdP group sync are future work (§15). API-key scopes are chosen at key creation (§7.4) and are independent of this rule, bounded by the creator's scopes.
+
 ### 6.2 Why not use OIDC tokens directly?
 
 - **Decoupled TTL.** Our JWT has its own TTL (8h). OIDC access tokens have provider-specific TTLs (Google = 1h). Using OIDC tokens would require refreshing mid-session.
@@ -379,8 +382,16 @@ class JwtAuthenticationFilter(
         if (jwt != null) {
             try {
                 val claims = jwtService.validate(jwt)
+                val userId = UUID.fromString(claims.subject)
+
+                // Liveness re-check: cached (60s TTL, same cache infra as §7.3) Postgres
+                // lookup of users.is_active. Deactivation kills the session within ~1 min.
+                if (!userLivenessCache.isActive(userId)) {
+                    throw DeactivatedUserException(userId)
+                }
+
                 val principal = AuthenticatedPrincipal(
-                    userId = UUID.fromString(claims.subject),
+                    userId = userId,
                     email = claims["email"] as String,
                     displayName = claims["name"] as String,
                     scopes = (claims["scopes"] as List<*>).map { Scope.valueOf(it as String) }.toSet(),
@@ -388,9 +399,12 @@ class JwtAuthenticationFilter(
                     keyId = null
                 )
                 SecurityContextHolder.getContext().authentication =
-                    UsernamePasswordAuthenticationToken(principal, null, principal.authorities)
+                    UsernamePasswordAuthenticationToken(
+                        principal, null,
+                        principal.scopes.map { SimpleGrantedAuthority("SCOPE_${it.name}") }
+                    )
             } catch (e: Exception) {
-                // Invalid/expired JWT — clear cookie, proceed unauthenticated
+                // Invalid/expired JWT or deactivated user — clear cookie, proceed unauthenticated
                 response.addCookie(Cookie("dp_session", "").apply { maxAge = 0 })
             }
         }
@@ -440,22 +454,27 @@ Argon2id hash (same as before). Schema in [Metadata DB spec](metadata-db.md).
 ### 7.3 Validation flow
 
 ```
-1. Client sends X-API-Key: dpk_<id>.<secret>
+1. Client sends DP-API-Key: dpk_<id>.<secret>
+   (on /mcp, Authorization: Bearer dpk_<id>.<secret> is equivalent)
 2. Parse id and secret.
 3. Look up api_keys WHERE id = 'dpk_<id>' AND is_revoked = false.
-4. Not found → 401 auth.api_key_invalid.
-5. expires_at < now → 401 auth.api_key_expired.
+4. Not found → 401 auth.api_key.invalid.
+5. expires_at < now → 401 auth.api_key.expired.
 6. Argon2id.verify(key_hash, full_key).
-7. Verify fails → 401 auth.api_key_invalid.
-8. Update last_used_at, last_used_ip (async).
-9. Build principal with userId + scopes from key record.
+7. Verify fails → 401 auth.api_key.invalid.
+8. Check the key owner's users.is_active (cached, 60s TTL).
+   Inactive → 401 auth.api_key.invalid.
+9. Update last_used_at, last_used_ip (async).
+10. Build principal with userId + scopes from key record.
 ```
 
-In-memory cache (60s TTL) for recently-validated keys, invalidated on revocation.
+In-memory cache (`datapipelines.auth.api-keys.cache-ttl-seconds`, default 60s) for recently-validated keys and owner liveness, invalidated on revocation/deactivation on the local instance and by TTL elsewhere.
 
 ### 7.4 Issuance
 
 User logs in via OIDC → navigates to API Keys page → clicks "Generate new key" → names it, selects scopes, optionally sets expiration → server generates key, hashes it, stores hash, returns plaintext **once**.
+
+A key's scopes MUST be a subset of its creator's scopes at issue time — a `read`-scoped session cannot mint an `author` key (privilege escalation guard). The HTTP surface for key management is defined in [REST API §16](rest-api.md#16-auth--user-admin-endpoints).
 
 ### 7.5 Scopes
 
@@ -469,6 +488,37 @@ Same hierarchical scope system:
 | `admin` | all | Manage datasources, users, system config |
 
 Default scope on key creation: `read`. Higher scopes require explicit selection.
+
+### 7.6 Scope ↔ Operation Matrix (authoritative)
+
+This matrix is the ONLY place operation-level scope requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert scopes locally. Scopes are hierarchical (§7.5) — the listed scope is the minimum.
+
+**REST endpoints:**
+
+| Operation | Endpoints | Min scope |
+|---|---|---|
+| Read pipelines / templates / datasources (metadata) / executions | all `GET` under `/api/v1/pipelines`, `/api/v1/templates`, `/api/v1/datasources`, `/api/v1/executions` (incl. `/export`, `/versions`) | `read` |
+| Retrieve execution results (cursor) | `GET /api/v1/executions/{id}/result` (+ ownership check) | `read` |
+| Execute a pipeline | `POST /api/v1/pipelines/{id}/execute` | `execute` |
+| Cancel an execution | `DELETE /api/v1/executions/{id}` (+ ownership check; `admin` may cancel any) | `execute` |
+| Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` |
+| Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` |
+| Create / update / delete datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` | `admin` |
+| Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
+| User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
+
+**MCP tools** (all 15 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+
+| Tool | Min scope |
+|---|---|
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
+| `pipelines_execute` | `execute` |
+| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
+| `datasources_test` | `author` |
+
+(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only, `admin`.)
+
+**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix.
 
 ---
 
@@ -490,8 +540,9 @@ class SecurityConfig(
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { csrf ->
-                csrf.csrfTokenRepository(CookieCsrfTokenRepository.withDefaults())
-                csrf.ignoringRequestMatchers("/api/**")  // API uses X-API-Key, not CSRF
+                // Cookie: dp_csrf (readable by JS), header: DP-CSRF-Token
+                csrf.csrfTokenRepository(cookieCsrfRepository())
+                csrf.ignoringRequestMatchers("/api/**", "/mcp")  // API-key surfaces, not CSRF
             }
             .authorizeHttpRequests { auth ->
                 auth
@@ -534,7 +585,7 @@ class SecurityConfig(
 ```
 1. CORS filter                     — adds CORS headers
 2. CSRF filter                     — validates CSRF token on state-changing requests (UI only; API paths excluded)
-3. ApiKeyFilter                    — checks X-API-Key header; if present, validates and sets SecurityContext
+3. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
 4. JwtAuthenticationFilter         — checks dp_session cookie; if present, validates and sets SecurityContext
 5. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
 6. AuthorizationFilter             — checks authenticated() for protected paths
@@ -557,16 +608,27 @@ If neither API key nor JWT is present (and the path requires auth), the Authoriz
 ### 8.4 API endpoints (auth via API key OR JWT)
 
 All `/api/v1/**` endpoints accept either:
-- `X-API-Key: dpk_...` header (agent/MCP).
+- `DP-API-Key: dpk_...` header (agents, programmatic clients).
 - `Cookie: dp_session=<jwt>` (browser UI calling REST directly).
 
 The filter chain tries API key first, then JWT. If both present, API key wins.
 
-CSRF is disabled for `/api/**` because API key auth is inherently CSRF-immune (no cookie). When JWT cookie is used for API calls from the browser, the CSRF token IS required (enforced by the frontend including `X-CSRF-Token` header on state-changing requests).
+CSRF is disabled for `/api/**` and `/mcp` because API-key auth is inherently CSRF-immune (no cookie). When the JWT cookie is used for API calls from the browser, the CSRF token IS required — the frontend reads the `dp_csrf` cookie and sends its value in the `DP-CSRF-Token` header on state-changing requests.
+
+### 8.5 MCP endpoint (`/mcp`)
+
+`POST /mcp` and `GET /mcp` ([MCP Server §3](mcp-server.md#3-transport)) are API-key-only — session cookies are **not** accepted there. Two equivalent credential carriers:
+
+- `DP-API-Key: dpk_<id>.<secret>` — same as REST.
+- `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header. The `ApiKeyFilter` recognizes the `dpk_` prefix in a Bearer token and routes it through the identical validation path (§7.3).
+
+`/mcp` is CSRF-exempt (no cookie auth) and enforces the same scope matrix (§7.6) per tool.
 
 ---
 
 ## 9. Auth Errors
+
+Codes follow the `{domain}.{entity}.{failure}` convention; the registry of record is [Pipeline Contract §13.7](pipeline-contract.md#137-authentication--authorization).
 
 | Code | HTTP | Description |
 |---|---|---|
@@ -575,13 +637,13 @@ CSRF is disabled for `/api/**` because API key auth is inherently CSRF-immune (n
 | `auth.login.oidc_error` | 500 | OIDC provider returned an error during login |
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |
-| `auth.api_key_missing` | 401 | No `X-API-Key` or `dp_session` cookie |
-| `auth.api_key_invalid` | 401 | Key id not found, revoked, or hash mismatch |
-| `auth.api_key_expired` | 401 | Key's `expires_at` is in the past |
-| `auth.scope_insufficient` | 403 | Principal lacks required scope |
-| `auth.csrf.missing_token` | 403 | CSRF token missing on state-changing UI request |
-| `auth.csrf.token_mismatch` | 403 | CSRF token doesn't match session |
-| `auth.rate_limit.exceeded` | 429 | Rate limit hit |
+| `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
+| `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or owner deactivated |
+| `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
+| `auth.scope.insufficient` | 403 | Principal lacks required scope (§7.6 matrix) |
+| `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
+
+Rate limiting uses the single system-wide `rate_limit.exceeded` code ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — there is no separate auth-layer rate-limit code. The login rate limit is `datapipelines.auth.rate-limit.login-per-minute` ([Configuration §3.4](configuration.md#34-auth)).
 
 ---
 
@@ -613,7 +675,7 @@ CSRF is disabled for `/api/**` because API key auth is inherently CSRF-immune (n
   "timestamp": "2026-08-05T14:30:00.123Z",
   "event": "auth.login.success",
   "user_id": "uuid",
-  "provider": "GOOGLE",
+  "provider": "google",
   "source_ip": "10.0.0.42",
   "user_agent": "Mozilla/5.0...",
   "details": {
@@ -680,9 +742,9 @@ datapipelines:
 - `client-secret` — from the provider's app registration.
 - `issuer-uri` — the provider's OIDC issuer URL. Triggers auto-discovery of all endpoints.
 
-**Two values are optional:**
-- `name` — registration ID used in URLs (`/oauth2/authorization/{name}`). Default: derived from display name.
-- `display-name` — text shown on the login button.
+**Two further values:**
+- `name` — **required.** Registration ID used in URLs (`/oauth2/authorization/{name}`) and stored in `users.provider`. Lowercase `[a-z0-9-]+`. (The §5.2 bean uses it directly; there is no derivation fallback.)
+- `display-name` — optional. Text shown on the login button; defaults to `name`.
 
 ### 11.2 Common provider issuer URIs (reference)
 
@@ -715,13 +777,13 @@ OKTA_CLIENT_SECRET=...
 DATAPIPELINES_JWT_SECRET=...
 ```
 
-### 11.4 Optional environment variables
+### 11.4 API key validation cache
 
-| Variable | Default | Description |
-|---|---|---|
-| `DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS` | (empty = open) | Comma-separated email domains allowed to log in |
-| `DATAPIPELINES_AUTH_JWT_TTL_HOURS` | 8 | Session JWT TTL |
-| `DATAPIPELINES_AUTH_API_KEY_CACHE_TTL_SECONDS` | 60 | In-memory cache for recently-validated API keys |
+Validated API keys and owner-liveness results are cached in-memory per instance for `datapipelines.auth.api-keys.cache-ttl-seconds` (default 60). Revocation/deactivation invalidates the local cache immediately and takes effect elsewhere at TTL expiry.
+
+### 11.5 Other auth configuration keys
+
+All auth config keys (allowlist domains, JWT TTL, cache TTL, default key scopes, login rate limit) are defined in [Configuration §3.4](configuration.md#34-auth) — the single config authority. This spec does not restate names or defaults.
 
 ---
 
@@ -804,3 +866,4 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |
 | 2026-08-05 | v2.0 | OIDC migration | Replaced local auth with Google/Microsoft OIDC. No passwords stored. Internal JWT issued after OIDC login. Added email domain allowlist. Added Spring Security filter chain configuration. Added OIDC success handler. Users provisioned automatically on first login. |
 | 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |
+| 2026-08-07 | v2.2 | consistency campaign | **D10:** `X-API-Key` → `DP-API-Key`; CSRF = `dp_csrf` cookie + `DP-CSRF-Token` header. **D11:** `/mcp` in the chain (§8.5): API-key-only, CSRF-exempt, Bearer `dpk_` accepted. **D13:** liveness re-check on every request via 60s cache — deactivation effective ≤ ~1 min (§4.2, §6.3, §7.3). **D14:** scope derivation at login (§6.1). **D15:** authoritative scope↔operation matrix (§7.6); key scopes ⊆ creator's scopes (§7.4). **D5:** error codes normalized to 3-segment (`auth.api_key.missing` etc.), `auth.csrf.*` collapsed to `auth.csrf.invalid`, `auth.rate_limit.exceeded` removed in favor of `rate_limit.exceeded`. `name` required per provider (§11.1); audit example provider lowercase; config tables replaced by pointers to configuration.md (D8). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
