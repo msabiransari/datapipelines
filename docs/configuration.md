@@ -64,7 +64,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.executor.max-parallel-nodes` | `4` | Max parallel nodes within one execution |
 | `datapipelines.executor.max-concurrent-executions-per-user` | `10` | Per-user concurrent execution limit |
 | `datapipelines.executor.max-concurrent-executions-global` | `100` | Global concurrent execution limit |
-| `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pooling)) |
+| `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pool-configuration)) |
 | `datapipelines.executor.execution-timeout-seconds` | `600` | Overall execution timeout |
 
 ### 3.3 Staging (tempdb)

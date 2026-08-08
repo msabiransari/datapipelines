@@ -660,14 +660,13 @@ Content-Type: application/json
 {
   "id": "fetch_orders.sql",         // optional; auto-generated if omitted
   "dialect": "POSTGRES",
-  "description": "Fetch orders in date range.",
-  "params_schema": {
-    "start_date": {"type": "DATE"},
-    "end_date": {"type": "DATE"}
-  },
+  "description": "Fetch orders in date range. Expects start_date and end_date in the render context.",
+  "imports": [],
   "body": "SELECT order_id, customer_id, total_amount, order_date\nFROM orders\nWHERE order_date BETWEEN '${start_date}' AND '${end_date}'"
 }
 ```
+
+Templates declare no parameter schema — variables are declared by the pipelines that reference the template, and validated there by dry-render ([Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution)).
 
 Response: `201 Created` with full template (including version `1`, `created_at`).
 
@@ -691,7 +690,7 @@ PUT /templates/{id}
 {
   "dialect": "POSTGRES",            // must match existing (or use POST to create new id)
   "description": "...",
-  "params_schema": {...},
+  "imports": [{"id": "lib_date_filters.sql", "version": 2, "alias": "dates"}],
   "body": "..."
 }
 ```
@@ -872,6 +871,8 @@ DELETE /executions/{execution_id}
 ```
 
 Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative).
+
+Works from **any** instance: the request writes a Redis cancellation flag that the executing instance honors within ~one heartbeat interval ([DAG Executor §8.3.1](dag-executor.md#831-the-registry)). The `204` acknowledges the cancellation *request*; the `execution_aborted` event marks its completion.
 
 Response: `204 No Content`. Cancelling an already-terminal execution returns `409 Conflict` with `pipeline.execution.not_running`.
 

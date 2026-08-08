@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.2 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
-**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md)
-**Last updated:** 2026-08-05
+**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
+**Last updated:** 2026-08-07
 
 ---
 
@@ -26,9 +26,10 @@ This spec defines:
 1. **Templates are first-class entities, not embedded in pipelines.** Separation lets pipelines stay small, templates be reused, edits be isolated, and versioning be tracked cleanly.
 2. **Templates target one dialect.** A template written for Postgres is not directly executable against Oracle — different SQL syntax, different function names, different type names. The `dialect` field declares the target.
 3. **Templates are immutable per version.** Editing a template creates a new version. Pipelines reference `{id, version}` — that reference always produces the same SQL for the same context, forever.
-4. **Freemarker is the template engine.** Mature, well-known, embeddable in Java/Kotlin, supports macros/import/include for libraries. We configure it conservatively for security.
-5. **Variables are declared upfront.** Templates declare their input variables in `params_schema`. The pipeline validates that every variable referenced in the body is declared (either in `params_schema` or supplied by the pipeline's `parameters`).
-6. **No arbitrary code execution.** Templates render SQL strings, not arbitrary program logic. Freemarker's dangerous constructs are disabled.
+4. **Freemarker is the template engine.** Mature, well-known, embeddable in Java/Kotlin, supports macros/import for libraries. We configure it conservatively for security (§4.3).
+5. **Templates do not declare their variables — the pipeline does.** A template has no parameter schema of its own. The **pipeline's `parameters` block is the single declaration point** ([Pipeline Contract §6](pipeline-contract.md#6-parameters-input-map-declaration)), and the full parameter map (after defaults are applied) *is* the render context passed to every template the pipeline references. A template is therefore a pure function of the calling pipeline's parameters; the same template can be reused by pipelines that declare those parameters differently. Templates keep a free-text `description` so humans and agents can discover what a template expects.
+6. **No arbitrary code execution.** Templates render SQL strings, not arbitrary program logic. Freemarker's dangerous constructs are disabled (§4.2) and the body is scanned at save time (§7).
+7. **Nothing invalid is ever stored.** Every create/update validates fully before the row is written — the universal save-time validation principle in [Pipeline Contract §2](pipeline-contract.md#2-design-principles). For templates that means parse-level validation (§7.1); the *render*-level check belongs to pipeline save, because only a pipeline knows the parameters.
 
 ---
 
@@ -44,49 +45,37 @@ This spec defines:
   "engine": "freemarker",
   "dialect": "POSTGRES",
   "display_name": "Fetch Orders in Date Range",
-  "description": "Pulls orders with optional filter on cancellation status.",
-  "params_schema": {
-    "start_date": {
-      "type": "DATE",
-      "description": "Inclusive start date."
-    },
-    "end_date": {
-      "type": "DATE",
-      "description": "Inclusive end date."
-    },
-    "include_cancelled": {
-      "type": "BOOLEAN",
-      "description": "Whether to include cancelled orders.",
-      "default": false
-    }
-  },
+  "description": "Pulls orders between start_date and end_date (DATE), with an include_cancelled (BOOLEAN) switch. Intended for pipelines that declare those three parameters.",
   "imports": [
-    {"id": "lib_date_filters.sql", "version": 1}
+    {"id": "lib_date_filters.sql", "version": 1, "alias": "dates"}
   ],
-  "body": "SELECT\n  order_id,\n  customer_id,\n  total_amount,\n  order_date,\n  status\nFROM orders\nWHERE order_date BETWEEN '${start_date}' AND '${end_date}'\n<#if !include_cancelled>\n  AND status <> 'CANCELLED'\n</#if>\n<@lib.date_range_status />",
+  "body": "SELECT\n  order_id,\n  customer_id,\n  total_amount,\n  order_date,\n  status\nFROM orders\nWHERE <@dates.date_range column=\"order_date\" start=start_date end=end_date />\n<#if !include_cancelled>\n  AND status <> 'CANCELLED'\n</#if>",
   "created_at": "2026-08-01T10:00:00Z",
   "created_by": "user-uuid",
   "is_library": false
 }
 ```
 
+Note that the body contains **no `<#import>` directive**. The engine synthesizes the imports from the `imports` array at render time (§6.3); the body simply calls `<@dates.date_range .../>` using the declared alias.
+
 ### 3.2 Field reference
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `schema_version` | integer | yes | Currently `1`. |
+| `schema_version` | integer | yes | Currently `1`. Independent of the entity `version` below — see [Pipeline Contract §15.4](pipeline-contract.md#154-which-version-counter-governs-what). |
 | `id` | string | yes | Stable identifier. `[a-z0-9_\.\-]+`. Auto-generated if omitted on create. |
 | `version` | integer | yes | Monotonically increasing per template id. Server-assigned. |
 | `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`. Reserved for future: `"pebble"`, `"handlebars"`, `"none"` (raw SQL, no template processing). See [Enums §6](enums.md#6-templateengine--template-language). |
 | `dialect` | string (enum) | yes | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. |
 | `display_name` | string | yes | Human-readable name. |
-| `description` | string | yes | Long-form description. |
-| `params_schema` | object | yes (may be empty) | Parameter declarations. Same shape as [Pipeline Contract §5](pipeline-contract.md#5-parameters-input-map-declaration). |
-| `imports` | array of `{id, version}` | yes (may be empty) | Library templates whose macros this template uses. See §6. Only meaningful when `engine` is `"freemarker"`. |
-| `body` | string | yes | Template source. Syntax depends on `engine` (Freemarker by default). Multi-line. |
+| `description` | string | yes | Free-text, for human and agent discoverability. Not machine-validated: it is the only place a template can hint at the parameters it expects, since it declares none (§2.5). |
+| `imports` | array of `{id, version, alias}` | yes (may be empty) | Library templates whose macros this template calls, and the namespace alias each is bound to. See §6. Only meaningful when `engine` is `"freemarker"`. |
+| `body` | string | yes | Template source. Syntax depends on `engine` (Freemarker by default). Multi-line. Must **not** contain `<#import>` or `<#include>` directives (§6.3). |
 | `created_at` | ISO 8601 timestamp | yes | Server-assigned. |
 | `created_by` | string (UUID) | yes | User ID of creator. |
-| `is_library` | boolean | yes | `true` if this template exists to be imported by others (typically defines `<#macro>`s, no main body). `false` if it's executable directly. |
+| `is_library` | boolean | yes | `true` if this template exists to be imported by others. A library body contains **only `<#macro>` / `<#function>` definitions — no output outside macro definitions** (§6.2); `body` is still required. `false` if the template is executable directly by a pipeline node. |
+
+**Render context.** There is no `params_schema` field. The variables a body may reference are exactly the keys of the calling pipeline's `parameters` map, defaults applied — see [Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution).
 
 ---
 
@@ -94,7 +83,7 @@ This spec defines:
 
 ### 4.1 Freemarker version
 
-Pinned via Gradle version catalog (see [Module Structure spec](module-structure.md)). At time of writing, the latest stable Freemarker is `2.3.34` — actual pinning happens at implementation time against current stable.
+Pinned via Gradle version catalog (see [Module Structure spec](module-structure.md)). At time of writing, the latest stable Freemarker is `2.3.34` — actual pinning happens at implementation time against current stable. The `Configuration` incompatible-improvements version in §4.3 must be kept equal to the pinned artifact version.
 
 ### 4.2 Allowed Freemarker constructs
 
@@ -104,37 +93,65 @@ Pinned via Gradle version catalog (see [Module Structure spec](module-structure.
 - `<#list items as item>` loops over collections.
 - `<#assign var=value>` local variables.
 - `<#macro name param1 param2>` macro definitions.
-- `<#import "..." as alias>` and `<#include "...">` for libraries.
+- `<@alias.macro_name .../>` calls into imported library namespaces (§6).
 - `<#function>` definitions.
 - `<#switch>`, `<#case>`.
 - Built-ins: `?c` (computer-format), `?string("...")`, `?lower_case`, `?upper_case`, `?size`, `?has_content`, `?default(...)`, etc.
 
-**Forbidden** (disabled via Freemarker config):
-- `?eval`, `?api` — arbitrary expression evaluation, Java API access.
-- `?new` — instantiates arbitrary Java classes. **Hard-disabled.**
-- `Execute`, `freemarker.template.utility.JythonRuntime`, `ObjectConstructor` — classic Freemarker SSTI vectors. Removed from the configuration's allowed classes.
-- `freemarker.cache.FileTemplateLoader` — we don't load templates from filesystem; only from in-memory strings / DB.
+**Forbidden** — rejected at save time by the body scan (`template.validation.dangerous_construct`, §7):
+- `?eval` — evaluates a string as a Freemarker expression. **There is no configuration switch that disables `?eval` in Freemarker 2.3.x** (verified against the `Configurable` setting list, §4.3), so the save-time scan is the *only* guard and is therefore normative, not belt-and-braces. With §4.3's class resolver and object wrapper in place, `?eval` cannot reach Java classes even if one slipped through — its blast radius is confined to expressions over the render context.
+- `?api` — Java API access on wrapped objects. Also disabled by configuration (§4.3).
+- `?new` — instantiates arbitrary Java classes. Hard-disabled by configuration (§4.3).
+- `Execute`, `ObjectConstructor`, `freemarker.template.utility.JythonRuntime` — the classic Freemarker SSTI vectors. Unreachable because class resolution is disabled entirely (§4.3).
+- `<#import>` and `<#include>` **inside a body**. Imports are declarative (`imports`, §6.3) and synthesized by the engine; a literal directive in a body would bypass alias/version/`is_library` validation, so it is rejected.
+- Any filesystem- or classpath-backed template loading (`freemarker.cache.FileTemplateLoader`, `ClassTemplateLoader`). Templates come only from the registry (§4.3).
 
 ### 4.3 Security configuration
 
+Templates are authored by authenticated users but are still *untrusted input* to the render engine — configure for the hostile case. Freemarker's own FAQ (item 23, "allowing users to upload templates") is the reference; every setting below was checked against the Freemarker 2.3.x `Configurable` / `Configuration` / `TemplateClassResolver` javadoc.
+
 ```kotlin
-val freemarkerConfig = Configuration(Configuration.VERSION_2_3_34).apply {
-    templateLoader = StringTemplateLoader()        // bodies come from DB
-    objectWrapper = DefaultObjectWrapperBuilder(Configuration.VERSION_2_3_34)
-        .build().apply {
-            externalsCatchAll = false
-        }
+val fmVersion = Configuration.VERSION_2_3_34   // keep equal to the pinned catalog version (§4.1)
 
-    // Disable dangerous built-ins
-    setSetting("builtin_classes", "")              // no ObjectConstructor, Execute, etc.
-    setSetting("new_builtin_class_resolver", TemplateClassResolver.SAFER_RESOLVER)
+val freemarkerConfig = Configuration(fmVersion).apply {
+    // 1. Templates come only from the registry, keyed "id@version" (§6.3).
+    //    No FileTemplateLoader, no ClassTemplateLoader — nothing filesystem- or classpath-backed.
+    templateLoader = RegistryTemplateLoader(templateRegistry)
 
-    // No Jython/Groovy/scripting
-    setSetting("template_exception_handler", TemplateExceptionHandler.RETHROW_HANDLER)
+    // 2. No class resolution at all — kills ?new, ObjectConstructor, Execute, JythonRuntime.
+    //    ALLOWS_NOTHING_RESOLVER, NOT SAFER_RESOLVER: Freemarker's own FAQ states
+    //    SAFER_RESOLVER is "not restrictive enough" for untrusted templates.
+    newBuiltinClassResolver = TemplateClassResolver.ALLOWS_NOTHING_RESOLVER
+
+    // 3. No ?api. Freemarker's default is already false; set it explicitly so a
+    //    future default change cannot silently open it.
+    isAPIBuiltinEnabled = false
+
+    // 4. The render context holds only canonical-typed scalars and lists (§4.4),
+    //    so the wrapper never needs to expose Java members at all.
+    objectWrapper = SimpleObjectWrapper(fmVersion)
+
+    // 5. Render failures propagate as errors — never partially into the SQL string.
+    templateExceptionHandler = TemplateExceptionHandler.RETHROW_HANDLER
+    logTemplateExceptions = false
 }
 ```
 
-> **Verification needed:** Confirm the exact Freemarker config keys for the version pinned. Freemarker's hardening knobs evolve; cite the docs for the pinned version.
+**Verified (2026-08-07, against the Apache Freemarker 2.3.x javadoc and FAQ):**
+- `Configurable.setNewBuiltinClassResolver(TemplateClassResolver)` exists; `TemplateClassResolver.ALLOWS_NOTHING_RESOLVER` ("doesn't allow resolving any classes"), `SAFER_RESOLVER`, and `UNRESTRICTED_RESOLVER` are the three published constants.
+- `Configurable.setAPIBuiltinEnabled(boolean)` exists and is initialized to `false` by the `Configurable` constructor.
+- `Configurable.setTemplateExceptionHandler(TemplateExceptionHandler)` exists; `RETHROW_HANDLER` is a published handler.
+- **No setting named `builtin_classes` exists**, and **no `externalsCatchAll` property exists** on `BeansWrapperConfiguration` (its exposure knobs are `setExposureLevel(int)`, `setExposeFields(boolean)`, `setMemberAccessPolicy(MemberAccessPolicy)`). Both appeared in the v1.0 draft of this section and were invented; they are deleted.
+- Freemarker "cannot enforce CPU/memory limits" (FAQ) — the render timeout below therefore cannot be a Freemarker setting.
+
+**Implementation gate — verify before merging the engine module:**
+1. Accessor forms only: confirm the Kotlin property spellings (`isAPIBuiltinEnabled`, `newBuiltinClassResolver`, `logTemplateExceptions`) resolve against the pinned artifact, and the `SimpleObjectWrapper(Version)` constructor arity. The *requirements* above are fixed; only the call spelling is subject to this check.
+2. If the render context ever grows beyond canonical scalars/collections, `SimpleObjectWrapper` must be replaced by a `DefaultObjectWrapperBuilder` configured with a `WhitelistMemberAccessPolicy` — not by relaxing the resolver.
+3. Re-read the Freemarker `SECURITY.md` advisories for the pinned version and add any new hardening knob it introduces.
+
+**Render guards.** Two limits apply to every render, both configured centrally — see [Configuration §3.9](configuration.md#39-templates); this doc never restates their defaults:
+- `datapipelines.templates.render-timeout-ms` — wall-clock cap on a single render. Because Freemarker has no timeout setting, the render runs on a bounded worker and a watchdog aborts it at the cap: interrupt the rendering thread, then discard the partial output. Exceeding the cap fails the node with `pipeline.node.template_render_failed`. *(Implementation gate: confirm how the pinned Freemarker version observes `Thread.interrupt()` mid-render; if it does not abort promptly, the worker must be abandoned rather than joined.)*
+- Output size — a render whose accumulated output exceeds the staging batch memory budget is aborted under the same error code. Memory accounting rules are owned by [Staging §8](staging.md).
 
 ### 4.4 Type-aware interpolation
 
@@ -165,7 +182,7 @@ For SQL contexts requiring quoted values, the template author wraps the interpol
 ### 5.1 Rules
 
 - Versions are integers, monotonically increasing per template id.
-- Each version is immutable — body, params_schema, dialect cannot be changed once stored.
+- Each version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once stored.
 - Deleting a template (soft delete) does not affect existing versions. Pipelines referencing deleted templates' versions continue to work until those pipelines are explicitly modified.
 - Versions never reused, never renumbered.
 
@@ -180,10 +197,12 @@ Soft-delete            → version 3 marked deleted; pipelines referencing v1/v2
 
 ### 5.3 What "update" means
 
-`PUT /templates/{id}` creates a new version. The request body contains new `body`, `params_schema`, etc. The server:
-1. Validates the new body against Freemarker (parse + render with sample context).
+`PUT /templates/{id}` creates a new version. The request body contains the new `body`, `imports`, etc. The server:
+1. Runs the full §7 validation set — Freemarker **parse only**, forbidden-construct scan, and import-graph resolution. No render is attempted: a template does not know its callers' parameters, so there is no context to render against (§7.1).
 2. Stores as a new version (current version + 1).
 3. Does NOT modify or remove previous versions.
+
+Existing pipelines are unaffected: they pin `{id, version}`, so a new version is invisible to them until a pipeline is edited to reference it — at which point that pipeline's save re-runs the dry-render check ([Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
 
 ---
 
@@ -198,7 +217,7 @@ Library templates solve this. A library template defines `<#macro>`s that other 
 ### 6.2 Example library template
 
 ```ftl
-<#-- lib_date_filters.sql version 1 -->
+<#-- lib_date_filters.sql version 1 — is_library: true -->
 <#macro date_range column start end>
   ${column} BETWEEN '${start}' AND '${end}'
 </#macro>
@@ -208,39 +227,43 @@ Library templates solve this. A library template defines `<#macro>`s that other 
 </#macro>
 ```
 
-Marked `is_library: true`. Has no main body — only macros.
+Marked `is_library: true`. The `body` field is still **required** — it is where the macros live. What a library must not have is **output outside macro definitions**: everything at the top level is `<#macro>` / `<#function>` / comments. A library that emits text of its own would inject that text into every importer.
 
 ### 6.3 Importing in a regular template
 
-```ftl
-<#import "lib_date_filters.sql" as lib>
-
-SELECT order_id, customer_id, total_amount
-FROM orders
-WHERE <@lib.date_range column="order_date" start=start_date end=end_date />
-  AND status = 'ACTIVE'
-```
-
-The template's `imports` field declares which library templates it uses:
+A template declares its libraries in the `imports` array. Each entry binds one library version to one namespace alias:
 
 ```json
 "imports": [
-  {"id": "lib_date_filters.sql", "version": 1}
+  {"id": "lib_date_filters.sql", "version": 1, "alias": "dates"}
 ]
 ```
 
+The body then calls the macros through the alias — and contains **no import directive**:
+
+```ftl
+SELECT order_id, customer_id, total_amount
+FROM orders
+WHERE <@dates.date_range column="order_date" start=start_date end=end_date />
+  AND status = 'ACTIVE'
+```
+
 The render engine:
-1. Loads each imported library template (by id+version, from registry).
-2. Builds a combined Freemarker namespace.
-3. Renders the main template body.
+1. Resolves each `imports` entry to a stored library version and registers it with the template loader under the key `"{id}@{version}"`.
+2. **Synthesizes** the equivalent `<#import "{id}@{version}" as {alias}>` prologue from the array — the author never writes it, so an alias can never point at an unvalidated, unpinned, or non-library template.
+3. Resolves transitive imports the same way (a library's own `imports` array), building the full closure.
+4. Renders the main body against the pipeline's parameter map.
+
+Because the loader only ever resolves `"{id}@{version}"` keys against the registry, there is no template name a body could reference to escape the registry — which is why §4.2 forbids literal `<#import>`/`<#include>`.
 
 ### 6.4 Import resolution rules
 
-- Imports are resolved by `{id, version}` from the template registry.
-- Version pinning is explicit — bumping a library to v2 does NOT silently change templates that imported v1. Authors must update the importing template to use v2.
-- Imports are transitive: library A can import library B. The render engine resolves the full closure.
-- Cycles forbidden: A imports B, B imports A → `template.import.cycle_detected`.
-- Max import depth: 10 (configurable). Prevents pathological nesting.
+- Imports are resolved by `{id, version}` from the template registry — exact version, no ranges, no "latest".
+- Version pinning is explicit — bumping a library to v2 does NOT silently change templates that imported v1. Authors must update the importing template to use v2 (which creates a new version of the importer).
+- An imported template must exist at that exact version (`template.validation.import_not_found`) and must have `is_library: true` (`template.validation.import_not_library`).
+- Aliases must be unique within a template's `imports` array (`template.validation.duplicate_alias`). Two libraries may share macro names as long as their aliases differ — that is what namespacing is for.
+- Imports are transitive: library A can import library B. Transitive depth is capped at **10** (`template.validation.import_depth_exceeded`). The cap is a fixed constant, not a config key.
+- Cycles forbidden: A imports B, B imports A → `template.validation.import_cycle`.
 
 ### 6.5 Library promotion across environments
 
@@ -250,38 +273,36 @@ Libraries are promoted like regular templates — export bundle includes them. I
 
 ## 7. Validation Rules
 
-All checks run at template create/update time.
+All checks below run at template create/update time, before anything is written (D2 — [Pipeline Contract §2](pipeline-contract.md#2-design-principles)). The canonical HTTP status and wording for each code live in the central catalog, [Pipeline Contract §13.9](pipeline-contract.md#139-template).
 
 | Code | Check |
 |---|---|
 | `template.validation.dialect_invalid` | `dialect` is in the allowed enum |
 | `template.validation.id_invalid` | `id` matches `[a-z0-9_\.\-]+`, length 1–100 |
-| `template.validation.body_malformed` | Freemarker parses the body without syntax errors |
-| `template.validation.undefined_variable` | Every `${var}` and `<#if var...>` references a variable in `params_schema` (or supplied by pipeline parameters at render time) — see §7.2 |
-| `template.validation.import_not_found` | Every `imports` entry resolves to an existing library template version |
+| `template.validation.syntax_error` | Freemarker parses the body without syntax errors |
+| `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` (see §4.2) |
+| `template.validation.duplicate_alias` | No two `imports` entries share an `alias` |
+| `template.validation.import_not_found` | Every `imports` entry resolves to an existing template at that exact version |
+| `template.validation.import_not_library` | Every imported template has `is_library: true` |
 | `template.validation.import_cycle` | Import graph is acyclic |
 | `template.validation.import_depth_exceeded` | Transitive import depth ≤ 10 |
-| `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct (see §4.2) |
-| `template.validation.params_schema_invalid` | `params_schema` parameter declarations are well-formed (per Type System rules) |
-| `template.validation.is_library_without_macros` | `is_library: true` requires at least one `<#macro>` definition |
+| `template.validation.is_library_without_macros` | `is_library: true` requires at least one `<#macro>` definition and no output outside macro definitions |
 
-### 7.1 Parse-time vs render-time validation
+### 7.1 Save-time validation is parse-only
 
-- **Parse-time** (always run on save): Freemarker syntax validity, dangerous-construct scan, import graph validity, params_schema structural validity.
-- **Render-time** (run when a pipeline using this template is created/updated): every variable referenced in the body is resolvable — either declared in `params_schema`, or supplied by the pipeline's `parameters`, or produced by a declared calculator (v2).
+- **At template save** — everything in the table above: Freemarker syntax validity, the forbidden-construct scan, and full import-graph resolution (existence, `is_library`, alias uniqueness, depth, cycles). **No render is performed.** A template declares no parameters (§2.5), so at save time there is no context to render against and no basis for a synthetic one. There is deliberately no "sample context" anywhere in this contract.
+- **At pipeline save** — the render-level check. Pipeline validation dry-renders every template its nodes reference against the pipeline's declared `parameters` (defaults where present, type-appropriate sample values otherwise). See §7.2.
+- **At execution** — nothing new is checked. Both gates above have already run; a render failure at execution time is a bug or an environment drift, and surfaces as `pipeline.node.template_render_failed` (§8.2).
 
-### 7.2 The undefined-variable rule
+### 7.2 The dry-render rule (owned by pipeline validation)
 
-This is the most subtle validation. The rule:
+The rule that catches template/pipeline drift lives on the **pipeline** side, because only a pipeline knows the parameters:
 
-**At pipeline-validation time, for every template referenced by every node, every Freemarker variable used in the template body must be resolvable** to one of:
-1. A parameter declared in the template's own `params_schema`.
-2. A parameter declared in the pipeline's `parameters` (passed via the context).
-3. (v2) A calculator output declared in the pipeline's `calculators` block.
+**At pipeline save, for every template referenced by every node, the template (plus its resolved import closure) must render successfully against the pipeline's declared `parameters`.** Any Freemarker variable the body references that has no corresponding pipeline parameter is an undefined-variable render failure, and validation fails with `pipeline.validation.template_parameter_undeclared`.
 
-If any variable is unresolvable, validation fails with `pipeline.validation.template_parameter_undeclared`.
+Normative definition: [Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution) and [§12.6](pipeline-contract.md#126-template-validations). This catches typos and template-pipeline drift at write time, not at execution time.
 
-This catches typos and template-pipeline drift at write time, not at execution time.
+A consequence worth stating plainly: a template that is perfectly valid on its own can still be un-referenceable by a given pipeline. That is intended — the template is reusable, and each pipeline proves for itself that it supplies what the template needs.
 
 ---
 
@@ -290,30 +311,33 @@ This catches typos and template-pipeline drift at write time, not at execution t
 ### 8.1 Single-template render
 
 ```
-Input: TemplateRef{id, version}, Context{map of variables}
+Input: TemplateRef{id, version}, Context{the pipeline's full parameter map, defaults applied}
 Process:
-  1. Look up template body + params_schema from registry by {id, version}
-  2. Resolve imports (transitively)
-  3. Build combined Freemarker namespace (main template + imported libraries)
-  4. Validate every variable in context satisfies the template's params_schema (type check)
-  5. Render via Freemarker
-  6. Return SQL string
+  1. Look up template body + imports from registry by {id, version}
+  2. Resolve the import closure transitively; register each library
+     with the loader under "{id}@{version}"
+  3. Synthesize the <#import ... as alias> prologue from the imports array
+  4. Render body + prologue via Freemarker, under the §4.3 configuration
+     and the §4.4 render guards (timeout, output size)
+  5. Return SQL string
 Output: SQL string
 ```
+
+There is no per-template type-check step: the context is the pipeline's parameter map, already validated and coerced against the pipeline's own `parameters` declarations ([Pipeline Contract §6.3](pipeline-contract.md#63-wire-encoding-of-input-parameter-values)) before any render begins.
 
 ### 8.2 Error behavior
 
 - Template `{id, version}` not found → `pipeline.node.template_not_found` (should not happen — write-time validation should have caught this).
-- Variable in body not in context → `pipeline.node.template_render_failed` (details include the variable name and template id+version).
-- Type mismatch (e.g., context has STRING where DATE is expected) → `pipeline.node.template_render_failed`.
+- Variable in body not in context → `pipeline.node.template_render_failed` (details include the variable name and template id+version). Should not happen either: the pipeline's dry-render (§7.2) covers it.
+- Render exceeds `render-timeout-ms` or the output size cap → `pipeline.node.template_render_failed` (details name which guard tripped).
 - Forbidden construct somehow present (shouldn't be — caught at save time) → `pipeline.node.template_render_failed`.
 
-### 8.3 Performance
+### 8.3 Performance and caching
 
-- Templates are cached in memory after first render (LRU cache, configurable size, default 1000 templates).
-- Cache key: `{template_id, version, import_versions}`.
-- Cache invalidated on template update (new version → new cache entry; old entry remains for in-flight executions).
-- Render itself is fast (<10ms typical for templates up to ~5KB body).
+- Parsed templates are cached in memory after first render. Cache capacity is `datapipelines.templates.cache-size` — see [Configuration §3.9](configuration.md#39-templates). This doc does not restate the default.
+- Cache key: `{template_id, version, resolved import closure versions}`.
+- Cache invalidated on template update by construction: a new version is a new cache key; the old entry remains valid for in-flight executions, which is exactly the immutability guarantee (§5.1).
+- Render itself is fast (<10ms typical for templates up to ~5KB body). The `render-timeout-ms` guard (§4.3) exists for pathological bodies, not for the normal path.
 
 ---
 
@@ -328,8 +352,10 @@ Output: SQL string
 | List | `GET /templates?dialect={d}&q={search}` |
 | Delete (soft) | `DELETE /templates/{id}` |
 | List versions | `GET /templates/{id}/versions` |
-| Render against sample context | `POST /templates/{id}/versions/{version}/render` |
+| Preview render with a caller-supplied context | `POST /templates/{id}/versions/{version}/render` |
 | Import library bundle | `POST /templates/import` |
+
+The `/render` endpoint is an **editor preview affordance only** — the caller explicitly supplies the variable map to render against. It is not a validation step and it never runs implicitly: template save is parse-only (§7.1), and the authoritative render check is the pipeline dry-render (§7.2).
 
 ---
 
@@ -338,11 +364,11 @@ Output: SQL string
 The UI template editor (in `web` module) provides:
 
 - **Syntax highlighting** for Freemarker + SQL.
-- **Live preview** via `/render` endpoint — type sample context values, see rendered SQL.
-- **Validation feedback** — error markers for parse errors, undefined variables, forbidden constructs.
-- **Library browser** — pick library templates to import from a searchable list.
+- **Live preview** via the `/render` endpoint — the author types a variable map by hand and sees the rendered SQL. Purely an authoring aid (§9).
+- **Validation feedback** — error markers for parse errors, forbidden constructs, and import-resolution failures (the §7 checks). Undefined-variable feedback is *not* available here; it appears when the template is wired into a pipeline (§7.2).
+- **Library browser** — pick library templates to import from a searchable list; picking one appends an `{id, version, alias}` entry to `imports` (the editor never writes `<#import>` into the body).
 - **Version history** — view diff between versions, restore old version (creates new version with old body).
-- **Test render against real datasources** (optional) — for templates targeting `tempdb`, can render and run against the user's own H2 instance.
+- **Test render against a scratch tempdb** (optional) — available for templates whose `dialect` matches the dialect of the tempdb engine. The engine is declared per pipeline in `settings.tempdb.engine` (H2 in v1; DuckDB templates become testable this way when that engine lands) — see [Pipeline Contract §12.6](pipeline-contract.md#126-template-validations). The editor does not hardcode H2.
 
 ---
 
@@ -352,17 +378,18 @@ The Template entity is **versioned, additive-only**.
 
 ### 11.1 Frozen in v1
 
-- The Template JSON shape (top-level fields, `params_schema` structure, `imports` structure).
+- The Template JSON shape (top-level fields, `imports` entry shape `{id, version, alias}`).
+- The rule that templates declare no parameters of their own — the pipeline's `parameters` is the single declaration point.
 - The Freemarker integration contract (allowed/forbidden constructs).
 - The `is_library` convention.
-- The import resolution rules.
+- The import resolution rules, including body-never-imports.
 - The version-immutability guarantee.
 
 ### 11.2 Not frozen
 
 - New optional fields (`tags`, `metadata`, etc.) may be added non-breakingly.
-- The render cache configuration is deployment-specific.
-- Future template languages beyond Freemarker are out of scope but possible (would be a new `engine` field).
+- The render cache and timeout configuration are deployment-specific ([Configuration §3.9](configuration.md#39-templates)).
+- Future template languages beyond Freemarker are out of scope but possible (would be a new `engine` value).
 
 ---
 
@@ -374,46 +401,33 @@ The Template entity is **versioned, additive-only**.
 
 - `co.datapipelines.templates.Template` data class
 - `co.datapipelines.templates.TemplateVersion` data class
+- `co.datapipelines.templates.TemplateImport` data class (`id`, `version`, `alias`)
 - `co.datapipelines.templates.TemplateRegistry` — lookup by id+version, caching
-- `co.datapipelines.templates.TemplateEngine` — wraps Freemarker, exposes `render(ref, context): String`
+- `co.datapipelines.templates.RegistryTemplateLoader` — the Freemarker `TemplateLoader` of §4.3; resolves only `"{id}@{version}"` keys against the registry
+- `co.datapipelines.templates.TemplateEngine` — wraps Freemarker, exposes `render(ref, context): String`, owns the §4.3 render guards
 - `co.datapipelines.templates.TemplateValidator` — runs §7 checks
-- `co.datapipelines.templates.LibraryResolver` — resolves transitive imports
+- `co.datapipelines.templates.LibraryResolver` — resolves transitive imports, enforces depth/cycle/alias rules
+
+The module's public API carries no parameter-schema types.
 
 ### 12.2 Persistence
 
-`templates` and `template_versions` tables in the app's metadata DB. Schema:
+`templates` and `template_versions` live in the app's metadata DB. **The DDL is defined once, in [Metadata DB §4](metadata-db.md) — that spec is the sole DDL authority (D4) and this section deliberately carries no `CREATE TABLE` block.**
 
-```sql
-CREATE TABLE templates (
-  id           VARCHAR(100) PRIMARY KEY,
-  display_name VARCHAR(255) NOT NULL,
-  description  TEXT,
-  is_library   BOOLEAN NOT NULL DEFAULT FALSE,
-  is_deleted   BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_by   UUID NOT NULL,
-  current_version INTEGER NOT NULL
-);
-
-CREATE TABLE template_versions (
-  template_id  VARCHAR(100) NOT NULL REFERENCES templates(id),
-  version      INTEGER NOT NULL,
-  dialect      VARCHAR(20) NOT NULL,
-  params_schema JSONB NOT NULL,
-  imports      JSONB NOT NULL,         -- array of {id, version}
-  body         TEXT NOT NULL,
-  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_by   UUID NOT NULL,
-  PRIMARY KEY (template_id, version)
-);
-```
+What metadata-db must express for this spec to hold:
+- `template_versions` carries `engine` and `is_library` alongside `dialect`, `imports` (JSONB), and `body`.
+- There is **no `params_schema` column** on either table.
+- `imports` JSONB is an array of `{id, version, alias}` (§3.2).
+- `(template_id, version)` is the primary key; versions are never updated in place (§5.1).
 
 ### 12.3 Testing
 
-- Unit tests for `TemplateValidator` covering every check in §7.
-- Round-trip tests: every sample template in `docs/examples/` must parse, validate, and render against its sample context.
-- Forbidden-construct tests: every Freemarker SSTI vector (from public security advisories) must be rejected at save time.
-- Library import tests: transitive imports, depth limits, cycle detection, missing library handling.
+- Unit tests for `TemplateValidator` covering every check in §7, including the negative cases: duplicate alias, import of a non-library template, depth 11, and a two-node cycle.
+- Round-trip tests: every sample template in `docs/examples/` must parse, validate, and resolve its import closure. Render assertions belong to the pipeline fixtures that supply the parameters.
+- Forbidden-construct tests: every Freemarker SSTI vector (from public security advisories) must be rejected at save time, and a literal `<#import>` in a body must be rejected.
+- Hardening tests: with the §4.3 configuration, `?new`, `?api`, `Execute`, and `ObjectConstructor` must all fail at render even when the save-time scan is bypassed — the two layers are tested independently.
+- Library import tests: transitive imports, depth limits, cycle detection, missing library handling, alias namespacing of same-named macros in two libraries.
+- Render-guard tests: a runaway `<#list>` trips `render-timeout-ms`; an oversized output trips the size cap.
 - Performance tests: render latency for templates up to 50KB body, 20 imports deep.
 
 ---
@@ -422,7 +436,7 @@ CREATE TABLE template_versions (
 
 Out of scope for v1:
 
-- **Alternative engines**: support Pebble, Handlebars, or Thymeleaf for SQL alongside Freemarker. New `engine` field on templates. Not v1.
+- **Alternative engines**: support Pebble, Handlebars, or Thymeleaf for SQL alongside Freemarker. New `engine` value on templates. Not v1.
 - **Parameterized SQL output**: instead of rendering to a single SQL string, render to `{sql, params}` for prepared-statement execution. Closes the SQL-injection gap. v1.1 candidate.
 - **Multi-dialect templates**: a single template with dialect-conditional sections (`<#if dialect == "ORACLE">...<#else>...</#if>`). v2 candidate.
 - **Template testing framework**: declarative test cases per template (`given this context, render should match this expected SQL`). Useful for regression testing.
@@ -432,7 +446,7 @@ Out of scope for v1:
 
 ## Appendix A: Worked Example
 
-### Library: `lib_aggregate.sql` v1
+### Library: `lib_aggregate.sql` v1 (`is_library: true`)
 
 ```ftl
 <#macro sum_by group_by_column value_column table>
@@ -452,11 +466,21 @@ Out of scope for v1:
 </#macro>
 ```
 
-### Pipeline template: `monthly_revenue.sql` v3
+Nothing outside the macro definitions — the library emits no output of its own (§6.2).
+
+### Pipeline template: `monthly_revenue.sql` v3 (`is_library: false`)
+
+Its `imports` array:
+
+```json
+"imports": [
+  {"id": "lib_aggregate.sql", "version": 1, "alias": "agg"}
+]
+```
+
+Its `body` — no `<#import>` directive; the engine synthesizes `<#import "lib_aggregate.sql@1" as agg>`:
 
 ```ftl
-<#import "lib_aggregate.sql" as agg>
-
 WITH revenue AS (
   <@agg.sum_by
      group_by_column="customer_id"
@@ -473,7 +497,22 @@ WHERE r.total >= ${min_total?c}
 ORDER BY r.total DESC
 ```
 
-### Render against context `{min_total: BigDecimal("1000.00")}`
+### Render context
+
+The template declares nothing. The context is the calling **pipeline's** parameter map, which must therefore declare `min_total`:
+
+```json
+"parameters": {
+  "min_total": {
+    "type": "BIGDECIMAL", "required": false, "default": "1000.00",
+    "precision": 12, "scale": 2
+  }
+}
+```
+
+At pipeline save, the dry-render (§7.2) renders this template against `{min_total: BigDecimal("1000.00")}` and succeeds. Had the pipeline omitted `min_total`, the save would fail with `pipeline.validation.template_parameter_undeclared`.
+
+### Rendered SQL
 
 ```sql
 WITH revenue AS (
@@ -501,3 +540,4 @@ ORDER BY r.total DESC
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |
 | 2026-08-05 | v1.1 | propagation | Added `engine` field to Template entity (default `"freemarker"`; future-proofing for Pebble/Handlebars/raw-SQL). Updated `body` and `imports` field descriptions to be engine-aware. Renamed `__staging__` → `tempdb` in UI editor section. |
+| 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08 §2.8](SPEC-REVIEW-2026-08.md#28-templatesmd): removed `params_schema` entirely (D3 — pipeline `parameters` is the single declaration point; template save is parse-only, dry-render moved to pipeline save); `imports` entries become `{id, version, alias}` with engine-synthesized `<#import>` and body-never-imports (D12); `is_library` corrected to "no output outside macro definitions", `body` required (D12); `template.import.cycle_detected` → `template.validation.import_cycle`, `body_malformed` → `syntax_error`, added `duplicate_alias` / `import_not_library` (D5); §4.3 Freemarker hardening rewritten against the verified 2.3.x API (invented `externalsCatchAll` / `builtin_classes` deleted; `ALLOWS_NOTHING_RESOLVER` replaces `SAFER_RESOLVER`) with an implementation-gate checklist; render guards reference [Configuration §3.9](configuration.md#39-templates) (D8); §12.2 DDL replaced by a pointer to [Metadata DB](metadata-db.md) (D4); §10 tempdb dialect derived from `settings.tempdb.engine`; fixed the §3.2 link to [Pipeline Contract §6](pipeline-contract.md#6-parameters-input-map-declaration). |

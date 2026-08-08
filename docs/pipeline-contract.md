@@ -699,6 +699,8 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.staging.creation_failed` | 500 | Could not create tempdb instance |
 | `pipeline.staging.cleanup_failed` | 500 | Could not clean up tempdb instance (leaked; logged) |
 | `pipeline.staging.memory_limit_exceeded` | 500 | Per-execution memory limit hit |
+| `pipeline.staging.invalid_column_name` | 500 | Source column label fails identifier validation or duplicates another in the same result set ([Staging §4.5](staging.md#45-identifier-safety)) |
+| `pipeline.staging.table_already_exists` | 500 | Staged CREATE TABLE targets a name already staged in this execution (defensive; save-time uniqueness is the primary guard) |
 
 ### 13.6 Type mapping
 
@@ -742,6 +744,9 @@ Defined and described in [Templates §7](templates.md#7-validation).
 |---|---|---|
 | `template.validation.syntax_error` | 400 | Freemarker parse failure |
 | `template.validation.dangerous_construct` | 400 | Forbidden Freemarker construct (SSTI hardening, Templates §4.2) |
+| `template.validation.id_invalid` | 400 | Template `id` fails the identifier rules |
+| `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum |
+| `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |
 | `template.validation.import_not_found` | 400 | `imports` entry references a missing template id/version |
 | `template.validation.import_not_library` | 400 | `imports` entry references a template with `is_library: false` |
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |

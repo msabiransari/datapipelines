@@ -54,6 +54,7 @@ No invalid entity ever reaches the database — pipelines, templates, datasource
 - Client disconnect (SSE consumer gone) cancels the execution after a grace period: `datapipelines.sse.disconnect-grace-seconds`, default 30. Rationale: never hold datasource connections for a caller that left.
 - Explicit cancel endpoint: `DELETE /api/v1/executions/{id}` → `ABORTED`. `ABORTED` production paths are now: client disconnect beyond grace, explicit DELETE, server shutdown.
 - dag-executor gains the plumbing spec: each running node registers its `Statement`; cancellation = `Statement.cancel()` then coroutine cancellation; tempdb connection closed in `finally`.
+- **Execution-time refinement:** cancellation requests travel through a Redis flag (`dp:cancel:{execution_id}`) checked by the executing instance on its heartbeat tick and node boundaries — so `DELETE /executions/{id}` works from any instance in the no-sticky-sessions deployment (worst-case latency ≈ one heartbeat interval). An in-memory-only registry would have made explicit cancel fail whenever the LB routed the DELETE elsewhere.
 - rest-api §6.8 rewritten: no resumption, no "poll to recover a running execution" story. On disconnect the client should assume the execution will be cancelled after grace. `Last-Event-Id` references deleted.
 - Datasource `properties` becomes two namespaced passthrough maps: `properties.hikari.*` (any HikariCP property, fed to `HikariConfig` verbatim) and `properties.jdbc.*` (driver-level properties). Validation of keys is delegated to Hikari/the driver at pool build; unknown keys fail datasource save (D2) via a test pool build. `datasource.validation.properties_invalid` redefined accordingly.
 
@@ -249,6 +250,7 @@ Legend: **[Dn]** = resolved by decision n. **[M]** = mechanical fix. Section num
 
 ### 2.12 ui-screens.md
 1. [M] Route convention stated: UI pages at root (`/pipelines`), htmx partials under `/partials/**` returning HTML fragments, JSON API under `/api/v1/**` — htmx never calls `/api/v1` (fix §4.10 to `/partials/api-keys`).
+1b. [D3] Line ~133: the template-editor "context variables form" can no longer enumerate `params_schema` variables (removed). Rework: free-form key/value context inputs (or JSON textarea) for the render-preview call — templates no longer declare their variables.
 2. [M] §5 htmx example fixed (`hx-include`/`hx-vals` for the query param, not static interpolation).
 3. [D15] Scope column references the auth matrix; §4.10 key-scope escalation rule from matrix (a key's scopes ⊆ creator's scopes).
 4. [M] §4.11 theme preference stored on the user row (PATCH `/partials/profile/theme` → UPDATE users), not session state.
@@ -297,6 +299,7 @@ Legend: **[Dn]** = resolved by decision n. **[M]** = mechanical fix. Section num
 7. [M] `-Poracle`/`-Pmysql` implementation sketch: conditional `runtimeOnly` deps in `datasources/build.gradle.kts` gated on Gradle properties; `lib/` drop-in via `bootRun`/`bootJar` classpath note.
 8. [M] Both "Verification needed" markers (MCP SDK coordinates, version catalog) kept but converted to implementation-gate checklist items with exact verification commands.
 9. [D3] `templates` module public API drops params-schema types.
+10. [M] `dag` module public API gains the types the executor rewrite introduced: `CancellationRegistry`, `CancellationHandle`, `ResultStore`, `ExecutionSlots`, `ExecutionAbortedException`, `AbortReason`, `NodeResult` (see dag-executor v1.2 §7.1, §8.3).
 
 ### 2.17 type-system.md
 1. [M] §7.1 column descriptor: add optional `nullable` field; `additionalProperties: false` → `true` with a "clients MUST ignore unknown fields" rule (fixes the §9.2 additive-evolution contradiction).

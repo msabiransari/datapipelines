@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.1 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
-**Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-08-05
+**Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
+**Last updated:** 2026-08-07
 
 ---
 
@@ -27,16 +27,18 @@ This spec defines:
 
 1. **Name-stable, env-resolved.** Datasource names are the contract between pipelines and connections. Names like `pg-prod` are stable across envs; their underlying JDBC URLs differ.
 2. **Credentials never in pipeline JSON.** Pipelines reference names only. Datasource credentials live in the Datasource Registry, encrypted at rest, never returned in GET responses.
-3. **One dialect per datasource.** The `dialect` declares the JDBC driver, type mapper, SQL behavior. Pipelines validate at write time that their template's `dialect` matches the referenced datasource's `dialect`.
+3. **One dialect per datasource.** The `dialect` declares the JDBC driver, type mapper, SQL behavior. Pipelines validate at write time that their template's `dialect` matches the referenced datasource's `dialect`. The `Dialect` value set has a single authority: [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) (mirrored, non-normatively, by [Enums §5](enums.md#5-dialect--supported-source-database-dialects)). This spec is a *consumer* of that list — §4.1 below maps each value to its driver, it does not define the set.
 4. **Pooled connections, not per-query.** Each datasource has its own HikariCP connection pool. Pipeline node executions lease connections from the pool and return them.
-5. **Health-checkable.** Every datasource can be tested via `/datasources/{name}/test`. Pipeline execution pre-checks that all referenced datasources are reachable.
+5. **Health-checkable.** Every datasource can be tested via `POST /api/v1/datasources/{name}/test`. Pipeline execution pre-checks that all referenced datasources are reachable.
 6. **Fail loudly on missing datasource.** A pipeline referencing a datasource name not in the registry fails validation at write time (`pipeline.validation.unknown_datasource`). A datasource removed at runtime causes execution to fail (`pipeline.node.datasource_not_found`).
+7. **Validate on write, universally.** No invalid datasource ever reaches the database. Every create/update runs the full §9 rule set *plus* a **test pool build** (§5.4) before the row is written — the same cross-cutting principle as [Pipeline Contract §2, principle 8](pipeline-contract.md#2-design-principles). Connection *properties* are therefore validated by HikariCP and the driver themselves, not by an allowlist maintained in this doc.
+8. **Passthrough over allowlist.** Pool and driver tuning is expressed as two namespaced passthrough maps (`properties.hikari.*`, `properties.jdbc.*`). Every HikariCP property and every driver connection property is reachable without a spec change; correctness is enforced at pool build, not by enumeration.
 
 ---
 
 ## 3. Datasource Entity
 
-### 3.1 JSON structure (request — `POST /datasources`)
+### 3.1 JSON structure (request — `POST /api/v1/datasources`)
 
 ```json
 {
@@ -47,21 +49,28 @@ This spec defines:
   "jdbc_url": "jdbc:postgresql://pg-prod.internal:5432/app_db",
   "username": "datapipelines_app",
   "password": "...",                       // write-only; never returned in GET
+  "query_timeout_seconds": 60,
   "properties": {
-    "maximum_pool_size": 10,
-    "minimum_idle": 2,
-    "connection_timeout_seconds": 30,
-    "idle_timeout_seconds": 600,
-    "max_lifetime_seconds": 1800,
-    "query_timeout_seconds": 60,
-    "ssl": true,
-    "ssl_mode": "verify-full",
-    "ssl_root_cert_path": "/etc/ssl/certs/pg-prod-ca.pem"
+    "hikari": {
+      "maximumPoolSize": 10,
+      "minimumIdle": 2,
+      "connectionTimeout": 30000,
+      "idleTimeout": 600000,
+      "maxLifetime": 1800000
+    },
+    "jdbc": {
+      "ssl": "true",
+      "sslmode": "verify-full",
+      "sslrootcert": "/etc/ssl/certs/pg-prod-ca.pem",
+      "ApplicationName": "datapipelines"
+    }
   }
 }
 ```
 
-### 3.2 JSON structure (response — `GET /datasources/{name}`)
+`properties` has exactly two reserved namespaces — `hikari` (pool properties, applied verbatim to `HikariConfig`) and `jdbc` (driver connection properties). Both are optional, both default to `{}`, and neither is allowlisted by this spec. See §5.
+
+### 3.2 JSON structure (response — `GET /api/v1/datasources/{name}`)
 
 Identical to request, except:
 - `password` is **never** returned. Replaced with `password_set: true | false`.
@@ -71,14 +80,15 @@ Identical to request, except:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Stable identifier. `[a-z0-9_-]+`, length 1–63. |
+| `name` | string | yes | Stable identifier and primary key. `[a-z0-9_-]+`, length 1–63. **Immutable** — see §11.1. |
 | `display_name` | string | yes | Human-readable name. |
-| `description` | string | yes | Long-form description. |
-| `dialect` | string (enum) | yes | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. Determines the JDBC driver, type mapper, and SQL behavior. |
+| `description` | string | **optional** | Long-form description. Absent or empty is legal; nothing in the system requires it. |
+| `dialect` | string (enum) | yes | A `Dialect` value — authority is [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) ([Enums §5](enums.md#5-dialect--supported-source-database-dialects)). Determines the JDBC driver, type mapper, and SQL behavior. |
 | `jdbc_url` | string | yes | JDBC URL for the dialect. |
 | `username` | string | yes | DB username. |
 | `password` | string | yes on write, never returned | DB password. |
-| `properties` | object | optional | Connection pool / SSL / dialect-specific config. See §5. |
+| `query_timeout_seconds` | integer | optional | `Statement.setQueryTimeout` for every node executing against this datasource. When set, it **overrides** `datapipelines.executor.node-query-timeout-seconds` — see §5.5. |
+| `properties` | object | optional | Two namespaced passthrough maps: `properties.hikari.*` and `properties.jdbc.*`. See §5. |
 
 ---
 
@@ -86,12 +96,14 @@ Identical to request, except:
 
 ### 4.1 Dialect catalog
 
+The `Dialect` value set is owned by [Type System §5](type-system.md#5-source-to-canonical-mapping-tables); this table is the driver/licensing view of it. Which drivers actually ship in the published image versus opt-in profile versus `lib/` drop-in is stated once in the [Deployment spec](deployment.md) driver matrix.
+
 | Dialect | JDBC driver (Maven coordinates) | License | Notes |
 |---|---|---|---|
 | `POSTGRES` | `org.postgresql:postgresql` | BSD-2-Clause | Clean license, ships in core. |
 | `ORACLE` | `com.oracle.database.jdbc:ojdbc11` | OTN | **User-supplied via optional Gradle profile** — see §10. |
 | `MSSQL` | `com.microsoft.sqlserver:mssql-jdbc` | MIT | Clean license, ships in core. |
-| `MYSQL` | `com.mysql:mysql-connector-j` | GPL-2.0 with FOSS exception | **Verify redistribution terms before bundling** — likely user-supplied. |
+| `MYSQL` | `com.mysql:mysql-connector-j` | GPL-2.0 with FOSS exception | **Verify redistribution terms before bundling** — treated as user-supplied (`-Pmysql` profile) until verified. See the [Deployment](deployment.md) driver matrix. |
 | `H2` | `com.h2database:h2` | MPL 2.0 / EPL 1.0 | Clean license, ships in core (also used for staging). |
 | `DUCKDB` | `org.duckdb:duckdb_jdbc` | MIT | Clean license, ships in core. |
 | `SQLITE` | `org.xerial:sqlite-jdbc` | Apache 2.0 (with SQLite public-domain bundled) | Clean license, ships in core. |
@@ -102,12 +114,14 @@ Identical to request, except:
 interface DialectAdapter {
     val dialect: Dialect
     val jdbcDriverClassName: String
-    val defaultProperties: Map<String, String>          // driver-specific defaults
+    val defaultProperties: Map<String, String>          // driver-level defaults; overridable by properties.jdbc.*
     val typeMapper: IngressTypeMapper                   // JDBC types → canonical types
-    fun validateJdbcUrl(url: String): ValidationResult  // dialect-specific URL validation
-    fun buildHikariConfig(datasource: Datasource): HikariConfig
+    fun validateJdbcUrl(url: String): ValidationResult  // dialect-specific URL validation (§6.1)
+    fun buildHikariConfig(datasource: Datasource): HikariConfig   // entity fields + defaults + properties.* (§5)
 }
 ```
+
+`buildHikariConfig` is the single place the two passthrough maps are applied, so the save-time test pool build (§5.4) and the runtime pool build (§5.2) cannot diverge.
 
 Each dialect has an implementation:
 - `PostgresDialectAdapter`
@@ -126,27 +140,42 @@ Each dialect's `typeMapper` implements the per-dialect mapping tables in [Type S
 
 ## 5. Connection Pool Configuration
 
-HikariCP is the connection pool. Default properties per datasource:
+HikariCP is the connection pool. Tuning is expressed as **two namespaced passthrough maps** under `properties` — there is no allowlist of supported keys in this spec.
 
-| Property | Default | Description |
+**`properties.hikari.*` — pool properties.** Every entry is applied **verbatim** to `HikariConfig` using HikariCP's own property names and units (camelCase names; all durations in **milliseconds**, as HikariCP defines them). Any property HikariCP supports is therefore usable without a spec change. Illustrative — *not* exhaustive, *not* an allowlist:
+
+| `properties.hikari` key | Server default when omitted | Description |
 |---|---|---|
-| `maximum_pool_size` | 10 | Max connections to the underlying DB. |
-| `minimum_idle` | 2 | Idle connections kept warm. |
-| `connection_timeout_seconds` | 30 | Max wait to acquire a connection from the pool. |
-| `idle_timeout_seconds` | 600 | Idle connection max age. |
-| `max_lifetime_seconds` | 1800 | Connection max age (forces reconnect). |
-| `query_timeout_seconds` | 60 | JDBC `Statement.setQueryTimeout`. Per-query. |
-| `ssl` | false | Enable TLS for connections. |
-| `ssl_mode` | (dialect-specific) | `disable`, `prefer`, `require`, `verify-ca`, `verify-full` (PG); equivalent for others. |
-| `ssl_root_cert_path` | (none) | Path to CA cert (server-side filesystem path). |
+| `maximumPoolSize` | 10 | Max connections to the underlying DB. |
+| `minimumIdle` | 2 | Idle connections kept warm. |
+| `connectionTimeout` | 30000 | Max wait (ms) to acquire a connection from the pool. |
+| `idleTimeout` | 600000 | Idle connection max age (ms). |
+| `maxLifetime` | 1800000 | Connection max age (ms) — forces reconnect. |
+| … any other HikariCP property | HikariCP's own default | e.g. `keepaliveTime`, `validationTimeout`, `leakDetectionThreshold`, `connectionInitSql`, `readOnly`, `transactionIsolation`. |
+
+**Server-managed keys.** `jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `metricRegistry`, and `healthCheckRegistry` are derived from the entity and from the dialect adapter. Supplying any of them under `properties.hikari` is a validation failure (`datasource.validation.properties_invalid`) rather than a silent override.
+
+**`properties.jdbc.*` — driver connection properties.** Every entry is passed through as a JDBC connection property (`HikariConfig.addDataSourceProperty`), i.e. what the driver would read from the `Properties` argument of `DriverManager.getConnection`. Values are strings. This is where TLS and driver-specific behavior live; the meaningful keys are the **driver's**, and each dialect adapter contributes `defaultProperties` (§4.2) that callers may override.
+
+Postgres TLS example (`sslmode` values are the [`SslMode`](enums.md#14-sslmode--datasource-tls-mode) catalog):
+
+| `properties.jdbc` key (PG) | Example | Description |
+|---|---|---|
+| `ssl` | `"true"` | Enable TLS. |
+| `sslmode` | `"verify-full"` | `disable` \| `prefer` \| `require` \| `verify-ca` \| `verify-full`. |
+| `sslrootcert` | `"/etc/ssl/certs/pg-prod-ca.pem"` | CA cert path on the **server** filesystem. |
+
+Other dialects use their own equivalents (MSSQL `encrypt`/`trustServerCertificate`, MySQL `useSSL`/`sslMode`, Oracle wallet properties); this spec does not restate driver documentation.
+
+**Rationale.** An allowlist of pool keys guarantees the one property an operator needs is the one we forgot. Passthrough plus save-time pool construction (§5.4) gives full coverage *and* fails invalid configuration before the row is written.
 
 ### 5.1 Pool sizing guidance
 
-Per datasource, `maximum_pool_size` should be sized to:
+Per datasource, `properties.hikari.maximumPoolSize` should be sized to:
 - **Support concurrent pipeline node executions** against this datasource.
 - **Stay under the source DB's connection limit.**
 
-Default 10 is conservative. High-traffic datasources can be tuned up. The executor's `max-parallel-nodes` default (4) means up to 4 simultaneous queries against the same datasource within one execution; across executions, the pool is shared.
+Default 10 is conservative. High-traffic datasources can be tuned up. `datapipelines.executor.max-parallel-nodes` ([Configuration §3.2](configuration.md#32-executor), default 4) means up to 4 simultaneous queries against the same datasource within one execution; across executions, the pool is shared, so the practical upper bound is `max-parallel-nodes × concurrent executions touching this datasource`.
 
 ### 5.2 Pool lifecycle
 
@@ -155,22 +184,54 @@ Default 10 is conservative. High-traffic datasources can be tuned up. The execut
 - On datasource update (PUT), the old pool is drained and a new one initialized.
 - On datasource delete (soft), the pool is drained and refused new leases.
 
+**Concurrency.** `poolFor(datasource)` (§6.1) is called from many executor coroutines at once, so lazy initialization must be **atomic**: pools live in a `ConcurrentHashMap<String, ConnectionPool>` keyed by datasource name and are created with `computeIfAbsent`, so exactly one `HikariDataSource` is constructed per datasource even under a concurrent first-lease burst. Two consequences the implementation must respect:
+
+- The mapping function does no blocking I/O beyond `HikariDataSource` construction (Hikari fills the pool asynchronously; `initializationFailTimeout` is left at Hikari's default for runtime pools, so an unreachable DB surfaces as a lease failure, not a map-wide stall).
+- Replacement on update/delete is `remove()`-then-`close()` on the **evicted** pool, never `close()` on a pool still reachable from the map — in-flight leases drain against the old instance while new leases go to the new one.
+
 ### 5.3 Lease lifecycle
 
 ```kotlin
 suspend fun <T> withConnection(datasourceName: String, block: (Connection) -> T): T {
     val datasource = registry.get(datasourceName) ?: throw DatasourceNotFoundException(...)
     val pool = poolFor(datasource)
-    val connection = pool.connection    // blocks up to connection_timeout
+    val connection = pool.connection    // blocks up to hikari connectionTimeout
     return try {
-        block(connection)
+        block(connection)               // caller sets Statement.setQueryTimeout per §5.5
     } finally {
         connection.close()              // returns to pool
     }
 }
 ```
 
-Acquisition timeout (30s default) exceeded → `pipeline.node.datasource_connection_failed`.
+No credential decryption happens on this path — the pool already holds the credential from its build (§7.4).
+
+Acquisition timeout (`properties.hikari.connectionTimeout`, 30 000 ms default) exceeded → `pipeline.node.datasource_connection_failed`.
+
+### 5.4 Test pool build (save-time validation)
+
+Datasource create and update run a **test pool build** before the row is written — this is how the passthrough model of §5 stays safe without an allowlist, and it is this entity's instance of the universal validate-on-write principle ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)).
+
+Sequence:
+
+1. The dialect adapter builds a `HikariConfig` from the entity fields plus `defaultProperties`.
+2. Every `properties.hikari.*` entry is applied to that `HikariConfig`. HikariCP resolves property names reflectively — an unknown name, a wrong value type, or an out-of-range value throws here.
+3. Every `properties.jdbc.*` entry is added via `addDataSourceProperty`.
+4. `HikariConfig.validate()` runs, then a `HikariDataSource` is constructed with `initializationFailTimeout = -1` so **no connection to the source database is required** to save the entity.
+5. The test pool is closed. Nothing from it is retained.
+
+Any failure in steps 2–4 rejects the save with `datasource.validation.properties_invalid`; the error `details` carry the offending key and the underlying message.
+
+**Limits of this check, stated honestly:** it validates *pool* configuration completely and *driver* property **names** only to the extent the driver rejects unknowns at `Properties` parse time. Driver properties that are only interpreted while opening a socket (a bad `sslrootcert` path, an unsupported `sslmode` value) surface at first connection and via `POST /api/v1/datasources/{name}/test` (§8.1) — not at save. Save-time validation guarantees a *constructible* pool, not a *reachable* database; reachability is deliberately not a save precondition (a datasource may legitimately be registered before its network path exists).
+
+### 5.5 Query timeout precedence
+
+Per-node JDBC statement timeouts resolve in exactly one order:
+
+1. The datasource's `query_timeout_seconds`, **when set** — it wins for every node executing against this datasource.
+2. Otherwise `datapipelines.executor.node-query-timeout-seconds` (default 60), defined in [Configuration §3.2](configuration.md#32-executor).
+
+The executor applies the resolved value with `Statement.setQueryTimeout` per node. This is the only place the precedence is stated; other docs reference it. Note this is a *per-statement* timeout and is independent of `datapipelines.executor.execution-timeout-seconds`, which bounds the whole execution.
 
 ---
 
@@ -183,16 +244,54 @@ interface DatasourceRegistry {
     fun list(): List<Datasource>
     fun get(name: String): Datasource?       // null if not registered or soft-deleted
     fun exists(name: String): Boolean
-    fun save(datasource: Datasource): Datasource   // create or update
+    fun save(datasource: Datasource): Datasource   // create or update; validates first (§5.4, §9)
     fun delete(name: String): DeleteResult         // soft delete; fails if in use
-    fun poolFor(datasource: Datasource): ConnectionPool
+    fun poolFor(datasource: Datasource): ConnectionPool   // lazy, thread-safe (§5.2)
     fun testConnection(name: String): TestResult
+    fun validate(datasource: Datasource): ValidationResult
 }
 ```
 
+Return types:
+
+```kotlin
+/** Outcome of a soft delete. Never throws for the in-use case — the caller needs the list. */
+data class DeleteResult(
+    val deleted: Boolean,
+    val name: String,
+    val errorCode: String? = null,          // 'datasource.in_use' when deleted = false
+    val referencingPipelines: List<String> = emptyList()   // pipeline ids blocking the delete
+)
+
+/** Outcome of a live connectivity probe (§8.1). Failure is data, not an exception. */
+data class TestResult(
+    val connected: Boolean,
+    val testedAt: Instant,
+    val latencyMs: Long? = null,            // present when connected
+    val serverVersion: String? = null,      // DatabaseMetaData.getDatabaseProductVersion(), when connected
+    val error: String? = null,              // message, when not connected
+    val errorClass: String? = null          // exception FQCN, when not connected
+)
+
+/** Outcome of save-time validation (§5.4, §9). Also returned by DialectAdapter.validateJdbcUrl. */
+data class ValidationResult(
+    val valid: Boolean,
+    val errors: List<ValidationError> = emptyList()
+) {
+    data class ValidationError(
+        val code: String,                   // a §9 code, e.g. 'datasource.validation.properties_invalid'
+        val field: String?,                 // JSON pointer-ish path, e.g. 'properties.hikari.maximumPoolSize'
+        val message: String                 // human-readable; safe to surface (never contains credentials)
+    )
+    companion object { fun ok() = ValidationResult(true) }
+}
+```
+
+`ValidationResult.errors` is **complete, not first-failure** — a save returns every rule that failed so the UI can render one form pass. `TestResult.error` and `ValidationResult.ValidationError.message` are redaction-scrubbed: neither ever carries `password` or the credential portion of a JDBC URL (redaction rules: [Observability spec](observability.md)).
+
 ### 6.2 In-use check on delete
 
-`DELETE /datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline references this name. The error response includes the list of pipelines using it, so the operator can clean up.
+`DELETE /api/v1/datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline references this name. The error response includes the list of pipelines using it (`DeleteResult.referencingPipelines`), so the operator can clean up.
 
 ### 6.3 Cache
 
@@ -208,49 +307,57 @@ interface DatasourceRegistry {
 
 Passwords are **never** stored in plaintext. Encryption approach:
 
-- AES-256-GCM with a master key.
-- Master key sourced from one of (in priority order):
-  1. `DATAPIPLEINES_DB_ENCRYPTION_KEY` environment variable (raw 32-byte base64).
-  2. External KMS (AWS KMS, GCP KMS, HashiCorp Vault) — integration TBD per deployment.
-  3. Generated on first run, stored at `${data_dir}/master.key` with `0600` permissions (single-node dev deployments only — flagged in startup logs).
+- **AES-256-GCM** with a single master key. Stored value = nonce ‖ ciphertext ‖ auth tag; a fresh random 96-bit nonce per encryption.
+- The master key has exactly **one source**: the `datapipelines.db.encryption-key` config key (`DATAPIPELINES_DB_ENCRYPTION_KEY`), defined in [Configuration §2](configuration.md#2-required-configuration) — exactly 32 bytes, base64-encoded.
+- The key is **required and fail-fast**: if it is missing, not valid base64, or not exactly 32 bytes, the application **does not start**. There is no fallback chain — no KMS lookup, no generated key file.
+
+**Why no fallback.** A silently generated key file is how credentials become undecryptable on the next redeploy (new container, new file, every stored password now garbage) — the failure appears long after the deploy that caused it, and no backup of the metadata DB can repair it. Refusing to start is the cheap failure. KMS-sourced keys (AWS KMS / GCP KMS / HashiCorp Vault) are a deliberate **v1.1** item, tracked in [ROADMAP §2](ROADMAP.md#2-v11-candidates) — when added, KMS becomes an *alternative explicit* source, never an implicit fallback.
 
 ### 7.2 Schema
 
-```sql
-CREATE TABLE datasources (
-  name            VARCHAR(63) PRIMARY KEY,
-  display_name    VARCHAR(255) NOT NULL,
-  description     TEXT,
-  dialect         VARCHAR(20) NOT NULL,
-  jdbc_url        TEXT NOT NULL,
-  username        TEXT NOT NULL,
-  password_encrypted BYTEA NOT NULL,         -- AES-256-GCM(ciphertext + tag + nonce)
-  properties      JSONB NOT NULL,
-  is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_by      UUID NOT NULL
-);
-```
+**DDL authority: [Metadata DB §4.10](metadata-db.md#410-datasources).** No DDL block lives in this spec — `metadata-db.md` is the only doc that writes DDL, so there is exactly one table definition to keep true.
+
+The semantics this spec depends on, which the DDL must satisfy:
+
+- `name` is the **primary key** (`TEXT`), constrained to 63 characters and to the identifier regex of §9 via `CHECK` — pipelines reference datasources by this value, so it is also the immutability anchor (§11.1).
+- `description` is **optional** (nullable / no `NOT NULL` requirement) — matching §3.3.
+- `password_encrypted` is `BYTEA` — AES-256-GCM output per §7.1, never plaintext, never returned by any endpoint.
+- `properties_json` is `JSONB` and holds the §5 object verbatim (`{"hikari": {...}, "jdbc": {...}}`), defaulting to `{}`.
+- `dialect` is `TEXT` with a `CHECK` constraint enumerating the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect values — a database-level guard duplicating the §9 application check on purpose.
+- `created_at` / `updated_at` are `TIMESTAMPTZ` (UTC); `updated_at` is set by the application in every UPDATE.
+- `created_by` is a `UUID` **foreign key to `users(id)`**.
+- `is_deleted` supports soft delete (§6.2); lookups filter it.
 
 ### 7.3 Key rotation
 
-Key rotation = decrypt every `password_encrypted` with old key, re-encrypt with new key, in a single transaction. Triggered by an admin CLI / endpoint. Documented in the runbook (future).
+Key rotation = decrypt every `password_encrypted` with the old key, re-encrypt with the new key, in a single transaction. Triggered by an admin CLI / endpoint, with both keys supplied explicitly (the old key is never inferred). All pools are drained afterwards so the next build decrypts under the new key. Documented in the runbook (future).
 
-### 7.4 Audit log
+### 7.4 Decryption points and audit log
 
-Every read of `password_encrypted` (i.e., every connection lease that re-decrypts) logs:
-- Timestamp
-- Caller (user or service)
-- Reason (pipeline execution ID + node ID, or connection test, or admin inspect)
+**Decryption happens once per pool build — not once per connection lease.** HikariCP necessarily holds the credential for the pool's lifetime (it opens new physical connections on its own schedule, without the caller present), so a per-lease decrypt would be theatre: the plaintext is already resident in the pool. The credential is decrypted exactly at:
 
-Stored in the audit log table; retained per deployment policy.
+1. **Pool build / rebuild** — lazy first lease (§5.2), or a rebuild after datasource update or key rotation.
+2. **Connection test** (§8.1) when it constructs a throwaway pool for a datasource with no live pool.
+3. **Key rotation** (§7.3), which decrypts every row in one pass.
+
+An audit event is written at each of those points — **never per lease**. The earlier "audit every lease" model produced unbounded event volume (one row per query, per node, per execution) that recorded nothing the execution record did not already contain, and it implied a decrypt that does not happen.
+
+Each event records:
+- Timestamp (`TIMESTAMPTZ`, UTC)
+- Datasource name
+- Trigger: `pool_build` | `pool_rebuild` | `connection_test` | `key_rotation`
+- Actor (user id for operator-initiated actions, or the system principal for executor-initiated pool builds)
+- Cause, when the trigger is `pool_build` from an execution: the execution id and node id that took the first lease
+
+Stored in the audit log table ([Metadata DB §4.3](metadata-db.md#43-audit_log)); retained per `datapipelines.audit.retention-days` ([Configuration §3.12](configuration.md#312-audit)).
+
+Per-node datasource *usage* remains observable without any credential-audit event: it is already recorded on the execution and its per-node stats.
 
 ---
 
 ## 8. Connection Testing
 
-### 8.1 `POST /datasources/{name}/test`
+### 8.1 `POST /api/v1/datasources/{name}/test`
 
 ```json
 // Response (200 OK):
@@ -281,11 +388,11 @@ Or on failure:
 }
 ```
 
-Note: connection test failure is **not** an HTTP error. The caller asked "can I connect?" and got an honest answer. HTTP 200 always (provided the datasource exists).
+Note: connection test failure is **not** an HTTP error. The caller asked "can I connect?" and got an honest answer. HTTP 200 always (provided the datasource exists). The `data` object is the wire form of `TestResult` (§6.1).
 
 ### 8.2 Pre-execution check
 
-Before pipeline execution begins, the executor pre-checks that every datasource referenced by the pipeline's nodes is configured and reachable. Failures here abort before any node runs, with error code `pipeline.execution.datasource_unreachable`.
+Before pipeline execution begins, the executor pre-checks that every datasource referenced by the pipeline's nodes is configured and reachable. Failures here abort before any node runs, with error code `pipeline.execution.datasource_unreachable` (registered in the central catalog, [Pipeline Contract §13.8](pipeline-contract.md#138-datasource) — HTTP 502).
 
 Pre-check is a fast `SELECT 1` (or dialect-equivalent) against each datasource. Cost: milliseconds per datasource, parallelizable.
 
@@ -297,15 +404,23 @@ In v1.1+, the system can poll datasources on a schedule and surface health in th
 
 ## 9. Validation Rules
 
+Every rule below runs on **create and update**, before the row is written (§2 principle 7; [Pipeline Contract §2](pipeline-contract.md#2-design-principles)). All failures are collected, not short-circuited (§6.1 `ValidationResult`). HTTP mappings live in the central catalog, [Pipeline Contract §13.8](pipeline-contract.md#138-datasource).
+
 | Code | Check |
 |---|---|
 | `datasource.validation.name_invalid` | `name` matches `[a-z0-9_-]+`, length 1–63 |
-| `datasource.validation.dialect_invalid` | `dialect` in allowed enum |
-| `datasource.validation.jdbc_url_malformed` | URL parses and matches dialect's expected pattern |
+| `datasource.validation.dialect_invalid` | `dialect` is a value of the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set |
+| `datasource.validation.jdbc_url_malformed` | URL parses and matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`) |
 | `datasource.validation.jdbc_url_scheme_invalid` | URL begins with `jdbc:{dialect}:` |
 | `datasource.validation.password_missing` | `password` required on create |
-| `datasource.validation.properties_invalid` | `properties` JSON is well-formed and keys are valid for the dialect |
+| `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, …) is present under `hikari`, and `properties` contains no namespace other than `hikari` / `jdbc`. The offending key and the underlying Hikari/driver message are returned in `details`. |
+| `datasource.validation.query_timeout_invalid` | `query_timeout_seconds`, when present, is an integer ≥ 1 |
 | `datasource.validation.duplicate_name` | Create with name that already exists (and not soft-deleted) |
+| `datasource.driver_not_loaded` | The JDBC driver class for `dialect` is on the classpath (§10.3) |
+
+`datasource.driver_not_loaded` is deliberately **not** in the `datasource.validation.*` namespace: it reports a deployment/packaging state (a missing driver JAR), not a defect in the submitted entity — the same payload becomes valid after the operator rebuilds with the right profile. The code is canonical in [Enums §16](enums.md#16-error-code-domains-prefix-catalog) / [Pipeline Contract §13.8](pipeline-contract.md#138-datasource).
+
+`datasource.in_use` (delete blocked by referencing pipelines, §6.2) is a lifecycle error rather than a save-time rule, and is likewise catalogued in §13.8.
 
 ---
 
@@ -356,20 +471,30 @@ object JdbcDrivers {
 }
 ```
 
-At datasource create time, validation calls `isAvailable(dialect)` and rejects with `datasource.validation.driver_not_loaded` if the driver JAR is missing.
+At datasource create/update time, validation calls `isAvailable(dialect)` and rejects with **`datasource.driver_not_loaded`** if the driver JAR is missing. This check runs *before* the test pool build (§5.4) — a missing driver would otherwise surface as a confusing `properties_invalid`.
 
 ---
 
 ## 11. CRUD Operations
 
+Wire contracts (envelopes, status codes, examples) live in [REST API §9](rest-api.md#9-datasource-endpoints); required scopes live in the [Auth §7.6 scope matrix](auth.md#76-scope--operation-matrix-authoritative) (read = `read`, test = `author`, create/update/delete = `admin`). This table is the operation inventory.
+
 | Operation | Method & Path | Notes |
 |---|---|---|
-| Register datasource | `POST /datasources` | Encrypts password, stores. |
-| List datasources | `GET /datasources?dialect={d}` | Passwords never included. |
-| Get datasource | `GET /datasources/{name}` | Password replaced with `password_set: bool`. |
-| Update datasource | `PUT /datasources/{name}` | Password optional (omit to keep existing). Drains & rebuilds pool. |
-| Delete datasource | `DELETE /datasources/{name}` | Soft delete; fails if `in_use`. |
-| Test connection | `POST /datasources/{name}/test` | Returns `{connected, server_version?, error?}`. |
+| Register datasource | `POST /api/v1/datasources` | Validates (§9) + test pool build (§5.4), encrypts password, stores. |
+| List datasources | `GET /api/v1/datasources?dialect={d}` | Passwords never included. |
+| Get datasource | `GET /api/v1/datasources/{name}` | Password replaced with `password_set: bool`. |
+| Update datasource | `PUT /api/v1/datasources/{name}` | Password optional (omit to keep existing). `name` may not change (§11.1). Drains & rebuilds pool. |
+| Delete datasource | `DELETE /api/v1/datasources/{name}` | Soft delete; fails with `datasource.in_use` if referenced. |
+| Test connection | `POST /api/v1/datasources/{name}/test` | Returns a `TestResult` (§6.1); HTTP 200 even when `connected: false`. |
+
+### 11.1 Rename semantics — `name` is immutable
+
+`name` is the primary key **and** the reference pipelines carry in their JSON (§2 principle 1). Renaming it would silently break every pipeline pointing at the old value, in every environment, with no write-time signal — so **there is no rename operation**:
+
+- `PUT /api/v1/datasources/{name}` ignores no field silently: a body whose `name` differs from the path segment is rejected with `datasource.validation.name_invalid` (`field: "name"`, message stating immutability). Every other field, including `dialect`, `jdbc_url`, credentials, `query_timeout_seconds` and `properties`, is updatable.
+- A rename is therefore **delete + create**: create the new datasource, repoint the referencing pipelines (a new pipeline version per [Pipeline Contract §14](pipeline-contract.md#14-pipeline-lifecycle-operations)), then delete the old one.
+- The delete step is the guard that makes this safe: it is **blocked while any non-deleted pipeline references the name** (`datasource.in_use`, §6.2), so the old datasource cannot disappear until the repointing is complete. Order matters — create → repoint → delete.
 
 ---
 
@@ -377,18 +502,19 @@ At datasource create time, validation calls `isAvailable(dialect)` and rejects w
 
 ### 12.1 Frozen in v1
 
-- Datasource entity JSON shape.
+- Datasource entity JSON shape, including the two `properties` namespaces (`hikari`, `jdbc`).
+- `name` immutability and its role as the pipeline-facing reference.
 - The 7 supported dialects and their identifiers.
 - The separation of pipeline-name from connection-details.
-- The encryption-at-rest requirement.
-- The connection-pool configuration keys.
+- The encryption-at-rest requirement, and the single required key source (fail-fast).
+- Save-time validation including the test pool build.
 
 ### 12.2 Not frozen
 
-- Pool implementation (HikariCP) — could swap to AGPL-licensed alternatives if license concerns arise.
-- The exact encryption scheme (AES-256-GCM today, could evolve to KMS-only).
+- Pool implementation (HikariCP) — could swap to AGPL-licensed alternatives if license concerns arise. Note this would change the meaning of `properties.hikari.*`; a swap therefore requires a migration path, which is why the namespace is named after the pool rather than being generic.
+- The exact encryption scheme (AES-256-GCM today; KMS as an additional explicit key source in v1.1 — [ROADMAP §2](ROADMAP.md#2-v11-candidates)).
 - New dialects added non-breakingly.
-- New connection-pool properties added non-breakingly.
+- Which pool/driver properties are *useful* — the passthrough model means no spec change is needed to adopt new ones.
 
 ---
 
@@ -409,6 +535,12 @@ At datasource create time, validation calls `isAvailable(dialect)` and rejects w
 ### 13.2 Testing
 
 - Unit tests per `DialectAdapter` covering `validateJdbcUrl` and `buildHikariConfig`.
+- Passthrough tests: a valid `properties.hikari` entry reaches `HikariConfig` verbatim; an unknown key, a wrong-typed value, and a server-managed key each fail the test pool build with `datasource.validation.properties_invalid` and name the offending key.
+- Test pool build does **not** require a reachable database (`initializationFailTimeout = -1`): saving a datasource pointing at a dead host succeeds; `POST .../test` on it returns `connected: false`.
+- Pool concurrency: N coroutines calling `poolFor()` simultaneously for a cold datasource construct exactly one `HikariDataSource`.
+- Query-timeout precedence: datasource `query_timeout_seconds` set → used; unset → global `node-query-timeout-seconds`.
+- Immutability: `PUT` with a differing `name` is rejected; delete while referenced returns `datasource.in_use` with the pipeline list.
+- Startup: a missing / malformed / wrong-length `DATAPIPELINES_DB_ENCRYPTION_KEY` fails application startup (no fallback path exists to test).
 - Integration tests via Testcontainers: spin up real PG/MySQL/MSSQL/Oracle containers, register a datasource, test connection, run a query, verify type mapping matches [Type System §5](type-system.md#5-source-to-canonical-mapping-tables).
 - Credential encryption tests: encrypt/decrypt round-trip, key-rotation flow, tamper detection (auth tag failure).
 - Connection pool tests: lease timeout, max-pool-size enforcement, eviction on datasource delete.
@@ -417,13 +549,13 @@ At datasource create time, validation calls `isAvailable(dialect)` and rejects w
 
 ## 14. Open Questions / Future Additions
 
-Out of scope for v1:
+Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v11-candidates)):
 
-- **KMS integration**: AWS KMS / GCP KMS / HashiCorp Vault as master-key sources.
+- **KMS integration**: AWS KMS / GCP KMS / HashiCorp Vault as an additional **explicit** master-key source (never an implicit fallback — §7.1).
 - **Background health checks**: scheduled polling of datasources with UI health indicators.
 - **Datasource groups / failover**: pair primary + replica, fail over on connection failure.
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
-- **Schema introspection tools**: `GET /datasources/{name}/schema`, `/tables`, `/tables/{t}/columns` — useful for LLM-assisted pipeline authoring. v1.1 candidate.
+- **Schema introspection tools**: `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{t}/columns` — useful for LLM-assisted pipeline authoring. v1.1 candidate.
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
 - **OAuth / IAM auth for cloud databases**: Snowflake, BigQuery (when those dialects are added).
 
@@ -434,3 +566,4 @@ Out of scope for v1:
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
+| 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
