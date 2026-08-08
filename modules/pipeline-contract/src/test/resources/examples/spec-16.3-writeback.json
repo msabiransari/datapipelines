@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "name": "monthly_revenue_etl",
+  "display_name": "Monthly Revenue ETL",
+  "description": "Write-back to the warehouse plus a caller return (spec §16.3).",
+  "parameters": {},
+  "nodes": [
+    {
+      "id": "fetch_orders",
+      "description": "Pull orders from PG.",
+      "type": "DQL",
+      "source": "pg-prod",
+      "template": {"id": "fetch_orders.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "stg_orders"},
+      "depends_on": []
+    },
+    {
+      "id": "fetch_customers",
+      "description": "Pull customers from MySQL.",
+      "type": "DQL",
+      "source": "mysql-prod",
+      "template": {"id": "fetch_customers.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "stg_customers"},
+      "depends_on": []
+    },
+    {
+      "id": "revenue_by_customer",
+      "description": "Join and aggregate.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "join_revenue.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "int_revenue"},
+      "depends_on": ["fetch_orders", "fetch_customers"]
+    },
+    {
+      "id": "write_to_warehouse",
+      "description": "Materialize to the warehouse.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "select_revenue.sql", "version": 1},
+      "output": {
+        "target": "datasource",
+        "datasource": "pg-warehouse",
+        "table": "monthly_revenue_cache",
+        "mode": "replace"
+      },
+      "depends_on": ["revenue_by_customer"]
+    },
+    {
+      "id": "return_report",
+      "description": "Return the report to the caller.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "report.sql", "version": 1},
+      "output": {"target": "caller"},
+      "depends_on": ["revenue_by_customer"]
+    }
+  ]
+}

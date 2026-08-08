@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "name": "revenue_with_index_and_audit",
+  "display_name": "Revenue with Index and Audit",
+  "description": "Hosts the §16.4 DDL node and the §16.5 DML node verbatim.",
+  "parameters": {},
+  "nodes": [
+    {
+      "id": "revenue_by_customer",
+      "description": "Join and aggregate into the tempdb table the DDL node indexes.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "join_revenue.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "int_revenue"},
+      "depends_on": []
+    },
+    {
+      "id": "create_idx",
+      "type": "DDL",
+      "description": "Create index on the staging table for join performance.",
+      "source": "tempdb",
+      "template": {"id": "create_idx_revenue.sql", "version": 1},
+      "depends_on": ["revenue_by_customer"]
+    },
+    {
+      "id": "return_report",
+      "description": "Final projection for the caller.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "report.sql", "version": 1},
+      "depends_on": ["create_idx"]
+    },
+    {
+      "id": "record_execution",
+      "type": "DML",
+      "description": "Insert an audit row.",
+      "source": "pg-meta",
+      "template": {"id": "record_execution.sql", "version": 1},
+      "depends_on": ["return_report"]
+    }
+  ]
+}

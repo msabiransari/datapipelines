@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "id": "a1b2c3d4-1111-2222-3333-444455556666",
+  "name": "monthly_revenue_report",
+  "display_name": "Monthly Revenue Report",
+  "description": "Joins PG orders with MySQL customers; aggregates by customer.",
+  "version": 3,
+  "owner": "9f8e7d6c-5b4a-3928-1716-050403020100",
+  "created_at": "2026-08-01T10:00:00Z",
+  "updated_at": "2026-08-05T14:30:00Z",
+
+  "settings": {
+    "tempdb": {
+      "engine": "H2",
+      "config": {
+        "max_memory_mb": 1024
+      }
+    }
+  },
+
+  "parameters": {
+    "start_date": {
+      "type": "DATE",
+      "required": true,
+      "description": "Inclusive start of the reporting period."
+    },
+    "end_date": {
+      "type": "DATE",
+      "required": true,
+      "description": "Inclusive end of the reporting period."
+    },
+    "min_total": {
+      "type": "BIGDECIMAL",
+      "precision": 12,
+      "scale": 2,
+      "required": false,
+      "default": "0.00",
+      "description": "Filter customers with lifetime value below this."
+    },
+    "include_cancelled": {
+      "type": "BOOLEAN",
+      "required": false,
+      "default": false,
+      "description": "Whether to include cancelled orders."
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "fetch_orders",
+      "description": "Pull orders in date range from PG.",
+      "type": "DQL",
+      "source": "pg-prod",
+      "template": {"id": "fetch_orders.sql", "version": 2},
+      "output": {"target": "tempdb", "table": "stg_orders"},
+      "depends_on": []
+    },
+    {
+      "id": "fetch_customers",
+      "description": "Pull active customers from MySQL.",
+      "type": "DQL",
+      "source": "mysql-prod",
+      "template": {"id": "fetch_customers.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "stg_customers"},
+      "depends_on": []
+    },
+    {
+      "id": "revenue_by_customer",
+      "description": "Join orders + customers; aggregate revenue.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "join_revenue.sql", "version": 1},
+      "output": {"target": "tempdb", "table": "int_revenue"},
+      "depends_on": ["fetch_orders", "fetch_customers"]
+    },
+    {
+      "id": "cache_to_warehouse",
+      "description": "Materialize the revenue table to the reporting warehouse.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "select_revenue.sql", "version": 1},
+      "output": {
+        "target": "datasource",
+        "datasource": "pg-warehouse",
+        "table": "monthly_revenue_cache",
+        "mode": "replace"
+      },
+      "depends_on": ["revenue_by_customer"]
+    },
+    {
+      "id": "final_report",
+      "description": "Final projection and filter for caller.",
+      "type": "DQL",
+      "source": "tempdb",
+      "template": {"id": "final_report.sql", "version": 1},
+      "output": {"target": "caller"},
+      "depends_on": ["revenue_by_customer"]
+    }
+  ]
+}

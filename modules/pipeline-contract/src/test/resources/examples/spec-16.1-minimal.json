@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "active_users",
+  "display_name": "Active Users",
+  "description": "List all active users.",
+  "parameters": {},
+  "nodes": [
+    {
+      "id": "active_users",
+      "description": "Read active users from PG.",
+      "type": "DQL",
+      "source": "pg-prod",
+      "template": {"id": "active_users.sql", "version": 1},
+      "depends_on": []
+    }
+  ]
+}
