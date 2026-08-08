@@ -82,6 +82,10 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | **Pipeline-level scheduling** — cron-style declarations | pipeline-contract §18 |
 | **Additional `output.target` values** — `kafka`, `s3`, `email`, `webhook` | pipeline-contract §18, enums §3 |
 | **Partial-result mode** — return whatever data was staged before a node failed | dag-executor §13 |
+| **UI pipeline edit mode** — graph authoring/drag-drop in the editor (v1 authoring is LLM/MCP-first) | pipeline-editor §11 |
+| **Detached (fire-and-forget) execution** — would relax cancel-on-disconnect for explicitly detached runs; pairs with async/webhooks above | rest-api §14 |
+| **Redis pub/sub cancellation fan-out** — push-based cross-instance cancel (v1 polls the cancel flag on heartbeat ticks) | dag-executor §8.3.1 |
+| **MCP progress notifications + cancel tool** — richer long-execution UX over MCP | mcp-server §12 |
 | **Cycle support (iterative pipelines)** — bounded loops for ML convergence algorithms | dag-executor §13 |
 | **Async / scheduled execution** — trigger pipelines, return immediately, deliver via webhook later | dag-executor §13 |
 | **Cross-pipeline calls** — invoke pipeline A from pipeline B's node | (not yet in any spec) |
@@ -207,11 +211,16 @@ Things deployers handle, not us. Listed here so we don't accidentally scope-cree
 
 ## 6. Decision Log (Items Moved Out of ROADMAP)
 
-When something moves from ROADMAP into a shipped spec, log it here so we can trace the evolution.
+When something moves from ROADMAP into a shipped spec — or a spec-level decision changes what was planned — log it here so we can trace the evolution.
 
 | Date | Item | Moved to | Notes |
 |---|---|---|---|
-| (empty — v1 not yet shipped) | | | |
+| 2026-08-07 | **Consistency campaign D1–D15** | [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) | ~40 cross-doc defects resolved; the decision record is the reference for all items below |
+| 2026-08-07 | Template `params_schema` **removed** (D3) | templates v1.2, pipeline-contract v1.2 | Pipeline `parameters` is the single declaration point; save-time dry-render replaces per-template schemas |
+| 2026-08-07 | Result delivery **unified** (D9) | rest-api v1.3 §7 | Inline-vs-claim-check split deleted; every caller result → Redis, `data_ready` = first page + cursor, `DP-Result-TTL-Seconds` clamped |
+| 2026-08-07 | **Cancel-on-disconnect** + explicit cancel (D7) | rest-api v1.3 §6.8/§10.4, dag-executor v1.2 §8.3 | Replaces "executions survive disconnect, poll to recover"; cross-instance cancel via Redis flag |
+| 2026-08-07 | Custom headers → **`DP-` prefix** (D10) | rest-api v1.3 §3.6 | `X-API-Key`/`X-Correlation-Id` renamed; `Idempotency-Key` kept (standard) |
+| 2026-08-07 | Encryption-key **fallback chain removed** (D8) | datasources v1.1 §7.1 | Key is required fail-fast; KMS sourcing stays a v1.1 candidate below — as an explicit alternative source, never an implicit fallback |
 
 ---
 
@@ -220,3 +229,4 @@ When something moves from ROADMAP into a shipped spec, log it here so we can tra
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial ROADMAP: consolidated future work from all 12 specs, organized by version (v1.1 / v2 / long-term), rejected items with reasoning, operator responsibilities |
+| 2026-08-07 | v1.1 | consistency campaign | Decision log seeded with D1–D15 outcomes (params_schema removal, unified result delivery, cancel-on-disconnect, DP- headers, no key fallback); v2 list gains UI edit mode, detached execution, pub/sub cancel fan-out, MCP progress/cancel. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
