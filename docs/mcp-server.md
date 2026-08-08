@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1 (frozen contract — additive-only changes after this point)
+**Status:** v1.2 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
-**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md)
-**Last updated:** 2026-08-05
+**Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
+**Last updated:** 2026-08-07
 
 ---
 
@@ -24,8 +24,8 @@ This spec defines:
 ## 2. Design Principles
 
 1. **MCP is a thin adapter over REST.** Every MCP tool maps to one or more REST endpoints defined in [REST API spec](rest-api.md). No business logic in the MCP layer — it's translation only.
-2. **Tools for actions, resources for inspection.** If an agent needs to *do* something (execute a pipeline, create a template), it calls a tool. If it needs to *read* something (look at a pipeline definition), it reads a resource. We avoid duplicating read-only operations as both.
-3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it. See [Auth spec](auth.md).
+2. **Tools for actions, resources for inspection.** If an agent needs to *do* something (execute a pipeline, create a template), it calls a tool. If it needs to *read* something (look at a pipeline definition), it reads a resource. We avoid duplicating read operations as both.
+3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 4. **MCP versioning follows the protocol.** We commit to a specific MCP protocol version per datapipelines.co release, and document upgrade paths when the protocol evolves.
 5. **Fail loudly, never silently.** MCP-level errors (transport, auth) and application errors (pipeline validation, datasource unreachable) both surface as structured errors the agent can act on. No silent fallbacks.
 
@@ -43,7 +43,14 @@ We expose MCP via the protocol's **Streamable HTTP** transport:
 
 This is the protocol's network-native transport, appropriate for our self-hosted, network-resident deployment model. The stdio transport (used for local-tools) is not supported — our product is a server, not a local process.
 
-> **Verification needed before implementation:** Confirm the exact MCP protocol version against the [current specification](https://spec.modelcontextprotocol.io/) and the streamable HTTP transport details. This spec was authored against the durable shape of MCP; protocol minor versions may have introduced adjustments.
+> **Implementation gate — protocol version check.** This spec is authored against the durable shape of MCP; the concrete protocol version string is a build-time input, not a frozen contract term. Before the MCP module is implemented, complete this checklist against the official specification at [modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification):
+>
+> - [ ] **Current protocol version string.** Read the specification's revision identifier and pin it as the value returned in `initialize.protocolVersion` (§5.1) and accepted in the `MCP-Protocol-Version` request header (§3.2). The `2025-06-18` value written throughout this doc is a placeholder pending this check.
+> - [ ] **Version-negotiation rule.** Confirm how the server must respond when a client offers an older/newer version (negotiate down vs. reject) and encode that in the handshake.
+> - [ ] **Streamable HTTP requirements.** Confirm: required `Accept` values on `POST /mcp` (`application/json` and `text/event-stream`), whether `GET /mcp` for a server-initiated SSE stream is mandatory or optional, `MCP-Session-Id` issuance/echo semantics, session-termination behavior (`DELETE /mcp`), and whether resumability headers are required of a stateless server.
+> - [ ] **SDK coordinates.** Verify the MCP server SDK artifact/version against the source of record before adding it to the version catalog ([Module Structure §8](module-structure.md)).
+>
+> Any deviation found here is an additive correction to §3 and §5.1 only — the tool, resource, and prompt surfaces do not depend on it.
 
 ### 3.2 Endpoint structure
 
@@ -52,12 +59,14 @@ POST {host}/mcp
 Headers:
   Content-Type: application/json
   Accept: application/json, text/event-stream
-  X-API-Key: {api-key}                # or Authorization: Bearer {session-token}
-  MCP-Protocol-Version: 2025-06-18    # specific protocol version
+  DP-API-Key: dpk_<id>.<secret>       # OR: Authorization: Bearer dpk_<id>.<secret>
+  MCP-Protocol-Version: 2025-06-18    # placeholder — pinned by the §3.1 implementation gate
   MCP-Session-Id: {session-uuid}      # optional; server may issue for stateful sessions
 ```
 
-Server response: JSON for single-message exchanges, `text/event-stream` for streamed responses (e.g., pipeline execution events streamed directly through MCP).
+Exactly one credential carrier is required, and the two are equivalent: `DP-API-Key` (the REST convention, [REST API §3.6](rest-api.md#36-custom-header-registry)) or `Authorization: Bearer dpk_...` for MCP clients that can only set the standard Authorization header. Both route through the identical API-key validation path — see §4.1 and [Auth §8.5](auth.md#85-mcp-endpoint-mcp). Session JWTs (`dp_session` cookie, or a Bearer token that is not a `dpk_` key) are **not** accepted on `/mcp`.
+
+Server response: JSON for single-message exchanges, `text/event-stream` for streamed responses.
 
 ### 3.3 Session lifecycle
 
@@ -70,27 +79,40 @@ Server response: JSON for single-message exchanges, `text/event-stream` for stre
 
 ### 4.1 Auth model
 
-Every MCP request must include either:
-- `X-API-Key: {api-key}` — for programmatic agents (the primary case).
-- `Authorization: Bearer {session-token}` — for browser-embedded MCP clients (rare).
+`/mcp` is **API-key-only**. Every MCP request must carry a datapipelines API key in one of two equivalent headers:
+
+- `DP-API-Key: dpk_<id>.<secret>` — the REST convention; the primary case.
+- `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header (Claude Desktop and several others). The filter recognizes the `dpk_` prefix and routes the token through the identical validation path.
+
+Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key or a deactivated owner stops working within ~1 minute.
+
+**Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
 API keys are:
-- Issued per-user-per-agent from the UI (e.g., "Claude Desktop key", "GLM key").
-- Revocable.
-- Scoped (read-only / execute / author). See [Auth spec](auth.md).
-- Sent in the `X-API-Key` header (matching the REST API convention).
+- Issued per-user-per-agent from the UI (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
+- Revocable, optionally expiring.
+- Scoped `read` / `execute` / `author` / `admin` (hierarchical, [Auth §7.5](auth.md#75-scopes)). A key's scopes are a subset of its creator's scopes at issue time.
+
+**Scope enforcement.** The minimum scope for every MCP tool is defined once in the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative) — this spec restates each tool's requirement in §6.2 for readability but the matrix is authoritative on any conflict. The `admin` scope exists (datasource management, user administration) but **no v1 MCP tool requires it**: creating, editing, and deleting datasources is UI/REST-only. An `admin` key still works everywhere, since scopes are hierarchical.
+
+**Security chain.** `/mcp` (both `POST` and `GET`) is an explicit matcher in the Spring Security filter chain: CSRF-exempt (no cookie auth to forge against), no session cookies accepted, same scope enforcement as REST, same per-user rate limits ([REST API §12](rest-api.md#12-rate-limiting)). See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 
 ### 4.2 Unauthorized behavior
 
-Missing or invalid API key:
+Missing credential (no `DP-API-Key` header and no Bearer `dpk_` token):
 - HTTP `401 Unauthorized` with JSON body:
   ```json
-  {"error": {"code": "auth.api_key_missing", "message": "..."}}
+  {"error": {"code": "auth.api_key.missing", "message": "..."}}
   ```
 - MCP session is not established.
 
-Insufficient scope (e.g., read-only key trying to call `pipelines.create`):
-- HTTP `403 Forbidden` with `auth.scope_insufficient`.
+Invalid, revoked, expired, or deactivated-owner key:
+- HTTP `401 Unauthorized` with `auth.api_key.invalid` (or `auth.api_key.expired`).
+
+Insufficient scope (e.g., a `read` key calling `pipelines_create`):
+- The transport-level answer is HTTP `403 Forbidden` with `auth.scope.insufficient` when the credential is rejected before dispatch. Once a session is established and a tool is dispatched, a scope failure is returned as a tool result with `isError: true` carrying the same `auth.scope.insufficient` code (§9.2) — agents must handle both.
+
+Codes follow the `{domain}.{entity}.{failure}` convention; the registry of record is [Pipeline Contract §13.7](pipeline-contract.md#137-authentication--authorization).
 
 ### 4.3 Why not OAuth
 
@@ -116,17 +138,21 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
     "version": "1.0.0"
   },
   "capabilities": {
-    "tools": {"listChanged": true},
-    "resources": {"listChanged": true, "subscribe": false},
-    "prompts": {"listChanged": true},
+    "tools": {"listChanged": false},
+    "resources": {"listChanged": false, "subscribe": false},
+    "prompts": {"listChanged": false},
     "logging": {}
   }
 }
 ```
 
-- `tools.listChanged: true` — server notifies clients when tool list changes (e.g., new pipeline published → new `pipeline_execute_*` tool appears).
+- `tools.listChanged: false` — the v1 tool surface is **static**: the same 15 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
-- `logging` — server can emit log notifications.
+- `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
+- `logging` — server can emit log notifications (§10).
+
+`protocolVersion` is the placeholder pending the §3.1 implementation-gate check. `serverInfo.version` is the datapipelines.co release version.
 
 ---
 
@@ -152,9 +178,13 @@ Tools are named `{domain}_{action}`:
 - `executions_get`
 - `executions_get_result`
 
-A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2.
+A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
 ### 6.2 Tool definitions
+
+Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
+
+Every tool's result envelope, including its error shape, is §6.3.
 
 #### 6.2.1 `pipelines_list`
 
@@ -163,7 +193,7 @@ List pipelines the caller has access to.
 ```json
 {
   "name": "pipelines_list",
-  "description": "List pipelines registered on this datapipelines.co instance, filtered by owner, datasource, or text search. Returns metadata (id, name, description, version, datasources_used) — not the full body.",
+  "description": "List pipelines registered on this datapipelines.co instance, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, updated_at) — not the full body. Use pipelines_get for the body.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -176,7 +206,9 @@ List pipelines the caller has access to.
 }
 ```
 
-Returns: array of pipeline metadata objects.
+Returns: array of pipeline metadata objects. Datasource references are per-node and are read from the body via `pipelines_get` — the listing does not aggregate them.
+
+**Scope:** `read`.
 
 #### 6.2.2 `pipelines_get`
 
@@ -198,6 +230,8 @@ Fetch a full pipeline definition.
 ```
 
 Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)).
+
+**Scope:** `read`.
 
 #### 6.2.3 `pipelines_execute`
 
@@ -226,12 +260,20 @@ Execute a pipeline.
 Returns: an **execution result object** containing:
 - Execution metadata (`execution_id`, `pipeline_id`, `status`, `duration_ms`, `node_stats`).
 - Schema (array of column descriptors per [Type System §7](type-system.md#7-schema-envelope-structure)).
-- Rows (array-of-arrays; or `result_url` + `expires_at` if claim-check).
+- The **first page of rows** inline (up to `datapipelines.result.page-size-rows`), plus `total_rows`, `has_more`, `result_url`, and `expires_at`.
 - Warnings array (if any).
 
-The result shape mirrors the [REST `data_ready` event](rest-api.md#647-data_ready) — agents consuming SSE consume the same structure via this tool's return value.
+The result shape mirrors the [REST `data_ready` event](rest-api.md#647-data_ready) exactly — same fields, same uniform delivery model. There is no inline-vs-claim-check split: every caller result is materialized in Redis before the tool returns ([REST API §7.1](rest-api.md#71-model)). For a result that fits in one page, the inline rows ARE the whole result and no follow-up call is needed; when `has_more` is `true`, page the remainder with `executions_get_result` (§6.2.15) within the TTL.
 
-For very large results, the tool returns `result_url` instead of inline rows; the agent can then call `executions_get_result` with paging to retrieve the data.
+A pipeline with **no caller node** ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) is legal — a pure write-back/ETL pipeline. Such an execution returns metadata, `node_stats`, and no `schema`/`rows`; this is success, not an error.
+
+**Long-running executions.** The tool call is a **single blocking request**: it returns when the execution reaches a terminal state (`SUCCESS`, `FAILED`, `ABORTED`) or when `datapipelines.executor.execution-timeout-seconds` (default 600) elapses and the execution is aborted. For a 3-minute pipeline, the agent experiences one tool call that takes ~3 minutes; the HTTP response for that call stays open for the duration and the server writes nothing to it until the result is ready. (The REST SSE heartbeat, [REST API §6.6](rest-api.md#66-heartbeat-keepalive), is an SSE-stream concept and does not apply here — an MCP tool call is not an event stream. Operators must therefore ensure proxy/load-balancer idle timeouts on `/mcp` exceed `execution-timeout-seconds`; see [Deployment](deployment.md).)
+
+MCP **progress notifications** for in-flight nodes are deliberately not implemented in v1 — the tool returns progress only as the final `node_stats`. Streaming execution events through the MCP transport is a v2 item ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)). Agents that want live progress today can subscribe to the server's logging notifications (§10), which carry per-node completion messages.
+
+**If the agent abandons the call** (aborts the HTTP request, client crash), the execution is cancelled after `datapipelines.sse.disconnect-grace-seconds` (default 30) exactly as for a dropped REST stream ([REST API §6.8](rest-api.md#68-client-disconnect)) — in-flight statements are interrupted and the execution ends `ABORTED`. There is no resumption path; a reconnecting agent must re-execute. An execution can also be cancelled out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance; the abandoned tool call then returns an `ABORTED` result. There is no MCP cancel *tool* in v1.
+
+**Scope:** `execute`.
 
 #### 6.2.4 `pipelines_create`
 
@@ -240,7 +282,7 @@ Create a new pipeline.
 ```json
 {
   "name": "pipelines_create",
-  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG, exactly one DQL sink must have output.target='caller' (the auto-detected terminal), all datasource references must exist in this environment, all template references must exist. Returns the created pipeline with server-assigned id and version 1.",
+  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. Returns the created pipeline with server-assigned id and version 1.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "display_name", "nodes"],
@@ -248,11 +290,11 @@ Create a new pipeline.
       "name": {"type": "string", "pattern": "^[a-z0-9_]+$"},
       "display_name": {"type": "string"},
       "description": {"type": "string"},
-      "parameters": {"type": "object"},
+      "parameters": {"type": "object", "description": "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter declaration point: the full parameter map, defaults applied, is the render context for every template the pipeline references."},
       "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
       "nodes": {
         "type": "array",
-        "description": "Pipeline nodes. Each node has type (DQL/DML/DDL), source, template ref, output block (for DQL), and depends_on array. The framework auto-detects the terminal as the single DQL sink with output.target='caller'."
+        "description": "Pipeline nodes. Each node has type (DQL/DML/DDL), source, template ref, depends_on array, and — for DQL only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare output.target='tempdb' with a table name explicitly."
       }
     },
     "additionalProperties": false
@@ -262,15 +304,17 @@ Create a new pipeline.
 
 Returns: created pipeline (with id, version, etc.).
 
-Scope required: `author`.
+The whole pipeline is validated before it is stored — no invalid pipeline ever reaches the database ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)). Validation failures come back as a tool result with `isError: true` carrying the pipeline validation code (§9.2); the agent should fix and retry rather than assume partial creation.
+
+**Scope:** `author`.
 
 #### 6.2.5 `pipelines_update`
 
 Update an existing pipeline (creates new version).
 
-Same input as `pipelines_create` plus required `id`. Returns the new version.
+Same input as `pipelines_create` plus required `id`. Returns the new version. Same save-time validation applies.
 
-Scope required: `author`.
+**Scope:** `author`.
 
 #### 6.2.6 `templates_list`
 
@@ -285,11 +329,16 @@ List templates.
     "properties": {
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]},
       "q": {"type": "string"},
+      "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
     }
   }
 }
 ```
+
+Returns: array of template metadata (`id`, `version`, `dialect`, `display_name`, `description`, `is_library`). A template's `description` is the only place it can hint at the parameters it expects — templates declare none ([Templates §3.2](templates.md#32-field-reference)).
+
+**Scope:** `read`.
 
 #### 6.2.7 `templates_get`
 
@@ -298,17 +347,19 @@ Fetch a template body.
 ```json
 {
   "name": "templates_get",
-  "description": "Get the body and metadata of a specific template version.",
+  "description": "Get the body and metadata of a specific template version, including its imports array (the library macros it can call). Defaults to the latest version.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
     "properties": {
       "id": {"type": "string"},
-      "version": {"type": "integer"}
+      "version": {"type": "integer", "description": "Defaults to latest."}
     }
   }
 }
 ```
+
+**Scope:** `read`.
 
 #### 6.2.8 `templates_create`
 
@@ -317,44 +368,70 @@ Create a new template.
 ```json
 {
   "name": "templates_create",
-  "description": "Create a new SQL template. Templates use Freemarker syntax. Variables referenced in the template body must be declared in params_schema (or supplied by a calculator in the executing pipeline).",
+  "description": "Create a new SQL template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain <#import> or <#include> directives, they are synthesized from the imports array.",
   "inputSchema": {
     "type": "object",
-    "required": ["dialect", "body"],
+    "required": ["dialect", "display_name", "description", "body"],
     "properties": {
-      "id": {"type": "string", "description": "Optional; auto-generated if omitted."},
+      "id": {"type": "string", "description": "Optional; auto-generated if omitted. Pattern [a-z0-9_.-]+."},
+      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]},
-      "description": {"type": "string"},
-      "params_schema": {"type": "object"},
-      "body": {"type": "string"}
-    }
+      "display_name": {"type": "string"},
+      "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
+      "imports": {
+        "type": "array",
+        "description": "Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true.",
+        "items": {
+          "type": "object",
+          "required": ["id", "version", "alias"],
+          "properties": {
+            "id": {"type": "string"},
+            "version": {"type": "integer"},
+            "alias": {"type": "string", "description": "Namespace the macros are bound to, e.g. 'dates' → <@dates.date_range .../>."}
+          },
+          "additionalProperties": false
+        }
+      },
+      "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
+      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
+    },
+    "additionalProperties": false
   }
 }
 ```
 
-Scope required: `author`.
+Save-time validation is **parse-only** — syntax, forbidden constructs, import resolution ([Templates §7.1](templates.md#71-save-time-validation-is-parse-only)). A template is never rendered against a sample context at save time, because it does not know its callers' parameters; the dry-render check happens when a *pipeline* referencing it is saved ([Templates §7.2](templates.md#72-the-dry-render-rule-owned-by-pipeline-validation)). An agent authoring a template should therefore call `templates_render` (§6.2.9) with a representative context to confirm the SQL it produces.
+
+**Scope:** `author`.
 
 #### 6.2.9 `templates_render`
 
-Render a template against a sample context (preview SQL).
+Render a template against a supplied context (preview SQL).
 
 ```json
 {
   "name": "templates_render",
-  "description": "Render a template against the provided context values. Use this to preview the SQL that would be generated before executing a pipeline.",
+  "description": "Render a template against the provided context values and return the SQL it produces. Use this to preview generated SQL before creating a pipeline that references the template. The context is a free-form map: supply the same keys the calling pipeline would declare as parameters. Referencing a key absent from the context fails the render — that is the same failure a pipeline save would report.",
   "inputSchema": {
     "type": "object",
     "required": ["id", "context"],
     "properties": {
       "id": {"type": "string"},
-      "version": {"type": "integer"},
-      "context": {"type": "object", "additionalProperties": true}
-    }
+      "version": {"type": "integer", "description": "Defaults to latest."},
+      "context": {
+        "type": "object",
+        "description": "Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the wire conventions of the Type System (BIGINTEGER/BIGDECIMAL as strings, TIMESTAMP with Z or offset).",
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": false
   }
 }
 ```
 
-Returns: rendered SQL string.
+Returns: rendered SQL string. This is a preview only — nothing is executed and nothing is stored.
+
+**Scope:** `author` (it is the authoring loop's preview step; see the Auth §7.6 matrix).
 
 #### 6.2.10 `datasources_list`
 
@@ -373,6 +450,8 @@ List registered datasources (without credentials).
 }
 ```
 
+**Scope:** `read`. (Creating, editing, and deleting datasources requires `admin` and is UI/REST-only — there is no MCP tool for it in v1.)
+
 #### 6.2.11 `datasources_get`
 
 Fetch a single datasource (without password).
@@ -380,7 +459,7 @@ Fetch a single datasource (without password).
 ```json
 {
   "name": "datasources_get",
-  "description": "Get metadata for a single datasource.",
+  "description": "Get metadata for a single datasource: name, dialect, JDBC URL, pool settings. Credentials are never returned.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -390,6 +469,8 @@ Fetch a single datasource (without password).
   }
 }
 ```
+
+**Scope:** `read`.
 
 #### 6.2.12 `datasources_test`
 
@@ -411,6 +492,8 @@ Test that a datasource connection can be established.
 
 Returns: `{connected: bool, server_version: string?, error: string?}`.
 
+**Scope:** `author` — testing a connection opens a real pool against a production database, so it sits above plain `read` even though it mutates nothing.
+
 #### 6.2.13 `executions_list`
 
 List recent executions.
@@ -430,6 +513,8 @@ List recent executions.
 }
 ```
 
+**Scope:** `read`.
+
 #### 6.2.14 `executions_get`
 
 Fetch metadata for a specific execution (no rows).
@@ -448,6 +533,8 @@ Fetch metadata for a specific execution (no rows).
 }
 ```
 
+**Scope:** `read`.
+
 #### 6.2.15 `executions_get_result`
 
 Fetch result rows (paginated) for a completed execution.
@@ -455,21 +542,43 @@ Fetch result rows (paginated) for a completed execution.
 ```json
 {
   "name": "executions_get_result",
-  "description": "Fetch result rows for a completed execution. Paginated via offset+limit. Returns schema + rows. Available until the result TTL expires (default 5 minutes for claim-checked results; inline results from recent executions are also available for a short window).",
+  "description": "Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run.",
   "inputSchema": {
     "type": "object",
     "required": ["execution_id"],
     "properties": {
       "execution_id": {"type": "string", "format": "uuid"},
       "offset": {"type": "integer", "default": 0, "minimum": 0},
-      "limit": {"type": "integer", "default": 10000, "maximum": 100000},
+      "limit": {"type": "integer", "default": 1000, "minimum": 1, "maximum": 100000, "description": "Rows per page. Defaults to the server's result page size."},
       "format": {"type": "string", "enum": ["json", "arrow", "csv"], "default": "json"}
-    }
+    },
+    "additionalProperties": false
   }
 }
 ```
 
-Returns: schema + rows + pagination metadata. For `format: arrow` or `csv`, returns binary payload encoded as base64 in the result.
+This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-result-delivery) — **identical semantics, identical guarantees**:
+
+- `offset` / `limit` / `format` map one-to-one onto the cursor's query parameters. `offset` + `limit` paging over a result fully materialized in Redis before the cursor exists, so ordering is stable across pages.
+- Availability is uniform: every completed execution with a caller node has its result stored, regardless of size. There is no inline-vs-claim-check distinction to reason about (that split was removed in REST API v1.3).
+- TTL is fixed at result-write time (`datapipelines.result.ttl-default-seconds`, clamped between the min/max keys; a client may request one on the *execute* call via `DP-Result-TTL-Seconds`). Page reads never extend it.
+- Auth: `read` scope **plus ownership** of the execution — `admin` may read any. Same rule as the REST cursor; the `result_url` is not a capability URL.
+
+**JSON format** returns `{schema, rows, row_count, offset, limit, total_rows, has_more, expires_at}` — same body as [REST §7.3](rest-api.md#73-response-json-format-default).
+
+**Binary columns and non-JSON formats.** `BINARY` column values in JSON results are base64 per the Type System's egress rules. For `format: "arrow"` or `"csv"`, and for any result whose encoded payload would exceed **1 MB**, the tool does **not** inline the bytes: it returns `{"result_url": "...", "expires_at": "...", "format": "...", "total_rows": N, "reason": "payload_exceeds_inline_cap"}` — the REST cursor URL, which the agent fetches with the same API key. Rationale: MCP tool results are model context; megabytes of base64 in a tool result poison an agent's window for no benefit. Payloads at or under the cap are inlined as base64 with their content type named.
+
+**Errors** mirror [REST §7.6](rest-api.md#76-endpoint-errors) exactly, returned as tool results with `isError: true` (§9.2) — registry of record [Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval):
+
+| Code | Meaning for the agent |
+|---|---|
+| `result.execution_not_found` | Unknown execution id — check `executions_list`. |
+| `result.execution_incomplete` | Still running; wait or re-check with `executions_get`. |
+| `result.execution_failed` | The execution failed; there is no result. Use `executions_get` for the failure. |
+| `result.expired` | TTL elapsed. Re-run the pipeline — the result is unrecoverable. |
+| `result.format_unsupported` | Unknown `format` value. |
+
+**Scope:** `read` (+ ownership).
 
 ### 6.3 Tool result schema
 
@@ -503,6 +612,8 @@ On error:
 
 The inner JSON matches the [REST API error envelope's `error` object](rest-api.md#42-error-envelope) — same codes, same shape, so agents see consistent errors whether they come via REST or MCP.
 
+Every tool result — success or error — carries the request's `correlation_id` in its `_meta`, echoing the `DP-Correlation-Id` of the underlying request so a user can hand an agent's output straight to an operator and have it traced ([Observability §9](observability.md)).
+
 ---
 
 ## 7. Resource Surface
@@ -514,7 +625,7 @@ Resources are entities the agent can read as "files." Useful for agents that wan
 ```
 datapipelines://pipelines/{id}                                 → latest version, full body
 datapipelines://pipelines/{id}/versions/{version}              → specific version
-datapipelines://pipelines/{id}/parameters                      → parameter schema only
+datapipelines://pipelines/{id}/parameters                      → the pipeline's parameter declarations only
 datapipelines://templates/{id}                                 → latest version
 datapipelines://templates/{id}/versions/{version}
 datapipelines://datasources/{name}                             → metadata, no password
@@ -545,12 +656,23 @@ Agents use `resources/list` to discover URIs:
 {
   "method": "resources/list",
   "params": {
-    "cursor": "..."     // optional pagination cursor
+    "cursor": "eyJrIjoicGlwZWxpbmVzIiwibyI6MTAwfQ"    // optional; omit for the first page
   }
 }
 ```
 
-Returns a list of resource descriptors with URIs, names, descriptions, and MIME types.
+Returns a page of resource descriptors (URI, name, description, MIME type) plus `nextCursor`.
+
+**Pagination is mandatory and normative:**
+
+- **Page size is fixed at 100** descriptors. It is not client-controllable — an agent asking for "everything" must page.
+- `cursor` is an **opaque server-issued token**. Clients MUST treat it as an opaque string: do not parse, construct, or persist it across server restarts. A cursor the server cannot decode → JSON-RPC `-32602` invalid params.
+- The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
+- Enumeration order is stable within a paging run (pipelines, then templates, then datasources, then executions; each by id). Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
+
+**Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions), so two agents can see different resource sets on the same server.
+
+**Execution resources are windowed:** only executions from the **last 24 hours** are enumerated. Older executions remain readable by direct URI (`datapipelines://executions/{id}`) as long as their metadata exists in the Metadata DB — they are simply not listed, because an unbounded execution history would make `resources/list` useless (and enormous) on any busy instance. Result rows are governed by the much shorter result TTL regardless (§6.2.15).
 
 ### 7.4 No subscriptions in v1
 
@@ -561,6 +683,8 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 ## 8. Prompt Surface
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
+
+**Admission rule for v1:** a prompt ships only if every step it instructs the agent to take is achievable with the 15 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. Two prompts meet the bar (§8.1, §8.3); one did not (§8.2).
 
 ### 8.1 `analyze_pipeline`
 
@@ -578,32 +702,15 @@ Predefined prompts the agent can invoke via `prompts/get`. Useful for steering a
 }
 ```
 
-Returns a prompt instructing the agent to fetch the pipeline definition, examine each node's template, validate SQL against the target dialect, check for performance issues, and report findings.
+Returns a prompt instructing the agent to fetch the pipeline definition (`pipelines_get`), read each referenced template (`templates_get`), preview the generated SQL (`templates_render`) against representative parameter values, check the SQL against the node's target dialect, look for performance issues, and report findings. Read-only: the prompt never instructs the agent to modify anything. Every step uses a v1 tool.
 
-### 8.2 `create_pipeline_for_question`
+### 8.2 `create_pipeline_for_question` — **not in v1**
 
-```json
-{
-  "name": "create_pipeline_for_question",
-  "description": "Guide the agent through creating a new pipeline to answer a natural-language question against the available datasources.",
-  "arguments": {
-    "type": "object",
-    "required": ["question"],
-    "properties": {
-      "question": {"type": "string", "description": "The business question to answer."},
-      "datasource_hint": {"type": "string", "description": "Optional: which datasource likely has the data."}
-    }
-  }
-}
-```
+**Removed from the v1 prompt surface.** The workflow it scripts requires the agent to discover a datasource's tables and columns before it can author SQL, and datapipelines.co exposes **no schema-introspection tools in v1**. Without them the prompt's step 2 has no implementation: the agent would either stall or hallucinate a schema and author SQL against tables that may not exist — worse than offering nothing, because the prompt's presence advertises a capability the server does not have.
 
-Returns a prompt instructing the agent to:
-1. List available datasources.
-2. Inspect schemas (via future `datasources_get_schema` tool — v2).
-3. Design a pipeline.
-4. Author required templates.
-5. Validate and create the pipeline.
-6. Execute and report results.
+This is a sequencing decision, not a rejection. The prompt returns when `datasources_get_schema` / `datasources_get_tables` / `datasources_get_columns` land — a v1.1 candidate, [ROADMAP §2](ROADMAP.md#2-v11-candidates), where LLM-assisted pipeline authoring is the stated motivation. Adding it then is additive: a new prompt name plus the tools it depends on, no change to anything frozen here.
+
+Agents authoring pipelines today do so with schema knowledge supplied by the user (or obtained outside this server) and the v1 authoring tools: `templates_create` → `templates_render` to preview the SQL → `pipelines_create`, whose save-time validation dry-renders every referenced template and rejects anything that would not run ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)).
 
 ### 8.3 `debug_failed_execution`
 
@@ -621,7 +728,7 @@ Returns a prompt instructing the agent to:
 }
 ```
 
-Returns a prompt that walks the agent through reading the execution metadata, the failed node's error, the underlying datasource state, and proposing a fix.
+Returns a prompt that walks the agent through reading the execution metadata and failed node's error (`executions_get`), comparing against recent executions of the same pipeline (`executions_list`), reading the pipeline and the failing node's template (`pipelines_get`, `templates_get`), re-rendering that template with the failed execution's parameters to see the exact SQL (`templates_render`), checking datasource reachability (`datasources_test`), and proposing a fix. Every step uses a v1 tool.
 
 ---
 
@@ -664,9 +771,9 @@ The error payload inside the tool result matches the [REST API `error` object](r
 
 ### 9.3 Transport errors
 
-- HTTP 401 → agent must re-authenticate.
-- HTTP 403 → agent's key lacks scope.
-- HTTP 429 → rate limited; agent should back off.
+- HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
+- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
+- HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 5xx → server error; agent should retry with backoff.
 
 ---
@@ -693,7 +800,9 @@ The server emits `notifications/message` per the MCP logging spec:
 
 Levels: `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`.
 
-Agents can use these for visibility into execution progress (alternative to polling `executions_get`). For full structured progress, agents should call `pipelines_execute` (which returns full progress).
+Log notifications carry the `correlation_id` of the originating request.
+
+Agents can use these for visibility into an execution while a `pipelines_execute` call is still blocking (§6.2.3) — they are the v1 stand-in for MCP progress notifications, which are deferred to v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)). They are advisory: delivery requires the client to have an open `GET /mcp` notification stream, and nothing in the execution contract depends on them. The authoritative per-node record is the `node_stats` array in the tool's final result.
 
 ---
 
@@ -704,8 +813,8 @@ Agents can use these for visibility into execution progress (alternative to poll
 Users discover the MCP endpoint via the UI's "Connect an Agent" page, which exposes:
 
 - The full MCP endpoint URL (`https://{host}/mcp`).
-- API key creation/management.
-- A copy-pasteable configuration snippet for common agents:
+- API key creation/management ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only)), including the scope picker — the page must state which scope an agent needs for what it will do (`read` to browse, `execute` to run pipelines, `author` to create them) and that a key's scopes cannot exceed the creator's.
+- A copy-pasteable configuration snippet for common agents, using whichever header that client supports (`DP-API-Key` or `Authorization: Bearer dpk_...` — §3.2):
   - Claude Desktop: `mcpServers` JSON for `claude_desktop_config.json`.
   - Cursor: settings JSON.
   - Generic HTTP MCP client: connection details.
@@ -718,15 +827,17 @@ Agents discover the server's capabilities via the standard MCP `initialize` hand
 
 ## 12. Open Questions / Future Additions
 
-Out of scope for v1, tracked for future:
+Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritative queue):
 
-- **Dynamic per-pipeline tools**: register `pipeline_execute_{name}` tools for pipelines flagged as "agent-exposed," so an agent sees them by name rather than discovering them by listing.
-- **Resource subscriptions**: `resources/subscribe` for live updates when pipelines/templates change.
-- **Schema introspection tools**: `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` — for agents that need to author SQL templates. Likely v1.1 — needed for the `create_pipeline_for_question` prompt to actually work.
+- **Schema introspection tools**: `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` — for agents that need to author SQL templates. **v1.1 candidate** ([ROADMAP §2](ROADMAP.md#2-v11-candidates)); the `create_pipeline_for_question` prompt (§8.2) returns with them.
+- **Dynamic per-pipeline tools**: register `pipeline_execute_{name}` tools for pipelines flagged as "agent-exposed," so an agent sees them by name rather than discovering them by listing. Flips `tools.listChanged` to `true` (§5.1). v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
+- **Result streaming / progress notifications via MCP**: stream execution events through the MCP transport instead of returning them only in the final tool result — removes the blocking-call experience of §6.2.3. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
+- **Resource subscriptions**: `resources/subscribe` for live updates when pipelines/templates change. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
+- **An MCP cancel tool**: v1 cancellation is `DELETE /api/v1/executions/{id}` over REST, or abandoning the blocking call (§6.2.3).
+- **Datasource management tools**: deliberate omission, not an oversight — datasource CRUD is `admin`-scoped and UI/REST-only in v1 (§4.1).
 - **Sampling**: support server-initiated LLM completions (rare for this product; agents do their own LLM work).
 - **OAuth support**: when multi-tenant SaaS deployment materializes.
 - **MCP roots**: not applicable (we are not a filesystem tool).
-- **Result streaming via MCP**: stream pipeline execution events directly through the MCP transport as notifications, instead of returning them as a single tool result. Cleaner UX for long-running pipelines.
 
 ---
 
@@ -735,13 +846,18 @@ Out of scope for v1, tracked for future:
 (This section is normative for the implementation.)
 
 - [ ] Every MCP endpoint requires auth (no unauthenticated access).
-- [ ] API key validated on every request, not just session establishment.
-- [ ] Scope enforced per tool (e.g., `pipelines_create` requires `author` scope).
-- [ ] Datasource passwords never included in tool results or resources.
+- [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
+- [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
+- [ ] Key revocation and owner deactivation take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
+- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-scope--operation-matrix-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
+- [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a valid `read` key cannot read another user's results.
+- [ ] `resources/list` filtered by the caller's scope and ownership (§7.3), not just paginated.
+- [ ] Datasource passwords never included in tool results or resources; `datasources_test` failures do not echo credentials or JDBC URLs.
 - [ ] Error messages do not leak credentials or internal network topology.
-- [ ] Rate limiting enforced at the MCP layer (same limits as REST).
+- [ ] Rate limiting enforced at the MCP layer — the same **per-user** limits as REST, shared across both surfaces (a user cannot double their budget by splitting traffic).
+- [ ] `/mcp` is CSRF-exempt *because* it accepts no cookies — assert both halves; exemption without the cookie ban is a CSRF hole.
 - [ ] All MCP traffic over TLS (enforced by deployment, not just recommended).
-- [ ] Audit log records every tool call (tool name, caller, target pipeline, timestamp, success/failure).
+- [ ] Audit log records every tool call (tool name, caller, target entity, timestamp, success/failure) with the `correlation_id`.
 
 ---
 
@@ -751,3 +867,4 @@ Out of scope for v1, tracked for future:
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial MCP server spec: streamable HTTP transport, API key auth, 15 tools, 8 resource types, 3 prompts, error model |
 | 2026-08-05 | v1.1 | propagation | Updated `pipelines_create` tool to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`; nodes carry `type`, `output`, `settings`). |
+| 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.11. **[D11]** §3.2/§4.1 auth rewritten: `DP-API-Key` **or** `Authorization: Bearer dpk_...` through one validation path; session JWTs explicitly rejected; security-chain note added (auth §8.5). **[D15]** Scope row on all 15 tools sourced from the auth §7.6 matrix; `read-only` → `read`; `admin` acknowledged as required by no v1 tool. **[D9]** §6.2.15 rewritten to the uniform REST §7 cursor (offset/limit/format, fixed TTL, stable order, ownership check), 1 MB inline cap with cursor-URL fallback, `result.*` error table; §6.2.3 returns first page + `result_url` (claim-check language gone). **[D3/D12]** `templates_create` drops `params_schema`, gains `imports [{id,version,alias}]`, `is_library`, `engine`; `templates_render` context is a free-form parameter map. **[D1]** `pipelines_create` node description: omitted `output` → `caller`, at most one caller node, zero legal. **[D7]** §6.2.3 documents blocking-call semantics, execution timeout, abandoned-call cancellation after grace, and deferral of MCP progress notifications. **[D10]** `X-API-Key` → `DP-API-Key`. **[M]** §5.1 `listChanged: false` across capabilities; §6.2.1 drops `datasources_used`; §7.3 `resources/list` pagination specified (opaque cursor, page size 100, 24h execution window, scope filtering); §8.2 `create_pipeline_for_question` removed from the v1 surface (ROADMAP §2); §3.1 verification marker reframed as an implementation-gate checklist; §12 futures re-tiered against ROADMAP; §13 checklist expanded. |

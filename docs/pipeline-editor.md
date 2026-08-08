@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.1 (revised — see Change Log)
+**Status:** v1.2 (revised — see Change Log)
 **Owner:** datapipelines.co core
-**Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-08-05
+**Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
+**Last updated:** 2026-08-07
 
 ---
 
@@ -13,22 +13,23 @@ The Pipeline Editor is the primary human-facing screen of datapipelines.co. It r
 
 This spec defines:
 - The page architecture (server-rendered shell + client-side interactivity).
-- Technology stack (Thymeleaf + Alpine.js + Cytoscape.js + @acme/design-tokens + fetch + EventSource).
+- Technology stack (Thymeleaf + Alpine.js + Cytoscape.js + @acme/design-tokens + `fetch`).
 - Graph rendering (Cytoscape.js with dagre layout).
 - Node states and visual styles (idle, running, success, failed, aborted).
-- SSE event handling → graph updates.
+- SSE event handling → graph updates, including connection loss (§15).
 - Execute button flow.
-- Error display.
-- Save/edit operations.
+- Error display and result delivery.
 - JavaScript vendoring strategy (no CDN, no build step).
-- Accessibility and keyboard navigation.
+- Accessibility and keyboard navigation (canvas graph + parallel DOM node list).
+
+Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP or by direct JSON editing. The editor is a visualization + execution surface (§11).
 
 ---
 
 ## 2. Design Principles
 
 1. **Hybrid rendering.** Thymeleaf renders the page shell + initial data on the server. Client-side JS (Alpine.js + vanilla) handles interactivity. No SPA framework, no build step.
-2. **Progressive enhancement.** The page works without JavaScript (read-only: shows pipeline metadata + static graph). JavaScript adds: interactive graph, SSE execution, save/edit, error modals.
+2. **Graceful degradation, stated honestly.** The editor **requires JavaScript for its core function.** Without JS the server-rendered shell still shows pipeline metadata (name, version, settings, parameters) and a plain `<ul>` of node ids with their declared type, source, template and `dependsOn` — the same list §14 renders for assistive technology. There is **no graph** (Cytoscape draws to a `<canvas>`), no execution, no result panel, no error modal. A `<noscript>` block states this. We do not claim the page "works without JavaScript".
 3. **No CDN, no build step.** All JS libraries (Cytoscape.js, cytoscape-dagre, Alpine.js) and the design system CSS vendored as static files under `/vendor/`. Per the project's no-CDN rule.
 4. **Design system is the styling foundation.** All colors, spacing, typography, shadows, and radii come from `@acme/design-tokens`. No hardcoded hex values anywhere — not in CSS, not in Cytoscape styles, not in Thymeleaf templates. The design system's semantic tokens (`--surface-*`, `--text-*`, `--accent-*`, etc.) are the single source of truth. See §3.4.
 5. **One page, three panels.** Left sidebar (settings + parameters), center (graph), right panel (node details — slides in on node click).
@@ -54,8 +55,9 @@ This spec defines:
 | **Alpine.js** | 3.x | Reactive data binding for UI state (execute button state, modal visibility, parameter form values, error display). |
 | **Cytoscape.js** | 3.34.0 | Graph rendering + interaction (pan, zoom, click, node selection). |
 | **cytoscape-dagre** | matching extension version | DAG auto-layout (left-to-right, levels by topology). |
-| **Native fetch API** | browser-built-in | REST calls (save pipeline, execute, fetch details). |
-| **Native EventSource** | browser-built-in | SSE consumption for execution progress. |
+| **Native fetch API + `ReadableStream`** | browser-built-in | REST calls (execute, fetch details, result cursor) **and** SSE consumption — the execute endpoint is a POST, which `EventSource` cannot issue, so the stream is parsed manually from the response body. See §7.3. |
+
+> `EventSource` is deliberately **not** in this stack. Every SSE consumer in the editor is `fetch` + `ReadableStream` (§7.3).
 
 ### 3.3 What we explicitly do NOT use
 
@@ -74,7 +76,7 @@ The entire UI — not just the editor — uses **`@acme/design-tokens`** (v0.2.0
 - **Base reset** (`base.css`): global typography + reset.
 - **Motion** (`motion.css`): animations + keyframes, all `prefers-reduced-motion` aware.
 
-**Default theme for datapipelines.co: `saas`** (modern indigo). Enterprise deployments may choose `professional` (navy/financial) or any other theme. Theme is configurable per deployment via `DATAPIPELINES_UI_THEME` env var (default: `saas`).
+The active theme is resolved **per request**, not fixed at deployment: `${uiTheme} = users.theme_preference ?: datapipelines.ui.theme` — the authenticated user's stored preference when set ([UI Screens §4.11](ui-screens.md#411-user-settings)), otherwise the deployment default from [Configuration §3.10](configuration.md#310-ui) (name, default and valid theme list defined once there, not restated here). The controller passes the resolved value to the template as `${uiTheme}` (§4.2); both sources are validated against the vendored theme list (config at startup, preference on write), so the editor may assume it names a vendored theme file. The runtime theme-swap mechanism (Appendix A.5's `readDesignTokens()` re-read) is unaffected by which source won.
 
 **Design system CSS load order** (in every page's `<head>`, before app CSS):
 
@@ -130,7 +132,7 @@ function readDesignTokens() {
 }
 ```
 
-When the theme changes at runtime, the graph re-reads tokens and re-applies the Cytoscape stylesheet. See §15.1.
+When the theme changes at runtime, the graph re-reads tokens and re-applies the Cytoscape stylesheet. See Appendix A.5.
 
 ---
 
@@ -143,7 +145,7 @@ GET /pipelines/{id}/editor
 GET /pipelines/{id}/versions/{version}/editor    (specific version)
 ```
 
-Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-session-auth).
+Authentication: session cookie carrying the internal JWT (browser flow). See [Auth §6](auth.md#6-session-tokens-internal-jwt). Required scope per the authoritative matrix in [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative): `read` to view, `execute` to run, `execute` to cancel.
 
 ### 4.2 Server-rendered HTML structure
 
@@ -180,7 +182,14 @@ Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-
                 x-data="{ running: false }"
                 @click="executePipeline()"
                 :disabled="running"
+                :aria-busy="running"
                 x-text="running ? 'Executing...' : 'Execute'">Execute</button>
+        <!-- Cancel: DELETE /executions/{id} (§15.2). Shown only while a stream is open. -->
+        <button id="cancel-btn" class="ds-button ds-button--secondary"
+                x-data="{ running: false, cancelling: false }"
+                x-show="running" @click="cancelExecution()"
+                :disabled="cancelling"
+                x-text="cancelling ? 'Cancelling...' : 'Cancel'">Cancel</button>
     </header>
 
     <!-- Main layout: sidebar | graph | details -->
@@ -211,7 +220,29 @@ Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-
 
         <!-- Center: graph -->
         <section class="editor-graph">
-            <div id="cy"></div>
+            <!-- Cytoscape draws into a <canvas> inside #cy: no per-node DOM exists. -->
+            <div id="cy" role="img" th:attr="aria-label=${graphSummary}"
+                 aria-describedby="node-list">Pipeline graph</div>
+
+            <!-- Parallel accessible node list (§14). Server-rendered, so it is also the
+                 no-JS fallback. Visually hidden until focused; statuses updated by the
+                 same SSE handler that styles the canvas. -->
+            <ul id="node-list" class="visually-hidden-until-focus" role="listbox"
+                aria-label="Pipeline nodes" tabindex="0">
+                <li th:each="n : ${pipeline.nodes}" role="option"
+                    th:id="'node-item-' + ${n.id}"
+                    th:attr="data-node-id=${n.id},aria-selected=false"
+                    th:text="${n.id} + ' — ' + ${n.type} + ' — idle'">node_id — DQL — idle</li>
+            </ul>
+
+            <!-- Status announcements for AT; SSE handler writes one sentence per transition. -->
+            <div id="graph-status" class="visually-hidden" role="status" aria-live="polite"></div>
+
+            <noscript>
+                <p class="ds-text">This editor needs JavaScript for the graph, execution and
+                results. Without it you can read the pipeline metadata and the node list above.</p>
+            </noscript>
+
             <div class="graph-controls">
                 <button class="ds-button ds-button--ghost ds-button--sm" onclick="window.editor.fit()">Fit</button>
                 <button class="ds-button ds-button--ghost ds-button--sm" onclick="window.editor.zoomIn()">+</button>
@@ -226,12 +257,18 @@ Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-
         </aside>
     </main>
 
-    <!-- Error modal (uses .ds-modal primitive) -->
+    <!-- Error modal (uses .ds-modal primitive).
+         The window-level `show-error` listener is what makes §9.1's dispatch do anything —
+         ErrorModal.show() dispatches on `window`, Alpine catches it here. -->
     <div class="ds-modal-backdrop" id="error-modal"
-         x-data="{ visible: false, error: null }" x-show="visible" x-transition.opacity>
-        <div class="ds-modal" @click.away="visible = false">
+         x-data="{ visible: false, error: null }"
+         x-on:show-error.window="error = $event.detail; visible = true"
+         x-on:keydown.escape.window="visible = false"
+         x-show="visible" x-transition.opacity>
+        <div class="ds-modal" role="alertdialog" aria-modal="true"
+             aria-labelledby="error-modal-title" @click.away="visible = false">
             <div class="ds-modal__header">
-                <h2 class="ds-h4 ds-text--danger">Execution Failed</h2>
+                <h2 class="ds-h4 ds-text--danger" id="error-modal-title">Execution Failed</h2>
                 <button class="ds-button ds-button--ghost ds-button--sm" @click="visible = false">×</button>
             </div>
             <div class="ds-modal__body">
@@ -244,6 +281,17 @@ Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-
             </div>
         </div>
     </div>
+
+    <!-- Result preview panel (§10) — populated by result.js on data_ready -->
+    <aside class="ds-card editor-result" id="result-panel"
+           role="region" aria-label="Execution result"
+           x-data="{ visible: false }" x-show="visible" x-transition></aside>
+
+    <!-- Connection-loss banner (§15.1) — non-blocking, above the graph -->
+    <div class="ds-banner ds-banner--warning" id="connection-banner"
+         role="status" x-data="{ visible: false, text: '' }" x-show="visible"
+         x-on:connection-lost.window="text = $event.detail.text; visible = true"
+         x-text="text"></div>
 
     <!-- Pipeline JSON embedded for client-side consumption -->
     <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}">
@@ -261,6 +309,8 @@ Authentication: session cookie (browser flow). See [Auth spec §6](auth.md#6-ui-
     <script src="/js/pipeline-editor/execute.js"></script>
     <script src="/js/pipeline-editor/details.js"></script>
     <script src="/js/pipeline-editor/error.js"></script>
+    <script src="/js/pipeline-editor/result.js"></script>
+    <script src="/js/pipeline-editor/a11y.js"></script>
     <script src="/js/pipeline-editor/init.js"></script>
 </body>
 </html>
@@ -334,6 +384,11 @@ class PipelineGraph {
     }
 
     buildElements(pipeline) {
+        // The caller node is the node resolving to output.target === 'caller' — declared, or
+        // by an omitted `output` block. At most one exists; zero is legal (pure ETL).
+        // See Pipeline Contract §9. NOT topology-derived.
+        const isCaller = n => n.type === 'DQL' && (!n.output || n.output.target === 'caller');
+
         const nodes = pipeline.nodes.map(n => ({
             data: {
                 id: n.id,
@@ -344,8 +399,17 @@ class PipelineGraph {
                 template: n.template,
                 output: n.output,
                 dependsOn: n.dependsOn,
+                isCaller: isCaller(n),
                 status: 'idle',                 // §6
-            }
+            },
+            // Classes MUST be set here — the §5.3 stylesheet selects on them and nothing
+            // else adds them later. `idle` is applied at build time so setNodeStatus()'s
+            // removeClass('idle running success failed aborted') stays symmetric (§6.4).
+            classes: [
+                `nodeType${n.type}`,            // nodeTypeDQL | nodeTypeDML | nodeTypeDDL
+                'idle',
+                ...(isCaller(n) ? ['caller'] : []),
+            ].join(' '),
         }));
 
         const edges = [];
@@ -381,7 +445,7 @@ class PipelineGraph {
 
 `cytoscape-dagre` with `rankDir: 'LR'` produces a left-to-right DAG layout where:
 - Source nodes (no dependencies) are on the left.
-- The terminal node (`output.target: "caller"`) is on the right.
+- Sinks (nodes nothing depends on) are on the right. The **caller node** is wherever topology puts it — it carries the `.caller` class as its visual marker, not a fixed position ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)). A pipeline may have no caller node at all.
 - Topological levels are visually distinct columns.
 - Edges flow left-to-right with arrowheads.
 
@@ -479,9 +543,11 @@ function buildGraphStyle(t) {        // t = readDesignTokens() output
                 'border-color': t.accentPrimary,        // design system focus ring color
             }
         },
-        // Terminal node (output.target: caller) — distinct visual marker
+        // Caller node (resolves to output.target: caller) — distinct visual marker.
+        // Applied in buildElements() (§5.1). At most one node carries it; a pure-ETL
+        // pipeline has none.
         {
-            selector: 'node.terminal',
+            selector: 'node.caller',
             style: {
                 'border-style': 'double',
                 'border-width': 5,
@@ -517,7 +583,7 @@ function buildGraphStyle(t) {        // t = readDesignTokens() output
 
 ```javascript
 wireEventHandlers() {
-    // Node click → show details panel
+    // Node click → select + show details panel
     this.cy.on('tap', 'node', (event) => {
         const node = event.target;
         this.selectNode(node.id());
@@ -532,7 +598,26 @@ wireEventHandlers() {
         }
     });
 }
+
+// The `.selected` class in §5.3 is applied HERE and nowhere else — Cytoscape's own
+// :selected pseudo-state is not used, so the class must be managed explicitly.
+// Selection is exclusive: at most one node carries `.selected`.
+selectNode(nodeId) {
+    this.clearSelection();
+    const node = this.cy.getElementById(nodeId);
+    node.addClass('selected');
+    this.selectedNodeId = nodeId;
+    window.a11y.syncSelection(nodeId);       // mirrors aria-selected on the §14 DOM list
+}
+
+clearSelection() {
+    this.cy.nodes().removeClass('selected');
+    this.selectedNodeId = null;
+    window.a11y.syncSelection(null);
+}
 ```
+
+Selecting a node from the accessible DOM list (§14) calls the same `selectNode()`, so canvas and list never disagree.
 
 ---
 
@@ -555,10 +640,14 @@ wireEventHandlers() {
 │    success    │          │    failed     │
 └───────────────┘          └───────────────┘
 
-Nodes not yet started when pipeline aborts:
+Nodes that never reach a terminal state of their own:
                 ┌─────────┐
-                │ aborted │  (dependency failed; this node never ran)
+                │ aborted │
                 └─────────┘
+Reached when (a) an upstream node failed and this one never ran, or
+(b) the execution was cancelled (execution_aborted) — in which case a
+node still `running` also becomes `aborted`, because the server has
+interrupted its statement.
 ```
 
 ### 6.2 CSS class → visual mapping
@@ -567,25 +656,30 @@ All colors derive from app-specific semantic tokens defined in `app.css`, which 
 
 | State | CSS class | Token (background) | Token (text) | Animation | Meaning |
 |---|---|---|---|---|---|
-| `idle` | (none — default) | `--node-idle-bg` | `--node-idle-text` | none | Initial state, not yet executed |
+| `idle` | `.idle` | `--node-idle-bg` | `--node-idle-text` | none | Initial state, not yet executed. Applied in `buildElements()` (§5.1) so all five statuses are symmetric classes — there is no implicit "no class" state. |
 | `running` | `.running` | `--node-running-bg` | `--node-running-text` | pulse | Node is currently executing |
 | `success` | `.success` | `--node-success-bg` | `--node-success-text` | none | Node completed successfully |
 | `failed` | `.failed` | `--node-failed-bg` | `--node-failed-text` | brief flash | Node failed; pipeline aborted |
-| `aborted` | `.aborted` | `--node-aborted-bg` | `--node-aborted-text`, 0.5 opacity | none | Node never ran (dependency failed) |
+| `aborted` | `.aborted` | `--node-aborted-bg` | `--node-aborted-text`, 0.5 opacity | none | Node never ran (dependency failed), or was interrupted by cancellation |
 
 Colors automatically adapt to the active design system theme. No hardcoded hex values.
 
 ### 6.3 State transitions via SSE events
 
+Event payloads are defined in [REST API §6.4](rest-api.md#64-event-types); the table below is only the graph's reaction to them.
+
 | SSE event | Graph action |
 |---|---|
 | `execution_started` | Reset all nodes to `idle`. Disable Execute button. |
 | `node_started` | Node → `running`. Incoming edges → `.active`. |
-| `node_completed` | Node → `success`. Outgoing edges → `.active`. |
+| `node_completed` | Node → `success`. Outgoing edges → `.active`. (Success-only event — failures arrive as `node_failed`.) |
 | `node_failed` | Node → `failed`. Update details panel with error. All pending nodes → `aborted`. |
-| `pipeline_completed` | All nodes should be `success` (or `aborted` for side-effect-only paths not on the terminal chain). Show success banner. |
-| `pipeline_failed` | Show error modal (§9). |
-| `data_ready` | Show result preview panel (§10). |
+| `pipeline_completed` | Terminal. Every node is `success` or `aborted`. Show success banner. |
+| `pipeline_failed` | Terminal. Show error modal (§9). |
+| `data_ready` | Show result preview panel (§10). Emitted after `pipeline_completed` and **only when the pipeline has a caller node** — a pure-ETL pipeline completes with no `data_ready` and no result panel. |
+| `execution_aborted` | Terminal. Every node not already `success`/`failed` → `aborted`; banner "Execution aborted ({reason})" using the event's `reason` (`client_disconnect` \| `cancelled` \| `shutdown`); Execute button re-enabled. See §15. |
+
+The stream closes after exactly one terminal event ([REST API §6.5](rest-api.md#65-event-ordering-guarantee)); the editor treats stream close without a terminal event as connection loss (§15.1).
 
 ### 6.4 Implementation: state update on SSE event
 
@@ -597,8 +691,10 @@ class SseHandler {
     }
 
     onEvent(eventType, data) {
+        this.lastEventType = eventType;
         switch (eventType) {
             case 'execution_started':
+                this.executionId = data.execution_id;    // needed by §15.1 status poll
                 this.graph.resetAllNodes();
                 break;
             case 'node_started':
@@ -620,32 +716,53 @@ class SseHandler {
             case 'data_ready':
                 window.resultPanel.show(data);
                 break;
+            case 'execution_aborted':
+                // Terminal event for every cancellation path (rest-api §6.4.8):
+                // client disconnect beyond grace, explicit DELETE, server shutdown.
+                this.graph.abortUnfinishedNodes();
+                window.banner.warn(`Execution aborted (${data.reason}).`);
+                break;
         }
+        window.a11y.announce(eventType, data);       // §14.2 live-region announcement
+    }
+
+    isTerminal(eventType) {
+        return ['pipeline_completed', 'pipeline_failed', 'execution_aborted'].includes(eventType);
     }
 }
 
 // graph.js (methods on PipelineGraph)
+// The five status classes are mutually exclusive and `idle` is one of them (applied at
+// build time in §5.1), so every transition is remove-all-then-add-one.
+const STATUS_CLASSES = 'idle running success failed aborted';
+
 setNodeStatus(nodeId, status) {
     const node = this.cy.getElementById(nodeId);
-    node.removeClass('idle running success failed aborted');
+    node.removeClass(STATUS_CLASSES);
     node.addClass(status);
     node.data('status', status);
+    window.a11y.syncStatus(nodeId, status);      // §14 DOM list stays in lockstep
 }
 
 abortPendingNodes(failedNodeId) {
-    // Mark all nodes that haven't started as aborted
-    this.cy.nodes().forEach(node => {
-        if (!node.hasClass('running') && !node.hasClass('success') && !node.hasClass('failed')) {
-            node.addClass('aborted');
-            node.data('status', 'aborted');
-        }
-    });
+    // A node failed: nodes that never started can no longer run.
+    this.cy.nodes()
+        .filter(n => n.hasClass('idle'))
+        .forEach(n => this.setNodeStatus(n.id(), 'aborted'));
+}
+
+abortUnfinishedNodes() {
+    // Execution cancelled (execution_aborted): anything not already terminal is aborted —
+    // including nodes still `running`, whose statements the server has interrupted.
+    this.cy.nodes()
+        .filter(n => !n.hasClass('success') && !n.hasClass('failed'))
+        .forEach(n => this.setNodeStatus(n.id(), 'aborted'));
+    this.cy.edges().removeClass('active');
 }
 
 resetAllNodes() {
-    this.cy.nodes().removeClass('running success failed aborted');
     this.cy.edges().removeClass('active');
-    this.cy.nodes().forEach(n => n.data('status', 'idle'));
+    this.cy.nodes().forEach(n => this.setNodeStatus(n.id(), 'idle'));
 }
 ```
 
@@ -657,10 +774,11 @@ resetAllNodes() {
 
 1. User fills in parameter form (if pipeline has parameters).
 2. Clicks **Execute**.
-3. Execute button becomes disabled, label changes to "Executing...".
-4. Page opens SSE connection via `fetch` (POST to `/pipelines/{id}/execute` with `Accept: text/event-stream`).
-5. SSE events flow in → graph updates in real-time.
-6. On completion: button re-enables, result panel shows (if success) or error modal shows (if failure).
+3. Execute button becomes disabled (`aria-busy="true"`), label changes to "Executing..."; the **Cancel** button appears (§15.2).
+4. Values are coerced to their declared wire types (§7.2) and posted as typed JSON. Page opens the SSE stream via `fetch` (POST to `/api/v1/pipelines/{id}/execute` with `Accept: text/event-stream`).
+5. SSE events flow in → graph, node list and live region update in real-time.
+6. On a terminal event: button re-enables, Cancel disappears, and — result panel (`data_ready`, §10), success banner (`pipeline_completed` with no caller node), error modal (`pipeline_failed`, §9), or aborted banner (`execution_aborted`, §15).
+7. If the stream ends **without** a terminal event, that is connection loss, not completion (§15.1).
 
 ### 7.2 Implementation
 
@@ -680,8 +798,12 @@ async function executePipeline() {
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream',
+                // Cookie-authenticated state-changing call → CSRF token from the `dp_csrf`
+                // cookie (Auth §8.4). Custom headers use the DP- prefix throughout.
+                'DP-CSRF-Token': readCookie('dp_csrf'),
             },
-            body: JSON.stringify({ parameters }),
+            credentials: 'same-origin',
+            body: JSON.stringify({ parameters }),   // typed JSON, never FormData — see collectParameters()
         });
 
         if (!response.ok) {
@@ -710,25 +832,87 @@ async function executePipeline() {
                 }
             }
         }
+        // Stream ended. If no terminal event arrived, the connection dropped (§15.1).
+        if (!window.sseHandler.isTerminal(window.sseHandler.lastEventType)) {
+            await handleConnectionLoss(window.sseHandler.executionId);
+        }
     } catch (error) {
-        window.errorModal.show({
-            code: 'pipeline.execution.connection_error',
-            message: 'Lost connection to server during execution.',
-            details: error.message,
-        });
+        // A thrown reader is the same condition as an early close: the stream is gone
+        // and the server will cancel after the grace period (§15.1).
+        await handleConnectionLoss(window.sseHandler.executionId);
     } finally {
         executeBtn.disabled = false;
         executeBtn.textContent = 'Execute';
     }
 }
+```
 
+#### Parameter coercion
+
+`collectParameters()` MUST NOT post raw form strings. [Pipeline Contract §6.3](pipeline-contract.md#63-wire-encoding-of-input-parameter-values) makes coercion **strict**: the server rejects a JSON string where a number/boolean is declared and vice versa (`pipeline.execution.invalid_parameter_type`). Since every `<input>` yields a string, the editor converts to the declared wire type before serializing.
+
+```javascript
+// execute.js — declared types come from the embedded pipeline JSON (`parameters` map).
 function collectParameters() {
     const form = document.getElementById('parameter-form');
+    const declared = window.editor.pipeline.parameters || {};
     const params = {};
-    new FormData(form).forEach((value, key) => { params[key] = value; });
+
+    new FormData(form).forEach((raw, key) => {
+        const decl = declared[key];
+        if (!decl) return;                                   // not a declared parameter
+        const value = typeof raw === 'string' ? raw.trim() : raw;
+        if (value === '' && !decl.required) return;          // omit → server applies the default
+        params[key] = coerceParameter(value, decl.type, key);
+    });
     return params;
 }
 
+function coerceParameter(value, type, key) {
+    switch (type) {
+        // Number-on-wire types → JSON numbers, never strings.
+        case 'INTEGER':
+        case 'SMALLINT':
+        case 'BIGINT':
+        case 'DECIMAL':                 // precision ≤ 15 (Type System §3.1)
+        case 'FLOAT':
+        case 'DOUBLE': {
+            const n = Number(value);
+            if (value === '' || Number.isNaN(n)) throw new ParameterError(key, type, value);
+            return n;
+        }
+        // String-on-wire numerics: precision must survive, so they stay strings.
+        // Sending them as JSON numbers is an explicit server-side rejection.
+        case 'BIGINTEGER':
+        case 'BIGDECIMAL':
+            return String(value);
+
+        // Boolean-on-wire → JSON true/false, never "true"/"on".
+        case 'BOOLEAN':
+            return value === true || value === 'true' || value === 'on';
+
+        // TIMESTAMP requires an explicit offset or Z — the server never guesses a zone.
+        // <input type="datetime-local"> yields a zone-less string, so we attach the
+        // browser's offset explicitly rather than sending it bare.
+        case 'TIMESTAMP':
+            return withExplicitOffset(value);       // "2026-08-07T14:30" → "2026-08-07T14:30:00+02:00"
+
+        case 'DATE':                    // exact ISO 8601 YYYY-MM-DD
+        case 'TIME':                    // exact ISO 8601 HH:MM:SS[.ffffff]
+        case 'STRING':
+        default:
+            return String(value);
+    }
+}
+```
+
+- Unparseable input never leaves the browser: `ParameterError` is caught by the Execute handler, which marks the offending field invalid (`aria-invalid="true"` + `.ds-field--error`) and aborts the POST.
+- Type-appropriate input widgets reduce, but do not remove, the need for coercion — `inputType(param.value.type)` (§4.2) maps `INTEGER`→`number`, `BOOLEAN`→`checkbox`, `DATE`→`date`, `TIMESTAMP`→`datetime-local`, everything else →`text`.
+- Client-side coercion is a UX convenience, **not** a validation boundary — the server re-validates every parameter regardless.
+
+#### SSE frame parsing
+
+```javascript
 function parseSseEvent(raw) {
     let type = null;
     let data = null;
@@ -739,6 +923,8 @@ function parseSseEvent(raw) {
     return type && data ? { type, data } : null;
 }
 ```
+
+Heartbeat frames ([REST API §6.6](rest-api.md#66-heartbeat-keepalive)) are SSE comment lines (`: heartbeat`) with no `event:`/`data:` field, so this parser returns `null` for them and they are skipped — they exist only to keep the connection open through proxy idle timeouts.
 
 ### 7.3 Why fetch + ReadableStream, not EventSource
 
@@ -759,7 +945,7 @@ When a node is clicked, the right panel slides in showing:
 | Type | `node.data.nodeType` | DQL / DML / DDL badge |
 | Source | `node.data.source` | Datasource name or `tempdb` |
 | Template | `node.data.template` | `{id, version}` — clickable link to template editor |
-| Output | `node.data.output` | For DQL: target + table/mode. For DML/DDL: "side effect" |
+| Output | `node.data.output` | For DQL: target + table/mode; an **omitted** `output` renders as "returns result to caller (default)", not as "none" ([Pipeline Contract §9.1](pipeline-contract.md#91-resolution)). For DML/DDL: "side effect" |
 | Depends on | `node.data.dependsOn` | List of parent node IDs (clickable) |
 | Status | `node.data.status` | Current execution status (idle/running/success/failed/aborted) |
 | Last execution stats | fetched via `/api/v1/executions?pipeline_id={id}&limit=1` | Duration, rows_out, error |
@@ -780,13 +966,11 @@ When `pipeline_failed` event arrives, or when the execute call returns an HTTP e
 ```javascript
 // error.js
 class ErrorModal {
-    constructor() {
-        this.element = document.getElementById('error-modal');
-        // Alpine.js manages visibility + error data
-    }
-
+    // Alpine owns the modal's visibility + error data. The consumer of this event is the
+    // `x-on:show-error.window` listener on #error-modal (§4.2) — the event MUST be
+    // dispatched on `window` for that listener to fire.
     show(error) {
-        this.element.dispatchEvent(new CustomEvent('show-error', {
+        window.dispatchEvent(new CustomEvent('show-error', {
             detail: {
                 code: error.code,
                 message: error.message,
@@ -817,7 +1001,6 @@ class ErrorModal {
 │  ┌────────────────────────────────────────────┐  │
 │  │ {                                           │  │
 │  │   "datasource_name": "pg-prod",            │  │
-│  │   "jdbc_url": "jdbc:postgresql://...",     │  │
 │  │   "underlying_error": "Connection refused" │  │
 │  │ }                                           │  │
 │  └────────────────────────────────────────────┘  │
@@ -833,87 +1016,87 @@ The error modal shows:
 - **Documentation link** (`doc_url`) — opens error-specific docs in a new tab.
 - **Close button** — dismisses modal. Graph retains the failed-node coloring.
 
+The `details` object is rendered verbatim, so it must never contain connection secrets: the server's `node_failed` payload carries `datasource_name` and `underlying_error`, never `jdbc_url` or credentials ([REST API §6.4.4](rest-api.md#644-node_failed); redaction mechanism in [Observability](observability.md)). The editor does no redaction of its own — it has nothing to redact with.
+
 The graph also shows the failed node in red — the modal is supplementary detail.
 
 ---
 
 ## 10. Result Preview
 
-### 10.1 On `data_ready` (inline delivery)
+Delivery is **uniform** — there is no inline-vs-claim-check split ([REST API §7](rest-api.md#7-result-delivery)). Every caller result is materialized in Redis before `data_ready` is emitted, and every `data_ready` carries the same fields: full `schema`, the **inline first page**, `total_rows`, `has_more`, `result_url`, `expires_at`.
 
-For small results (under 1 MB), the `data_ready` SSE event contains the schema + rows inline. The editor shows a result preview panel:
+### 10.1 On `data_ready`
+
+`result.js` renders one panel shape for every result size ([REST API §6.4.7](rest-api.md#647-data_ready)):
 
 ```
 ┌──────────────────────────────────────────────────┐
 │  Execution Result                            [×] │
 ├──────────────────────────────────────────────────┤
-│  4,480 rows • 2377 ms • 4 nodes succeeded       │
+│  4,480 rows • 2377 ms • 4 nodes succeeded        │
+│  Available until 14:35:02 (expires in 4m 58s)    │
 │                                                  │
 │  customer_id │ customer_name │ total_amount      │
 │ ─────────────┼───────────────┼────────────────── │
 │  1           │ Acme Corp     │ "12345.67"        │
 │  2           │ Globex        │ "67890.12"        │
 │  3           │ Initech       │ "1234.56"         │
-│  ...                                           │ │
-│                                                  │
-│  [Download JSON] [Download CSV] [Copy as JSON]   │
-└──────────────────────────────────────────────────┘
-```
-
-- Shows first 100 rows as a table.
-- BIGDECIMAL and BIGINTEGER values shown as strings (per Type System wire rules) — the table renders them as-is.
-- Download buttons fetch the full result (for inline results, the data is already available; for claim-check, it fetches from `result_url`).
-
-### 10.2 On `data_ready` (claim-check delivery)
-
-For large results (over 1 MB), the event contains `result_url` instead of inline rows:
-
-```
-┌──────────────────────────────────────────────────┐
-│  Execution Result                            [×] │
-├──────────────────────────────────────────────────┤
-│  12,450,000 rows • 2377 ms • 4 nodes succeeded   │
-│                                                  │
-│  Result is large. It's available for 5 minutes.  │
+│  ...                                             │
+│                       showing 1–1,000 of 4,480   │
+│                             [Load next page]     │
 │                                                  │
 │  [Download JSON] [Download CSV] [Download Arrow] │
-│  [Preview first 100 rows]                        │
 └──────────────────────────────────────────────────┘
 ```
 
-Download buttons hit `result_url` with the appropriate `Accept` header. Preview fetches the first page (offset=0, limit=100).
+- The panel renders `data.rows` from the event directly — no fetch needed for the first page. When `has_more` is `false` (the common case) the first page IS the whole result and no cursor call is ever made.
+- The table renders the first page as delivered. Page size is the server's `datapipelines.result.page-size-rows`, not a client constant — the editor never assumes 100 or 1000 rows.
+- BIGDECIMAL / BIGINTEGER values arrive as strings (Type System wire rules) and are rendered as-is — the editor never parses them into JS numbers.
+- Nothing is shown for a **pure-ETL pipeline**: with no caller node there is no `data_ready` event. The completion banner shows execution stats only.
+
+### 10.2 Paging and download via the result cursor
+
+Both "Load next page" and the download buttons use the same cursor endpoint ([REST API §7.2](rest-api.md#72-cursor-endpoint)):
+
+```
+GET /api/v1/executions/{execution_id}/result?offset=&limit=&format={json|arrow|csv}
+```
+
+- Paging is by `offset`/`limit`; ordering is stable because the result was fully materialized before the cursor existed.
+- The cursor requires normal session auth + `read` scope + ownership — `result_url` is **not** a capability URL, so the editor sends its credentials like any other API call.
+- **TTL is fixed.** Reading pages does not extend it. The panel shows the remaining time from `expires_at` and counts down.
+- After expiry the endpoint returns `410` with `result.expired`; the panel replaces the table with **"Result expired — re-run the pipeline"** and a re-execute button. It does not retry.
+- `result.execution_failed` (410) and `result.execution_not_found` (404) surface through the same error path (§9). The full endpoint error list is [REST API §7.6](rest-api.md#76-endpoint-errors).
+- A result exceeding `datapipelines.result.max-size-bytes` never reaches this panel — the execution itself fails with `result.too_large` and the error modal explains that large datasets belong in `output.target: "datasource"` write-back, not in caller results.
 
 ---
 
-## 11. Save / Edit Operations
+## 11. Editing Scope
 
-### 11.1 Read-only mode (default)
+### 11.1 The editor is read-only in v1
 
-By default, the editor opens in read-only mode for the published version. The graph is non-editable (no drag-and-drop, no node creation). The user can:
-- View the pipeline.
-- Execute it.
-- Inspect nodes.
+The editor is a **visualization + execution surface, not an authoring surface.** There is no edit mode, no save action, and no `?edit=true` parameter — the page has exactly one mode. The user can:
+- View the pipeline (graph, settings, parameters, node details).
+- Execute it and watch progress.
+- Cancel a running execution.
+- Inspect and page through results.
 - Switch versions.
 
-### 11.2 Edit mode
+The editor issues no `POST`/`PUT`/`DELETE` against `/pipelines` — its only state-changing calls are execute (§7) and cancel (§15).
 
-Clicking **Edit** (visible only for users with `author` scope) navigates to `/pipelines/{id}/editor?edit=true`. In edit mode:
-- Node descriptions and parameters are editable in the details panel.
-- "Save as new version" button → `PUT /pipelines/{id}` with modified JSON.
-- Graph topology editing (add/remove nodes, change dependencies) is **not supported in v1** — it requires a more complex editor. Users edit the pipeline JSON directly or via MCP/LLM, then reload.
+### 11.2 Authoring is LLM/MCP-first
 
-### 11.3 Why no drag-and-drop graph editing in v1
+Pipelines are authored, in order of intended use:
+1. **LLMs via MCP** — the primary authoring path for this product ([MCP Server](mcp-server.md)).
+2. **Direct JSON editing** via the REST API (developer path).
+3. **The template editor** for the SQL templates a pipeline references (separate spec).
 
-Drag-and-drop graph editing (add node, connect nodes, reposition) requires:
-- A palette of node types to drag from.
-- Edge-drawing interaction (`cytoscape-edgehandles` extension).
-- Form for node properties (id, source, template, output, depends_on).
-- Live validation (no cycles, terminal exists, etc.).
+A pipeline authored by any of these routes is validated at save time — no invalid pipeline reaches the database ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)) — so the editor can render whatever it loads without defensive validation.
 
-This is a v2 feature. For v1, the graph is a **visualization + execution surface**, not an authoring surface. Pipelines are authored by:
-- LLMs via MCP (the primary authoring path for this product).
-- Direct JSON editing (developer path).
-- The template editor (for SQL templates).
+### 11.3 UI edit mode is a ROADMAP item
+
+In-UI authoring — editable node metadata, "save as new version", and eventually drag-and-drop topology editing (node palette, `cytoscape-edgehandles`, live validation) — is **out of v1 scope** and tracked in [ROADMAP](ROADMAP.md). It is deferred deliberately, not merely unbuilt: the authoring surface has to re-implement the save-time validation rules the server already owns, and the MCP path delivers the same outcome today. Design work on it is explicitly out of scope for the 2026-08 consistency campaign ([SPEC-REVIEW-2026-08 Part 3](SPEC-REVIEW-2026-08.md#part-3--out-of-scope-for-this-campaign)).
 
 ---
 
@@ -925,6 +1108,7 @@ This is a v2 feature. For v1, the graph is a **visualization + execution surface
 modules/web/src/main/resources/static/
 ├── vendor/
 │   ├── design-system/                      ← @acme/design-tokens (vendored CSS)
+│   │   ├── vendor-manifest.json            ← versions + SHA-256 for ALL vendored assets
 │   │   ├── tokens.css
 │   │   ├── base.css
 │   │   ├── motion.css
@@ -946,18 +1130,20 @@ modules/web/src/main/resources/static/
 │       └── dagre.min.js                    (dagre layout engine, dependency of cytoscape-dagre)
 ├── css/
 │   ├── app.css                             ← app-specific semantic tokens (derive from design system)
-│   ├── pipeline-editor.css                 ← editor-specific styles (uses design system tokens)
-│   └── vendor-manifest.json                ← SHA-256 hashes for all vendored files
+│   └── pipeline-editor.css                 ← editor-specific styles (uses design system tokens)
 └── js/
     └── pipeline-editor/
         ├── init.js                         (page load → graph init)
         ├── graph.js                        (PipelineGraph class)
         ├── sse.js                          (SseHandler class)
-        ├── execute.js                      (executePipeline function)
+        ├── execute.js                      (executePipeline, collectParameters, coercion)
         ├── details.js                      (DetailsPanel class)
         ├── error.js                        (ErrorModal class)
-        └── result.js                       (ResultPanel class)
+        ├── result.js                       (ResultPanel class — §10)
+        └── a11y.js                         (DOM node list ↔ canvas sync, live region — §14)
 ```
+
+`vendor-manifest.json` lives at `static/vendor/design-system/vendor-manifest.json` — one manifest for **all** vendored assets (design system CSS, Cytoscape, dagre, Alpine), written there by `scripts/sync-design-system.sh` ([DEVELOPMENT.md](../DEVELOPMENT.md)). It is not under `css/`.
 
 ### 12.2 No build step, no modules
 
@@ -983,7 +1169,7 @@ Each library is downloaded as a pre-built UMD bundle and committed to `modules/w
 
 1. Download the specific version from npm CDN (unpkg/jsdelivr) **once** during development.
 2. Compute SHA-256 hash.
-3. Commit the file + a `vendor-manifest.json` recording:
+3. Commit the file + an entry in `static/vendor/design-system/vendor-manifest.json` (the single manifest for every vendored asset — see §12.1) recording:
    ```json
    {
      "design-system": {
@@ -1036,12 +1222,12 @@ The design system (`@acme/design-tokens`) is a sibling project at `../design-sys
 
 1. Build the design system: `cd ../design-system-starter && npm run build` → produces `dist/`.
 2. Copy the needed files from `dist/` into `modules/web/src/main/resources/static/vendor/design-system/`.
-3. Record the version (from `design-system-starter/package.json`) in `vendor-manifest.json`.
-4. A CI script (`scripts/sync-design-system.sh`) automates this: builds the design system, copies files, verifies version match.
+3. Record the version (from `design-system-starter/package.json`) in `static/vendor/design-system/vendor-manifest.json`.
+4. A CI script (`scripts/sync-design-system.sh`) automates this: builds the design system, copies files, writes the manifest, verifies version match.
 
 This keeps the design system as an independent project that can evolve separately, while datapipelines vendors a specific build for reproducibility.
 
-### 13.2 Version upgrades
+### 13.3 Version upgrades
 
 When upgrading a vendored library:
 1. Download the new version.
@@ -1056,26 +1242,54 @@ No `npm install` in CI, no `package-lock.json`, no transitive dependency resolut
 
 ## 14. Accessibility
 
+**The constraint that shapes this whole section:** Cytoscape.js renders the graph into a **single `<canvas>` element**. There are no per-node DOM elements, no SVG shapes, nothing for a screen reader or the browser's focus engine to reach. Per-node ARIA (`role="button"` on a node, a per-node `aria-label`, tabbing "into" the graph) is **not implementable** on this renderer — v1.1 of this spec required it and was wrong.
+
+The accessible surface is therefore a **parallel DOM structure mirroring the graph**, not annotations on the graph. A server-rendered list sits next to the canvas (markup in §4.2):
+
+```html
+<div id="cy" role="img" aria-label="{graphSummary}" aria-describedby="node-list"></div>
+
+<ul id="node-list" role="listbox" aria-label="Pipeline nodes" tabindex="0">
+  <li role="option" id="node-item-fetch_orders" data-node-id="fetch_orders"
+      aria-selected="false">fetch_orders — DQL — idle</li>
+  ...
+</ul>
+```
+
+- **One `<li role="option">` per node**, in topological order (the same order dagre ranks them), so the list reads as a sequence of execution stages.
+- Each option's accessible name is `"{node_id} — {type} — {status}"`, plus `", returns result to caller"` on the caller node and `", depends on: a, b"` when it has dependencies. That sentence is what a screen-reader user hears; it must carry everything the visual node encodes (identity, kind, state, caller marker, edges).
+- The list is **visually hidden until focused** (`.visually-hidden-until-focus`), then rendered as a normal panel — sighted keyboard users get the same affordance, which is also how the styling stays testable.
+- It is **server-rendered**, so it doubles as the no-JS fallback (§2 principle 2).
+- The canvas itself is `role="img"` with `aria-label` = a one-sentence graph summary (`"Pipeline DAG: 6 nodes, 7 dependencies, left to right"`) and `aria-describedby` pointing at the list. `role="application"` is **not** used — it would suppress the browsing mode the list depends on.
+
 ### 14.1 Keyboard navigation
 
-| Key | Action |
-|---|---|
-| `Tab` | Move focus between: Execute button → version dropdown → parameter inputs → graph → graph controls |
-| `Enter` (on Execute) | Execute pipeline |
-| `Tab` / `Shift+Tab` within graph | Cycle through nodes |
-| `Enter` (on selected node) | Open details panel |
-| `Escape` | Close details panel / error modal / result panel |
-| `+` / `-` | Zoom in / out (when graph focused) |
-| `F` | Fit graph to viewport |
-| `R` | Reset node states to idle (after execution completes) |
+| Key | Context | Action |
+|---|---|---|
+| `Tab` / `Shift+Tab` | page | Execute → version dropdown → parameter inputs → **node list** → graph controls → result panel |
+| `Enter` | Execute button | Execute pipeline |
+| `↑` / `↓` | node list | Move the active option (`aria-activedescendant` on the `<ul>`), selecting as it moves |
+| `Home` / `End` | node list | First / last node |
+| `Enter` / `Space` | node list | Open the details panel for the active node |
+| `Escape` | anywhere | Close details panel → result panel → error modal (topmost first) |
+| `+` / `−` | node list or graph controls | Zoom in / out |
+| `F` | node list or graph controls | Fit graph to viewport |
+| `R` | node list or graph controls | Reset node states to idle (only after a terminal event) |
 
-### 14.2 ARIA
+Selection is bidirectional and single-sourced: arrowing the list calls `PipelineGraph.selectNode()` (§5.4), which sets `.selected` on the canvas node, centres the viewport on it, and sets `aria-selected="true"` on the matching `<li>`. Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
 
-- Graph container: `role="application"`, `aria-label="Pipeline DAG visualization"`.
-- Each node rendered as an SVG element with `role="button"`, `aria-label="{node_id} — {status}"`, `aria-selected="true|false"`.
-- Details panel: `role="region"`, `aria-label="Node details"`.
-- Error modal: `role="alertdialog"`, `aria-labelledby` pointing to the error title.
-- Execute button: `aria-busy="true"` while execution in progress.
+The graph canvas is **not** in the tab order (`tabindex="-1"`) — focusing an image the user cannot interact with is a trap, and every graph action is reachable from the list or the controls.
+
+### 14.2 ARIA and status announcements
+
+`a11y.js` owns two jobs, both driven by the same SSE handler that styles the canvas (§6.4) — there is no second source of truth for status:
+
+- `syncStatus(nodeId, status)` rewrites the matching `<li>`'s text (`fetch_orders — DQL — running`). Because the option text changes rather than an ARIA attribute alone, screen readers announce it when the option is active.
+- `announce(eventType, data)` writes one sentence into `#graph-status` (`role="status"`, `aria-live="polite"`): `"fetch_orders running"`, `"fetch_orders failed: could not reach pg-prod"`, `"Pipeline completed, 4480 rows"`, `"Execution aborted (cancelled)"`. Terminal and failure events use `aria-live="assertive"` via a second region; per-node progress stays polite so a 20-node pipeline does not flood the buffer.
+- Rapid node transitions are coalesced (max one announcement per 500 ms, latest wins) — parallel branches otherwise emit faster than speech synthesis can consume.
+- The Execute button carries `aria-busy="true"` for the duration of the stream.
+
+Other regions: details panel `role="region" aria-label="Node details"`; result panel `role="region" aria-label="Execution result"`; error modal `role="alertdialog" aria-modal="true" aria-labelledby="error-modal-title"` with focus moved to it on open and restored to Execute on close.
 
 ### 14.3 Color contrast
 
@@ -1091,26 +1305,57 @@ If a custom theme introduces a contrast issue, the design system's contrast audi
 For colorblind users, status is also indicated by:
 - **Shape**: DML nodes are diamonds, DDL are tags, DQL are rectangles.
 - **Icon**: success shows ✓, failed shows ✗, running shows ⟳ (added as node label suffix).
-- **Text**: details panel always shows the status in words.
+- **Text**: the details panel and the §14 node list always show the status in words — no state is conveyed by color alone.
 
 ---
 
-## 15. SSE Stream Reconnection
+## 15. Connection Loss and Cancellation
 
-### 15.1 Connection drop
+### 15.1 Connection drop — the execution is cancelled, not resumed
 
-If the SSE connection drops mid-execution (network blip, server restart):
+**There is no reconnection.** [REST API §6.8](rest-api.md#68-client-disconnect) is explicit: a disconnected SSE client cancels its own execution. When the stream drops the server starts a grace timer (`datapipelines.sse.disconnect-grace-seconds`) and, if no terminal event has been reached when it elapses, interrupts the in-flight statements and finishes the execution as `ABORTED`. `Last-Event-Id` is ignored; there is no resume endpoint and no `GET` variant of execute to reconnect to. Any UI that promises "reconnecting…" is lying to the user.
 
-1. The `fetch` reader throws an error.
-2. Error caught in `execute.js`.
-3. UI shows a non-blocking warning: "Connection lost. Attempting to reconnect..."
-4. Client attempts to reconnect with `Last-Event-Id` header via `GET /pipelines/{id}/execute?execution_id={exec_id}`.
-5. If reconnection succeeds within 30 seconds, the stream resumes from the last event. The user sees no data loss.
-6. If reconnection fails, the UI shows: "Connection lost. Execution continues on the server. Check execution history for results."
+What the editor does instead:
 
-### 15.2 Execution continues server-side
+1. The `fetch` reader throws, **or** the stream closes without a terminal event (`pipeline_completed` / `pipeline_failed` / `execution_aborted`). Both are the same condition — `handleConnectionLoss()`.
+2. A non-blocking banner appears immediately: **"Connection lost — this execution will be cancelled shortly. Checking final status…"** No retry, no countdown that implies recovery.
+3. The editor polls `GET /api/v1/executions/{execution_id}` ([REST API §10.2](rest-api.md#102-get-execution-metadata)) **once**, after a short delay, and **at most once more** — enough to catch the abort landing, not a polling loop.
+4. On a terminal status the banner is replaced by the real outcome and the graph is finalized:
+   - `ABORTED` → `abortUnfinishedNodes()`, banner **"Execution aborted — the connection was lost."**
+   - `SUCCESS` → the execution had already finished when the stream died; the result is in Redis for its TTL, so the panel is populated from the cursor (§10.2).
+   - `FAILED` → the error modal (§9), populated from the execution record.
+5. If both polls still report `RUNNING`, the editor stops and shows **"Execution still running — it will be cancelled within {grace} seconds. Reload to see the final status."** It does not keep polling.
 
-Per the [DAG Executor spec §10](dag-executor.md#10-sse-event-integration), executions complete regardless of SSE client state. A dropped SSE connection does not abort the pipeline. The user can always find the result via `/executions/{execution_id}` after the fact.
+```javascript
+// execute.js
+async function handleConnectionLoss(executionId) {
+    window.banner.warn('Connection lost — this execution will be cancelled shortly. Checking final status…');
+    if (!executionId) return;                        // stream died before execution_started
+
+    for (const delayMs of [2000, 8000]) {            // two probes, then stop
+        await sleep(delayMs);
+        const res = await fetch(`/api/v1/executions/${executionId}`, { credentials: 'same-origin' });
+        if (!res.ok) continue;
+        const { data } = await res.json();
+        if (data.status !== 'RUNNING') return finalizeFromRecord(data);
+    }
+    window.banner.warn('Execution still running — it will be cancelled shortly. Reload to see the final status.');
+}
+```
+
+### 15.2 Explicit cancellation
+
+While an execution is running, the Execute button is replaced by **Cancel**, which issues `DELETE /api/v1/executions/{execution_id}` ([REST API §10.4](rest-api.md#104-cancel-execution); scope `execute` + ownership).
+
+- The `204` acknowledges the *request*, not completion. The UI shows "Cancelling…" and waits for the `execution_aborted` event on the still-open stream, which is what actually finalizes the graph (§6.3).
+- Cancellation works from any server instance (it travels via a Redis flag), so completion can lag by up to one heartbeat interval. The UI must not assume the `204` means the nodes have stopped.
+- Cancelling an execution that already reached a terminal state returns `409` with `pipeline.execution.not_running` — the editor swallows this quietly and just renders the terminal state it already has.
+
+### 15.3 What is NOT offered
+
+- **No reconnection or stream resumption** — deliberately removed; see §15.1.
+- **No fire-and-forget execution.** Closing the tab cancels the run. A user who needs the pipeline to finish unattended should trigger it via the REST/MCP surface, not the editor.
+- **Past executions are still inspectable** after the fact: metadata via `GET /executions/{id}`, the event stream replayable for 1 hour via `GET /executions/{id}/events`, and the result within its TTL via the cursor (§10.2).
 
 ---
 
@@ -1126,7 +1371,7 @@ Execution events arrive at human-observable rates (one per node start/complete, 
 
 ### 16.3 Result preview rendering
 
-The result preview table renders the first 100 rows only. Larger result sets are accessed via download (claim-check). DOM stays small.
+The result table renders one page at a time (`datapipelines.result.page-size-rows`); further pages come from the cursor on demand (§10.2) and replace the visible page rather than appending indefinitely. DOM stays small regardless of `total_rows`.
 
 ### 16.4 Cytoscape performance tips
 
@@ -1147,21 +1392,33 @@ The result preview table renders the first 100 rows only. Larger result sets are
 | Execute with failure | Click Execute on pipeline with unreachable datasource | Failed node turns red; error modal shows; pending nodes turn gray |
 | Switch versions | Use version dropdown | Page reloads with selected version's graph |
 | Node details | Click node | Details panel slides in with node metadata |
-| SSE reconnection | Disconnect network mid-execution | Reconnects automatically within 30s |
-| Large result | Execute pipeline producing > 1MB result | Result panel shows claim-check download links |
-| Keyboard nav | Tab through page | All interactive elements reachable via keyboard |
+| Caller node marker | Open a pipeline with a caller node, then one without | `.caller` double border on exactly one node; none on the pure-ETL pipeline |
+| Zero-caller pipeline | Execute a pure write-back pipeline | Completes with stats banner; **no** `data_ready`, no result panel |
+| Connection loss | Kill the network mid-execution | Banner "connection lost — will be cancelled"; **no** reconnect attempt; status poll resolves to `ABORTED`; nodes go gray |
+| Explicit cancel | Click Cancel mid-execution | `204`; `execution_aborted` arrives; running + pending nodes → aborted; banner names the reason |
+| Multi-page result | Execute a pipeline returning more rows than one page | First page inline from `data_ready`; "Load next page" hits the cursor; order stable |
+| Expired result | Wait past the result TTL, then page | "Result expired — re-run" (no retry loop) |
+| Parameter coercion | Submit a BOOLEAN + INTEGER + TIMESTAMP parameter set | Request body carries `true`/`42`/offset-bearing timestamp — not `"true"`/`"42"`/zone-less |
+| Keyboard nav | Tab through page, arrow through node list | Every action reachable; graph canvas itself is skipped; node list announces status changes |
+| No-JS | Load with JS disabled | Pipeline metadata + node list render; `<noscript>` explains the graph is unavailable |
 
 ### 17.2 Automated tests
 
 - **Unit tests** (JS, run in headless browser or jsdom):
-  - `PipelineGraph.buildElements()` — correct node/edge construction from pipeline JSON.
-  - `PipelineGraph.setNodeStatus()` — class transitions correct.
-  - `parseSseEvent()` — correct SSE wire format parsing.
-  - `collectParameters()` — correct form-to-object mapping.
+  - `PipelineGraph.buildElements()` — correct node/edge construction **and classes**: `nodeType{DQL|DML|DDL}`, `idle` on every node, `caller` on exactly the node resolving to `output.target: "caller"` (declared or omitted), and on **no** node for a zero-caller pipeline.
+  - `PipelineGraph.setNodeStatus()` — class transitions are exclusive (previous status class removed, including `idle`).
+  - `abortUnfinishedNodes()` — running nodes are aborted too; `success`/`failed` are preserved.
+  - `parseSseEvent()` — correct SSE wire format parsing; heartbeat comment frames yield `null`.
+  - `coerceParameter()` — per declared type: `BOOLEAN`→`true`, `INTEGER`→number, `BIGDECIMAL`→string (never a number), `TIMESTAMP`→offset-bearing string, bad input throws.
+  - `a11y.syncStatus()` — the `<li>` text and the canvas class agree after every transition.
 - **Integration tests** (Playwright or Cypress):
-  - Full execute flow: render → execute → SSE events → graph updates → result panel.
+  - Full execute flow: render → execute → SSE events → graph updates → result panel with the inline first page.
   - Failure flow: execute → node fails → error modal → graph retains state.
+  - Abort flow: execute → Cancel → `execution_aborted` → all unfinished nodes aborted, banner shown.
+  - Connection-loss flow: stream killed mid-execution → banner, no reconnect request issued, status poll fires at most twice.
+  - Cursor paging: multi-page result → next page → stable row order, TTL countdown, expiry message.
   - Version switch: dropdown changes → page reloads with correct version.
+  - Accessibility: axe scan clean; arrow-key traversal of the node list drives canvas selection; live region announces each status change.
 
 ---
 
@@ -1172,16 +1429,18 @@ The result preview table renders the first 100 rows only. Larger result sets are
 - The page URL structure (`/pipelines/{id}/editor`).
 - The three-panel layout (sidebar + graph + details).
 - The Cytoscape.js + dagre LR rendering.
-- The 5 node states (idle/running/success/failed/aborted).
-- The SSE event → graph update mapping.
+- The 5 node states (idle/running/success/failed/aborted) and their class names.
+- The SSE event → graph update mapping, including `execution_aborted` as a terminal event.
+- The parallel accessible node list as the AT/keyboard surface for the canvas graph.
 - The vendoring strategy (no CDN, no build step).
 - The error modal and result panel shapes.
+- Read-only: the editor never writes pipeline definitions in v1.
 
 ### 18.2 Not frozen
 
 - Specific color values (may be themed in future).
 - JS file organization (may be refactored to modules).
-- Addition of graph editing (drag-and-drop) in v2.
+- Addition of an authoring/edit mode, including drag-and-drop topology editing (ROADMAP, §11.3).
 - Layout algorithm choice (may offer per-pipeline config).
 
 ---
@@ -1190,7 +1449,9 @@ The result preview table renders the first 100 rows only. Larger result sets are
 
 Out of scope for v1, tracked in [ROADMAP](ROADMAP.md):
 
+- **UI edit mode** — editable node metadata + "save as new version" (§11.3). Deferred with drag-and-drop, not ahead of it.
 - **Drag-and-drop graph editing** — add nodes, draw edges, edit in place. Requires node palette, edge-drawing interaction, live validation. v2.
+- **Async / detached execution** — today closing the tab cancels the run (§15.3). Webhook-notified background execution is the ROADMAP answer, not SSE resumption.
 - **Live parameter form from JSON Schema** — auto-generate the parameter form from the pipeline's `parameters` declaration (currently Thymeleaf-rendered, which works but isn't dynamic when the pipeline JSON changes client-side).
 - **Mini-map** — Cytoscape supports an extension (`cytoscape-navigator`) for a mini-map overview on large graphs.
 - **Undo/redo for edits** — if graph editing lands.
@@ -1328,4 +1589,5 @@ Available themes (from the design system):
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline editor UI spec: Thymeleaf + Alpine.js + Cytoscape.js 3.34.0 + cytoscape-dagre. Three-panel layout, 5 node states, SSE-driven graph updates, vendoring strategy, accessibility, keyboard nav. |
+| 2026-08-07 | v1.2 | consistency campaign | **[D7]** §15 rewritten: no SSE reconnection and no `Last-Event-Id` — a dropped stream cancels the execution after the grace period; the editor warns, polls `GET /executions/{id}` at most twice for the final status, and renders `ABORTED`. `execution_aborted` (rest-api §6.4.8) wired into §6.3/§6.4 as a terminal event; explicit Cancel (`DELETE /executions/{id}`) added (§15.2). **[D9]** §10 rewritten for uniform result delivery: one panel shape, inline first page from `data_ready`, cursor paging/downloads within a fixed TTL, `result.expired` handling; inline-vs-claim-check split deleted. **[D1]** "terminal node" → **caller node** throughout; `.terminal` Cytoscape class renamed `.caller` and actually applied in `buildElements()`; zero-caller pipelines documented (no `data_ready`). **[D8]** `DATAPIPELINES_UI_THEME` now references configuration.md §3.10 instead of restating the default. **[M]** "Native EventSource" removed from the §3.2 stack (contradicted §7.3). Styling wiring fixed: `nodeType*` and `idle` classes added at build time, `.selected` managed in `selectNode()`/`clearSelection()`. §4.2 adds `result.js`, `a11y.js` and the `x-on:show-error.window` listener that gives §9.1's dispatch a consumer. **[M]** §7.2 `collectParameters()` coerces values to declared wire types (pipeline-contract §6.3) instead of posting FormData strings. **[M]** §14 accessibility rewritten honestly for canvas rendering: per-node `role="button"` is impossible, replaced by a parallel visually-hidden `<ul role="listbox">`, `role="img"` canvas, and an `aria-live` status region. **[M]** Progressive-enhancement overclaim removed (no-JS = metadata + node list, no graph). **[M]** §11 edit mode removed from v1 scope (`?edit=true` deleted) — authoring is LLM/MCP-first, UI edit mode is a ROADMAP item. **[M]** `vendor-manifest.json` unified to `static/vendor/design-system/`. **[M]** Duplicate `### 13.2` renumbered (version upgrades → §13.3). Anchor fixes: auth §6, dag-executor/rest-api cross-links; `jdbc_url` removed from the §9.2 error mockup. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.13. |
 | 2026-08-05 | v1.1 | design system integration | Integrated `@acme/design-tokens` design system as the styling foundation. All hardcoded colors replaced with design system tokens (`--surface-*`, `--text-*`, `--accent-*`). HTML uses `.ds-*` primitives (`.ds-button`, `.ds-card`, `.ds-modal`, etc.). Cytoscape stylesheet reads tokens via `readDesignTokens()` bridge. App-specific node-state tokens (`--node-*-bg/text`) derive from design system accent tokens. Theme switching (9 themes including dark mode) works at runtime without page reload. Replaced Appendix A entirely. Updated vendoring to include design system CSS. |
