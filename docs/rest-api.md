@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-This spec defines the **HTTP surface** of datapipelines.co: every REST endpoint, request/response shape, error format, the SSE event stream for pipeline execution, and the claim-check pattern for large results.
+This spec defines the **HTTP surface** of datapipelines.co: every REST endpoint, request/response shape, error format, the SSE event stream for pipeline execution, and the uniform Redis-backed result-delivery cursor.
 
 It is the contract for:
 - Browser-based UI (the pipeline editor, dashboard, execution views)
@@ -20,12 +20,12 @@ It is the contract for:
 
 ## 2. Design Principles
 
-1. **JSON-first.** Every request and response is JSON unless explicitly otherwise (binary upload, SSE stream, claim-check blob).
+1. **JSON-first.** Every request and response is JSON unless explicitly otherwise (binary upload, SSE stream, Arrow/CSV result pages).
 2. **Envelope consistency.** Every success response uses the same envelope shape. Every error response uses the same error envelope.
 3. **SSE for execution, REST for everything else.** Pipeline execution is the only long-running, event-emitting operation. It uses Server-Sent Events. All other endpoints are synchronous request-response.
-4. **Claim-check for large data.** Result sets above a configurable threshold (default 1 MB) are stored in Redis and referenced by URL, not inlined in the SSE stream.
-5. **Idempotency where it matters.** Pipeline execution supports idempotency keys (retries don't re-execute). Write operations on pipelines and templates do not (each write creates a new version).
-6. **Pagination everywhere.** List endpoints paginate. Result sets paginate (via claim-check).
+4. **One result path.** Every completed execution's caller result is materialized in Redis and read through one cursor endpoint (§7). `data_ready` carries the first page inline, so small results still cost a single round-trip. There is no inline-vs-claim-check split.
+5. **Idempotency where it matters.** Pipeline execution supports idempotency keys (retries don't re-execute) — see §3.5. Write operations on pipelines and templates do not (each write creates a new version).
+6. **Pagination everywhere.** List endpoints paginate. Result data pages through the result cursor (§7).
 7. **HTTP status codes used correctly.** 2xx success, 4xx client error, 5xx server error. No overloading.
 
 ---
@@ -44,12 +44,12 @@ https://{host}/api/v1
 
 ### 3.2 Authentication
 
-Every endpoint (except `/auth/login` and `/auth/refresh`) requires authentication via one of:
+Every `/api/v1/**` endpoint requires authentication via one of:
 
-- **Session cookie** — for browser-based UI flows. Set by `/auth/login`.
-- **API key** — for programmatic clients. Sent in header: `X-API-Key: {key}`.
+- **Session cookie** (`dp_session`) — for browser-based UI flows. Set by the OIDC login flow (`GET /oauth2/authorization/{provider}` → callback), not by any REST endpoint. There are no `/auth/login` or `/auth/refresh` endpoints — see [Auth §5](auth.md#5-oidc-login-flow).
+- **API key** — for programmatic clients. Sent in header: `DP-API-Key: dpk_...`.
 
-API keys are issued per-user-per-agent from the UI. See [Auth spec](auth.md).
+Required scopes per operation are defined once in the [Auth §7.6 scope matrix](auth.md#76-scope--operation-matrix-authoritative). API keys are issued per-user-per-agent from the UI (management endpoints in §16).
 
 ### 3.3 Content negotiation
 
@@ -60,13 +60,26 @@ API keys are issued per-user-per-agent from the UI. See [Auth spec](auth.md).
 
 ### 3.4 Correlation
 
-Every request may include `X-Correlation-Id` header. The server echoes it in the response and includes it in logs. If absent, the server generates one and returns it in the response header.
+Every request may include the `DP-Correlation-Id` header. The server echoes it in the response and includes it in logs. If absent, the server generates one and returns it in the response header.
 
 ### 3.5 Idempotency
 
-Write operations support idempotency via the `Idempotency-Key` header. The server caches the response for that key+request-hash for 24 hours. Repeated requests with the same key return the cached response.
+**Only `POST /pipelines/{id}/execute` supports idempotency** via the `Idempotency-Key` header (a de-facto standard header — deliberately not `DP-`-prefixed). The server caches the response reference for that key + request-hash for `datapipelines.idempotency.ttl-seconds` (default 24h); a retried request with the same key returns the original execution instead of re-executing. Same key + different body → `409 idempotency.key_reused_for_different_request`.
 
-Particularly important for `POST /pipelines/{id}/execute` — agent retry after network blip should not double-execute.
+CRUD writes do NOT accept idempotency keys in v1 — each write deliberately creates a new version, and version history makes accidental duplicates visible and removable.
+
+### 3.6 Custom header registry
+
+All datapipelines custom headers use the `DP-` prefix:
+
+| Header | Direction | Purpose |
+|---|---|---|
+| `DP-API-Key` | request | API-key authentication (§3.2) |
+| `DP-Correlation-Id` | both | Log/trace correlation (§3.4) |
+| `DP-CSRF-Token` | request | CSRF token for cookie-authenticated state-changing requests ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)) |
+| `DP-Result-TTL-Seconds` | request | Client-requested result TTL, clamped by the server (§7.4) |
+
+Standard headers used as-is: `Idempotency-Key`, `Retry-After`, `RateLimit-*` (§12), `Authorization` (Bearer on `/mcp` only — [Auth §8.5](auth.md#85-mcp-endpoint-mcp)).
 
 ---
 
@@ -108,7 +121,7 @@ Every 4xx and 5xx response uses this shape:
 }
 ```
 
-- `code` — error code from the [Pipeline Contract §11 catalog](pipeline-contract.md#11-error-code-catalog-initial-set). Always lowercase, dot-separated.
+- `code` — error code from the [Pipeline Contract §13 catalog](pipeline-contract.md#13-error-code-catalog). Always lowercase, dot-separated.
 - `message` — technical message for developers. English. Includes specifics.
 - `user_message` — non-technical message safe to display to end users. May be localized in future.
 - `details` — structured, code-specific. Each error code documents its `details` shape.
@@ -144,8 +157,6 @@ Query parameters: `?offset=0&limit=50`. Max `limit` is 200 (configurable).
 
 ```
 POST /pipelines
-Authorization: ...
-Idempotency-Key: ...   (optional but recommended)
 Content-Type: application/json
 
 {
@@ -178,7 +189,7 @@ Content-Type: application/json
 }
 ```
 
-Note: no `terminal_node_id` field. Terminal is auto-detected as the single DQL sink with `output.target: "caller"`. See [Pipeline Contract §9](pipeline-contract.md#9-terminal-node-auto-detection).
+Note: no `terminal_node_id` field. The result node is the (at most one) node resolving to `output.target: "caller"` — explicitly or by omitting `output`. See [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node).
 
 Response: `201 Created`
 
@@ -324,8 +335,9 @@ The response is a **stream of SSE events**, one per execution milestone. The str
 
 - SSE is unidirectional server → client, which is exactly what we need (the client sends one request, the server streams progress).
 - SSE works over standard HTTP — proxies, load balancers, auth headers all work natively.
-- SSE has automatic reconnection with `Last-Event-Id` (we honor this for resumable streams — see §6.7).
 - WebSocket would require a custom protocol, custom proxy config, custom auth. Overkill.
+
+Note: stream *resumption* (`Last-Event-Id`) is NOT supported — a dropped stream means the execution will be cancelled after the disconnect grace period (§6.8).
 
 ### 6.3 SSE event format
 
@@ -340,7 +352,7 @@ data: {json_payload}
 
 (Terminated by blank line.)
 
-`event_id` is monotonic per execution. Used for resumable streams (§6.7).
+`event_id` is monotonic per execution. Used for gap detection (§6.7).
 
 ### 6.4 Event types
 
@@ -405,7 +417,6 @@ Emitted when a node fails. Execution then halts (fail-fast); a `pipeline_failed`
     "user_message": "We couldn't reach the 'pg-prod' database. Check that the database is online and reachable from this server.",
     "details": {
       "datasource_name": "pg-prod",
-      "jdbc_url": "jdbc:postgresql://...:5432/...",
       "underlying_error": "java.net.ConnectException: Connection refused"
     },
     "doc_url": "https://docs.datapipelines.co/errors/pipeline-node-datasource-connection-failed"
@@ -465,16 +476,14 @@ Emitted when execution halts due to any node failure.
 
 #### 6.4.7 `data_ready`
 
-Emitted after `pipeline_completed`. Carries the result data.
-
-**Inline form** (small results — under `LARGE_RESULT_THRESHOLD`, default 1 MB):
+Emitted after `pipeline_completed`, only when the pipeline has a caller node ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)). By the time this event is emitted the full result is materialized in Redis; the event carries the schema, the **inline first page** (up to `datapipelines.result.page-size-rows`), and the cursor for the rest.
 
 ```
 event: data_ready
 id: 7
 data: {
   "execution_id": "exec-uuid",
-  "delivery_mode": "inline",
+  "pipeline_id": "pipeline-uuid",
   "schema": [
     {"name": "customer_id", "type": "INTEGER"},
     {"name": "total_amount", "type": "BIGDECIMAL", "precision": 18, "scale": 2},
@@ -485,24 +494,8 @@ data: {
     [2, "67890.12", "2024-02-03T00:00:00Z"]
   ],
   "row_count": 2,
-  "truncated": false,
-  "warnings": []
-}
-```
-
-**Claim-check form** (large results — over threshold):
-
-```
-event: data_ready
-id: 7
-data: {
-  "execution_id": "exec-uuid",
-  "delivery_mode": "claim_check",
-  "schema": [
-    {"name": "customer_id", "type": "INTEGER"},
-    ...
-  ],
-  "row_count": 12450000,
+  "total_rows": 2,
+  "has_more": false,
   "result_url": "https://{host}/api/v1/executions/exec-uuid/result",
   "expires_at": "2026-08-05T14:35:02Z",
   "ttl_seconds": 300,
@@ -510,15 +503,32 @@ data: {
 }
 ```
 
-Schema is always inline (small). Only `rows` get the claim-check treatment.
+- `rows` — the first page. For results ≤ one page, `rows` IS the whole result (`has_more: false`) and no cursor read is needed.
+- `result_url` + `expires_at` — cursor for paging the full result within TTL (§7). Always present, small results included — a client may re-fetch or download in another format within the TTL.
+- There is no `delivery_mode` field — the delivery model is uniform (v1.3; the former inline/claim-check split is gone).
+
+#### 6.4.8 `execution_aborted`
+
+Terminal event when an execution is cancelled: explicit `DELETE /executions/{id}` (§10.4), client disconnect beyond the grace period (§6.8), or server shutdown. Emitted to any still-connected stream (e.g., a UI watching an execution another session cancelled).
+
+```json
+{
+  "execution_id": "exec-uuid",
+  "pipeline_id": "pipeline-uuid",
+  "aborted_at": "2026-08-05T14:30:01.000Z",
+  "reason": "client_disconnect" | "cancelled" | "shutdown",
+  "status": "ABORTED",
+  "node_stats": [...]
+}
+```
 
 ### 6.5 Event ordering guarantee
 
 Within a single execution stream, events are ordered:
 1. Exactly one `execution_started` (first).
 2. For each node: zero or one `node_started` → zero or one of (`node_completed` | `node_failed`).
-3. Exactly one of (`pipeline_completed` → `data_ready`) | `pipeline_failed`.
-4. Stream closes after terminal event.
+3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` | `execution_aborted`.
+4. Stream closes after the terminal event.
 
 For parallel nodes, events are emitted in real-time as they occur (interleaved). Order between parallel nodes is non-deterministic.
 
@@ -536,37 +546,45 @@ The heartbeat interval is configurable via `datapipelines.sse.heartbeat-interval
 
 ### 6.7 Event idempotency
 
-`event_id` is monotonic per execution. Clients can use it to:
-- Detect dropped events (gap in sequence).
-- Resume a disconnected stream (§6.8).
+`event_id` is monotonic per execution. Clients can use it to detect dropped events (gap in sequence). Stream resumption is not supported (§6.8).
 
-### 6.8 Stream reconnection
+### 6.8 Client disconnect
 
-If the SSE connection drops mid-stream, the client attempts reconnection. In a multi-instance deployment without sticky sessions, the reconnection may hit a different instance that is not running the execution.
+**A disconnected client cancels its execution.** If the SSE connection drops mid-stream, the executing instance starts a grace timer (`datapipelines.sse.disconnect-grace-seconds`, default 30). If no terminal event has been reached when the grace period elapses, the execution is cancelled — in-flight statements are interrupted via `Statement.cancel()`, held datasource connections are released, and the execution finishes as `ABORTED` ([DAG Executor §8.3](dag-executor.md#83-cancellation)). Rationale: an execution nobody is waiting for must not keep occupying source-database connections and staging memory.
 
-**This is acceptable by design** — pipeline executions continue on the originating instance regardless of SSE client state (per [DAG Executor §10](dag-executor.md#10-sse-event-integration)). The client has two fallback paths:
+Consequences clients must design for:
 
-1. **Poll execution status:** `GET /api/v1/executions/{execution_id}` returns the execution record. Once `status` transitions to `SUCCESS` or `FAILED`, fetch the result.
-2. **Fetch result directly:** `GET /api/v1/executions/{execution_id}/result` (paginated, supports JSON / Arrow / CSV).
+- There is no reconnection or resumption path — `Last-Event-Id` is ignored. A client that loses its stream should assume the execution will be aborted and re-execute (with an `Idempotency-Key`, a retry within the idempotency TTL that arrives before the abort completes attaches to nothing — the original is gone; the retry starts a fresh execution).
+- A disconnect **after** the terminal event costs nothing: the execution is complete and its result lives out its TTL in Redis — fetch it via §7.
+- Detached (fire-and-forget) execution is intentionally not offered in v1; async execution with webhooks is a ROADMAP item.
 
-For short-running pipelines (seconds to a few minutes), the execution typically completes before the client even finishes reconnecting. The client polls once or twice, gets `SUCCESS`, and fetches the result.
-
-Executions live in the event log for 1 hour after completion. The SSE stream is available for replay via `GET /executions/{execution_id}/events` (see §10.3).
+Completed executions remain visible: metadata via `GET /executions/{execution_id}` (durable, [Metadata DB](metadata-db.md)), events replayable for 1 hour via §10.3 (Redis event log), results within their TTL via §7.
 
 ---
 
-## 7. Claim-Check Result Retrieval
+## 7. Result Delivery
 
-### 7.1 Endpoint
+### 7.1 Model
+
+Every completed execution with a caller node has its full result **materialized in Redis before `data_ready` is emitted**. One storage model, one retrieval path:
+
+- `data_ready` carries the schema + inline first page + `result_url` (§6.4.7). Small results need no further call.
+- The cursor endpoint below pages the stored result — for ANY execution, any size, within the TTL, in JSON / Arrow / CSV.
+- Because the result is fully materialized before the cursor exists, row order is stable across pages.
+
+**Hard cap:** a caller result larger than `datapipelines.result.max-size-bytes` (default 100 MB) fails the execution with `result.too_large`. **Result delivery is not the bulk-data path** — pipelines producing large datasets should write them back with `output.target: "datasource"` and return a summary (or nothing) to the caller. Explicit NOT-goals: durable result storage beyond the TTL, and result delivery as an ETL mechanism.
+
+**Redis unavailable at result-write time** fails the execution with `result.storage_unavailable` — there is no fallback to inline-only delivery (that would reintroduce a second path).
+
+### 7.2 Cursor endpoint
 
 ```
 GET /executions/{execution_id}/result?offset=0&limit=10000&format=json
-Authorization: ...
 ```
 
-Returns the result data stored in Redis after a large-result execution.
+Auth: `read` scope + ownership of the execution (`admin` may read any). The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
 
-### 7.2 Response (JSON format, default)
+### 7.3 Response (JSON format, default)
 
 ```json
 {
@@ -589,42 +607,43 @@ Returns the result data stored in Redis after a large-result execution.
 }
 ```
 
-Pagination: `offset` + `limit`. Max `limit` is 100,000 per page (configurable).
+Pagination: `offset` + `limit`. Default `limit` is `datapipelines.result.page-size-rows`; max 100,000 per page.
 
-### 7.3 Response (Arrow IPC format)
+### 7.4 TTL — fixed, client-influenced, clamped
 
-```
-GET /executions/{execution_id}/result?format=arrow
-Accept: application/vnd.apache.arrow.ipc
-```
-
-Returns binary Arrow IPC stream with embedded schema. No pagination — full result in one stream (clients that need streaming should use the SSE `data_ready` inline form, or accept the claim-check + paginate).
-
-### 7.4 Response (CSV format)
+The client may request a TTL on the execute call:
 
 ```
-GET /executions/{execution_id}/result?format=csv
-Accept: text/csv
+POST /pipelines/{id}/execute
+DP-Result-TTL-Seconds: 900
 ```
 
-Returns CSV with header row. Big integers and big decimals serialized as their string form (per Type System wire rules). No pagination — full result.
+Effective TTL = `clamp(requested, datapipelines.result.ttl-min-seconds, datapipelines.result.ttl-max-seconds)`; if the header is absent, `datapipelines.result.ttl-default-seconds` (300). The clamp is non-negotiable — an unbounded client-controlled TTL would let one caller pin gigabytes in Redis.
 
-### 7.5 TTL and cleanup
+The expiry is **fixed at result-write time** — page reads do NOT extend it (predictable memory; a result can never be kept alive indefinitely by polling). The effective `expires_at` is reported in `data_ready` and every cursor response. After expiry: `410 result.expired` — re-run the pipeline.
 
-- Claim-check data stored in Redis with TTL = `CLAIM_CHECK_TTL_SECONDS` (default 300 = 5 minutes).
-- TTL refreshed on each page read (sliding expiration).
-- On final page read (when `has_more: false`), server triggers immediate Redis key deletion.
-- After TTL expiry, Redis auto-expires the key. Subsequent requests return `410 Gone` with `result.claim_check_expired`.
+### 7.5 Other formats
+
+```
+GET /executions/{execution_id}/result?format=arrow    # application/vnd.apache.arrow.ipc
+GET /executions/{execution_id}/result?format=csv      # text/csv, header row
+```
+
+Arrow: binary IPC stream with embedded schema, full result in one response (no pagination). CSV: header row; big integers/decimals as their wire-string form (Type System rules); full result, no pagination. Both respect the same TTL and auth.
 
 ### 7.6 Endpoint errors
+
+Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval).
 
 | Code | HTTP | Description |
 |---|---|---|
 | `result.execution_not_found` | 404 | Execution ID unknown |
-| `result.execution_incomplete` | 409 | Execution has not reached `data_ready` yet |
+| `result.execution_incomplete` | 409 | Execution has not completed yet |
 | `result.execution_failed` | 410 | Execution ended in failure — no result to retrieve |
-| `result.claim_check_expired` | 410 | TTL expired; result no longer available |
+| `result.expired` | 410 | TTL elapsed; result no longer available |
 | `result.format_unsupported` | 400 | Unknown `format` parameter |
+| `result.too_large` | 500 | (During execution) result exceeded the size cap; execution failed |
+| `result.storage_unavailable` | 500 | (During execution) Redis unavailable; execution failed |
 
 ---
 
@@ -827,13 +846,10 @@ Returns the execution record (without rows — use §7 for result data):
     "completed_at": "...",
     "duration_ms": 2377,
     "node_stats": [...],
-    "result_delivery": "inline" | "claim_check",
-    "result_url": "...",            // present if claim_check and not expired
+    "result_url": "...",            // present while the result is unexpired (absent for zero-caller pipelines)
     "result_expires_at": "...",
-    "correlation_id": "...",
     "triggered_by": "user-uuid",
     "triggered_via": "UI" | "REST" | "MCP"
-  }
   }
 }
 ```
@@ -845,7 +861,19 @@ GET /executions/{execution_id}/events
 Accept: text/event-stream
 ```
 
-Re-emits the SSE event stream from execution history. Useful for debugging pipelines after the fact. Events are replayed in their original order with original timestamps.
+Re-emits the SSE event stream from the Redis event log, in original order with original timestamps. Useful for debugging pipelines after the fact.
+
+Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour.
+
+### 10.4 Cancel execution
+
+```
+DELETE /executions/{execution_id}
+```
+
+Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative).
+
+Response: `204 No Content`. Cancelling an already-terminal execution returns `409 Conflict` with `pipeline.execution.not_running`.
 
 ---
 
@@ -885,21 +913,25 @@ Returns `200 OK` when the service is ready to accept traffic, `503` otherwise. U
 
 ### 12.1 Limits
 
-- Per API key: 100 requests/second, 1000 requests/minute (configurable).
-- Pipeline execution: 10 concurrent executions per API key (configurable).
-- SSE connections: 50 concurrent streams per API key.
+All limits are **per user** — an API key draws from its owner's budget, so minting more keys does not raise any limit. Key names and defaults in [Configuration §3.7](configuration.md#37-rate-limiting) and §3.2 (executor concurrency):
+
+- Requests: `rate-limit.requests-per-second` (100), `rate-limit.requests-per-minute` (1000).
+- Pipeline execution: `executor.max-concurrent-executions-per-user` (10) → `pipeline.execution.concurrency_limit`.
+- SSE connections: 50 concurrent streams per user.
+
+Counters are tracked in Redis, so limits hold across instances in a multi-instance deployment.
 
 ### 12.2 Headers
 
-Every response includes:
+Every response includes the IETF draft rate-limit headers:
 
 ```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 87
-X-RateLimit-Reset: 1691234567
+RateLimit-Limit: 100
+RateLimit-Remaining: 87
+RateLimit-Reset: 1691234567
 ```
 
-On limit exceeded: `429 Too Many Requests` with `Retry-After` header and code `rate_limit.exceeded`.
+On limit exceeded: `429 Too Many Requests` with `Retry-After` header and the single system-wide code `rate_limit.exceeded` ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — the same code at every layer (REST, MCP, login).
 
 ---
 
@@ -909,7 +941,7 @@ On limit exceeded: `429 Too Many Requests` with `Retry-After` header and code `r
 
 - `Access-Control-Allow-Origin`: configured per deployment (default: same-origin).
 - `Access-Control-Allow-Methods`: `GET, POST, PUT, DELETE, OPTIONS`.
-- `Access-Control-Allow-Headers`: `Authorization, X-API-Key, Content-Type, Idempotency-Key, X-Correlation-Id, Last-Event-Id`.
+- `Access-Control-Allow-Headers`: `Authorization, DP-API-Key, DP-Correlation-Id, DP-CSRF-Token, DP-Result-TTL-Seconds, Content-Type, Idempotency-Key`.
 - `Access-Control-Allow-Credentials`: `true` (for cookie-based UI auth).
 
 ### 13.2 SSE-specific
@@ -922,7 +954,8 @@ SSE endpoints must include CORS headers on the stream response. Browsers won't c
 
 Out of scope for v1:
 
-- **Streaming result delivery via SSE**: in addition to inline / claim-check, support a third mode where rows are streamed through the SSE channel itself in `data_chunk` events. Useful for very large results the client wants to process incrementally.
+- **Streaming result delivery via SSE**: stream rows through the SSE channel itself in `data_chunk` events, in addition to the stored-result cursor. Useful for very large results the client wants to process incrementally.
+- **Async / detached execution with webhooks**: execute-and-return-immediately with delivery via webhook; would relax the §6.8 cancel-on-disconnect rule for explicitly detached runs.
 - **GraphQL**: a GraphQL endpoint mirroring the REST surface, for clients that prefer it. Not in v1.
 - **Webhook callbacks**: register a webhook URL and have us POST execution events there instead of (or in addition to) SSE. Useful for non-interactive integrations.
 - **Result caching**: optional TTL-based caching of pipeline results keyed by `pipeline_id + version + parameters hash`. Useful for expensive pipelines that are queried with the same inputs repeatedly.
@@ -939,6 +972,75 @@ A complete OpenAPI 3.1 spec lives in `docs/api/openapi.yaml` and is published at
 
 ---
 
+## 16. Auth & User Admin Endpoints
+
+Flows and rules are specified in [Auth](auth.md) (§7.4 issuance, §7.6 scope matrix); this section defines the HTTP surface. All endpoints below live under `/api/v1`.
+
+### 16.1 API keys (any authenticated principal — own keys only)
+
+```
+GET /auth/api-keys
+```
+Lists the caller's keys (id, name, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets.
+
+```
+POST /auth/api-keys
+Content-Type: application/json
+
+{"name": "claude-desktop", "scopes": ["read", "execute"], "expires_at": "2027-08-07T00:00:00Z"}
+```
+`scopes` must be ⊆ the caller's scopes (`403 auth.scope.insufficient` otherwise); `expires_at` optional. Response `201`:
+
+```json
+{
+  "schema_version": 1,
+  "correlation_id": "uuid",
+  "data": {
+    "id": "dpk_ab12cd34ef56",
+    "name": "claude-desktop",
+    "scopes": ["read", "execute"],
+    "key": "dpk_ab12cd34ef56.9f8e7d6c...",
+    "expires_at": "2027-08-07T00:00:00Z"
+  }
+}
+```
+
+`key` is the full plaintext, returned **exactly once** — it is never retrievable again.
+
+```
+DELETE /auth/api-keys/{key_id}
+```
+Revokes the key (effective ≤ cache TTL, ~60s). `204 No Content`.
+
+### 16.2 Current principal
+
+```
+GET /auth/me
+```
+Returns the authenticated principal: `user_id`, `email`, `display_name`, `scopes`, `auth_method`, `key_id` (when key-authenticated). Lets agents and the UI discover their own scope set.
+
+### 16.3 User administration (`admin` scope)
+
+```
+GET  /auth/users?q={search}&offset=0&limit=50     — list users
+GET  /auth/users/{user_id}                         — user detail
+POST /auth/users/{user_id}/deactivate              — is_active = false (effective ≤ ~60s, Auth §4.2)
+POST /auth/users/{user_id}/activate                — is_active = true
+POST /auth/users/{user_id}/grant-admin             — is_admin = true
+POST /auth/users/{user_id}/revoke-admin            — is_admin = false
+```
+
+All return the standard envelopes; mutations return the updated user record and write the corresponding `auth.user.*` audit events ([Auth §10.1](auth.md#101-events)). There is no user-create endpoint — users are provisioned by OIDC first login only ([Auth §4.2](auth.md#42-user-provisioning)).
+
+### 16.4 Logout (browser session)
+
+```
+POST /logout
+```
+Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (not under `/api/v1`), CSRF-protected, listed here for completeness.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
@@ -946,3 +1048,4 @@ A complete OpenAPI 3.1 spec lives in `docs/api/openapi.yaml` and is published at
 | 2026-08-05 | v1.0 | initial draft | Initial REST API + SSE specification: endpoints, envelopes, SSE event schemas, claim-check pattern, pagination, rate limits, CORS |
 | 2026-08-05 | v1.1 | propagation | Updated create-pipeline example to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`, node has `type`/`output`). |
 | 2026-08-05 | v1.2 | SSE hardening | Added SSE heartbeat (§6.6) for LB idle-timeout prevention. Updated stream reconnection (§6.8) for multi-instance without sticky sessions: execution continues on originating instance; client polls/fetches result via REST if SSE reconnects to different instance. |
+| 2026-08-07 | v1.3 | consistency campaign | **D9:** §7 rewritten — every caller result materialized in Redis, `data_ready` = schema + inline first page + cursor, `DP-Result-TTL-Seconds` clamped TTL (fixed expiry), 100MB cap, `result.too_large`/`result.storage_unavailable`/`result.expired`; inline/claim-check split removed. **D7:** §6.8 inverted — client disconnect cancels the execution after grace; `Last-Event-Id` resumption language removed; new `DELETE /executions/{id}` (§10.4) + `execution_aborted` event (§6.4.8) + `pipeline.execution.not_running`. **D10:** `DP-` header sweep + header registry (§3.6); `RateLimit-*` headers. **D5/D15:** per-user rate limits, scope matrix references. New §16: API-key CRUD, `/auth/me`, user admin; deleted stale `/auth/login`//`/auth/refresh` references. §3.5 idempotency scoped to execute only. `jdbc_url` removed from `node_failed` details (redaction). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

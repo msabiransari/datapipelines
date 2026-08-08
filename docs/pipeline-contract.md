@@ -673,7 +673,8 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type |
 | `pipeline.execution.aborted` | 500 | Execution aborted unexpectedly (executor error) |
 | `pipeline.execution.timeout` | 504 | Execution exceeded timeout |
-| `pipeline.execution.concurrency_limit` | 429 | Too many concurrent executions for this tenant/user |
+| `pipeline.execution.concurrency_limit` | 429 | Too many concurrent executions for this user |
+| `pipeline.execution.not_running` | 409 | Cancel requested for an execution that is already terminal |
 
 ### 13.4 Node execution
 
