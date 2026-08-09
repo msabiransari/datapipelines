@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.2 (frozen contract — additive-only changes after this point)
+**Status:** v1.4 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-09
 
 ---
 
@@ -129,7 +129,7 @@ Note the mutex covers statement creation and execution; the caller then consumes
 ```kotlin
 class H2Staging(
     override val executionId: UUID,
-    override val connection: Connection,
+    private val connection: Connection,
     private val config: H2StagingProperties,
 ) : Staging {
     private val mutex = Mutex()
@@ -511,7 +511,7 @@ Therefore:
 - `H2Staging` owns a `kotlinx.coroutines.sync.Mutex` (`kotlinx.coroutines.sync.Mutex`, **not** a `java.util.concurrent.locks.Lock` — the callers are coroutines and must suspend, not block an executor thread).
 - Every method that touches the connection — `stage`, `query`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
 - Consumption discipline for cursors: `query` returns a live `ResultSet` bound to the shared connection. The caller MUST fully consume or close that ResultSet before invoking another staging operation. The executor enforces this by consuming a tempdb ResultSet inside the same node step that opened it; a downstream node never holds an open staging cursor across a suspension point where another node could stage.
-- `connection` is exposed on the interface for direct SQL access, but callers using it directly are responsible for taking the mutex — the executor's own use of it is confined to the paths above.
+- Direct SQL access goes through `withConnection(block)` (§10), which acquires this same mutex for the duration of the block: the connection is never handed out unguarded, and the mutex itself is not reachable — or even observable — from outside the implementation. (The v1.2 contract exposed a `connection` property and made callers "responsible for taking the mutex"; that contract was unsatisfiable — the mutex is private, so no caller could ever take it — and is corrected here.) Two rules bind the block: it must not re-enter any staging operation (the lock is not reentrant, so `stage`/`query`/`execute`/`stats`/`withConnection` from inside the block deadlocks), and nothing derived from the connection (statements, cursors) may outlive the block.
 
 This corrects the earlier claim (and [DAG Executor §12.1](dag-executor.md#121-race-conditions-considered)) that there is "no concurrent tempdb access." There is; it is serialized by this mutex.
 
@@ -536,7 +536,10 @@ The interface is engine-agnostic, allowing DuckDB (or other engines) to be plugg
 ```kotlin
 interface Staging : AutoCloseable {
     val executionId: UUID
-    val connection: Connection        // direct access for SQL nodes; caller must hold the mutex (§9.2)
+    // Direct SQL for SQL nodes: runs block with the serialization lock held throughout (§9.2).
+    // block must not re-enter staging operations (the lock is not reentrant), and nothing
+    // derived from the Connection may escape the block.
+    suspend fun <T> withConnection(block: suspend (Connection) -> T): T
 
     suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
     suspend fun query(sql: String): ResultSet
@@ -656,3 +659,5 @@ Out of scope for v1:
 | 2026-08-05 | v1.0 | initial draft | Initial staging spec: per-execution H2 lifecycle, table naming, type mapping, streaming, single-connection model, engine-agnostic interface |
 | 2026-08-05 | v1.1 | propagation | Renamed `__staging__` → `tempdb` throughout to match v1.1 Pipeline Contract. Updated reserved-identifier namespace reference. |
 | 2026-08-07 | v1.2 | spec review | Per [SPEC-REVIEW-2026-08 §2.7](SPEC-REVIEW-2026-08.md#27-stagingmd) (D6, D5, D8, D1, D9): removed `DB_CLOSE_DELAY=-1` and rewrote §3.1/§3.4/§3.5 lifecycle (explicit `DROP ALL OBJECTS` + close in `finally`, no GC reliance); explicit `Mutex` serialization (§9); new identifier-safety rules §4.5 (`invalid_column_name`, `table_already_exists`); `StageResult.columns: List<ColumnSchema>`; `StagingFactory.create(executionId, engine)` aligned with dag-executor + per-pipeline `max_memory_mb` precedence; `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` with real helper signatures (§5.3); memory accounting switched to polled `MEMORY_USED()` (§8.2); §7 config replaced by references to configuration.md §3.3 and error codes to pipeline-contract §13.5; §4.1 link fixed to pipeline-contract §10; §6.1 claim-check language replaced by the uniform result-delivery model; terminal-node language → caller node. |
+| 2026-08-08 | v1.3 | P3 build (API HIGH-1) | `stage()` takes `sourceDialect: Dialect` and maps source columns through the **source dialect's** `mapColumn` — not `H2IngressMapper` (§3.2, §10); non-fatal mapping warnings surface on `StageResult.warnings` (§8.2); §4.4 value-reading table added. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
+| 2026-08-09 | v1.4 | P3 build (security MEDIUM-1) | `Staging.connection` property removed; direct SQL goes through `suspend fun <T> withConnection(block)` which holds the internal serialization lock for the whole block (§3.4, §9.2, §10). The v1.2 contract — callers of a `connection` property "responsible for taking the mutex" — was unsatisfiable (the mutex is private) and is corrected, not extended. |
