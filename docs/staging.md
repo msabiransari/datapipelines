@@ -1,6 +1,6 @@
 # Staging (H2) Specification
 
-**Status:** v1.4 (frozen contract — additive-only changes after this point)
+**Status:** v1.5 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
 **Last updated:** 2026-08-09
@@ -107,22 +107,23 @@ suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialec
 
 ### 3.3 Querying
 
-For nodes with `source: "tempdb"`, the executor runs the rendered SQL against the staging connection:
+For nodes with `source: "tempdb"`, the executor runs the rendered SQL through `withQuery`, which holds the serialization lock for the **entire** consumption of the cursor — creation, execution, and the caller's row-by-row drain — so the cursor is never read while the lock is free:
 
 ```kotlin
-suspend fun query(sql: String): ResultSet = mutex.withLock {
-    val stmt = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
-    stmt.setQueryTimeout(config.queryTimeoutSeconds)
-    stmt.fetchSize = config.resultBatchSize
-    stmt.executeQuery(sql)
+suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T = mutex.withLock {
+    connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { stmt ->
+        stmt.setQueryTimeout(config.queryTimeoutSeconds)
+        stmt.fetchSize = config.resultBatchSize
+        block(stmt.executeQuery(sql))
+    }
 }
 ```
 
-The returned ResultSet is consumed by either:
+The `block` is where the executor does the downstream work:
 - A downstream node's stage operation (streaming into a new H2 table).
-- The caller node's result capture ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) — materialized to the result store per [REST API §7](rest-api.md#7-result-delivery).
+- The caller node's result capture ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) — materialized to the result store per [REST API §7](rest-api.md#7-result-delivery). That materialization is suspending Redis I/O, and it runs **inside** the lock: on a single shared connection, correctness requires no other statement execute against that connection until the cursor is fully drained.
 
-Note the mutex covers statement creation and execution; the caller then consumes the cursor. Because the connection is single and shared, the executor consumes a staging ResultSet to completion (or closes it) before the next staging operation proceeds — see §9.2.
+This closes by construction the interleaving §9.2 warns about — earlier drafts returned a live `ResultSet` and relied on the caller's discipline to consume it before the next staging op, a guarantee the type system could not enforce (v1.5). The cost is that a large caller-node drain serializes staging for its duration; that is the §9.3 single-writer trade, and the caller node is typically terminal, so little else contends.
 
 ### 3.4 Destruction
 
@@ -498,9 +499,11 @@ If the JVM OOMs mid-execution, the in-memory staging database dies with the proc
 
 ### 9.1 The choice
 
-Each staging instance is backed by **one** JDBC connection, opened at execution start and held until the executor's `finally` (§3.5). This means:
+Each staging instance is backed by **one** operational JDBC connection, opened at execution start and held until the executor's `finally` (§3.5). This means:
 - Every node that touches staging — staging in, querying out, DML against tempdb — uses that one connection.
 - The connection is also what keeps the in-memory database alive; it cannot be opened and closed per operation.
+
+That operational connection authenticates as a **non-admin H2 user** (§9.5) — the transient admin connection that creates the database also creates the restricted user, and is closed before the module does any work.
 
 ### 9.2 Serialization is explicit — `Mutex`, not the driver
 
@@ -510,7 +513,7 @@ Therefore:
 
 - `H2Staging` owns a `kotlinx.coroutines.sync.Mutex` (`kotlinx.coroutines.sync.Mutex`, **not** a `java.util.concurrent.locks.Lock` — the callers are coroutines and must suspend, not block an executor thread).
 - Every method that touches the connection — `stage`, `query`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
-- Consumption discipline for cursors: `query` returns a live `ResultSet` bound to the shared connection. The caller MUST fully consume or close that ResultSet before invoking another staging operation. The executor enforces this by consuming a tempdb ResultSet inside the same node step that opened it; a downstream node never holds an open staging cursor across a suspension point where another node could stage.
+- Consumption discipline for cursors is enforced by construction, not convention: `withQuery(sql) { rs -> … }` (§3.3, §10) holds the mutex for the whole lifetime of the cursor, including the caller node's suspending drain to the result store (§6.1). There is no API that returns a live `ResultSet` to be read after the lock is released, so a downstream `stage`/`execute` on the shared connection cannot interleave with an open cursor — the state-corruption case this section warns about is unreachable.
 - Direct SQL access goes through `withConnection(block)` (§10), which acquires this same mutex for the duration of the block: the connection is never handed out unguarded, and the mutex itself is not reachable — or even observable — from outside the implementation. (The v1.2 contract exposed a `connection` property and made callers "responsible for taking the mutex"; that contract was unsatisfiable — the mutex is private, so no caller could ever take it — and is corrected here.) Two rules bind the block: it must not re-enter any staging operation (the lock is not reentrant, so `stage`/`query`/`execute`/`stats`/`withConnection` from inside the block deadlocks), and nothing derived from the connection (statements, cursors) may outlive the block.
 
 This corrects the earlier claim (and [DAG Executor §12.1](dag-executor.md#121-race-conditions-considered)) that there is "no concurrent tempdb access." There is; it is serialized by this mutex.
@@ -527,6 +530,16 @@ The cost is real and named: with N source nodes finishing simultaneously, their 
 
 If profiling shows staging serialization is a bottleneck (likely only on pipelines with many parallel source nodes and small per-source data), v1.1 can switch to a small H2 connection pool. Note this changes the lifecycle rule too: with a pool, the database lives as long as *any* pooled connection is open, so the pool — not a single connection — becomes the lifetime owner, and the `finally` must close the pool. The `Staging` interface does not change.
 
+### 9.5 Privilege containment — author SQL runs de-privileged (normative)
+
+The rendered SQL that `withQuery`/`execute` run is **author-authored** (a pipeline author's template body, §4.4 of [Templates](templates.md)). H2's admin-only surface reaches the host: `FILE_READ`/`FILE_WRITE`/`CSVWRITE`/`CSVREAD` read and write server files, `CREATE ALIAS`/`CREATE TRIGGER … AS` load JVM classes, `RUNSCRIPT`/`LINK_SCHEMA` fetch and execute. An `sa` (admin) staging session therefore turns "author may write tempdb SQL" into "author may read `/proc/self/environ`" — where `DATAPIPELINES_DB_ENCRYPTION_KEY` and `DATAPIPELINES_JWT_SECRET` live ([Configuration §2](configuration.md#2-required-configuration)). That is privilege escalation from `author` to all-datasource-credentials and session forgery, and it is **not** an accepted trade (contrast §4.4's SQL-injection note, which concerns the author's *own* authorized datasources, not the server's secrets).
+
+Therefore:
+- The database is created by a **transient bootstrap** admin (`sa`) connection, which immediately creates a restricted user (no admin right; `CREATE`/`INSERT`/`SELECT`/`DROP` on its own schema only) and is then **closed**. The one operational connection the module holds (§9.1) authenticates as that restricted user, and is what keeps the in-memory database alive thereafter.
+- Under that user, every admin-gated function above is unavailable, so author SQL cannot reach the host filesystem or load a class. `MEMORY_USED()` and the staging layer's own DDL / `DROP ALL OBJECTS` remain available (they are not admin-gated).
+- The exact admin-gating of each function is **verified against the pinned H2 driver** (`h2` in `libs.versions.toml`) by a test that runs `FILE_READ`, `CSVWRITE`, and `CREATE ALIAS` as the restricted user and asserts each is refused — a driver upgrade re-runs it. If the pinned H2 ever un-gates one of these for non-admin users, the test fails and the containment is revisited before shipping.
+- Additionally the JVM sets `-Dh2.allowedClasses=` (empty) as defense-in-depth against `CREATE ALIAS` class loading, independent of the user's rights.
+
 ---
 
 ## 10. The Staging Interface
@@ -542,7 +555,11 @@ interface Staging : AutoCloseable {
     suspend fun <T> withConnection(block: suspend (Connection) -> T): T
 
     suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
-    suspend fun query(sql: String): ResultSet
+    // Runs block against the cursor with the serialization lock held for the WHOLE consumption
+    // (§3.3/§9.2). The cursor is never handed out to be read after the lock is released, so a
+    // concurrent stage()/execute() on the shared connection cannot interleave. block must fully
+    // consume (or abandon) the cursor before it returns; nothing derived from it escapes.
+    suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T
     suspend fun execute(sql: String): Long    // INSERT/UPDATE/DELETE against staging; returns row count
 
     suspend fun stats(): StagingStats         // current tables/rows/measured memory
@@ -591,7 +608,7 @@ Differences from real PG to be aware of:
 
 ### 11.2 Functions available
 
-H2 provides standard SQL functions: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `CASE WHEN`, `JOIN`s (all kinds), window functions, common table expressions (CTEs). All available for staging templates. `MEMORY_USED()` is reserved for the staging layer's own accounting (§8.2).
+H2 provides standard SQL functions: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `CASE WHEN`, `JOIN`s (all kinds), window functions, common table expressions (CTEs). All available for staging templates. `MEMORY_USED()` is reserved for the staging layer's own accounting (§8.2). The admin-only host-reaching functions (`FILE_READ`/`FILE_WRITE`/`CSVREAD`/`CSVWRITE`/`RUNSCRIPT`/`CREATE ALIAS`/`LINK_SCHEMA`) are **not** available to author SQL — it runs as a non-admin user (§9.5).
 
 ### 11.3 Known gotchas
 
@@ -661,3 +678,4 @@ Out of scope for v1:
 | 2026-08-07 | v1.2 | spec review | Per [SPEC-REVIEW-2026-08 §2.7](SPEC-REVIEW-2026-08.md#27-stagingmd) (D6, D5, D8, D1, D9): removed `DB_CLOSE_DELAY=-1` and rewrote §3.1/§3.4/§3.5 lifecycle (explicit `DROP ALL OBJECTS` + close in `finally`, no GC reliance); explicit `Mutex` serialization (§9); new identifier-safety rules §4.5 (`invalid_column_name`, `table_already_exists`); `StageResult.columns: List<ColumnSchema>`; `StagingFactory.create(executionId, engine)` aligned with dag-executor + per-pipeline `max_memory_mb` precedence; `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` with real helper signatures (§5.3); memory accounting switched to polled `MEMORY_USED()` (§8.2); §7 config replaced by references to configuration.md §3.3 and error codes to pipeline-contract §13.5; §4.1 link fixed to pipeline-contract §10; §6.1 claim-check language replaced by the uniform result-delivery model; terminal-node language → caller node. |
 | 2026-08-08 | v1.3 | P3 build (API HIGH-1) | `stage()` takes `sourceDialect: Dialect` and maps source columns through the **source dialect's** `mapColumn` — not `H2IngressMapper` (§3.2, §10); non-fatal mapping warnings surface on `StageResult.warnings` (§8.2); §4.4 value-reading table added. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.4 | P3 build (security MEDIUM-1) | `Staging.connection` property removed; direct SQL goes through `suspend fun <T> withConnection(block)` which holds the internal serialization lock for the whole block (§3.4, §9.2, §10). The v1.2 contract — callers of a `connection` property "responsible for taking the mutex" — was unsatisfiable (the mutex is private) and is corrected, not extended. |
+| 2026-08-09 | v1.5 | P3 build (Gate C security re-check) | `query(sql): ResultSet` replaced by `withQuery(sql) { rs -> … }` holding the lock for the whole cursor consumption incl. the caller-node Redis drain (§3.3/§9.2/§10) — closes the §6.1-vs-§9.2 interleaving contradiction by construction (ST-SEC-1). New **§9.5 privilege containment**: author SQL runs as a non-admin H2 user (transient `sa` bootstrap creates DB + restricted user, then closes) so `FILE_READ`/`CSVWRITE`/`CREATE ALIAS` etc. cannot reach host files/classes — closes author→`/proc/self/environ`→encryption-key/JWT-secret escalation; gating verified against the pinned H2 driver + `-Dh2.allowedClasses=`. |

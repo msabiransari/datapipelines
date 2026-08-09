@@ -583,42 +583,24 @@ For DQL nodes, behavior depends on `node.output`:
 
 #### 6.4.1 `output.target: "tempdb"` — stage ResultSet
 
-Stream the ResultSet into the tempdb table named by `output.table`. The staging implementation (DDL generation, identifier quoting and column-name validation, type mapping, batch sizing) is owned by the [Staging spec](staging.md); the executor only calls `staging.stage(rs, table)`. Shape, for orientation:
+Stream the ResultSet into the tempdb table named by `output.table`. Everything — DDL generation, identifier quoting and column-name validation, source-dialect type mapping, batch sizing, the serialization lock — is owned by the [Staging spec](staging.md); the executor only calls
 
 ```kotlin
-fun stage(resultSet: ResultSet, tableName: String): Long = mutex.withLock {
-    val metadata = resultSet.metaData
-    val columnCount = metadata.columnCount
-    val columnTypes = (1..columnCount).map { mapper.map(it, metadata) }
-
-    connection.createStatement().use { stmt ->
-        stmt.execute(buildCreateTableSql(tableName, columnTypes))   // identifiers validated + quoted
-    }
-
-    connection.prepareStatement(buildInsertSql(tableName, columnCount)).use { insert ->
-        var rowCount = 0L
-        val batchSize = config.insertBatchSize    // datapipelines.staging.h2.insert-batch-size
-        while (resultSet.next()) {
-            for (i in 1..columnCount) {
-                insert.setObject(i, readValue(resultSet, i, columnTypes[i - 1]))
-            }
-            insert.addBatch()
-            if (++rowCount % batchSize == 0L) insert.executeBatch()
-        }
-        if (rowCount % batchSize != 0L) insert.executeBatch()
-        rowCount
-    }
-}
+val result = staging.stage(rs, output.table, node.source.dialect)   // Staging §3.2/§10
+// result.warnings (Staging §8.2) are folded into the execution result's warnings; never fatal.
 ```
 
-Streaming — constant memory regardless of result size. Downstream nodes reference this table by name in their SQL.
+passing the **source node's dialect** so source columns are mapped by that dialect's mapper, not H2's (`Dialect.H2` for a `tempdb`→`tempdb` node). `stage` is `suspend`, takes the internal mutex itself, and streams in constant memory regardless of result size; the executor never touches the staging connection directly. Downstream nodes reference this table by name in their SQL.
 
 #### 6.4.2 `output.target: "caller"` — materialize to the result store
 
 The caller node's ResultSet is **fully materialized into the Redis result store before the source connection closes**. There is no inline-vs-claim-check split and no live `ResultSet` (or JDBC cursor) outliving the node — the uniform result-delivery model is [REST API §7](rest-api.md#7-result-delivery).
 
 ```kotlin
-// called from executeDql, INSIDE conn.use { ... } — the connection is still open
+// called from executeDql. For a tempdb source, the drain runs INSIDE staging.withQuery
+// (Staging §3.3/§9.2) so the staging lock is held for the whole materialization — a
+// concurrent stage()/execute() on the shared connection cannot interleave with the open
+// cursor. For an external-datasource source, the drain runs inside that source's conn.use{}.
 is NodeOutput.Caller -> {
     val stored = resultStore.materialize(executionId, rs)
     NodeResult.of(node.id, rowsOut = stored.totalRows, startTime,
