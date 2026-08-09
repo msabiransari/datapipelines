@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v1.5 (frozen contract — additive-only changes after this point)
+**Status:** v1.6 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-08-09
@@ -238,15 +238,19 @@ The executor applies the resolved value with `Statement.setQueryTimeout` per nod
 
 Passthrough (§2 principle 8) has one bounded exception: a key is **refused** when the pinned driver treats its value as a class name to instantiate, a file path to read or write, connect-time SQL, or a TLS-verification switch. Refusal applies to **both carriers identically**: a key rejected under `properties.jdbc.*` (`datasource.validation.properties_invalid`) must also be rejected when smuggled into `jdbc_url`'s query/property segment (`datasource.validation.jdbc_url_malformed`) — the URL and the property map are validated against the same union of the server-managed set and the dialect's refusal set.
 
-**Credentials are refused in the URL outright**: `user`, `password`, and driver aliases (e.g. MSSQL `userName`) must arrive via the dedicated `username`/`password` fields — `jdbc_url` is stored plaintext and returned to `read`-scope principals (§3.2), so a credential embedded there defeats §7.1 encryption at rest.
+**Credentials are refused in the URL outright**: `user`, `password`, and driver aliases (e.g. MSSQL `userName`) must arrive via the dedicated `username`/`password` fields — `jdbc_url` is stored plaintext and returned to `read`-scope principals (§3.2), so a credential embedded there defeats §7.1 encryption at rest. This covers a credential smuggled as a query/property key **and** a **userinfo authority in any position** — not only a leading `//user:pw@host` but Oracle's native `jdbc:oracle:thin:user/pw@//host` and H2's `jdbc:h2:tcp://user:pw@host` forms, whose scheme prefix precedes the authority. The authority scan must find the `user[:/]…@` segment wherever it appears, not key off a `//` prefix.
+
+**Secret-valued properties are refused in both carriers**, regardless of whether they also load a class or name a file. `properties.jdbc` is stored plaintext in `properties_json` and returned to `read` scope (§3.2) exactly like `jdbc_url`, so any property whose *value* is credential material is a plaintext-secret exposure. Beyond the enumerated per-dialect keys, a **suffix predicate** over the key name refuses `*password`, `*passwd`, `*pwd`, `*secret`, and `*clientkey` (case-insensitive) — layered on top of the tabled sets so a new driver version's secret key is covered by construction. Named instances that the predicate would otherwise miss (e.g. MSSQL `keyVaultProviderClientKey`) are also listed in the dialect set.
+
+The TLS-verification **switches** refused below (`trustServerCertificate`, `verifyServerCertificate`, `allowPublicKeyRetrieval`) are best-effort: the `sslmode` / `useSSL` / `sslMode` family is deliberately left operator-controlled (§5, [Enums §14](enums.md#14-sslmode--datasource-tls-mode)) because operators legitimately select TLS modes. Refusing a hard "trust anything" switch on one dialect while permitting a mode selector on another is intended, not an inconsistency.
 
 The authoritative enumeration is the module's per-dialect refusal sets, pinned by tests against the driver versions in `libs.versions.toml`; **a driver upgrade must re-review its dialect's set**. Each set must at minimum refuse:
 
 | Dialect | Minimum refused keys (case-insensitive) |
 |---|---|
 | POSTGRES | `socketFactory`, `socketFactoryArg`, `sslfactory`, `sslfactoryarg`, `sslhostnameverifier`, `authenticationPluginClassName`, `sslkey`, `sslpassword`, `loggerFile`, `loggerLevel` |
-| MSSQL | `socketFactoryClass`, `socketFactoryConstructorArg`, `trustStore`, `trustStorePassword`, `trustStoreType`, `keyStoreLocation`, `keyStoreSecret`, `keyStoreAuthentication`, `clientCertificate`, `clientKey`, `clientKeyPassword`, `trustServerCertificate` |
-| MYSQL | `allowLoadLocalInfile`, `autoDeserialize`, plus every `*FactoryClass`/plugin-class property of the pinned Connector/J |
+| MSSQL | `socketFactoryClass`, `socketFactoryConstructorArg`, `trustStore`, `trustStorePassword`, `trustStoreType`, `keyStoreLocation`, `keyStoreSecret`, `keyStoreAuthentication`, `keyStorePrincipalId`, `clientCertificate`, `clientKey`, `clientKeyPassword`, `trustServerCertificate`, `keyVaultProviderClientKey`, `keyVaultProviderClientId` |
+| MYSQL | `allowLoadLocalInfile`, `autoDeserialize`, `allowPublicKeyRetrieval`, plus every `*FactoryClass`/plugin-class property of the pinned Connector/J |
 | H2 | `INIT` (RUNSCRIPT vector) |
 | SQLITE | `enable_load_extension` |
 | DUCKDB | the session-init-SQL-file option family of the pinned driver (connect-time fetch-and-run SQL) |
@@ -319,8 +323,10 @@ data class ValidationResult(
 ### 6.3 Cache
 
 - Datasource metadata cached in memory (low churn).
-- Cache invalidated on create/update/delete.
-- Connection pools cached separately (lazy init, see §5.2).
+- Cache invalidated on create/update/delete — **local instance only**.
+- Entries carry a **short TTL** (default 60s, matching the auth liveness cache) so a change made on one instance becomes visible on every other instance within the TTL. The local invalidation is an immediacy optimization for the instance that made the change; the TTL is what bounds cross-instance staleness in the multi-instance deployment model (auth §8) — without it, an operator repointing a datasource would be invisible to sibling instances until restart.
+- **Negative lookups are never cached** (a miss re-reads), so the cache cannot be grown by `GET`s for non-existent names and is bounded by the number of real datasources.
+- Connection pools cached separately (lazy init, see §5.2); the pool-build path bypasses this cache (it must reload the encrypted credential).
 
 ---
 
@@ -597,5 +603,6 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
 | 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.3 | P3 build (Gate C testing review) | §7.3 v1-scope note: the key-rotation *flow* is deferred to v1.1 (no v1 trigger surface); v1 ships the encryptor primitive and the registered-but-unemitted `datasource.key_rotation` audit event. |
-| 2026-08-09 | v1.5 | P3 build (Gate C API re-review) | Doc-sync of behavior the fix cycle added: §4.2 `DialectAdapter` gains `refusedPropertyKeys` (DS-API-12); §7.1 records the datasource-`name`-as-GCM-AAD binding and §7.3 rotation recipe now carries it through both halves (DS-API-13 — a literal reading of the old recipe would fail every tag); §7.4 states the `pool_build`/`pool_rebuild` timing + actor/cause rules, enums §15 gloss matched (DS-API-10). |
 | 2026-08-09 | v1.4 | P3 build (Gate C security + API reviews) | New **§5.6 refused property keys**: the bounded normative exception to §2's passthrough principle — class-loading / file-path / connect-time-SQL / TLS-switch keys refused in BOTH carriers (`properties.jdbc.*` and the `jdbc_url` query segment, same union), credentials refused in the URL outright, per-dialect minimum sets tabled, fail-closed adapter contract; §9 rows updated to reference it. §6.1: `save` gains required `actor` (created_by + §7.4 audit actor — v1.1 signature was unimplementable), `list` gains optional `dialect` filter, `testConnection` returns `null` for unknown names. §7.4: audit events emitted through an injected sink (no-op default), wired by the app. |
+| 2026-08-09 | v1.5 | P3 build (Gate C API re-review) | Doc-sync of behavior the fix cycle added: §4.2 `DialectAdapter` gains `refusedPropertyKeys` (DS-API-12); §7.1 records the datasource-`name`-as-GCM-AAD binding and §7.3 rotation recipe now carries it through both halves (DS-API-13 — a literal reading of the old recipe would fail every tag); §7.4 states the `pool_build`/`pool_rebuild` timing + actor/cause rules, enums §15 gloss matched (DS-API-10). |
+| 2026-08-09 | v1.6 | P3 build (Gate C security re-review) | §5.6 hardened: credential refusal now covers a **userinfo authority in any position** (Oracle `thin:user/pw@`, H2 `tcp://user:pw@`, not only `//`-prefixed) (DS-SEC-13); a **secret-valued-property category rule** refuses any `properties.jdbc`/URL key whose value is credential material via a suffix predicate (`*password`/`*passwd`/`*pwd`/`*secret`/`*clientkey` + named dialect secrets) since `properties.jdbc` is plaintext + `read`-visible like `jdbc_url` (DS-SEC-14); MySQL `allowPublicKeyRetrieval` (DS-SEC-16), MSSQL `keyVaultProviderClientKey`/`keyVaultProviderClientId`/`keyStorePrincipalId` (DS-SEC-14/18) added; TLS-switch refusals declared best-effort with the `sslmode` family operator-controlled. §6.3: metadata cache carries a short TTL (60s) for cross-instance coherence, negatives never cached (DS-SEC-15). |
