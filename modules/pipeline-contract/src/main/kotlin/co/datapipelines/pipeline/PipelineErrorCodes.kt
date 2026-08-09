@@ -247,6 +247,8 @@ object PipelineErrorCodes {
         const val DANGEROUS_CONSTRUCT = "template.validation.dangerous_construct"
         const val ID_INVALID = "template.validation.id_invalid"
         const val DIALECT_INVALID = "template.validation.dialect_invalid"
+        const val ENGINE_UNSUPPORTED = "template.validation.engine_unsupported"
+        const val SCHEMA_VERSION_UNSUPPORTED = "template.validation.schema_version_unsupported"
         const val IS_LIBRARY_WITHOUT_MACROS = "template.validation.is_library_without_macros"
         const val IMPORT_NOT_FOUND = "template.validation.import_not_found"
         const val IMPORT_NOT_LIBRARY = "template.validation.import_not_library"
