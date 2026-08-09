@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v2.2 (revised — see Change Log)
+**Status:** v2.3 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-09
 
 ---
 
@@ -624,7 +624,7 @@ All `/api/v1/**` endpoints accept either:
 
 The filter chain tries API key first, then JWT. If both present, API key wins.
 
-CSRF is disabled for `/api/**` and `/mcp` because API-key auth is inherently CSRF-immune (no cookie). When the JWT cookie is used for API calls from the browser, the CSRF token IS required — the frontend reads the `dp_csrf` cookie and sends its value in the `DP-CSRF-Token` header on state-changing requests.
+CSRF is disabled for `/api/**` and `/mcp`, exactly as the §8.1 chain shows: API-key auth is inherently CSRF-immune (no cookie), and the cookie-authenticated path is defended by `dp_session`'s `SameSite=Strict` attribute (§5.5) — a cross-site page cannot make the browser send the cookie at all. The browser UI does not use `/api/v1/**` anyway: htmx talks to `/partials/**` ([UI Screens §2](ui-screens.md#2-design-principles)), where Spring's CSRF protection IS active — the frontend reads the `dp_csrf` cookie and sends its value in the `DP-CSRF-Token` header on state-changing requests ([UI Screens §3](ui-screens.md#3-common-layout)); `POST /logout` is likewise CSRF-protected. A CSRF failure on those surfaces returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). (v2.2 wording made the token sound required on cookie-authenticated `/api` calls, contradicting the §8.1 chain — corrected v2.3: `SameSite=Strict` is the API-path defense; the token guards the cookie-native UI surfaces.)
 
 ### 8.5 MCP endpoint (`/mcp`)
 
@@ -878,3 +878,4 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-05 | v2.0 | OIDC migration | Replaced local auth with Google/Microsoft OIDC. No passwords stored. Internal JWT issued after OIDC login. Added email domain allowlist. Added Spring Security filter chain configuration. Added OIDC success handler. Users provisioned automatically on first login. |
 | 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |
 | 2026-08-07 | v2.2 | consistency campaign | **D10:** `X-API-Key` → `DP-API-Key`; CSRF = `dp_csrf` cookie + `DP-CSRF-Token` header. **D11:** `/mcp` in the chain (§8.5): API-key-only, CSRF-exempt, Bearer `dpk_` accepted. **D13:** liveness re-check on every request via 60s cache — deactivation effective ≤ ~1 min (§4.2, §6.3, §7.3). **D14:** scope derivation at login (§6.1). **D15:** authoritative scope↔operation matrix (§7.6); key scopes ⊆ creator's scopes (§7.4). **D5:** error codes normalized to 3-segment (`auth.api_key.missing` etc.), `auth.csrf.*` collapsed to `auth.csrf.invalid`, `auth.rate_limit.exceeded` removed in favor of `rate_limit.exceeded`. `name` required per provider (§11.1); audit example provider lowercase; config tables replaced by pointers to configuration.md (D8). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-09 | v2.3 | P3 build (Gate C testing review) | §8.4 CSRF prose corrected to match the §8.1 chain (which is the ratified D10 design): `/api/**` and `/mcp` are CSRF-exempt — API keys carry no cookie, and cookie-authenticated API calls are defended by `dp_session` `SameSite=Strict` (§5.5); the `dp_csrf`/`DP-CSRF-Token` double-submit guards the cookie-native UI surfaces (`/partials/**`, `POST /logout`), failing 403 `auth.csrf.invalid` with `details.reason`. The v2.2 sentence requiring the token on cookie-authenticated `/api` calls contradicted the sketch and is withdrawn. |

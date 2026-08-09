@@ -143,6 +143,7 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | Per-datasource ACLs — fine-grained access beyond scopes | auth §14 |
 | Service accounts — non-user principals for automation | auth §14 |
 | Key rotation workflow — issue new + deprecate old with overlap window | auth §14 |
+| Credential-encryption key rotation flow — admin-triggered re-encrypt of all `password_encrypted` rows (v1 ships the encryptor primitive + registered audit event only; deferred 2026-08-09) | datasources §7.3 |
 | IP allowlisting per key | auth §14 |
 | Key use alerts — notify user when key used from new IP | auth §14 |
 | WebAuthn / passkeys — passwordless login | auth §14 |

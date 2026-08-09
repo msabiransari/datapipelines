@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v1.1 (frozen contract — additive-only changes after this point)
+**Status:** v1.3 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-09
 
 ---
 
@@ -332,6 +332,8 @@ The semantics this spec depends on, which the DDL must satisfy:
 
 Key rotation = decrypt every `password_encrypted` with the old key, re-encrypt with the new key, in a single transaction. Triggered by an admin CLI / endpoint, with both keys supplied explicitly (the old key is never inferred). All pools are drained afterwards so the next build decrypts under the new key. Documented in the runbook (future).
 
+**v1 scope:** the rotation *flow* is deferred to v1.1 ([ROADMAP](ROADMAP.md)) — no v1 surface triggers it (no REST endpoint, no CLI). What v1 ships is the primitive it needs (`CredentialEncryptor` accepts an explicit raw key, so two encryptors can coexist during a rotation pass) and the registered `datasource.key_rotation` audit event ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), which is emitted by nothing until the flow lands.
+
 ### 7.4 Decryption points and audit log
 
 **Decryption happens once per pool build — not once per connection lease.** HikariCP necessarily holds the credential for the pool's lifetime (it opens new physical connections on its own schedule, without the caller present), so a per-lease decrypt would be theatre: the plaintext is already resident in the pool. The credential is decrypted exactly at:
@@ -567,3 +569,5 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
+| 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
+| 2026-08-09 | v1.3 | P3 build (Gate C testing review) | §7.3 v1-scope note: the key-rotation *flow* is deferred to v1.1 (no v1 trigger surface); v1 ships the encryptor primitive and the registered-but-unemitted `datasource.key_rotation` audit event. |
