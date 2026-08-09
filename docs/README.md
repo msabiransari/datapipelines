@@ -31,7 +31,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [pipeline-contract.md](pipeline-contract.md) | v1.2 frozen | Pipeline/Node JSON schema, caller-node result model, validation rules, **the single error-code catalog (§13)** |
 | [enums.md](enums.md) | v1.1 living | Every enum's wire value + serialization convention; error-code *domain* registry |
 | [configuration.md](configuration.md) | v1.1 | **The only place config keys are defined** — YAML path, env derivation rule, defaults, validation |
-| [auth.md](auth.md) | v2.3 | Generic OIDC login, internal JWT, API keys, **the scope↔operation matrix (§7.6)**, Spring Security chain |
+| [auth.md](auth.md) | v2.4 | Generic OIDC login, internal JWT, API keys, **the scope↔operation matrix (§7.6)**, Spring Security chain |
 | [metadata-db.md](metadata-db.md) | v1.1 frozen | **The only doc that writes DDL** — full Postgres schema, Flyway V1 source, operational jobs |
 
 ### Engine
@@ -39,7 +39,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [templates.md](templates.md) | v1.2 frozen | Freemarker SQL templates: versioning, library imports (`{id, version, alias}`), SSTI hardening, parse-only save validation |
-| [datasources.md](datasources.md) | v1.3 | Named connections, 7 dialects, Hikari/JDBC property passthrough, AES-GCM credential storage |
+| [datasources.md](datasources.md) | v1.4 | Named connections, 7 dialects, Hikari/JDBC property passthrough (§5.6 refusal sets), AES-GCM credential storage |
 | [staging.md](staging.md) | v1.4 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
 | [dag-executor.md](dag-executor.md) | v1.2 | Coroutine executor: topological execution, fail-fast, cancellation (Redis flag), result materialization |
 

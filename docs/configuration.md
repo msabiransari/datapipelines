@@ -81,6 +81,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 
 | YAML path | Default | Description |
 |---|---|---|
+| `datapipelines.auth.base-url` | (none) | The deployment's exact external origin, e.g. `https://dp.example.com` (scheme + host [+ port], no trailing slash). OIDC redirect URIs are built absolutely from it ([Auth §5.2](auth.md#52-clientregistration-bean-built-at-startup)) — never from request headers. **Startup fails when unset while any OIDC provider is configured.** |
 | `datapipelines.auth.jwt.ttl-hours` | `8` | Session JWT TTL |
 | `datapipelines.auth.allowlist.domains` | (empty) | Comma-separated allowed email domains. Binds to `List<String>` (comma-split; empty string = empty list = open provisioning) |
 | `datapipelines.auth.api-keys.cache-ttl-seconds` | `60` | Cache TTL for validated API keys and user `is_active` checks ([Auth §11.4](auth.md#114-api-key-validation-cache)) |

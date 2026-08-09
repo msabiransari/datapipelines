@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.3 (revised — see Change Log)
+**Status:** v2.4 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-08-09
@@ -99,7 +99,7 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 ### 4.2 User provisioning
 
 **First login:** When a user logs in via OIDC for the first time:
-1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token.
+1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token. The email is **normalized to lowercase** before every lookup and store — provider case differences must not fork one human into two rows (or mint a second bootstrap admin, §4.4). If the ID token carries `email_verified: false`, the login is **rejected** (`auth.login.oidc_error`, audited) — an unverified self-registered account at a provider must never reach the email-keyed linking step below, or it takes over the existing account with that email. A provider omitting the claim is treated as vouching for the address.
 2. Checks if a user with that `email` already exists.
    - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url`. (The user previously logged in via a different provider — link them.)
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
@@ -125,7 +125,7 @@ For internal-only deployments, **always set the allowlist** to prevent random Go
 A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) and no local login — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11):
 
 - The operator sets `datapipelines.auth.bootstrap-admin-email` ([Configuration §3.4](configuration.md#34-auth)) before first start.
-- During user provisioning (§4.2), when the provisioned email matches exactly, `is_admin` is set true. Idempotent — a later login by the same user changes nothing; the flag is never *revoked* by this path.
+- When a user row is **created** (first provisioning, §4.2) and its lowercase-normalized email matches the configured value (compared case-insensitively), `is_admin` is set true. The grant fires **only at row creation**: a later login changes nothing, the flag is never *revoked* by this path, and after an admin deliberately revokes admin (`auth.user.admin_revoked`, §10.1) this path never re-grants it — re-instating admin is an explicit §16.3 operation.
 - Audit-logged as `auth.user.admin_granted` with actor `bootstrap` (§10.1).
 - If the key is unset, no bootstrap occurs — the deployment simply has no admin until the key is set and that user logs in.
 
@@ -190,7 +190,11 @@ class OidcConfig {
                 .clientSecret(p.clientSecret)
                 .scope("openid", "profile", "email")
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                // ABSOLUTE, from datapipelines.auth.base-url — NEVER the request-derived
+                // {baseUrl} template: an attacker-controlled Host / X-Forwarded-Host would
+                // otherwise choose the redirect_uri sent to the IdP, and the only backstop
+                // is the IdP's own allowlist, a control this deployment does not own.
+                .redirectUri("${authConfig.baseUrl}/login/oauth2/code/${p.name}")
                 .issuerUri(p.issuerUri)        // triggers OIDC discovery
                 .clientName(p.displayName)
                 .build()
@@ -204,6 +208,8 @@ class OidcConfig {
     }
 }
 ```
+
+The redirect URI is built from `datapipelines.auth.base-url` ([Configuration §3.4](configuration.md#34-auth)) — the deployment's exact external origin (e.g. `https://dp.example.com`, no trailing slash). Startup fails when it is unset while any OIDC provider is configured. This is what §13's "OIDC redirect URI locked to the deployment's exact domain" means mechanically; the earlier `{baseUrl}` placeholder resolved from the incoming request and let a hostile `Host`/`X-Forwarded-Host` header pick the redirect target (v2.4).
 
 ### 5.3 Login page (dynamic — renders buttons for each configured provider)
 
@@ -553,7 +559,9 @@ class SecurityConfig(
             .csrf { csrf ->
                 // Cookie: dp_csrf (readable by JS), header: DP-CSRF-Token
                 csrf.csrfTokenRepository(cookieCsrfRepository())
-                csrf.ignoringRequestMatchers("/api/**", "/mcp")  // API-key surfaces, not CSRF
+                // Exemption follows the CREDENTIAL, not the path (§8.4): only requests
+                // carrying DP-API-Key (or Bearer dpk_ on /mcp) skip CSRF.
+                csrf.ignoringRequestMatchers(apiKeyCarrierMatcher)
             }
             .authorizeHttpRequests { auth ->
                 auth
@@ -624,7 +632,7 @@ All `/api/v1/**` endpoints accept either:
 
 The filter chain tries API key first, then JWT. If both present, API key wins.
 
-CSRF is disabled for `/api/**` and `/mcp`, exactly as the §8.1 chain shows: API-key auth is inherently CSRF-immune (no cookie), and the cookie-authenticated path is defended by `dp_session`'s `SameSite=Strict` attribute (§5.5) — a cross-site page cannot make the browser send the cookie at all. The browser UI does not use `/api/v1/**` anyway: htmx talks to `/partials/**` ([UI Screens §2](ui-screens.md#2-design-principles)), where Spring's CSRF protection IS active — the frontend reads the `dp_csrf` cookie and sends its value in the `DP-CSRF-Token` header on state-changing requests ([UI Screens §3](ui-screens.md#3-common-layout)); `POST /logout` is likewise CSRF-protected. A CSRF failure on those surfaces returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). (v2.2 wording made the token sound required on cookie-authenticated `/api` calls, contradicting the §8.1 chain — corrected v2.3: `SameSite=Strict` is the API-path defense; the token guards the cookie-native UI surfaces.)
+CSRF exemption is scoped by **credential type, never by path**: a request is exempt only when it carries an API key (`DP-API-Key` header, or `Authorization: Bearer dpk_` on `/mcp`) — a credential a hostile browser context cannot forge, with no cookie involved. A state-changing request authenticated by the `dp_session` cookie requires the `dp_csrf` double-submit token (`DP-CSRF-Token` header) **wherever it occurs**: `/partials/**` ([UI Screens §3](ui-screens.md#3-common-layout)), `POST /logout`, and cookie-authenticated calls to `/api/v1/**` alike. `/mcp` accepts no cookies at all (§8.5), so CSRF never arises there. `dp_session`'s `SameSite=Strict` (§5.5) is defense-in-depth, not the control — it does not defend against a same-site subdomain attacker. In the §8.1 chain this is a `RequestMatcher` over the credential carrier, not a path glob. A CSRF failure returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). (History: v2.2's prose and sketch contradicted each other; v2.3 briefly resolved toward path-based exemption + `SameSite=Strict`; v2.4 supersedes both after two Gate C seats independently flagged the subdomain gap — exemption follows the credential, not the path.)
 
 ### 8.5 MCP endpoint (`/mcp`)
 
@@ -879,3 +887,4 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |
 | 2026-08-07 | v2.2 | consistency campaign | **D10:** `X-API-Key` → `DP-API-Key`; CSRF = `dp_csrf` cookie + `DP-CSRF-Token` header. **D11:** `/mcp` in the chain (§8.5): API-key-only, CSRF-exempt, Bearer `dpk_` accepted. **D13:** liveness re-check on every request via 60s cache — deactivation effective ≤ ~1 min (§4.2, §6.3, §7.3). **D14:** scope derivation at login (§6.1). **D15:** authoritative scope↔operation matrix (§7.6); key scopes ⊆ creator's scopes (§7.4). **D5:** error codes normalized to 3-segment (`auth.api_key.missing` etc.), `auth.csrf.*` collapsed to `auth.csrf.invalid`, `auth.rate_limit.exceeded` removed in favor of `rate_limit.exceeded`. `name` required per provider (§11.1); audit example provider lowercase; config tables replaced by pointers to configuration.md (D8). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-09 | v2.3 | P3 build (Gate C testing review) | §8.4 CSRF prose corrected to match the §8.1 chain (which is the ratified D10 design): `/api/**` and `/mcp` are CSRF-exempt — API keys carry no cookie, and cookie-authenticated API calls are defended by `dp_session` `SameSite=Strict` (§5.5); the `dp_csrf`/`DP-CSRF-Token` double-submit guards the cookie-native UI surfaces (`/partials/**`, `POST /logout`), failing 403 `auth.csrf.invalid` with `details.reason`. The v2.2 sentence requiring the token on cookie-authenticated `/api` calls contradicted the sketch and is withdrawn. |
+| 2026-08-09 | v2.4 | P3 build (Gate C security + API reviews) | **CSRF re-ruled (supersedes v2.3):** exemption follows the CREDENTIAL, not the path — only API-key-carrying requests skip CSRF; cookie-authenticated state-changing requests require the `dp_csrf` double-submit everywhere, `SameSite=Strict` demoted to defense-in-depth (same-site subdomain gap, flagged independently by two Gate C seats); §8.1 sketch updated. **§5.2:** OIDC redirect URI built absolutely from new `datapipelines.auth.base-url` (Configuration §3.4), never request-derived (`Host`/`X-Forwarded-Host` attack); startup fails when unset with providers configured. **§4.2:** emails lowercase-normalized at every lookup/store; login rejected when `email_verified: false` (unverified-account takeover via email-keyed linking). **§4.4:** bootstrap admin grant fires only at row creation — never re-grants after a deliberate revoke. |

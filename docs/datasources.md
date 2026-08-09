@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v1.3 (frozen contract — additive-only changes after this point)
+**Status:** v1.4 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-08-09
@@ -233,6 +233,26 @@ Per-node JDBC statement timeouts resolve in exactly one order:
 
 The executor applies the resolved value with `Statement.setQueryTimeout` per node. This is the only place the precedence is stated; other docs reference it. Note this is a *per-statement* timeout and is independent of `datapipelines.executor.execution-timeout-seconds`, which bounds the whole execution.
 
+### 5.6 Refused property keys (normative security exception to passthrough)
+
+Passthrough (§2 principle 8) has one bounded exception: a key is **refused** when the pinned driver treats its value as a class name to instantiate, a file path to read or write, connect-time SQL, or a TLS-verification switch. Refusal applies to **both carriers identically**: a key rejected under `properties.jdbc.*` (`datasource.validation.properties_invalid`) must also be rejected when smuggled into `jdbc_url`'s query/property segment (`datasource.validation.jdbc_url_malformed`) — the URL and the property map are validated against the same union of the server-managed set and the dialect's refusal set.
+
+**Credentials are refused in the URL outright**: `user`, `password`, and driver aliases (e.g. MSSQL `userName`) must arrive via the dedicated `username`/`password` fields — `jdbc_url` is stored plaintext and returned to `read`-scope principals (§3.2), so a credential embedded there defeats §7.1 encryption at rest.
+
+The authoritative enumeration is the module's per-dialect refusal sets, pinned by tests against the driver versions in `libs.versions.toml`; **a driver upgrade must re-review its dialect's set**. Each set must at minimum refuse:
+
+| Dialect | Minimum refused keys (case-insensitive) |
+|---|---|
+| POSTGRES | `socketFactory`, `socketFactoryArg`, `sslfactory`, `sslfactoryarg`, `sslhostnameverifier`, `authenticationPluginClassName`, `sslkey`, `sslpassword`, `loggerFile`, `loggerLevel` |
+| MSSQL | `socketFactoryClass`, `socketFactoryConstructorArg`, `trustStore`, `trustStorePassword`, `trustStoreType`, `keyStoreLocation`, `keyStoreSecret`, `keyStoreAuthentication`, `clientCertificate`, `clientKey`, `clientKeyPassword`, `trustServerCertificate` |
+| MYSQL | `allowLoadLocalInfile`, `autoDeserialize`, plus every `*FactoryClass`/plugin-class property of the pinned Connector/J |
+| H2 | `INIT` (RUNSCRIPT vector) |
+| SQLITE | `enable_load_extension` |
+| DUCKDB | the session-init-SQL-file option family of the pinned driver (connect-time fetch-and-run SQL) |
+| ORACLE | reviewed set of the pinned ojdbc when built with `-Poracle` (class-loading and file-path properties at minimum) |
+
+Under `properties.hikari`, `exceptionOverrideClassName` joins the server-managed refusal set (arbitrary class instantiation). The refusal sets are part of every dialect adapter's contract — an adapter without a reviewed set is a defect, and the validation path must fail **closed** (an unknown or non-conforming adapter yields no exemption from refusal, never an empty set).
+
 ---
 
 ## 6. Datasource Registry
@@ -241,16 +261,18 @@ The executor applies the resolved value with `Statement.setQueryTimeout` per nod
 
 ```kotlin
 interface DatasourceRegistry {
-    fun list(): List<Datasource>
+    fun list(dialect: Dialect? = null): List<Datasource>   // optional filter backs GET /datasources?dialect= (§11)
     fun get(name: String): Datasource?       // null if not registered or soft-deleted
     fun exists(name: String): Boolean
-    fun save(datasource: Datasource): Datasource   // create or update; validates first (§5.4, §9)
+    fun save(datasource: Datasource, actor: UUID): Datasource   // create or update; validates first (§5.4, §9). actor: created_by (Metadata DB §4.10) + the §7.4 audit actor
     fun delete(name: String): DeleteResult         // soft delete; fails if in use
     fun poolFor(datasource: Datasource): ConnectionPool   // lazy, thread-safe (§5.2)
-    fun testConnection(name: String): TestResult
+    fun testConnection(name: String): TestResult?  // null = no such datasource (caller maps to 404); §8.1's "HTTP 200 always" applies only when it exists
     fun validate(datasource: Datasource): ValidationResult
 }
 ```
+
+(v1.4: `save` gained the required `actor` parameter — `created_by` is `NOT NULL` and §7.4 audit events record an actor, so the v1.1 signature was unimplementable; `list` gained the optional dialect filter §11 already promises; `testConnection` returns `null` for an unknown name instead of a synthetic failed `TestResult` whose `errorClass` was not an FQCN.)
 
 Return types:
 
@@ -342,7 +364,7 @@ Key rotation = decrypt every `password_encrypted` with the old key, re-encrypt w
 2. **Connection test** (§8.1) when it constructs a throwaway pool for a datasource with no live pool.
 3. **Key rotation** (§7.3), which decrypts every row in one pass.
 
-An audit event is written at each of those points — **never per lease**. The earlier "audit every lease" model produced unbounded event volume (one row per query, per node, per execution) that recorded nothing the execution record did not already contain, and it implied a decrypt that does not happen.
+An audit event is written at each of those points — **never per lease**. The module emits them through an injected audit sink (a `fun interface` sibling of `DatasourceReferences`, with a no-op default so the module stays dependent on `typesystem` alone); the application wires the sink onto the shared `audit_log` writer at assembly (v1.4). The earlier "audit every lease" model produced unbounded event volume (one row per query, per node, per execution) that recorded nothing the execution record did not already contain, and it implied a decrypt that does not happen.
 
 Each event records:
 - Timestamp (`TIMESTAMPTZ`, UTC)
@@ -412,10 +434,10 @@ Every rule below runs on **create and update**, before the row is written (§2 p
 |---|---|
 | `datasource.validation.name_invalid` | `name` matches `[a-z0-9_-]+`, length 1–63 |
 | `datasource.validation.dialect_invalid` | `dialect` is a value of the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set |
-| `datasource.validation.jdbc_url_malformed` | URL parses and matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`) |
+| `datasource.validation.jdbc_url_malformed` | URL parses, matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`), and carries no server-managed, refused (§5.6), or credential key in its query/property segment |
 | `datasource.validation.jdbc_url_scheme_invalid` | URL begins with `jdbc:{dialect}:` |
 | `datasource.validation.password_missing` | `password` required on create |
-| `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, …) is present under `hikari`, and `properties` contains no namespace other than `hikari` / `jdbc`. The offending key and the underlying Hikari/driver message are returned in `details`. |
+| `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `exceptionOverrideClassName`, …) is present under `hikari`, no refused key (§5.6) or server-managed/credential key is present under `jdbc`, and `properties` contains no namespace other than `hikari` / `jdbc`. The offending key and the underlying Hikari/driver message are returned in `details`. |
 | `datasource.validation.query_timeout_invalid` | `query_timeout_seconds`, when present, is an integer ≥ 1 |
 | `datasource.validation.duplicate_name` | Create with a name that already exists. `name` is the PRIMARY KEY ([Metadata DB §4.10](metadata-db.md#410-datasources)), so uniqueness is GLOBAL including soft-deleted rows — a deleted datasource's name is not reusable until hard-deleted (corrected 2026-08-08: pipelines reference datasources by name, so silent reuse would repoint history; consistent with pipeline `duplicate_name`). No reactivate-on-recreate path in v1. |
 | `datasource.driver_not_loaded` | The JDBC driver class for `dialect` is on the classpath (§10.3) |
@@ -571,3 +593,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
 | 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.3 | P3 build (Gate C testing review) | §7.3 v1-scope note: the key-rotation *flow* is deferred to v1.1 (no v1 trigger surface); v1 ships the encryptor primitive and the registered-but-unemitted `datasource.key_rotation` audit event. |
+| 2026-08-09 | v1.4 | P3 build (Gate C security + API reviews) | New **§5.6 refused property keys**: the bounded normative exception to §2's passthrough principle — class-loading / file-path / connect-time-SQL / TLS-switch keys refused in BOTH carriers (`properties.jdbc.*` and the `jdbc_url` query segment, same union), credentials refused in the URL outright, per-dialect minimum sets tabled, fail-closed adapter contract; §9 rows updated to reference it. §6.1: `save` gains required `actor` (created_by + §7.4 audit actor — v1.1 signature was unimplementable), `list` gains optional `dialect` filter, `testConnection` returns `null` for unknown names. §7.4: audit events emitted through an injected sink (no-op default), wired by the app. |
