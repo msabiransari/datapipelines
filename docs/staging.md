@@ -1,6 +1,6 @@
 # Staging (H2) Specification
 
-**Status:** v1.5 (frozen contract — additive-only changes after this point)
+**Status:** v1.6 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
 **Last updated:** 2026-08-09
@@ -28,7 +28,7 @@ This spec defines:
 
 1. **Per-execution isolation.** Every execution gets its own H2 instance. No cross-execution data leakage. No cleanup race conditions. No need for namespace prefixes.
 2. **In-memory only.** H2 runs in `MEMORY` mode — no disk I/O, no persistence. The cost is RAM; the benefit is speed. Executions that exceed memory limits fail explicitly (rather than silently swapping to disk).
-3. **Created-on-demand, destroyed-on-completion.** The instance is created when the executor starts and destroyed deterministically when the executor finishes, regardless of success/failure. Destruction is an explicit `DROP ALL OBJECTS` plus a connection close in a `finally` block — **never** a reliance on garbage collection.
+3. **Created-on-demand, destroyed-on-completion.** The instance is created when the executor starts and destroyed deterministically when the executor finishes, regardless of success/failure. Destruction is an explicit table drop (enumerate + `DROP TABLE`, §3.4) plus a connection close in a `finally` block — **never** a reliance on garbage collection.
 4. **Tables named per the Pipeline Contract.** Tables use the exact `output.table` names declared in the pipeline (`stg_orders`, `int_revenue`). No prefixes, no UUIDs. Downstream template SQL references these names directly.
 5. **Single connection in v1, explicitly serialized.** One JDBC connection per instance, guarded by a `kotlinx.coroutines.sync.Mutex`. A JDBC `Connection` does not safely serialize concurrent callers on its own, and the executor runs nodes concurrently — the mutex is the mechanism, not an implementation detail (§9).
 6. **Streaming, not buffering.** Source ResultSets stream into H2 via batched inserts — constant memory regardless of result size.
@@ -137,10 +137,13 @@ class H2Staging(
 
     override fun close() {
         try {
-            connection.createStatement().use { it.execute("DROP ALL OBJECTS") }
+            // Non-admin cleanup: DROP ALL OBJECTS requires admin in H2 2.3.232 (§9.5), so
+            // enumerate this schema's tables from INFORMATION_SCHEMA and DROP TABLE each —
+            // both available to the restricted user. This is a belt anyway (see below).
+            dropAllStagedTables(connection)
         } catch (e: SQLException) {
             log.warn(
-                "tempdb DROP ALL OBJECTS failed for execution {}: {}",
+                "tempdb table cleanup failed for execution {}: {}",
                 executionId, e.message,
             )   // pipeline.staging.cleanup_failed — logged, never rethrown from close()
         } finally {
@@ -156,8 +159,8 @@ class H2Staging(
 
 Two independent mechanisms, in order:
 
-1. **`DROP ALL OBJECTS`** — releases every staged table's memory immediately and deterministically, before the connection close. Belt.
-2. **`connection.close()`** — with default close semantics (§3.1), closing the only connection destroys the in-memory database itself. Braces.
+1. **Enumerate-and-drop** (`INFORMATION_SCHEMA.TABLES` → `DROP TABLE` per table) — releases every staged table's memory immediately and deterministically, before the connection close. Belt. (`DROP ALL OBJECTS` would be simpler but is admin-gated in H2 2.3.232, and the staging user is non-admin by §9.5; the enumerate-and-drop uses only non-admin operations.)
+2. **`connection.close()`** — with default close semantics (§3.1), closing the only connection destroys the in-memory database itself. Braces. This is the primary guarantee; step 1 only accelerates memory release within a long-lived JVM.
 
 Neither step depends on garbage collection. `close()` never throws: it is invoked from the executor's `finally` block, where an exception would mask the execution's real failure. A failed cleanup is logged and surfaces as `pipeline.staging.cleanup_failed` (§7.2) in the execution's error detail when the execution is otherwise successful.
 
@@ -461,20 +464,25 @@ Each staging instance has a memory budget, resolved once at creation (§3.1): th
 
 The staging layer does **not** estimate footprint from row counts and average row widths — that arithmetic is unreliable for VARCHAR/VARBINARY-heavy tables and was wrong in both directions.
 
-Accounting is a direct measurement of H2's own allocation:
+Accounting is a direct measurement of JVM heap, read **in-process** — not via H2's `MEMORY_USED()`:
 
-```sql
-SELECT MEMORY_USED()   -- kilobytes used by the in-memory database
+```kotlin
+fun usedHeapKb(): Long {
+    System.gc()   // match MEMORY_USED()'s post-GC semantics; coarse guard, not per-poll hot path
+    val rt = Runtime.getRuntime()
+    return (rt.totalMemory() - rt.freeMemory()) / 1024
+}
 ```
 
-- `MEMORY_USED()` is polled **once after each staging operation completes** (after `batchInsert` returns for a table, inside the same mutex-held section — `checkMemoryBudget()` in §3.2) and after each `execute(sql)` that writes to staging. It is not polled per batch: the call is cheap but not free, and per-table granularity is enough to stop a runaway pipeline within one node.
-- The reading is in kilobytes; the budget is in megabytes. Compare as `memoryUsedKb > maxMemoryMb * 1024`.
+- **Why not `SELECT MEMORY_USED()`:** in H2 2.3.232, `MEMORY_USED()` requires **admin rights** (SQLState 90040) — and the staging connection is deliberately a *non-admin* user so author SQL cannot reach the host (§9.5). Empirically, `MEMORY_USED()` and `(totalMemory − freeMemory)` return the **same number** (both ~14271 KB after a 50k-row fill in the same instant): H2's `MEMORY_USED()` is itself "run a GC, then return used heap", not a measure of the database's own allocation. So the in-process reading is the identical quantity with no admin dependency.
+- Polled **once after each staging operation completes** (after `batchInsert` returns for a table, inside the same mutex-held section — `checkMemoryBudget()` in §3.2) and after each `execute(sql)` that writes to staging. Not per batch: per-table granularity is enough to stop a runaway pipeline within one node.
+- Reading is in kilobytes; budget in megabytes. Compare as `usedHeapKb > maxMemoryMb * 1024`.
 - Exceeding the budget fails the current staging operation with `pipeline.staging.memory_limit_exceeded`, carrying the measured value and the budget in the error details.
-- The same reading backs `StagingStats.memoryUsedBytes` (§10), so `stats()` reports measured usage rather than a guess.
+- The same reading backs `StagingStats.memoryUsedBytes` (§10).
 
 Rows staged per table and the table count are tracked as plain counters for observability; they are reported, not used to decide the limit.
 
-**Known limit of the measurement:** `MEMORY_USED()` reports the database's own allocation, not JVM heap held by in-flight ResultSets, wire buffers, or the result store writer. It is a staging-footprint guard, not a JVM guard — §8.4 covers that layer.
+**Known limit — the reading is JVM-heap-wide, not per-execution (v1).** Because it measures used heap for the whole JVM, it includes heap held by in-flight ResultSets, other executions' staging DBs, wire buffers, and the result-store writer — everything, not just this execution's tables. With **concurrent executions** every staging instance reads the same global number, so a single execution's `max_memory_mb` is in practice a **shared JVM-heap ceiling**, not an isolated per-execution budget: one heavy execution can trip a lighter one's check. This is a deliberate v1 simplification (it is the cheapest guard that reliably stops a genuine runaway before OOM), true regardless of which H2 user runs it; real per-execution memory isolation is a v1.1+ item (§13.2 lists the accounting model as not frozen). §8.4 is the hard JVM backstop underneath it.
 
 ### 8.3 Failure handling
 
@@ -535,10 +543,11 @@ If profiling shows staging serialization is a bottleneck (likely only on pipelin
 The rendered SQL that `withQuery`/`execute` run is **author-authored** (a pipeline author's template body, §4.4 of [Templates](templates.md)). H2's admin-only surface reaches the host: `FILE_READ`/`FILE_WRITE`/`CSVWRITE`/`CSVREAD` read and write server files, `CREATE ALIAS`/`CREATE TRIGGER … AS` load JVM classes, `RUNSCRIPT`/`LINK_SCHEMA` fetch and execute. An `sa` (admin) staging session therefore turns "author may write tempdb SQL" into "author may read `/proc/self/environ`" — where `DATAPIPELINES_DB_ENCRYPTION_KEY` and `DATAPIPELINES_JWT_SECRET` live ([Configuration §2](configuration.md#2-required-configuration)). That is privilege escalation from `author` to all-datasource-credentials and session forgery, and it is **not** an accepted trade (contrast §4.4's SQL-injection note, which concerns the author's *own* authorized datasources, not the server's secrets).
 
 Therefore:
-- The database is created by a **transient bootstrap** admin (`sa`) connection, which immediately creates a restricted user (no admin right; `CREATE`/`INSERT`/`SELECT`/`DROP` on its own schema only) and is then **closed**. The one operational connection the module holds (§9.1) authenticates as that restricted user, and is what keeps the in-memory database alive thereafter.
-- Under that user, every admin-gated function above is unavailable, so author SQL cannot reach the host filesystem or load a class. `MEMORY_USED()` and the staging layer's own DDL / `DROP ALL OBJECTS` remain available (they are not admin-gated).
-- The exact admin-gating of each function is **verified against the pinned H2 driver** (`h2` in `libs.versions.toml`) by a test that runs `FILE_READ`, `CSVWRITE`, and `CREATE ALIAS` as the restricted user and asserts each is refused — a driver upgrade re-runs it. If the pinned H2 ever un-gates one of these for non-admin users, the test fails and the containment is revisited before shipping.
-- Additionally the JVM sets `-Dh2.allowedClasses=` (empty) as defense-in-depth against `CREATE ALIAS` class loading, independent of the user's rights.
+- The database is created by a **transient bootstrap** admin (`sa`) connection, which immediately creates a restricted user (`CREATE USER` + grants for `CREATE`/`INSERT`/`SELECT`/`DROP TABLE` on its schema — no admin right) and is then **closed**. The one operational connection the module holds (§9.1) authenticates as that restricted user, and is what keeps the in-memory database alive thereafter.
+- Under that user, every host-reaching function is refused with SQLState 90040 ("Admin rights are required") — **empirically verified against H2 2.3.232**: `FILE_READ`, `FILE_WRITE`, `CSVREAD`, `CSVWRITE`, `CREATE ALIAS`, `RUNSCRIPT`, `LINK_SCHEMA`, `CREATE TRIGGER … AS`, plus the self-escalation routes `ALTER USER … ADMIN TRUE` / `CREATE USER` / `SET`. So author SQL cannot reach the host filesystem, load a class, or grant itself admin.
+- **The staging layer avoids the two admin-gated operations it would otherwise use.** `MEMORY_USED()` and `DROP ALL OBJECTS` are *also* admin-gated (90040) in this H2 version — so accounting uses an in-process heap reading (§8.2) and cleanup enumerates `INFORMATION_SCHEMA.TABLES` and drops each table (§3.4), both non-admin. `CREATE`/`INSERT`/`SELECT`/`DROP TABLE` and reading `INFORMATION_SCHEMA` — everything the staging layer needs — are available to the restricted user.
+- The admin-gating is **guarded by a test** (`h2` in `libs.versions.toml`): it runs `FILE_READ`, `CSVWRITE`, and `CREATE ALIAS` as the restricted user and asserts each is refused. A driver upgrade re-runs it; if a future H2 un-gates one for non-admin users, the test fails and the containment is revisited before shipping.
+- Optional deployment-level belt: launching the JVM with `-Dh2.allowedClasses=` (empty) denies `CREATE ALIAS` class loading independent of user rights. It must be a **launch arg** — `SysProperties.ALLOWED_CLASSES` is captured at H2 class-init, so a runtime `System.setProperty` is a no-op — and it is redundant once the operational user is non-admin (which already refuses `CREATE ALIAS`), so it is not required by this spec, only noted for deployments that want it.
 
 ---
 
@@ -678,4 +687,5 @@ Out of scope for v1:
 | 2026-08-07 | v1.2 | spec review | Per [SPEC-REVIEW-2026-08 §2.7](SPEC-REVIEW-2026-08.md#27-stagingmd) (D6, D5, D8, D1, D9): removed `DB_CLOSE_DELAY=-1` and rewrote §3.1/§3.4/§3.5 lifecycle (explicit `DROP ALL OBJECTS` + close in `finally`, no GC reliance); explicit `Mutex` serialization (§9); new identifier-safety rules §4.5 (`invalid_column_name`, `table_already_exists`); `StageResult.columns: List<ColumnSchema>`; `StagingFactory.create(executionId, engine)` aligned with dag-executor + per-pipeline `max_memory_mb` precedence; `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` with real helper signatures (§5.3); memory accounting switched to polled `MEMORY_USED()` (§8.2); §7 config replaced by references to configuration.md §3.3 and error codes to pipeline-contract §13.5; §4.1 link fixed to pipeline-contract §10; §6.1 claim-check language replaced by the uniform result-delivery model; terminal-node language → caller node. |
 | 2026-08-08 | v1.3 | P3 build (API HIGH-1) | `stage()` takes `sourceDialect: Dialect` and maps source columns through the **source dialect's** `mapColumn` — not `H2IngressMapper` (§3.2, §10); non-fatal mapping warnings surface on `StageResult.warnings` (§8.2); §4.4 value-reading table added. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.4 | P3 build (security MEDIUM-1) | `Staging.connection` property removed; direct SQL goes through `suspend fun <T> withConnection(block)` which holds the internal serialization lock for the whole block (§3.4, §9.2, §10). The v1.2 contract — callers of a `connection` property "responsible for taking the mutex" — was unsatisfiable (the mutex is private) and is corrected, not extended. |
+| 2026-08-09 | v1.6 | P3 build (staging round-2, empirical H2 finding) | §9.5 mechanism corrected against the pinned H2 2.3.232: `MEMORY_USED()` **and** `DROP ALL OBJECTS` are admin-gated (SQLState 90040), so a non-admin staging user cannot call them — §8.2 accounting switched to an in-process JVM-heap reading (identical quantity: H2's `MEMORY_USED()` is itself post-GC used-heap, not DB allocation — the old "not JVM heap" note was inverted and is corrected), §3.4 cleanup switched to enumerate-`INFORMATION_SCHEMA`-then-`DROP TABLE`; both verified non-admin. §9.5 records the verified 90040 refusals + drops the runtime `allowedClasses` bullet (no-op after class-init; redundant once non-admin). §8.2 now states honestly that the reading is JVM-heap-wide, not per-execution isolated (shared ceiling under concurrent executions) — a v1 simplification, per-execution isolation is v1.1+ (§13.2). |
 | 2026-08-09 | v1.5 | P3 build (Gate C security re-check) | `query(sql): ResultSet` replaced by `withQuery(sql) { rs -> … }` holding the lock for the whole cursor consumption incl. the caller-node Redis drain (§3.3/§9.2/§10) — closes the §6.1-vs-§9.2 interleaving contradiction by construction (ST-SEC-1). New **§9.5 privilege containment**: author SQL runs as a non-admin H2 user (transient `sa` bootstrap creates DB + restricted user, then closes) so `FILE_READ`/`CSVWRITE`/`CREATE ALIAS` etc. cannot reach host files/classes — closes author→`/proc/self/environ`→encryption-key/JWT-secret escalation; gating verified against the pinned H2 driver + `-Dh2.allowedClasses=`. |
