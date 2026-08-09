@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v1.4 (frozen contract — additive-only changes after this point)
+**Status:** v1.5 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-08-09
@@ -116,6 +116,7 @@ interface DialectAdapter {
     val jdbcDriverClassName: String
     val defaultProperties: Map<String, String>          // driver-level defaults; overridable by properties.jdbc.*
     val typeMapper: IngressTypeMapper                   // JDBC types → canonical types
+    val refusedPropertyKeys: Set<String>                // dialect additions to the §5.6 refusal set (may add, never shrink)
     fun validateJdbcUrl(url: String): ValidationResult  // dialect-specific URL validation (§6.1)
     fun buildHikariConfig(datasource: Datasource): HikariConfig   // entity fields + defaults + properties.* (§5)
 }
@@ -330,6 +331,7 @@ data class ValidationResult(
 Passwords are **never** stored in plaintext. Encryption approach:
 
 - **AES-256-GCM** with a single master key. Stored value = nonce ‖ ciphertext ‖ auth tag; a fresh random 96-bit nonce per encryption.
+- **The datasource `name` is bound as GCM associated data (AAD)** on both encrypt and decrypt. A stored ciphertext therefore decrypts only under the name it was sealed with: a row copied or renamed at the database level fails the tag rather than silently decrypting, closing the lift-a-ciphertext-to-another-row attack (`name` is immutable, §11.1, so this never obstructs legitimate use). Any code path that decrypts — pool build, connection test, and the §7.3 rotation pass — MUST pass the row's name as AAD.
 - The master key has exactly **one source**: the `datapipelines.db.encryption-key` config key (`DATAPIPELINES_DB_ENCRYPTION_KEY`), defined in [Configuration §2](configuration.md#2-required-configuration) — exactly 32 bytes, base64-encoded.
 - The key is **required and fail-fast**: if it is missing, not valid base64, or not exactly 32 bytes, the application **does not start**. There is no fallback chain — no KMS lookup, no generated key file.
 
@@ -352,7 +354,7 @@ The semantics this spec depends on, which the DDL must satisfy:
 
 ### 7.3 Key rotation
 
-Key rotation = decrypt every `password_encrypted` with the old key, re-encrypt with the new key, in a single transaction. Triggered by an admin CLI / endpoint, with both keys supplied explicitly (the old key is never inferred). All pools are drained afterwards so the next build decrypts under the new key. Documented in the runbook (future).
+Key rotation = for each row, decrypt `password_encrypted` with the old key **using that row's `name` as AAD (§7.1)**, then re-encrypt with the new key **under the same `name` AAD**, in a single transaction. Triggered by an admin CLI / endpoint, with both keys supplied explicitly (the old key is never inferred). The `name` must be carried through both halves — a rotation that decrypts/re-encrypts without it fails every GCM tag. All pools are drained afterwards so the next build decrypts under the new key. Documented in the runbook (future).
 
 **v1 scope:** the rotation *flow* is deferred to v1.1 ([ROADMAP](ROADMAP.md)) — no v1 surface triggers it (no REST endpoint, no CLI). What v1 ships is the primitive it needs (`CredentialEncryptor` accepts an explicit raw key, so two encryptors can coexist during a rotation pass) and the registered `datasource.key_rotation` audit event ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), which is emitted by nothing until the flow lands.
 
@@ -365,6 +367,8 @@ Key rotation = decrypt every `password_encrypted` with the old key, re-encrypt w
 3. **Key rotation** (§7.3), which decrypts every row in one pass.
 
 An audit event is written at each of those points — **never per lease**. The module emits them through an injected audit sink (a `fun interface` sibling of `DatasourceReferences`, with a no-op default so the module stays dependent on `typesystem` alone); the application wires the sink onto the shared `audit_log` writer at assembly (v1.4). The earlier "audit every lease" model produced unbounded event volume (one row per query, per node, per execution) that recorded nothing the execution record did not already contain, and it implied a decrypt that does not happen.
+
+**`pool_build` vs `pool_rebuild` timing.** A datasource update evicts the live pool immediately (synchronously, with the operator's identity in hand) but decrypts nothing then — the lazy rebuild on the next lease is what decrypts, and it emits its own `pool_build` (actor = system, executor-initiated). So an update to a datasource with a live pool produces `pool_rebuild` (operator actor, marks the eviction) followed later by `pool_build` (system actor, marks the actual decryption). `pool_rebuild` exists to capture the operator who triggered the change — an identity that is gone by the time the lazy build runs — not to mark a decryption of its own. `actor` is the system principal for executor-initiated pool builds and the operator's user id for operator-initiated actions (update, connection test); `cause` (execution id + node id) is populated only for a `pool_build` triggered from an execution, where the executor supplies the context.
 
 Each event records:
 - Timestamp (`TIMESTAMPTZ`, UTC)
@@ -593,4 +597,5 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
 | 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.3 | P3 build (Gate C testing review) | §7.3 v1-scope note: the key-rotation *flow* is deferred to v1.1 (no v1 trigger surface); v1 ships the encryptor primitive and the registered-but-unemitted `datasource.key_rotation` audit event. |
+| 2026-08-09 | v1.5 | P3 build (Gate C API re-review) | Doc-sync of behavior the fix cycle added: §4.2 `DialectAdapter` gains `refusedPropertyKeys` (DS-API-12); §7.1 records the datasource-`name`-as-GCM-AAD binding and §7.3 rotation recipe now carries it through both halves (DS-API-13 — a literal reading of the old recipe would fail every tag); §7.4 states the `pool_build`/`pool_rebuild` timing + actor/cause rules, enums §15 gloss matched (DS-API-10). |
 | 2026-08-09 | v1.4 | P3 build (Gate C security + API reviews) | New **§5.6 refused property keys**: the bounded normative exception to §2's passthrough principle — class-loading / file-path / connect-time-SQL / TLS-switch keys refused in BOTH carriers (`properties.jdbc.*` and the `jdbc_url` query segment, same union), credentials refused in the URL outright, per-dialect minimum sets tabled, fail-closed adapter contract; §9 rows updated to reference it. §6.1: `save` gains required `actor` (created_by + §7.4 audit actor — v1.1 signature was unimplementable), `list` gains optional `dialect` filter, `testConnection` returns `null` for unknown names. §7.4: audit events emitted through an injected sink (no-op default), wired by the app. |

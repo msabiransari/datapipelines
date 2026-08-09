@@ -279,7 +279,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | Value | Trigger |
 |---|---|
 | `datasource.pool_build` | Credential decrypted to build a connection pool |
-| `datasource.pool_rebuild` | Pool rebuilt after a datasource update |
+| `datasource.pool_rebuild` | Update-triggered eviction of a live pool; carries the initiating operator (the decryption itself is the subsequent `pool_build`) — see [Datasources §7.4](datasources.md#74-decryption-points-and-audit-log) |
 | `datasource.connection_test` | Explicit connection test (`POST .../test`) |
 | `datasource.key_rotation` | Master-key rotation re-encryption pass |
 
