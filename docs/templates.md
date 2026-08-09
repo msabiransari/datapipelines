@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.2 (frozen contract — additive-only changes after this point)
+**Status:** v1.3 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-09
 
 ---
 
@@ -62,10 +62,10 @@ Note that the body contains **no `<#import>` directive**. The engine synthesizes
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `schema_version` | integer | yes | Currently `1`. Independent of the entity `version` below — see [Pipeline Contract §15.4](pipeline-contract.md#154-which-version-counter-governs-what). |
+| `schema_version` | integer | yes | Currently `1` — the only value v1 accepts; any other is **rejected at save time** with `template.validation.schema_version_unsupported` (§7). Independent of the entity `version` below — see [Pipeline Contract §15.4](pipeline-contract.md#154-which-version-counter-governs-what). |
 | `id` | string | yes | Stable identifier. `[a-z0-9_\.\-]+`. Auto-generated if omitted on create. |
 | `version` | integer | yes | Monotonically increasing per template id. Server-assigned. |
-| `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`. Reserved for future: `"pebble"`, `"handlebars"`, `"none"` (raw SQL, no template processing). See [Enums §6](enums.md#6-templateengine--template-language). |
+| `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`; a save carrying any other value (`"pebble"`, `"handlebars"`, `"none"`) is **rejected at save time** with `template.validation.engine_unsupported` (§7) — it is never stored and silently rendered as Freemarker. Reserved values are catalogued in [Enums §6](enums.md#6-templateengine--template-language). |
 | `dialect` | string (enum) | yes | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. |
 | `display_name` | string | yes | Human-readable name. |
 | `description` | string | yes | Free-text, for human and agent discoverability. Not machine-validated: it is the only place a template can hint at the parameters it expects, since it declares none (§2.5). |
@@ -100,6 +100,7 @@ Pinned via Gradle version catalog (see [Module Structure spec](module-structure.
 
 **Forbidden** — rejected at save time by the body scan (`template.validation.dangerous_construct`, §7):
 - `?eval` — evaluates a string as a Freemarker expression. **There is no configuration switch that disables `?eval` in Freemarker 2.3.x** (verified against the `Configurable` setting list, §4.3), so the save-time scan is the *only* guard and is therefore normative, not belt-and-braces. With §4.3's class resolver and object wrapper in place, `?eval` cannot reach Java classes even if one slipped through — its blast radius is confined to expressions over the render context.
+- `?interpret` and `?eval_json` — sibling constructs to `?eval` that compile a **string value** (which may be a render-context value, i.e. an API-supplied pipeline parameter) into template source and execute it. Like `?eval` they have no configuration switch, so the save-time scan is the sole guard: they are the constructs that would let a context value become source, defeating "a context value is data, never source". Rejected on the same footing as `?eval`.
 - `?api` — Java API access on wrapped objects. Also disabled by configuration (§4.3).
 - `?new` — instantiates arbitrary Java classes. Hard-disabled by configuration (§4.3).
 - `Execute`, `ObjectConstructor`, `freemarker.template.utility.JythonRuntime` — the classic Freemarker SSTI vectors. Unreachable because class resolution is disabled entirely (§4.3).
@@ -250,7 +251,7 @@ WHERE <@dates.date_range column="order_date" start=start_date end=end_date />
 
 The render engine:
 1. Resolves each `imports` entry to a stored library version and registers it with the template loader under the key `"{id}@{version}"`.
-2. **Synthesizes** the equivalent `<#import "{id}@{version}" as {alias}>` prologue from the array — the author never writes it, so an alias can never point at an unvalidated, unpinned, or non-library template.
+2. **Synthesizes** the equivalent `<#import "{id}@{version}" as {alias}>` prologue from the array — the author never writes it, so an alias can never point at an unvalidated, unpinned, or non-library template. Because `alias` and `id` are interpolated into that synthesized directive, they are validated as strict identifiers *before* synthesis: `alias` matches `[a-zA-Z_][a-zA-Z0-9_]*` and `id` matches the §7 `id` rule; `version` is a positive integer. A value that fails — an alias or id carrying Freemarker metacharacters, whitespace, or a directive fragment, or a non-positive version — is a prologue-injection attempt and is rejected with `template.validation.dangerous_construct` (§4.2/§7); the refusal message never echoes the offending value back into logs. The loader independently re-checks the key on the read path, failing closed on any row that reached storage by another route.
 3. Resolves transitive imports the same way (a library's own `imports` array), building the full closure.
 4. Renders the main body against the pipeline's parameter map.
 
@@ -278,6 +279,8 @@ All checks below run at template create/update time, before anything is written 
 | Code | Check |
 |---|---|
 | `template.validation.dialect_invalid` | `dialect` is in the allowed enum |
+| `template.validation.engine_unsupported` | `engine` is a value v1 supports (only `"freemarker"`) |
+| `template.validation.schema_version_unsupported` | `schema_version` is a value v1 supports (only `1`) |
 | `template.validation.id_invalid` | `id` matches `[a-z0-9_\.\-]+`, length 1–100 |
 | `template.validation.syntax_error` | Freemarker parses the body without syntax errors |
 | `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` (see §4.2) |
@@ -493,9 +496,11 @@ SELECT
   r.total / 100.0 AS revenue_display
 FROM revenue r
 JOIN stg_customers c ON r.group_key = c.customer_id
-WHERE r.total >= ${min_total?c}
+WHERE r.total >= ${min_total}
 ORDER BY r.total DESC
 ```
+
+(Plain `${min_total}` — not `${min_total?c}`. §4.4's type-aware rendering already emits a `BIGDECIMAL(12,2)` as the plain, computer-safe decimal string `1000.00` with its declared scale; `?c` is unnecessary here and actively wrong — every published Freemarker `CFormat` drops trailing zeros, so `?c` would render `1000` and lose the declared scale §4.4 promises. Reserve `?c` for cases where you explicitly want scale-less computer format.)
 
 ### Render context
 
@@ -541,3 +546,4 @@ ORDER BY r.total DESC
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |
 | 2026-08-05 | v1.1 | propagation | Added `engine` field to Template entity (default `"freemarker"`; future-proofing for Pebble/Handlebars/raw-SQL). Updated `body` and `imports` field descriptions to be engine-aware. Renamed `__staging__` → `tempdb` in UI editor section. |
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08 §2.8](SPEC-REVIEW-2026-08.md#28-templatesmd): removed `params_schema` entirely (D3 — pipeline `parameters` is the single declaration point; template save is parse-only, dry-render moved to pipeline save); `imports` entries become `{id, version, alias}` with engine-synthesized `<#import>` and body-never-imports (D12); `is_library` corrected to "no output outside macro definitions", `body` required (D12); `template.import.cycle_detected` → `template.validation.import_cycle`, `body_malformed` → `syntax_error`, added `duplicate_alias` / `import_not_library` (D5); §4.3 Freemarker hardening rewritten against the verified 2.3.x API (invented `externalsCatchAll` / `builtin_classes` deleted; `ALLOWS_NOTHING_RESOLVER` replaces `SAFER_RESOLVER`) with an implementation-gate checklist; render guards reference [Configuration §3.9](configuration.md#39-templates) (D8); §12.2 DDL replaced by a pointer to [Metadata DB](metadata-db.md) (D4); §10 tempdb dialect derived from `settings.tempdb.engine`; fixed the §3.2 link to [Pipeline Contract §6](pipeline-contract.md#6-parameters-input-map-declaration). |
+| 2026-08-09 | v1.3 | P3 build (Gate B) | `?interpret`/`?eval_json` added to §4.2's forbidden list (context-value-to-source siblings of `?eval`, no config switch). §3.2 `engine` and `schema_version` now rejected at save when unsupported — new codes `template.validation.engine_unsupported` / `template.validation.schema_version_unsupported` (§7, [Pipeline Contract §13.9](pipeline-contract.md#139-template)) close the silent-mis-render gap. §6.3: `imports` `alias`/`id`/`version` validated as strict identifiers before prologue synthesis (prologue-injection attempt → `dangerous_construct`, message never echoes the value; loader re-checks fail-closed). Appendix A worked example corrected `${min_total?c}` → `${min_total}` (`?c` drops the declared scale §4.4 promises). |

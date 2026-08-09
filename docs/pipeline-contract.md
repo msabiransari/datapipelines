@@ -763,6 +763,8 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.dangerous_construct` | 400 | Forbidden Freemarker construct (SSTI hardening, Templates §4.2) |
 | `template.validation.id_invalid` | 400 | Template `id` fails the identifier rules |
 | `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum |
+| `template.validation.engine_unsupported` | 400 | `engine` not a value v1 supports (only `freemarker`) |
+| `template.validation.schema_version_unsupported` | 400 | `schema_version` not a value v1 supports (only `1`) |
 | `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |
 | `template.validation.import_not_found` | 400 | `imports` entry references a missing template id/version |
 | `template.validation.import_not_library` | 400 | `imports` entry references a template with `is_library: false` |
