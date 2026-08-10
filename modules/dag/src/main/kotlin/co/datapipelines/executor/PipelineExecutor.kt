@@ -1,0 +1,629 @@
+package co.datapipelines.executor
+
+import co.datapipelines.dag.Dag
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.events.DataReady
+import co.datapipelines.events.EventEmitter
+import co.datapipelines.events.ExecutionAborted
+import co.datapipelines.events.ExecutionEvent
+import co.datapipelines.events.ExecutionStarted
+import co.datapipelines.events.NodeCompleted
+import co.datapipelines.events.NodeFailed
+import co.datapipelines.events.NodeStarted
+import co.datapipelines.events.PipelineCompleted
+import co.datapipelines.events.PipelineFailed
+import co.datapipelines.pipeline.ParameterBinder
+import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.staging.Staging
+import co.datapipelines.staging.StagingEngine
+import co.datapipelines.staging.StagingFactory
+import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.typesystem.DatapipelinesException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.slf4j.LoggerFactory
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.seconds
+import co.datapipelines.pipeline.StagingEngine as PipelineStagingEngine
+
+/**
+ * The runtime engine (dag-executor.md §5): takes a validated pipeline plus parameters, walks the
+ * DAG with coroutines, and produces the result dataset.
+ *
+ * ## The concurrency model in one paragraph
+ *
+ * Every node gets a coroutine **up front**; each awaits its own dependencies and only then takes
+ * a parallelism permit. That is strictly more parallel than wave scheduling, and the permit
+ * ordering is not a detail: taking the permit first would let `max-parallel-nodes` coroutines sit
+ * blocked on dependencies while holding every permit, so the dependencies they wait for could
+ * never acquire one — **any chain longer than `max-parallel-nodes` would deadlock**. Waiting
+ * first costs nothing (a suspended `awaitAll` occupies no thread) and the permit then bounds only
+ * nodes doing actual SQL work. `PermitAfterAwaitDeadlockTest` is the standing guard.
+ *
+ * Failure is fail-fast (§5.4): one node failing cancels every sibling through structured
+ * concurrency, pending nodes never start, and the execution reports `FAILED` with per-node stats.
+ * Cancellation (§8.3) is a separate, first-class path that reports `ABORTED` and carries no error
+ * code.
+ */
+@Suppress("LongParameterList")
+class PipelineExecutor(
+    private val nodeRunner: NodeRunner,
+    private val stagingFactory: StagingFactory,
+    private val resultStore: ResultStore,
+    private val eventEmitter: EventEmitter,
+    private val cancellationRegistry: CancellationRegistry,
+    private val cancellationFlags: CancellationFlags,
+    private val executionSlots: ExecutionSlots,
+    private val dispatcher: ExecutorDispatcher,
+    private val config: ExecutorConfig,
+    private val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+    /**
+     * No default (F6). `rest-api` §6.4.7 requires `data_ready.result_url` to be **absolute**, and a
+     * relative default silently shipped a wire-invalid payload to every client that did not
+     * override it. Making it required turns "forgot to wire the base URL" from a runtime protocol
+     * violation into a compile error in `app`; [ResultUrlFactory.RELATIVE] survives as a test-only
+     * fixture.
+     */
+    private val resultUrls: ResultUrlFactory,
+) {
+    init {
+        metrics.bindConcurrency(executionSlots)
+    }
+
+    /**
+     * Runs one execution end to end (§5.1).
+     *
+     * The execution slot is taken **first** and held for the whole run (§5.1 step 2), so a
+     * pipeline can never run out of slots halfway through.
+     *
+     * @throws PipelineConcurrencyLimitException no slot was free.
+     * @throws PipelineExecutionFailed a node failed.
+     * @throws PipelineTimeoutException the execution timeout fired.
+     * @throws ExecutionAbortedException the execution was cancelled (§8.3).
+     */
+    suspend fun execute(request: ExecuteRequest): ExecutionResult {
+        val executionId = UUID.randomUUID()
+        return executionSlots.withSlot(request.userId) { runExecution(executionId, request) }
+    }
+
+    @Suppress("LongMethod")
+    private suspend fun runExecution(
+        executionId: UUID,
+        request: ExecuteRequest,
+    ): ExecutionResult {
+        val startedAt = Instant.now()
+        val plan = ExecutablePipeline.from(request.pipeline)
+        // Binding runs before the stream opens, and stays there: a rejected parameter is a 400
+        // with no execution at all, and §8.2 catalogues no executor code for it. Everything the
+        // catalogue DOES cover moves below the emit (F9).
+        val context = ParameterBinder(request.pipeline.parameters).bindOrThrow(request.parameters)
+        val run = ExecutionRun(executionId, request, plan, startedAt)
+
+        // §5.1 step 4 before steps 8-10: `execution_started` precedes every allocation whose
+        // failure §8.2 names (`staging.creation_failed`, `staging.engine_unavailable`). Creating
+        // staging first meant such a failure escaped with ZERO events on an execution the caller
+        // had already been handed an id for.
+        emit(
+            ExecutionStarted(
+                executionId = executionId,
+                pipelineId = request.pipelineId,
+                pipelineVersion = request.pipelineVersion,
+                parameters = context.asMap(),
+                correlationId = request.correlationId,
+                startedAt = startedAt,
+            ),
+        )
+
+        var staging: Staging? = null
+        val handle = cancellationRegistry.register(executionId)
+        try {
+            // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
+            // executor's own pool, never on whatever thread the caller happened to arrive on.
+            val opened = withContext(dispatcher.context) { stagingFactory.create(executionId, stagingEngineFor(request.pipeline)) }
+            staging = opened
+            val ctx = nodeContext(request, opened, handle, run, context.asMap())
+            return withTimeout(config.executionTimeoutSeconds.seconds) {
+                coroutineScope {
+                    handle.bind(coroutineContext.job)
+                    val poller = launch(dispatcher.context) { pollCancelFlag(executionId, run, handle) }
+                    try {
+                        val results = runNodes(plan.dag, ctx, run)
+                        succeed(run, results)
+                    } finally {
+                        poller.cancel()
+                    }
+                }
+            }
+        } catch (e: NodeExecutionException) {
+            failWithNode(run, e)
+        } catch (e: TimeoutCancellationException) {
+            failWithTimeout(run, e)
+        } catch (e: ExecutionAbortedException) {
+            abort(run, e)
+        } catch (e: DatapipelinesException) {
+            // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
+            // the stream as `pipeline_failed` on the execution the caller is already watching.
+            failWithSetup(run, e)
+        } finally {
+            cleanup(executionId, staging)
+        }
+    }
+
+    /**
+     * Schedules every node up front (§5.2). Dependencies are awaited **before** the parallelism
+     * permit is taken — see the class KDoc.
+     */
+    private suspend fun runNodes(
+        dag: Dag<ExecutableNode>,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+    ): Map<String, NodeResult> =
+        coroutineScope {
+            val permits = Semaphore(config.maxParallelNodes)
+            val scheduled = LinkedHashMap<String, Deferred<NodeResult>>()
+            // Topological order guarantees a node's dependencies are already scheduled.
+            dag.topologicalOrder().forEach { nodeId ->
+                val node = dag.node(nodeId)
+                val dependencies = node.dependsOn.map { scheduled.getValue(it) }
+                scheduled[nodeId] =
+                    async(dispatcher.context) {
+                        // Dependencies FIRST, holding no permit; only then occupy a slot (§5.2).
+                        dependencies.awaitAll()
+                        permits.withPermit { executeNode(node, ctx, run) }
+                    }
+            }
+            scheduled.mapValues { (_, deferred) -> deferred.await() }
+        }
+
+    /**
+     * One node's lifecycle: `node_started`, then exactly one of `node_completed` or `node_failed`
+     * (§2 principle 5, §5.2). `node_completed` is **never** emitted for a failed node.
+     */
+    private suspend fun executeNode(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+    ): NodeResult {
+        // §8.3.1: the Redis flag is checked at node boundaries as well as on the poll tick, so a
+        // cross-instance cancel does not have to wait a full interval to stop the next node.
+        checkCancelFlag(run.executionId)
+        val startedAt = Instant.now()
+        run.stats.started(node.id, startedAt)
+        emit(NodeStarted(run.executionId, node.id, startedAt))
+        return try {
+            completeNode(node, ctx, run, startedAt)
+        } catch (e: CancellationException) {
+            // Cancellation is not a node failure: it emits nothing and maps to no code (§5.2).
+            // But if the cancellation *replaced* a real failure — `withStatement` converts a
+            // cancel-induced driver error, and carries the original as a suppressed exception —
+            // the stats still record it. Suppressing the event is right; losing the reason is not.
+            recordSuppressedFailure(node, run, e)
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw failNode(node, ctx, run, e)
+        }
+    }
+
+    /** Records the failure a cancellation stood in front of, if there was one (F8). */
+    private fun recordSuppressedFailure(
+        node: ExecutableNode,
+        run: ExecutionRun,
+        cancellation: CancellationException,
+    ) {
+        val original = cancellation.suppressed.firstOrNull() ?: return
+        val mapped = (original as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(original, NodePhase.EXECUTE, node.id)
+        run.stats.abortedWithCause(node.id, mapped)
+    }
+
+    private suspend fun completeNode(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        startedAt: Instant,
+    ): NodeResult {
+        val result = nodeRunner.run(node, ctx, startedAt)
+        run.stats.completed(result)
+        metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
+        emit(NodeCompleted(run.executionId, node.id, NodeStats.of(result)))
+        return result
+    }
+
+    /**
+     * Records the failure, emits `node_failed` **exactly once**, and returns the exception to throw.
+     *
+     * The first branch is the funnel guard: `CancellationHandle.withStatement` already converts a
+     * cancel-induced driver error, but a failure raised *outside* a registered statement — staging,
+     * the result-store drain, write-back — can still land here while the execution is already
+     * aborting. `node_failed` must never be emitted for one of those, because §10 allows exactly
+     * one terminal event and an `execution_aborted` is already on its way.
+     */
+    private suspend fun failNode(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        run: ExecutionRun,
+        cause: Exception,
+    ): Exception {
+        val mapped = (cause as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(cause, NodePhase.EXECUTE, node.id)
+
+        // F8: the reason is recorded on EVERY path, including the two suppressed ones — only the
+        // *event* is suppressed. On those two the node is `ABORTED`-with-cause rather than `FAILED`:
+        // it was stopped by the execution ending, not by a fault of its own.
+        ctx.handle.abortReason?.let {
+            run.stats.abortedWithCause(node.id, mapped)
+            return ExecutionAbortedException(it)
+        }
+        if (run.unwinding.get()) {
+            run.stats.abortedWithCause(node.id, mapped)
+            // The scope is already unwinding and this node's statement was interrupted by
+            // [pollCancelFlag]'s cleanup to make that unwind actually stop the source query. The
+            // resulting driver error is a *consequence* of the decided outcome, not an independent
+            // failure: emitting `node_failed` for it would put a spurious query_execution_failed on
+            // a stream whose terminal event is already pipeline_failed(timeout) or another node's.
+            return CancellationException("node ${node.id} interrupted while the execution unwound")
+        }
+        run.stats.failed(node.id, mapped)
+        emit(NodeFailed(run.executionId, node.id, mapped, run.stats.snapshot(listOf(node.id)).first()))
+        return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause)
+    }
+
+    // -------------------------------------------------------------- outcomes
+
+    /**
+     * The success path — but the stored caller result is resolved **before** the terminal event.
+     *
+     * That ordering is the whole point (B3). Emitting `pipeline_completed` first and only then
+     * discovering that `describe()` returns null left exactly one legal-looking outcome for a
+     * lost result: `SUCCESS` with no `data_ready` — which is **wire-identical** to a legal
+     * zero-caller run (§4.1, §10). A caller pipeline that silently returns no data is the worst
+     * possible failure mode, and D9's "no fallback, fail loud" says so directly. Resolving first
+     * means a vanished result fails the execution with `result.storage_unavailable` instead.
+     */
+    private suspend fun succeed(
+        run: ExecutionRun,
+        results: Map<String, NodeResult>,
+    ): ExecutionResult {
+        // §4.1: no caller node → no data_ready at all. Legal, not an error.
+        val resultRef = run.plan.callerNodeId?.let { results.getValue(it).callerResultRef }
+        val view = resultRef?.let { resolveStoredResult(run, it) }
+
+        val completedAt = Instant.now()
+        val stats = run.stats.snapshot(run.plan.dag.nodeIds)
+        run.emitTerminal {
+            emit(
+                PipelineCompleted(
+                    executionId = run.executionId,
+                    pipelineId = run.request.pipelineId,
+                    pipelineVersion = run.request.pipelineVersion,
+                    startedAt = run.startedAt,
+                    completedAt = completedAt,
+                    durationMs = run.elapsedMsAt(completedAt),
+                    nodeStats = stats,
+                ),
+            )
+        }
+        // §6.4.2: built from the **stored** result, never from the ResultSet.
+        view?.let { emit(DataReady.from(run.request.pipelineId, it, resultUrls.urlFor(run.executionId), run.resultTtlSeconds(config))) }
+        metrics.executionFinished(run.request.pipelineId, ExecutionStatus.SUCCESS, run.elapsed(completedAt))
+        return run.result(ExecutionStatus.SUCCESS, stats, resultRef, completedAt)
+    }
+
+    /**
+     * Reads the stored caller result back, or fails the execution.
+     *
+     * The throw is a [NodeExecutionException] against the caller node so it lands on the existing
+     * `failWithNode` path — which emits `pipeline_failed` and nothing else. Deliberately no
+     * `node_failed`: the node itself succeeded and already emitted `node_completed`, and §10
+     * permits exactly one of the two per node.
+     */
+    private suspend fun resolveStoredResult(
+        run: ExecutionRun,
+        resultRef: String,
+    ): StoredResultView {
+        // §15.2: a Redis read is blocking I/O and belongs on the executor's own pool.
+        val view = withContext(dispatcher.context) { resultStore.describe(resultRef) }
+        if (view == null) {
+            LOG.error("Stored result {} vanished before data_ready; failing execution {}", resultRef, run.executionId)
+            throw NodeExecutionException(
+                nodeId = run.plan.callerNodeId ?: "",
+                errorCode = PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+                errorDetails = mapOf("result_ref" to resultRef),
+                cause = IllegalStateException("stored result $resultRef is gone or expired before data_ready"),
+            )
+        }
+        return view
+    }
+
+    private suspend fun failWithNode(
+        run: ExecutionRun,
+        e: NodeExecutionException,
+    ): Nothing {
+        val failedAt = Instant.now()
+        // node_failed was already emitted at the failure site — not re-emitted here (§5.2).
+        run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails))) }
+        metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
+        throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails)
+    }
+
+    /** A timeout is a **failure**, not a cancellation: status `FAILED`, code `execution.timeout`. */
+    private suspend fun failWithTimeout(
+        run: ExecutionRun,
+        cause: TimeoutCancellationException,
+    ): Nothing {
+        val failedAt = Instant.now()
+        val timeout = PipelineTimeoutException(run.stats.runningNodeIds().firstOrNull(), run.elapsedMsAt(failedAt))
+        val error = MappedError(timeout.code, timeout.message.orEmpty(), timeout.details)
+        run.emitTerminal { emit(pipelineFailed(run, failedAt, timeout.timedOutNodeId, error)) }
+        metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
+        throw timeout.also { it.addSuppressed(cause) }
+    }
+
+    /**
+     * A catalogued failure from execution setup (§5.1 steps 8-10) — today only staging creation.
+     *
+     * It reaches the stream as `pipeline_failed` with the code the raising module chose, on an
+     * execution that has already emitted `execution_started` (F9). No node ever started, so every
+     * node reports `ABORTED` in the snapshot.
+     */
+    private suspend fun failWithSetup(
+        run: ExecutionRun,
+        e: DatapipelinesException,
+    ): Nothing {
+        val failedAt = Instant.now()
+        val error = MappedError(e.code, e.message.orEmpty(), e.details)
+        run.emitTerminal { emit(pipelineFailed(run, failedAt, failedNodeId = null, error = error)) }
+        metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
+        throw e
+    }
+
+    private suspend fun abort(
+        run: ExecutionRun,
+        e: ExecutionAbortedException,
+    ): Nothing {
+        val abortedAt = Instant.now()
+        run.emitTerminal {
+            emit(
+                ExecutionAborted(
+                    executionId = run.executionId,
+                    pipelineId = run.request.pipelineId,
+                    reason = e.reason,
+                    abortedAt = abortedAt,
+                    nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                ),
+            )
+        }
+        metrics.executionAborted(e.reason)
+        metrics.executionFinished(run.request.pipelineId, ExecutionStatus.ABORTED, run.elapsed(abortedAt))
+        throw e
+    }
+
+    private fun pipelineFailed(
+        run: ExecutionRun,
+        failedAt: Instant,
+        failedNodeId: String?,
+        error: MappedError,
+    ) = PipelineFailed(
+        executionId = run.executionId,
+        pipelineId = run.request.pipelineId,
+        pipelineVersion = run.request.pipelineVersion,
+        startedAt = run.startedAt,
+        failedAt = failedAt,
+        durationMs = run.elapsedMsAt(failedAt),
+        failedNodeId = failedNodeId,
+        error = error,
+        nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+    )
+
+    // ------------------------------------------------------------ plumbing
+
+    /**
+     * The `finally` of §5.1 step 16, which runs on **every** path — success, failure, timeout,
+     * cancellation. `Staging.close()` is contractually non-throwing (staging §3.4), so tempdb
+     * cleanup cannot mask the real outcome.
+     */
+    private suspend fun cleanup(
+        executionId: UUID,
+        staging: Staging?,
+    ) {
+        cancellationRegistry.deregister(executionId)
+        // §15.2: a Redis DELETE and an H2 table sweep are both blocking; neither may run on a
+        // caller thread that might be a Netty event loop. `NonCancellable` because cleanup must
+        // complete even when we got here by cancellation.
+        withContext(dispatcher.context + NonCancellable) {
+            cancellationFlags.clear(executionId)
+            staging?.close()
+        }
+    }
+
+    /**
+     * Re-reads the cross-instance cancel flag on the §8.3.1 tick until the execution ends — and, on
+     * the way out, interrupts any statement still in flight.
+     *
+     * That `finally` is how a timeout reaches the source query (B4a). `withTimeout` cancels this
+     * coroutine the instant the deadline passes — a suspended `delay` is cancellable, so the block
+     * runs immediately, while the blocked node is still inside `executeQuery`. Hooking the poller's
+     * cancellation rather than arming a second timer is what makes it race-free: there is one
+     * deadline, not two that can fire in either order.
+     *
+     * It fires on the failure path too, which §8.3.3 asks for in as many words ("running siblings
+     * have their registered `Statement.cancel()` invoked by the same handle") and which was equally
+     * missing. On the clean path there is nothing running, so it is a no-op.
+     */
+    private suspend fun pollCancelFlag(
+        executionId: UUID,
+        run: ExecutionRun,
+        handle: CancellationHandle,
+    ) {
+        val interval = Duration.ofSeconds(config.cancelPollIntervalSeconds).toMillis()
+        try {
+            while (true) {
+                delay(interval)
+                checkCancelFlag(executionId)
+            }
+        } finally {
+            if (run.stats.runningNodeIds().isNotEmpty()) {
+                run.unwinding.set(true)
+                handle.cancelStatements()
+            }
+        }
+    }
+
+    private fun checkCancelFlag(executionId: UUID) {
+        cancellationFlags.read(executionId)?.let { cancellationRegistry.cancel(executionId, it) }
+    }
+
+    private fun nodeContext(
+        request: ExecuteRequest,
+        staging: Staging,
+        handle: CancellationHandle,
+        run: ExecutionRun,
+        values: Map<String, Any?>,
+    ): NodeExecutionContext {
+        // B2: the pipeline's `settings.tempdb.config.max_memory_mb` may only ever LOWER the
+        // operator's global ceiling, never raise it. Save-time validation only checks `> 0`, so an
+        // author could otherwise declare 1_000_000 MB and disable `checkStagingBudget` — the ONLY
+        // ceiling on the `withConnection` paths — turning one `CREATE TABLE AS SELECT` over a
+        // generated range into a whole-instance OOM for every tenant on the box. D6 gives the
+        // pipeline an override; reading it as "may relax the operator's limit" is not a reading
+        // any deployment could safely run.
+        val budgetMb =
+            request.pipeline.settings.tempdb.maxMemoryMb
+                ?.toLong()
+                ?.coerceAtMost(config.stagingMaxMemoryMb)
+                ?: config.stagingMaxMemoryMb
+        return NodeExecutionContext(
+            executionId = run.executionId,
+            staging = staging,
+            handle = handle,
+            values = values,
+            warnings = run.warnings,
+            resultTtlSeconds = run.resultTtlSeconds(config),
+            renderBudgetChars = config.renderOutputBudgetChars(budgetMb),
+            stagingMaxMemoryMb = budgetMb,
+            tempdbDialect = request.pipeline.settings.tempdb.engine.dialect,
+        )
+    }
+
+    private suspend fun emit(event: ExecutionEvent) = eventEmitter.emit(event)
+
+    private fun stagingEngineFor(pipeline: Pipeline): StagingEngine =
+        when (pipeline.settings.tempdb.engine) {
+            // The two enums are separate declarations by layering necessity (staging.StagingEngine
+            // KDoc): `staging` may not depend on `pipeline-contract`, so `dag` — which depends on
+            // both — owns the mapping. Exhaustive, so a new engine is a compile error here.
+            PipelineStagingEngine.H2 -> StagingEngine.H2
+        }
+
+    private companion object {
+        val LOG = LoggerFactory.getLogger(PipelineExecutor::class.java)
+    }
+}
+
+/** One execution's mutable bookkeeping, kept out of [PipelineExecutor]'s method signatures. */
+internal class ExecutionRun(
+    val executionId: UUID,
+    val request: ExecuteRequest,
+    val plan: ExecutablePipeline,
+    val startedAt: Instant,
+) {
+    val stats = NodeStatsCollector()
+    val warnings = WarningSink()
+
+    /**
+     * Set once the execution scope is unwinding with an outcome already decided, and the in-flight
+     * statements have been interrupted to make that unwind reach the source databases (B4a).
+     *
+     * A node failing *after* this is failing because we stopped it, so its `node_failed` is
+     * suppressed — the stats still record the real driver error (F8).
+     */
+    val unwinding = AtomicBoolean()
+    private val terminalEmitted = AtomicBoolean()
+
+    fun elapsed(at: Instant): Duration = Duration.between(startedAt, at)
+
+    fun elapsedMsAt(at: Instant): Long = elapsed(at).toMillis()
+
+    fun resultTtlSeconds(config: ExecutorConfig): Long = config.result.effectiveTtlSeconds(request.resultTtlSeconds)
+
+    /**
+     * Emits a terminal event at most once (§12.1): "whichever of `pipeline_completed` /
+     * `execution_aborted` wins, the other is suppressed". A cancellation that lands while the
+     * success path is already emitting must not produce two terminal events on one stream.
+     */
+    suspend fun emitTerminal(block: suspend () -> Unit) {
+        if (terminalEmitted.compareAndSet(false, true)) block()
+    }
+
+    fun result(
+        status: ExecutionStatus,
+        nodeStats: List<NodeStats>,
+        resultRef: String?,
+        completedAt: Instant,
+    ): ExecutionResult =
+        ExecutionResult(
+            executionId = executionId,
+            status = status,
+            nodeStats = nodeStats,
+            resultRef = resultRef,
+            startedAt = startedAt,
+            completedAt = completedAt,
+            durationMs = elapsedMsAt(completedAt),
+            warnings = warnings.collected(),
+        )
+}
+
+/**
+ * Builds a [PipelineExecutor] from the collaborator list dag-executor.md §5.2 names.
+ *
+ * §5.2's constructor takes the template engine, datasource registry, write-back runner and result
+ * store directly; this implementation groups the first three (plus the result store) into
+ * [NodeRunner] so node execution is unit-testable without an event emitter or a slot pool. This
+ * factory keeps the spec's construction shape available to `app`.
+ */
+@Suppress("LongParameterList")
+fun pipelineExecutor(
+    templateEngine: TemplateEngine,
+    datasourceRegistry: DatasourceRegistry,
+    stagingFactory: StagingFactory,
+    writebackRunner: WritebackRunner,
+    resultStore: ResultStore,
+    eventEmitter: EventEmitter,
+    cancellationRegistry: CancellationRegistry,
+    cancellationFlags: CancellationFlags,
+    executionSlots: ExecutionSlots,
+    dispatcher: ExecutorDispatcher,
+    config: ExecutorConfig,
+    resultUrls: ResultUrlFactory,
+    metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+    auditSink: ExecutionAwareAuditSink? = null,
+): PipelineExecutor =
+    PipelineExecutor(
+        nodeRunner = NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics),
+        stagingFactory = stagingFactory,
+        resultStore = resultStore,
+        eventEmitter = eventEmitter,
+        cancellationRegistry = cancellationRegistry,
+        cancellationFlags = cancellationFlags,
+        executionSlots = executionSlots,
+        dispatcher = dispatcher,
+        config = config,
+        metrics = metrics,
+        resultUrls = resultUrls,
+    )

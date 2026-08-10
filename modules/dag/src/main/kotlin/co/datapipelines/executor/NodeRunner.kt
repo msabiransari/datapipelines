@@ -1,0 +1,516 @@
+package co.datapipelines.executor
+
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.NodeSource
+import co.datapipelines.pipeline.NodeType
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.staging.Staging
+import co.datapipelines.staging.StagingMemoryLimitException
+import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.TypeMappingWarning
+import kotlinx.coroutines.CancellationException
+import java.sql.Connection
+import java.sql.ResultSet
+import java.sql.Statement
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
+
+/**
+ * Per-execution collector for the non-fatal type-mapping warnings that `StageResult.warnings` and
+ * the caller-result schema mapping produce (staging §8.2, type-system §8.2).
+ *
+ * Per **execution**, not per executor: node coroutines run in parallel and all write here, and a
+ * collector shared across executions would leak one run's warnings into another's response.
+ */
+class WarningSink {
+    private val warnings = ConcurrentLinkedQueue<TypeMappingWarning>()
+
+    fun addAll(more: Collection<TypeMappingWarning>) {
+        warnings.addAll(more)
+    }
+
+    /** Everything collected so far, in collection order. */
+    fun collected(): List<TypeMappingWarning> = warnings.toList()
+}
+
+/** Everything one node execution needs that is fixed for the whole execution. */
+data class NodeExecutionContext(
+    val executionId: UUID,
+    val staging: Staging,
+    val handle: CancellationHandle,
+    val values: Map<String, Any?>,
+    val warnings: WarningSink,
+    /** Already-clamped effective result TTL for this execution (REST §7.4). */
+    val resultTtlSeconds: Long,
+    /** The per-execution render output budget (§6.1 / Staging §8) — never the engine default. */
+    val renderBudgetChars: Long,
+    /** The effective `max_memory_mb` for this execution's tempdb (D6). */
+    val stagingMaxMemoryMb: Long,
+    /** The dialect of `source: "tempdb"` nodes, from `settings.tempdb.engine` (§12.6, D6). */
+    val tempdbDialect: Dialect,
+)
+
+/**
+ * Runs one node: render → connect → dispatch on `type` → dispatch on `output`
+ * (dag-executor.md §6).
+ *
+ * Failures are raised as [NodeFailedSignal] carrying an already-mapped catalog code (§8.2); the
+ * caller ([PipelineExecutor]) owns event emission, so this class never emits and can be tested
+ * without an emitter.
+ *
+ * ## Where this departs from §5.2's sketch, and why
+ *
+ * §5.2 reads `staging.connection` and calls `staging.stage(rs, table)` from inside a cursor over
+ * the same connection. Neither is reachable against the shipped `Staging` contract: the
+ * connection is private behind `withConnection`, and the staging mutex is **not reentrant** —
+ * calling `stage` from inside `withQuery` deadlocks by construction (staging.md §3.3, §9.2 and
+ * the `Staging` KDoc say so explicitly). So a `tempdb` → `tempdb` DQL node runs as a single
+ * `CREATE TABLE … AS <sql>` on the staging connection instead of cursor-plus-stage: one
+ * statement, one lock acquisition, and the copy never leaves H2.
+ *
+ * Every tempdb statement this class issues — the CTAS, DML/DDL, and the read cursors of
+ * [tempdbCursor] — runs through `withConnection` on a statement the executor owns, so all of them
+ * carry `node-query-timeout-seconds` and are registered for `Statement.cancel()` (§6.3, §8.3.1).
+ * `withQuery` is deliberately unused: a statement created inside `staging` cannot be registered,
+ * and an unregistered statement is an uncancellable one.
+ */
+@Suppress("LongParameterList")
+class NodeRunner(
+    private val templateEngine: TemplateEngine,
+    private val datasourceRegistry: DatasourceRegistry,
+    private val writebackRunner: WritebackRunner,
+    private val resultStore: ResultStore,
+    private val config: ExecutorConfig,
+    private val auditSink: ExecutionAwareAuditSink? = null,
+    /** `datapipelines.staging.rows` had zero call sites before F10 — it was permanently 0. */
+    private val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+) {
+    /** Executes [node] and returns its result. Throws [NodeFailedSignal] on any failure. */
+    suspend fun run(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        startedAt: Instant = Instant.now(),
+    ): NodeResult {
+        val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
+        return when (node.source) {
+            is NodeSource.Tempdb -> runOnTempdb(node, sql, ctx, startedAt)
+            is NodeSource.Datasource -> runOnDatasource(node, node.source.name, sql, ctx, startedAt)
+        }
+    }
+
+    /**
+     * The per-execution output budget is passed explicitly (§6.1): letting the engine-wide
+     * default apply would render against a backstop that knows nothing about this execution's
+     * staging memory budget.
+     */
+    private fun render(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+    ): String = templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
+
+    // ---------------------------------------------------------------- tempdb
+
+    private suspend fun runOnTempdb(
+        node: ExecutableNode,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult {
+        // tempdb is not a datasource, so there is no per-datasource override to consider (§5.5).
+        val timeout = config.queryTimeoutSecondsFor(null)
+        return when (node.type) {
+            NodeType.DQL -> tempdbQuery(node, sql, ctx, startedAt, timeout)
+            NodeType.DML, NodeType.DDL -> tempdbWrite(node, sql, ctx, startedAt, timeout)
+        }
+    }
+
+    private suspend fun tempdbQuery(
+        node: ExecutableNode,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+    ): NodeResult =
+        when (val output = requireOutput(node)) {
+            is NodeOutput.Tempdb -> {
+                tempdbCreateTableAs(node, output, sql, ctx, startedAt, timeout)
+            }
+
+            is NodeOutput.Caller -> {
+                phase(NodePhase.MATERIALIZE, node.id) {
+                    tempdbCursor(node, sql, ctx, timeout) { rs -> materialize(node, rs, ctx, startedAt, ctx.tempdbDialect) }
+                }
+            }
+
+            is NodeOutput.Datasource -> {
+                phase(NodePhase.WRITEBACK, node.id) {
+                    tempdbCursor(node, sql, ctx, timeout) { rs ->
+                        NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect), startedAt)
+                    }
+                }
+            }
+        }
+
+    /**
+     * Opens a read cursor over tempdb for [block], on a statement **this class owns**.
+     *
+     * ## Why not `staging.withQuery` (B4b)
+     *
+     * `withQuery` creates the statement inside `staging`, so the executor never sees it — and a
+     * statement the executor cannot see is a statement it cannot register with
+     * [CancellationHandle.withStatement]. The consequence was concrete: a tempdb-sourced caller or
+     * write-back node was **uncancellable**. `DELETE /executions/{id}`, the disconnect-grace timer
+     * and the execution timeout all reached the coroutine and none of them reached the query, so a
+     * long tempdb read ran to completion with nobody waiting for it — exactly the hole §8.3 exists
+     * to close, and inconsistent with the sibling `tempdbCreateTableAs`/`tempdbWrite` paths that
+     * already did this correctly.
+     *
+     * ## The §6.4.2 lock-across-drain guarantee is preserved, not traded away
+     *
+     * `withConnection` holds the *same* serialization mutex for the whole block, so the cursor and
+     * the caller's suspending drain to the result store are still covered end to end: a concurrent
+     * `stage`/`execute` on the shared connection cannot interleave with an open cursor. The two
+     * methods differ only in who creates the statement, which is the one thing that matters here.
+     *
+     * The statement is `TYPE_FORWARD_ONLY`/`CONCUR_READ_ONLY` (§6.3.1) and carries the node query
+     * timeout, so tempdb reads now honour `node-query-timeout-seconds` — which, through
+     * `withQuery`, they never did.
+     */
+    private suspend fun <T> tempdbCursor(
+        node: ExecutableNode,
+        sql: String,
+        ctx: NodeExecutionContext,
+        timeout: Int,
+        block: suspend (ResultSet) -> T,
+    ): T =
+        ctx.staging.withConnection { connection ->
+            connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { statement ->
+                statement.queryTimeout = timeout
+                ctx.handle.withStatement(node.id, statement) {
+                    statement.executeQuery(sql).use { rs -> block(rs) }
+                }
+            }
+        }
+
+    /**
+     * `CREATE TABLE <table> AS <sql>` on the staging connection.
+     *
+     * Run through `withConnection` rather than `Staging.execute` so the statement gets a
+     * `queryTimeout` and is registered for `Statement.cancel()`: staging sets **no** timeout on
+     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold the staging mutex for
+     * as long as it liked with the execution timeout as the only backstop. The memory budget
+     * `execute` would have checked is checked explicitly afterwards ([checkStagingBudget]).
+     *
+     * ## Why the row count is a second statement
+     *
+     * `executeUpdate` on `CREATE TABLE … AS …` returns **0** on H2 (verified against the pinned
+     * 2.3.232 driver — `NodeRunnerTest` caught it): the JDBC contract only promises a count for
+     * DML, and a CTAS is DDL. Reporting that 0 as `rows_out` would put a silent lie in every
+     * `node_completed` payload and in `node_stats_json` for the most common node shape there is.
+     * So the freshly created table is counted, inside the **same** `withConnection` block — one
+     * lock acquisition, so no *concurrent* node can write to the table between the create and the
+     * count. The honest bound stops there: `sql` is author-authored and H2 accepts multiple
+     * statements, so an author who appends their own `INSERT` after the projection can still
+     * influence the number this reports. `rows_out` is therefore "rows in the table when the node
+     * finished", which is the useful quantity anyway — not a tamper-proof count of the projection.
+     */
+    private suspend fun tempdbCreateTableAs(
+        node: ExecutableNode,
+        output: NodeOutput.Tempdb,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+    ): NodeResult {
+        // Phase code, not the save-time validation code (§8.2 coherence): this is the STAGE phase.
+        val table =
+            SqlIdentifiers.quote(
+                SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.STAGING_FAILED),
+            )
+        val rows =
+            phase(NodePhase.STAGE, node.id) {
+                ctx.staging.withConnection { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.queryTimeout = timeout
+                        ctx.handle.withStatement(node.id, statement) {
+                            statement.executeUpdate("CREATE TABLE $table AS $sql")
+                            countRows(statement, table)
+                        }
+                    }
+                }
+            }
+        checkStagingBudget(node, ctx)
+        // `datapipelines.staging.rows` counts rows staged across ALL executions, and a
+        // tempdb→tempdb CTAS stages just as surely as `stage()` does — it simply does it inside H2
+        // rather than through a cursor. Counting only the `stage()` path left the metric blind to
+        // the commonest multi-node shape there is, which is worse than leaving it at zero: a
+        // half-populated counter reads as a real number.
+        metrics.rowsStaged(rows)
+        return NodeResult.of(node.id, rows, startedAt)
+    }
+
+    /** `SELECT COUNT(*)` over a table this class just created — always exactly one row. */
+    private fun countRows(
+        statement: Statement,
+        quotedTable: String,
+    ): Long =
+        statement.executeQuery("SELECT COUNT(*) FROM $quotedTable").use { rs ->
+            if (rs.next()) rs.getLong(1) else 0L
+        }
+
+    /** DML/DDL against tempdb — same timeout and cancellation reasoning as [tempdbCreateTableAs]. */
+    private suspend fun tempdbWrite(
+        node: ExecutableNode,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+    ): NodeResult {
+        val affected =
+            phase(NodePhase.EXECUTE, node.id) {
+                ctx.staging.withConnection { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.queryTimeout = timeout
+                        ctx.handle.withStatement(node.id, statement) {
+                            if (node.type == NodeType.DML) {
+                                statement.executeUpdate(sql).toLong()
+                            } else {
+                                executeDdl(statement, sql)
+                            }
+                        }
+                    }
+                }
+            }
+        checkStagingBudget(node, ctx)
+        return NodeResult.of(node.id, affected, startedAt)
+    }
+
+    /**
+     * The measured-footprint check staging performs after each of its own writes (staging §8.2),
+     * re-applied here because this class issues tempdb DML through `withConnection`, which does
+     * not check it. Skipping it would let a `CREATE TABLE AS SELECT` blow through the budget the
+     * `stage()` path enforces.
+     */
+    private suspend fun checkStagingBudget(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+    ) {
+        val usedBytes = phase(NodePhase.STAGE, node.id) { ctx.staging.stats().memoryUsedBytes }
+        if (usedBytes / BYTES_PER_KB > ctx.stagingMaxMemoryMb * KB_PER_MB) {
+            val overflow = StagingMemoryLimitException(usedBytes, ctx.stagingMaxMemoryMb)
+            throw NodeFailedSignal(ErrorCodeMapper.map(overflow, NodePhase.STAGE, node.id), overflow)
+        }
+    }
+
+    // ------------------------------------------------------------ datasource
+
+    private suspend fun runOnDatasource(
+        node: ExecutableNode,
+        name: String,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult {
+        val datasource = phase(NodePhase.CONNECT, node.id) { datasourceRegistry.get(name) ?: throw datasourceNotFound(name) }
+        val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
+        val connection =
+            phase(NodePhase.CONNECT, node.id) {
+                // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
+                // `poolFor`'s `computeIfAbsent`, not from `leaseConnection` — resolving the pool
+                // first meant the ThreadLocal was still unset when the event fired, so
+                // `DatasourceAuditEvent.cause` was null on every executor-triggered pool build and
+                // the whole carry-forward was inert. The audit trail could not answer "which
+                // execution caused this credential to be decrypted", which is the one question
+                // datasources §7.4 exists to answer.
+                auditSink?.withCause(ctx.executionId, node.id) {
+                    datasourceRegistry.poolFor(datasource).leaseConnection()
+                } ?: datasourceRegistry.poolFor(datasource).leaseConnection()
+            }
+        return connection.use { conn ->
+            when (node.type) {
+                NodeType.DQL -> datasourceQuery(node, conn, sql, ctx, startedAt, timeout, datasource.dialect)
+                NodeType.DML -> datasourceUpdate(node, conn, sql, ctx, startedAt, timeout)
+                NodeType.DDL -> datasourceDdl(node, conn, sql, ctx, startedAt, timeout)
+            }
+        }
+    }
+
+    private suspend fun datasourceQuery(
+        node: ExecutableNode,
+        conn: Connection,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+        dialect: Dialect,
+    ): NodeResult =
+        conn.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { statement ->
+            statement.queryTimeout = timeout
+            ctx.handle.withStatement(node.id, statement) {
+                val rs = phase(NodePhase.EXECUTE, node.id) { statement.executeQuery(sql) }
+                // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
+                dispatchOutput(node, rs, ctx, startedAt, dialect)
+            }
+        }
+
+    private suspend fun dispatchOutput(
+        node: ExecutableNode,
+        rs: ResultSet,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        dialect: Dialect,
+    ): NodeResult =
+        when (val output = requireOutput(node)) {
+            is NodeOutput.Tempdb -> {
+                val staged =
+                    phase(NodePhase.STAGE, node.id) {
+                        // The SOURCE node's dialect, never H2's (staging §3.2) — mapping a Postgres
+                        // or Oracle cursor through H2's table picks the wrong storage type and
+                        // loses data before egress re-derivation can see it.
+                        ctx.staging.stage(rs, output.table, dialect).also { ctx.warnings.addAll(it.warnings) }
+                    }
+                // B2 (second half): staging enforces the budget it was CONSTRUCTED with — the
+                // operator global — because `StagingFactory.create(executionId, engine)` has no
+                // budget parameter, so a *lower* per-pipeline `max_memory_mb` never reaches it.
+                // Re-checking here closes that without a staging signature change: the effective
+                // (already clamped, possibly lower) budget is enforced by the executor after every
+                // staged write, exactly as it is after every `withConnection` write.
+                checkStagingBudget(node, ctx)
+                metrics.rowsStaged(staged.rowsStaged)
+                NodeResult.of(node.id, staged.rowsStaged, startedAt)
+            }
+
+            is NodeOutput.Caller -> {
+                phase(NodePhase.MATERIALIZE, node.id) { materialize(node, rs, ctx, startedAt, dialect) }
+            }
+
+            is NodeOutput.Datasource -> {
+                phase(NodePhase.WRITEBACK, node.id) {
+                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect), startedAt)
+                }
+            }
+        }
+
+    private suspend fun materialize(
+        node: ExecutableNode,
+        rs: ResultSet,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        dialect: Dialect,
+    ): NodeResult {
+        val stored = resultStore.materialize(ctx.executionId, rs, dialect, ctx.resultTtlSeconds)
+        ctx.warnings.addAll(stored.warnings)
+        return NodeResult.of(
+            nodeId = node.id,
+            rowsOut = stored.totalRows,
+            startedAt = startedAt,
+            callerResultRef = stored.key,
+            bytesOutEstimate = stored.bytes,
+        )
+    }
+
+    private suspend fun datasourceUpdate(
+        node: ExecutableNode,
+        conn: Connection,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+    ): NodeResult =
+        conn.prepareStatement(sql).use { statement ->
+            statement.queryTimeout = timeout
+            ctx.handle.withStatement(node.id, statement) {
+                val affected = phase(NodePhase.EXECUTE, node.id) { statement.executeUpdate().toLong() }
+                NodeResult.of(node.id, affected, startedAt)
+            }
+        }
+
+    private suspend fun datasourceDdl(
+        node: ExecutableNode,
+        conn: Connection,
+        sql: String,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        timeout: Int,
+    ): NodeResult =
+        conn.createStatement().use { statement ->
+            statement.queryTimeout = timeout
+            ctx.handle.withStatement(node.id, statement) {
+                phase(NodePhase.EXECUTE, node.id) { executeDdl(statement, sql) }
+                NodeResult.of(node.id, 0L, startedAt)
+            }
+        }
+
+    /** DDL reports success, not rows (§6.3.3). */
+    private fun executeDdl(
+        statement: Statement,
+        sql: String,
+    ): Long {
+        statement.execute(sql)
+        return 0L
+    }
+
+    /** DQL always has a concrete output by deserialization time (§4.1). */
+    private fun requireOutput(node: ExecutableNode): NodeOutput =
+        requireNotNull(node.output) { "DQL node '${node.id}' reached the executor with no output block" }
+
+    private fun datasourceNotFound(name: String) =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND,
+            message = "Datasource '$name' is not registered in this environment.",
+            details = mapOf("datasource" to name),
+        )
+
+    /** Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code. */
+    private suspend fun <T> phase(
+        phase: NodePhase,
+        nodeId: String,
+        body: suspend () -> T,
+    ): T =
+        try {
+            body()
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw asNodeFailure(e, phase, nodeId)
+        }
+
+    /**
+     * Cancellation passes through untouched — it is **not** a node failure (§5.2), and mapping it
+     * to an error code would turn an `ABORTED` execution into a `FAILED` one. An inner phase's
+     * already-mapped signal passes through too, so the outermost phase cannot re-label it.
+     */
+    private fun asNodeFailure(
+        error: Exception,
+        phase: NodePhase,
+        nodeId: String,
+    ): Exception =
+        when (error) {
+            is CancellationException -> error
+            is NodeFailedSignal -> error
+            else -> NodeFailedSignal(ErrorCodeMapper.map(error, phase, nodeId), error)
+        }
+
+    private companion object {
+        const val BYTES_PER_KB = 1024L
+        const val KB_PER_MB = 1024L
+    }
+}
+
+/**
+ * A node failure that already knows its catalog code — thrown by [NodeRunner], caught by
+ * [PipelineExecutor], which emits `node_failed` exactly once and rethrows it as a
+ * [NodeExecutionException].
+ *
+ * It is not itself the public failure type because §5.2 puts the `node_failed` emission at the
+ * failure site's caller; one exception used for both would make "was this already emitted?"
+ * ambiguous, which is exactly the duplicate-emission bug SPEC-REVIEW 2.6.2 removed.
+ */
+class NodeFailedSignal(
+    val error: MappedError,
+    cause: Throwable,
+) : RuntimeException(error.message, cause)
