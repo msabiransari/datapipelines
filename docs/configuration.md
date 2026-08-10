@@ -131,6 +131,7 @@ Limits are **per user** (an API key inherits its owner's budget — minting more
 |---|---|---|
 | `datapipelines.templates.cache-size` | `500` | Parsed-template cache entries |
 | `datapipelines.templates.render-timeout-ms` | `5000` | Hard limit on a single template render |
+| `datapipelines.templates.max-body-chars` | `262144` | Max template `body` length accepted at save (256K chars); over-cap bodies are rejected with `template.validation.syntax_error` before parsing ([Templates §4.2](templates.md#42-allowed-freemarker-constructs)) — bounds parse cost and heap against an adversarial body |
 
 ### 3.10 UI
 

@@ -1,6 +1,6 @@
 # Templates Specification
 
-**Status:** v1.3 (frozen contract — additive-only changes after this point)
+**Status:** v1.4 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
 **Last updated:** 2026-08-09
@@ -98,6 +98,8 @@ Pinned via Gradle version catalog (see [Module Structure spec](module-structure.
 - `<#switch>`, `<#case>`.
 - Built-ins: `?c` (computer-format), `?string("...")`, `?lower_case`, `?upper_case`, `?size`, `?has_content`, `?default(...)`, etc.
 
+**The scan operates on the PARSED template, not on regex-stripped source (normative).** A scanner that strips comments and matches text with regex is bypassable — verified against the pinned Freemarker: hiding `<#--` / `-->` inside FTL string literals (`<#assign a="<#--">…<#assign b="-->">`) makes a regex comment-stripper delete a `?eval`/`<#include>` the engine still executes, and a leading `[#ftl]` switches the parser to square-bracket syntax an angle-bracket regex never sees. The body is already parsed for syntax validation (§7); the forbidden-construct scan MUST walk that same FreeMarker AST (built-in nodes, `Include`/`Import` nodes) so the parser and the scanner agree by construction. The scanner additionally **rejects square-bracket tag/interpolation syntax** (`[#…`, `[=…`) outright, and the body is **length-capped at save** (`datapipelines.templates.max-body-chars`, [Configuration §3.9](configuration.md#39-templates)) — over-cap bodies are rejected with `template.validation.syntax_error` before parsing, bounding parse cost and heap.
+
 **Forbidden** — rejected at save time by the body scan (`template.validation.dangerous_construct`, §7):
 - `?eval` — evaluates a string as a Freemarker expression. **There is no configuration switch that disables `?eval` in Freemarker 2.3.x** (verified against the `Configurable` setting list, §4.3), so the save-time scan is the *only* guard and is therefore normative, not belt-and-braces. With §4.3's class resolver and object wrapper in place, `?eval` cannot reach Java classes even if one slipped through — its blast radius is confined to expressions over the render context.
 - `?interpret` and `?eval_json` — sibling constructs to `?eval` that compile a **string value** (which may be a render-context value, i.e. an API-supplied pipeline parameter) into template source and execute it. Like `?eval` they have no configuration switch, so the save-time scan is the sole guard: they are the constructs that would let a context value become source, defeating "a context value is data, never source". Rejected on the same footing as `?eval`.
@@ -135,6 +137,12 @@ val freemarkerConfig = Configuration(fmVersion).apply {
     // 5. Render failures propagate as errors — never partially into the SQL string.
     templateExceptionHandler = TemplateExceptionHandler.RETHROW_HANDLER
     logTemplateExceptions = false
+
+    // 6. Pin the tag/interpolation syntax so a leading [#ftl] cannot switch the parser
+    //    to square-bracket syntax that a scanner keyed on <# would miss (the scanner
+    //    also rejects [# / [= outright, §4.2).
+    tagSyntax = Configuration.ANGLE_BRACKET_TAG_SYNTAX
+    interpolationSyntax = Configuration.LEGACY_INTERPOLATION_SYNTAX
 }
 ```
 
@@ -151,8 +159,8 @@ val freemarkerConfig = Configuration(fmVersion).apply {
 3. Re-read the Freemarker `SECURITY.md` advisories for the pinned version and add any new hardening knob it introduces.
 
 **Render guards.** Two limits apply to every render, both configured centrally — see [Configuration §3.9](configuration.md#39-templates); this doc never restates their defaults:
-- `datapipelines.templates.render-timeout-ms` — wall-clock cap on a single render. Because Freemarker has no timeout setting, the render runs on a bounded worker and a watchdog aborts it at the cap: interrupt the rendering thread, then discard the partial output. Exceeding the cap fails the node with `pipeline.node.template_render_failed`. *(Implementation gate: confirm how the pinned Freemarker version observes `Thread.interrupt()` mid-render; if it does not abort promptly, the worker must be abandoned rather than joined.)*
-- Output size — a render whose accumulated output exceeds the staging batch memory budget is aborted under the same error code. Memory accounting rules are owned by [Staging §8](staging.md).
+- `datapipelines.templates.render-timeout-ms` — wall-clock cap on a single render. Freemarker has no timeout setting, so the render runs on a worker and a watchdog interrupts it at the cap. **The implementation-gate question is now answered against the pinned version: a plain `Thread.interrupt()` does NOT abort a Freemarker render — a `<#list 1..2000000000>` keeps running after `interrupt()`+`cancel(true)`, and merely abandoning the worker leaks one core-burning thread per runaway, without bound.** Therefore the engine MUST (a) register `freemarker.core.ThreadInterruptionSupportTemplatePostProcessor` (present in the pinned jar) so interruption actually aborts the render, and (b) run renders on a **bounded** worker pool with a rejection policy, so a leaked worker cannot accumulate. Exceeding the cap fails the node with `pipeline.node.template_render_failed`.
+- Output size — a render whose accumulated output exceeds the staging batch memory budget is aborted under the same error code. Memory accounting rules are owned by [Staging §8](staging.md). Note the output **writer** cap alone does not bound heap: a template can accumulate in a `<#assign s=s+s>` variable without writing a byte, so the bounded worker + interruption above (not the writer cap) is what stops in-memory growth.
 
 ### 4.4 Type-aware interpolation
 
@@ -228,7 +236,7 @@ Library templates solve this. A library template defines `<#macro>`s that other 
 </#macro>
 ```
 
-Marked `is_library: true`. The `body` field is still **required** — it is where the macros live. What a library must not have is **output outside macro definitions**: everything at the top level is `<#macro>` / `<#function>` / comments. A library that emits text of its own would inject that text into every importer.
+Marked `is_library: true`. The `body` field is still **required** — it is where the macros live. What a library must not have is **output outside macro definitions**: everything at the top level is `<#macro>` / `<#function>` / comments, and an optional leading `<#ftl …>` header directive (which produces no output). A library that emits text of its own would inject that text into every importer.
 
 ### 6.3 Importing in a regular template
 
@@ -431,7 +439,7 @@ What metadata-db must express for this spec to hold:
 - Hardening tests: with the §4.3 configuration, `?new`, `?api`, `Execute`, and `ObjectConstructor` must all fail at render even when the save-time scan is bypassed — the two layers are tested independently.
 - Library import tests: transitive imports, depth limits, cycle detection, missing library handling, alias namespacing of same-named macros in two libraries.
 - Render-guard tests: a runaway `<#list>` trips `render-timeout-ms`; an oversized output trips the size cap.
-- Performance tests: render latency for templates up to 50KB body, 20 imports deep.
+- Performance tests: render latency for templates up to a 50KB body with a wide import fan-out at the maximum transitive depth (§6.4 caps depth at **10** — an earlier "20 imports deep" here contradicted that cap; read it as ≤10 deep, up to ~20 imports wide). Also: a save-time adversarial-input suite — a body at `max-body-chars`, deeply-nested parens/`<#if>`, and a wide import DAG — must complete within a bounded time (guards the §4.2 AST scan and §6.4 traversal against the quadratic/exponential blowups a regex scanner and an unmemoized walk exhibit).
 
 ---
 
@@ -546,4 +554,5 @@ ORDER BY r.total DESC
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |
 | 2026-08-05 | v1.1 | propagation | Added `engine` field to Template entity (default `"freemarker"`; future-proofing for Pebble/Handlebars/raw-SQL). Updated `body` and `imports` field descriptions to be engine-aware. Renamed `__staging__` → `tempdb` in UI editor section. |
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08 §2.8](SPEC-REVIEW-2026-08.md#28-templatesmd): removed `params_schema` entirely (D3 — pipeline `parameters` is the single declaration point; template save is parse-only, dry-render moved to pipeline save); `imports` entries become `{id, version, alias}` with engine-synthesized `<#import>` and body-never-imports (D12); `is_library` corrected to "no output outside macro definitions", `body` required (D12); `template.import.cycle_detected` → `template.validation.import_cycle`, `body_malformed` → `syntax_error`, added `duplicate_alias` / `import_not_library` (D5); §4.3 Freemarker hardening rewritten against the verified 2.3.x API (invented `externalsCatchAll` / `builtin_classes` deleted; `ALLOWS_NOTHING_RESOLVER` replaces `SAFER_RESOLVER`) with an implementation-gate checklist; render guards reference [Configuration §3.9](configuration.md#39-templates) (D8); §12.2 DDL replaced by a pointer to [Metadata DB](metadata-db.md) (D4); §10 tempdb dialect derived from `settings.tempdb.engine`; fixed the §3.2 link to [Pipeline Contract §6](pipeline-contract.md#6-parameters-input-map-declaration). |
+| 2026-08-09 | v1.4 | P3 build (Gate C: 1 CRITICAL + 3 HIGH) | §4.2: forbidden-construct scan made **AST-based, not regex-over-stripped-source** — a comment-strip regex is bypassable by `<#--`/`-->` hidden in FTL string literals and by a leading `[#ftl]` square-bracket switch (both verified against the pinned jar; the CRITICAL that let `?eval`/`?interpret`/`<#include>` through the sole normative save-time gate); scanner also rejects `[#`/`[=` and the body is length-capped (`datapipelines.templates.max-body-chars`, Configuration §3.9). §4.3: `tagSyntax`/`interpolationSyntax` pinned; render-guard gate answered — plain `Thread.interrupt()` does NOT abort a Freemarker render, so `ThreadInterruptionSupportTemplatePostProcessor` + a bounded worker pool are required (abandonment alone leaks a core-burning thread per runaway; the writer cap does not bound `<#assign s=s+s>` heap). §6.2: optional leading `<#ftl>` header allowed. §12.3: "20 imports deep" corrected to ≤10 (contradicted the §6.4 cap) + adversarial-input timing suite. rest-api §8.4: template `dialect` may change across versions (existing pipelines pin a version). |
 | 2026-08-09 | v1.3 | P3 build (Gate B) | `?interpret`/`?eval_json` added to §4.2's forbidden list (context-value-to-source siblings of `?eval`, no config switch). §3.2 `engine` and `schema_version` now rejected at save when unsupported — new codes `template.validation.engine_unsupported` / `template.validation.schema_version_unsupported` (§7, [Pipeline Contract §13.9](pipeline-contract.md#139-template)) close the silent-mis-render gap. §6.3: `imports` `alias`/`id`/`version` validated as strict identifiers before prologue synthesis (prologue-injection attempt → `dangerous_construct`, message never echoes the value; loader re-checks fail-closed). Appendix A worked example corrected `${min_total?c}` → `${min_total}` (`?c` drops the declared scale §4.4 promises). |

@@ -691,7 +691,7 @@ GET /templates/{id}/versions/{version}
 PUT /templates/{id}
 
 {
-  "dialect": "POSTGRES",            // must match existing (or use POST to create new id)
+  "dialect": "POSTGRES",            // may differ from prior versions — a new version records its own dialect (existing pipelines pin a version, so they are unaffected)
   "description": "...",
   "imports": [{"id": "lib_date_filters.sql", "version": 2, "alias": "dates"}],
   "body": "..."
