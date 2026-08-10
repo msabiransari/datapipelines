@@ -12,7 +12,8 @@ out/
 # Kotlin 2.x per-project analysis state (trailing comments are NOT supported
 # in .gitignore — they become part of the pattern, so keep them on their own line)
 .kotlin/
-# Gate A run logs (scripts/gate.sh)
+# Gate run logs — scripts/gate.sh writes .gate-logs/, agent worktrees write gate-logs/
+.gate-logs/
 gate-logs/
 
 # The wrapper JAR and scripts ARE committed (they are how the build is reproducible);
@@ -56,4 +57,5 @@ lib/*.jar
 credentials.*
 secrets.*
 .claude/worktrees/
+.gate-logs/
 gate-logs/
