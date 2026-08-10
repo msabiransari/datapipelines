@@ -663,6 +663,7 @@ Content-Type: application/json
 {
   "id": "fetch_orders.sql",         // optional; auto-generated if omitted
   "dialect": "POSTGRES",
+  "display_name": "Fetch Orders in Date Range",   // required (templates.md §3.2)
   "description": "Fetch orders in date range. Expects start_date and end_date in the render context.",
   "imports": [],
   "body": "SELECT order_id, customer_id, total_amount, order_date\nFROM orders\nWHERE order_date BETWEEN '${start_date}' AND '${end_date}'"
@@ -692,6 +693,7 @@ PUT /templates/{id}
 
 {
   "dialect": "POSTGRES",            // may differ from prior versions — a new version records its own dialect (existing pipelines pin a version, so they are unaffected)
+  "display_name": "Fetch Orders in Date Range",   // required (templates.md §3.2)
   "description": "...",
   "imports": [{"id": "lib_date_filters.sql", "version": 2, "alias": "dates"}],
   "body": "..."
