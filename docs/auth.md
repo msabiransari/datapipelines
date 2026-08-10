@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.4 (revised — see Change Log)
+**Status:** v2.5 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-08-09
@@ -522,6 +522,7 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` |
 | Create / update / delete datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` | `admin` |
 | Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
+| Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
 
 **MCP tools** (all 15 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
@@ -785,6 +786,8 @@ The env vars depend on which providers the deployment configures. The structural
 | Variable | Required? | Description |
 |---|---|---|
 | `DATAPIPELINES_JWT_SECRET` | **yes** | Internal JWT signing secret (≥ 32 bytes random, base64) |
+| `DATAPIPELINES_AUTH_BASE_URL` | **yes (when any OIDC provider is configured)** | The deployment's exact external origin, e.g. `https://dp.example.com` — the absolute OIDC redirect URI is built from it (§5.2). **Application startup fails if unset while providers are configured** ([Configuration §3.4](configuration.md#34-auth) `datapipelines.auth.base-url`). |
+| `DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL` | no | Bootstrap the first admin (§4.4). Optional; when set, the OIDC user with this exact (lowercased) email is granted admin at row creation. |
 | Provider-specific client-id/secret env vars | **yes** | One pair per configured provider (names defined in `application.yml`) |
 
 For example, a deployment using Google + Okta would set:
@@ -887,4 +890,5 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |
 | 2026-08-07 | v2.2 | consistency campaign | **D10:** `X-API-Key` → `DP-API-Key`; CSRF = `dp_csrf` cookie + `DP-CSRF-Token` header. **D11:** `/mcp` in the chain (§8.5): API-key-only, CSRF-exempt, Bearer `dpk_` accepted. **D13:** liveness re-check on every request via 60s cache — deactivation effective ≤ ~1 min (§4.2, §6.3, §7.3). **D14:** scope derivation at login (§6.1). **D15:** authoritative scope↔operation matrix (§7.6); key scopes ⊆ creator's scopes (§7.4). **D5:** error codes normalized to 3-segment (`auth.api_key.missing` etc.), `auth.csrf.*` collapsed to `auth.csrf.invalid`, `auth.rate_limit.exceeded` removed in favor of `rate_limit.exceeded`. `name` required per provider (§11.1); audit example provider lowercase; config tables replaced by pointers to configuration.md (D8). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-09 | v2.3 | P3 build (Gate C testing review) | §8.4 CSRF prose corrected to match the §8.1 chain (which is the ratified D10 design): `/api/**` and `/mcp` are CSRF-exempt — API keys carry no cookie, and cookie-authenticated API calls are defended by `dp_session` `SameSite=Strict` (§5.5); the `dp_csrf`/`DP-CSRF-Token` double-submit guards the cookie-native UI surfaces (`/partials/**`, `POST /logout`), failing 403 `auth.csrf.invalid` with `details.reason`. The v2.2 sentence requiring the token on cookie-authenticated `/api` calls contradicted the sketch and is withdrawn. |
+| 2026-08-10 | v2.5 | P3 build (auth re-review) | §7.6: added the `GET /api/v1/auth/me` row (any authenticated) — default-deny (§8.3 ScopeInterceptor) turns a missing matrix row into a hard block for that endpoint, and §7.6 is the sole authority. §11.3: `DATAPIPELINES_AUTH_BASE_URL` listed as required-with-providers (startup fails without it — the v2.4 §5.2 change added the requirement but not the env-list entry) + `DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL` optional. |
 | 2026-08-09 | v2.4 | P3 build (Gate C security + API reviews) | **CSRF re-ruled (supersedes v2.3):** exemption follows the CREDENTIAL, not the path — only API-key-carrying requests skip CSRF; cookie-authenticated state-changing requests require the `dp_csrf` double-submit everywhere, `SameSite=Strict` demoted to defense-in-depth (same-site subdomain gap, flagged independently by two Gate C seats); §8.1 sketch updated. **§5.2:** OIDC redirect URI built absolutely from new `datapipelines.auth.base-url` (Configuration §3.4), never request-derived (`Host`/`X-Forwarded-Host` attack); startup fails when unset with providers configured. **§4.2:** emails lowercase-normalized at every lookup/store; login rejected when `email_verified: false` (unverified-account takeover via email-keyed linking). **§4.4:** bootstrap admin grant fires only at row creation — never re-grants after a deliberate revoke. |
