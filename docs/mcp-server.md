@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.2 (frozen contract — additive-only changes after this point)
+**Status:** v1.3 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-08-07
@@ -43,14 +43,14 @@ We expose MCP via the protocol's **Streamable HTTP** transport:
 
 This is the protocol's network-native transport, appropriate for our self-hosted, network-resident deployment model. The stdio transport (used for local-tools) is not supported — our product is a server, not a local process.
 
-> **Implementation gate — protocol version check.** This spec is authored against the durable shape of MCP; the concrete protocol version string is a build-time input, not a frozen contract term. Before the MCP module is implemented, complete this checklist against the official specification at [modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification):
+> **Implementation gate — RESOLVED at P6b (2026-08-10).** This spec is authored against the durable shape of MCP; the concrete protocol version string is a build-time input, not a frozen contract term. The checklist below was completed against the official specification and the shipped MCP SDK when the module was implemented:
 >
-> - [ ] **Current protocol version string.** Read the specification's revision identifier and pin it as the value returned in `initialize.protocolVersion` (§5.1) and accepted in the `MCP-Protocol-Version` request header (§3.2). The `2025-06-18` value written throughout this doc is a placeholder pending this check.
-> - [ ] **Version-negotiation rule.** Confirm how the server must respond when a client offers an older/newer version (negotiate down vs. reject) and encode that in the handshake.
-> - [ ] **Streamable HTTP requirements.** Confirm: required `Accept` values on `POST /mcp` (`application/json` and `text/event-stream`), whether `GET /mcp` for a server-initiated SSE stream is mandatory or optional, `MCP-Session-Id` issuance/echo semantics, session-termination behavior (`DELETE /mcp`), and whether resumability headers are required of a stateless server.
-> - [ ] **SDK coordinates.** Verify the MCP server SDK artifact/version against the source of record before adding it to the version catalog ([Module Structure §8](module-structure.md)).
+> - [x] **Current protocol version string.** Pinned to `2025-06-18`, returned in `initialize.protocolVersion` (§5.1) and accepted in the `MCP-Protocol-Version` header (§3.2); a `PinnedTransport` decorator advertises it as the sole supported version.
+> - [x] **Version-negotiation rule.** The server negotiates **down** to its pinned version — a client offering a newer version is served `2025-06-18` (verified in-process).
+> - [x] **Streamable HTTP requirements.** The v1 server is **stateless**: `POST /mcp` accepts `application/json` + `text/event-stream`; `GET /mcp` for a server-initiated SSE stream is **optional and NOT served** (answered `405`) — so there are no server-to-client notifications in v1 (§5.1, §10), no `MCP-Session-Id` issuance, and no resumability headers. A stateful transport (session ids, the notification stream) is a v2 item ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)).
+> - [x] **SDK coordinates.** `io.modelcontextprotocol:mcp-core` + `mcp-json-jackson2`, both `mcp-sdk = 2.0.0`, pinned in the version catalog ([Module Structure §8](module-structure.md)).
 >
-> Any deviation found here is an additive correction to §3 and §5.1 only — the tool, resource, and prompt surfaces do not depend on it.
+> These resolutions were additive corrections to §3 and §5.1 only — the tool, resource, and prompt surfaces did not depend on them.
 
 ### 3.2 Endpoint structure
 
@@ -140,8 +140,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
   "capabilities": {
     "tools": {"listChanged": false},
     "resources": {"listChanged": false, "subscribe": false},
-    "prompts": {"listChanged": false},
-    "logging": {}
+    "prompts": {"listChanged": false}
   }
 }
 ```
@@ -150,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
-- `logging` — server can emit log notifications (§10).
+- **No `logging` capability in v1.** The v1 transport is stateless (§3.3): it answers `GET /mcp` with `405`, so there is no server-to-client stream to carry `notifications/message`. Advertising `logging` would promise notifications no client can receive — the same reasoning as `listChanged: false`. Live progress during a blocking `pipelines_execute` (§6.2.3) is therefore not available in v1; the authoritative per-node record is the `node_stats` array in the tool's final result. Logging/progress notifications return with the stateful transport in v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)).
 
 `protocolVersion` is the placeholder pending the §3.1 implementation-gate check. `serverInfo.version` is the datapipelines.co release version.
 
@@ -263,15 +262,15 @@ Returns: an **execution result object** containing:
 - The **first page of rows** inline (up to `datapipelines.result.page-size-rows`), plus `total_rows`, `has_more`, `result_url`, and `expires_at`.
 - Warnings array (if any).
 
-The result shape mirrors the [REST `data_ready` event](rest-api.md#647-data_ready) exactly — same fields, same uniform delivery model. There is no inline-vs-claim-check split: every caller result is materialized in Redis before the tool returns ([REST API §7.1](rest-api.md#71-model)). For a result that fits in one page, the inline rows ARE the whole result and no follow-up call is needed; when `has_more` is `true`, page the remainder with `executions_get_result` (§6.2.15) within the TTL.
+The result shape mirrors the [REST `data_ready` event](rest-api.md#647-data_ready) exactly — same fields (`schema`, the inline `rows` first page, `row_count`, `total_rows`, `has_more`, `result_url`, `expires_at`, and **`ttl_seconds`** so the agent knows its paging window without diffing timestamps), same uniform delivery model. There is no inline-vs-claim-check split: every caller result is materialized in Redis before the tool returns ([REST API §7.1](rest-api.md#71-model)). For a result that fits in one page, the inline rows ARE the whole result and no follow-up call is needed; when `has_more` is `true`, page the remainder with `executions_get_result` (§6.2.15) within the TTL.
 
 A pipeline with **no caller node** ([Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node)) is legal — a pure write-back/ETL pipeline. Such an execution returns metadata, `node_stats`, and no `schema`/`rows`; this is success, not an error.
 
 **Long-running executions.** The tool call is a **single blocking request**: it returns when the execution reaches a terminal state (`SUCCESS`, `FAILED`, `ABORTED`) or when `datapipelines.executor.execution-timeout-seconds` (default 600) elapses and the execution is aborted. For a 3-minute pipeline, the agent experiences one tool call that takes ~3 minutes; the HTTP response for that call stays open for the duration and the server writes nothing to it until the result is ready. (The REST SSE heartbeat, [REST API §6.6](rest-api.md#66-heartbeat-keepalive), is an SSE-stream concept and does not apply here — an MCP tool call is not an event stream. Operators must therefore ensure proxy/load-balancer idle timeouts on `/mcp` exceed `execution-timeout-seconds`; see [Deployment](deployment.md).)
 
-MCP **progress notifications** for in-flight nodes are deliberately not implemented in v1 — the tool returns progress only as the final `node_stats`. Streaming execution events through the MCP transport is a v2 item ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)). Agents that want live progress today can subscribe to the server's logging notifications (§10), which carry per-node completion messages.
+MCP **progress notifications** for in-flight nodes are deliberately not implemented in v1 — the tool returns progress only as the final `node_stats`. Streaming execution events through the MCP transport is a v2 item ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)). The v1 stateless transport delivers **no** server-to-client notifications of any kind (§5.1), so `node_stats` in the tool's final result is the authoritative and only per-node record.
 
-**If the agent abandons the call** (aborts the HTTP request, client crash), the execution is cancelled after `datapipelines.sse.disconnect-grace-seconds` (default 30) exactly as for a dropped REST stream ([REST API §6.8](rest-api.md#68-client-disconnect)) — in-flight statements are interrupted and the execution ends `ABORTED`. There is no resumption path; a reconnecting agent must re-execute. An execution can also be cancelled out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance; the abandoned tool call then returns an `ABORTED` result. There is no MCP cancel *tool* in v1.
+**If the agent abandons the call** (aborts the HTTP request, client crash): a blocking `POST /mcp` gives the servlet no disconnect callback, so the `datapipelines.sse.disconnect-grace-seconds` cancellation that a dropped **REST SSE** stream gets ([REST API §6.8](rest-api.md#68-client-disconnect)) does **not** apply to an abandoned tool call in v1 — the execution runs until it finishes or hits `datapipelines.executor.execution-timeout-seconds`. To stop an in-flight execution deterministically, cancel it out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance — in-flight statements are interrupted and the abandoned tool call returns an `ABORTED` result. There is no resumption path (a reconnecting agent must re-execute) and no MCP cancel *tool* in v1.
 
 **Scope:** `execute`.
 
@@ -780,7 +779,9 @@ The error payload inside the tool result matches the [REST API `error` object](r
 
 ## 10. Logging
 
-The server emits `notifications/message` per the MCP logging spec:
+> **Not delivered in v1.** The v1 transport is stateless (§3.3) and answers `GET /mcp` with `405`, so there is no server-to-client stream — the server advertises no `logging` capability (§5.1) and emits none of the notifications below. This section defines their **shape** for the stateful transport that lands with v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)); until then the authoritative per-node record is the `node_stats` array in a tool's final result. The rest of this section is v2-forward.
+
+When emitted (v2), the server sends `notifications/message` per the MCP logging spec:
 
 ```json
 {
@@ -867,4 +868,5 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial MCP server spec: streamable HTTP transport, API key auth, 15 tools, 8 resource types, 3 prompts, error model |
 | 2026-08-05 | v1.1 | propagation | Updated `pipelines_create` tool to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`; nodes carry `type`, `output`, `settings`). |
+| 2026-08-10 | v1.3 | P6b build (Gate C) | Aligned the frozen spec with the merged `mcp-server` module. Additive/corrective only. **§3.1 implementation-gate RESOLVED**: protocol version pinned `2025-06-18` (negotiate-down), the v1 transport is **stateless** — `GET /mcp` optional and NOT served (405), no session ids, no resumability; SDK `mcp-sdk 2.0.0`. **§5.1**: `logging` capability **removed** — a stateless transport has no stream to deliver `notifications/message`, so advertising it promised notifications no client can receive. **§10**: marked not-delivered-in-v1 (defines the v2 shape only); `node_stats` in a tool's final result is the authoritative per-node record. **§6.2.3**: corrected the abandoned-call paragraph — a blocking `POST /mcp` has no disconnect callback, so `disconnect-grace` cancellation does **not** apply to an abandoned MCP tool call (only out-of-band `DELETE /executions/{id}` + the execution timeout do); result-shape enumeration now lists `ttl_seconds` (mirrors REST `data_ready`). §6.2.9 (bare rendered-SQL string) and §6.2.10 (`dialect` free `{"type":"string"}`, no enum) unchanged — the code was aligned to them. Rate limiting on `/mcp` (§13), repository limit/offset push-down, execution-record persistence and the admin all-executions listing are cross-surface carry-forwards to `web`/`app` (P6a/P7), not defects in this module. |
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.11. **[D11]** §3.2/§4.1 auth rewritten: `DP-API-Key` **or** `Authorization: Bearer dpk_...` through one validation path; session JWTs explicitly rejected; security-chain note added (auth §8.5). **[D15]** Scope row on all 15 tools sourced from the auth §7.6 matrix; `read-only` → `read`; `admin` acknowledged as required by no v1 tool. **[D9]** §6.2.15 rewritten to the uniform REST §7 cursor (offset/limit/format, fixed TTL, stable order, ownership check), 1 MB inline cap with cursor-URL fallback, `result.*` error table; §6.2.3 returns first page + `result_url` (claim-check language gone). **[D3/D12]** `templates_create` drops `params_schema`, gains `imports [{id,version,alias}]`, `is_library`, `engine`; `templates_render` context is a free-form parameter map. **[D1]** `pipelines_create` node description: omitted `output` → `caller`, at most one caller node, zero legal. **[D7]** §6.2.3 documents blocking-call semantics, execution timeout, abandoned-call cancellation after grace, and deferral of MCP progress notifications. **[D10]** `X-API-Key` → `DP-API-Key`. **[M]** §5.1 `listChanged: false` across capabilities; §6.2.1 drops `datasources_used`; §7.3 `resources/list` pagination specified (opaque cursor, page size 100, 24h execution window, scope filtering); §8.2 `create_pipeline_for_question` removed from the v1 surface (ROADMAP §2); §3.1 verification marker reframed as an implementation-gate checklist; §12 futures re-tiered against ROADMAP; §13 checklist expanded. |

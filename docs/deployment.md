@@ -287,6 +287,8 @@ The 0.5 covers what the heap number does not: metaspace, code cache, thread stac
 
 **JVM flags.** Either `-XX:MaxRAMPercentage=65` (heap tracks the container limit — preferred for k8s, where limits change without an image rebuild) or an explicit `-Xmx`. Do not set both. Always `-Duser.timezone=UTC` (§3.1).
 
+**Servlet threads (MCP blocking calls).** An MCP `pipelines_execute` call ([MCP Server §6.2.3](mcp-server.md#623-pipelines_execute)) is a **single blocking HTTP request** that holds one servlet thread until the execution reaches a terminal state or `datapipelines.executor.execution-timeout-seconds` (default 600) elapses. Per-user concurrency is bounded (`max-concurrent-executions-per-user`, default 10) but the default Tomcat pool is 200 threads, so on the order of ~20 concurrent long-running MCP callers can saturate it and starve REST/UI traffic on the same instance for minutes. Size `server.tomcat.threads.max` at or above the expected count of simultaneously-blocking MCP executions plus normal REST concurrency, or isolate `/mcp` on its own connector/instance. This is in addition to raising proxy/LB idle timeouts above `execution-timeout-seconds` (MCP Server §6.2.3).
+
 **CPU.** Execution is coroutine-based and largely I/O-bound on source databases; 2 vCPU per instance is a reasonable floor. Scale out on `max-concurrent-executions-global` pressure, not CPU.
 
 ---
