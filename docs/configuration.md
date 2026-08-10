@@ -77,6 +77,10 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.staging.h2.result-batch-size` | `10000` | Rows per fetch batch when reading staged data out |
 | `datapipelines.staging.h2.query-timeout-seconds` | `60` | H2 query timeout |
 
+> **`max-memory-mb` is a *per-execution* ceiling, not a process-wide one.** Every concurrent execution gets its own tempdb with its own budget, so the aggregate tempdb heap a node can reach is `max-memory-mb` × `datapipelines.executor.max-concurrent-executions-global` — with the defaults, 1024 MB × 100. Size the two **together** against the container's heap; setting `max-memory-mb` alone bounds one execution, not the box. A process-wide staging gate is deferred ([ROADMAP](ROADMAP.md)).
+>
+> A pipeline's `settings.tempdb.config.max_memory_mb` override is **clamped to ≤ this value** — it may lower the operator's ceiling for that pipeline, never raise it. Save-time validation only checks `> 0`, so without the clamp an author could declare an arbitrarily large budget and disable the only ceiling the executor's `withConnection` paths have ([DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration)).
+
 ### 3.4 Auth
 
 | YAML path | Default | Description |

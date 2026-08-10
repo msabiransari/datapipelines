@@ -192,6 +192,8 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 **Reserved for future:** `PARTIAL` (partial-result mode where some nodes succeeded but a non-critical path failed — see [ROADMAP](ROADMAP.md)).
 
+> **Declaration reality (2026-08-10).** Declared in the `dag` module, for the same layering reason `SseEventType` is (§11): `web` implements rest-api at layer 5 and depends on `dag` at layer 3, never the reverse ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)). The executor is what produces the status and what writes `pipeline_executions.status`, so the enum lives at the lowest layer that needs it and `web` consumes it. This document, [rest-api](rest-api.md) and [metadata-db](metadata-db.md) remain the **wire authorities** — the declaration site is an implementation consequence, not a change of ownership.
+
 ---
 
 ## 11. `SseEventType` — pipeline execution event types
@@ -347,6 +349,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `MCP` | MCP tool invocation (agent) |
 | `SCHEDULED` | (Future) Cron-triggered execution |
 | `WEBHOOK` | (Future) External webhook trigger |
+
+> **Declaration reality (2026-08-10).** Declared in the `dag` module, for the same layering reason as `ExecutionStatus` (§10) and `SseEventType` (§11): the executor owns the execution repository that persists `pipeline_executions.trigger`, and it sits below `web`. This document, [rest-api](rest-api.md) and [metadata-db](metadata-db.md) remain the wire authorities.
 
 ---
 
