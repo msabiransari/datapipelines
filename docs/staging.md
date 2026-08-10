@@ -1,6 +1,6 @@
 # Staging (H2) Specification
 
-**Status:** v1.7 (frozen contract — additive-only changes after this point)
+**Status:** v1.8 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
 **Last updated:** 2026-08-09
@@ -452,7 +452,7 @@ Staging error codes are cataloged centrally in [Pipeline Contract §13.5](pipeli
 | `pipeline.staging.memory_limit_exceeded` | The staged footprint exceeds the effective memory budget (§8.2) |
 | `pipeline.staging.precision_overflow` | Source DECIMAL precision exceeds H2's limit (§5.2) |
 | `pipeline.staging.value_overflow` | A source value exceeds the staged column's capacity (§4.3) |
-| `pipeline.staging.cleanup_failed` | `DROP ALL OBJECTS` or connection close failed (§3.4); logged, never masks a node failure |
+| `pipeline.staging.cleanup_failed` | table cleanup (enumerate + `DROP TABLE`, §3.4) or connection close failed; logged, never masks a node failure |
 
 There is no `pipeline.staging.h2_creation_failed` — the engine-neutral `creation_failed` is the canonical code.
 
@@ -524,7 +524,7 @@ The executor runs nodes **concurrently** (up to `datapipelines.executor.max-para
 Therefore:
 
 - `H2Staging` owns a `kotlinx.coroutines.sync.Mutex` (`kotlinx.coroutines.sync.Mutex`, **not** a `java.util.concurrent.locks.Lock` — the callers are coroutines and must suspend, not block an executor thread).
-- Every method that touches the connection — `stage`, `query`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
+- Every method that touches the connection — `stage`, `withQuery`, `execute`, `stats` — acquires the mutex. These methods are `suspend` functions for that reason (§10).
 - Consumption discipline for cursors is enforced by construction, not convention: `withQuery(sql) { rs -> … }` (§3.3, §10) holds the mutex for the whole lifetime of the cursor, including the caller node's suspending drain to the result store (§6.1). There is no API that returns a live `ResultSet` to be read after the lock is released, so a downstream `stage`/`execute` on the shared connection cannot interleave with an open cursor — the state-corruption case this section warns about is unreachable.
 - Direct SQL access goes through `withConnection(block)` (§10), which acquires this same mutex for the duration of the block: the connection is never handed out unguarded, and the mutex itself is not reachable — or even observable — from outside the implementation. (The v1.2 contract exposed a `connection` property and made callers "responsible for taking the mutex"; that contract was unsatisfiable — the mutex is private, so no caller could ever take it — and is corrected here.) Two rules bind the block: it must not re-enter any staging operation (the lock is not reentrant, so `stage`/`query`/`execute`/`stats`/`withConnection` from inside the block deadlocks), and nothing derived from the connection (statements, cursors) may outlive the block.
 
@@ -573,7 +573,7 @@ interface Staging : AutoCloseable {
     // concurrent stage()/execute() on the shared connection cannot interleave. block must fully
     // consume (or abandon) the cursor before it returns; nothing derived from it escapes.
     suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T
-    suspend fun execute(sql: String): Long    // INSERT/UPDATE/DELETE against staging; returns row count
+    suspend fun execute(sql: String): Long    // INSERT/UPDATE/DELETE/DDL against staging; returns row count
 
     suspend fun stats(): StagingStats         // current tables/rows/measured memory
 
@@ -590,7 +590,7 @@ data class StageResult(
 data class StagingStats(
     val tableCount: Int,
     val totalRows: Long,
-    val memoryUsedBytes: Long        // measured via MEMORY_USED() (§8.2), not estimated
+    val memoryUsedBytes: Long        // measured JVM heap, in-process (§8.2), not estimated
 )
 ```
 
@@ -621,7 +621,7 @@ Differences from real PG to be aware of:
 
 ### 11.2 Functions available
 
-H2 provides standard SQL functions: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `CASE WHEN`, `JOIN`s (all kinds), window functions, common table expressions (CTEs). All available for staging templates. `MEMORY_USED()` is reserved for the staging layer's own accounting (§8.2). The admin-only host-reaching functions (`FILE_READ`/`FILE_WRITE`/`CSVREAD`/`CSVWRITE`/`RUNSCRIPT`/`CREATE ALIAS`/`LINK_SCHEMA`) are **not** available to author SQL — it runs as a non-admin user (§9.5).
+H2 provides standard SQL functions: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `CASE WHEN`, `JOIN`s (all kinds), window functions, common table expressions (CTEs). All available for staging templates. Note `MEMORY_USED()` is **not** used by the staging layer (it is admin-gated in this H2 version, and the operational user is non-admin) — accounting reads JVM heap in-process (§8.2). The admin-only host-reaching functions (`FILE_READ`/`FILE_WRITE`/`CSVREAD`/`CSVWRITE`/`RUNSCRIPT`/`CREATE ALIAS`/`LINK_SCHEMA`) are **not** available to author SQL — it runs as a non-admin user (§9.5).
 
 ### 11.3 Known gotchas
 
@@ -642,7 +642,7 @@ These are documented in the authoring guide (future).
 - **Streaming tests**: stage 1M rows with limited JVM heap; verify constant transfer memory.
 - **Concurrency test**: two coroutines calling `stage()` on the same instance simultaneously complete correctly and serialize (both tables present, correct row counts, no driver errors) — the test must fail if the mutex is removed.
 - **Lifecycle tests**: after `close()`, `connection.isClosed` is true AND a fresh connection to the same `jdbc:h2:mem:exec_{id}` URL sees an empty database (proving the instance did not survive) — this is the regression test for `DB_CLOSE_DELAY=-1` ever returning. Also: `close()` on a connection already broken does not throw.
-- **Memory-limit test**: stage past a deliberately small `max_memory_mb`; assert `pipeline.staging.memory_limit_exceeded` and that `MEMORY_USED()` (not an estimate) drove the decision.
+- **Memory-limit test**: stage past a deliberately small `max_memory_mb`; assert `pipeline.staging.memory_limit_exceeded` and that the measured in-process JVM-heap reading (not an estimate) drove the decision — with the budget anchored to a measured baseline + headroom, since the reading is JVM-heap-wide (§8.2).
 - **Type round-trip tests** for every canonical type:
   - Source value → staged → queried back → wire-encoded → asserted equal to source.
   - Covers BIGINTEGER, BIGDECIMAL precision, TIMESTAMP UTC normalization, etc.
@@ -654,7 +654,7 @@ These are documented in the authoring guide (future).
 ### 13.1 Frozen in v1
 
 - The `Staging` interface and `StagingFactory.create(executionId, engine)` signature.
-- The lifecycle: single connection opened at execution start, held for the execution, `DROP ALL OBJECTS` + close in `finally`, no GC reliance.
+- The lifecycle: single (non-admin, §9.5) connection opened at execution start, held for the execution, table drop (enumerate + `DROP TABLE`, §3.4) + close in `finally`, no GC reliance.
 - The single-connection + explicit-`Mutex` serialization model.
 - Identifier safety: column-name regex, duplicate rejection, unconditional double-quoting, no sanitizing.
 - The canonical → H2 type mapping (per [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2)).
@@ -691,6 +691,7 @@ Out of scope for v1:
 | 2026-08-07 | v1.2 | spec review | Per [SPEC-REVIEW-2026-08 §2.7](SPEC-REVIEW-2026-08.md#27-stagingmd) (D6, D5, D8, D1, D9): removed `DB_CLOSE_DELAY=-1` and rewrote §3.1/§3.4/§3.5 lifecycle (explicit `DROP ALL OBJECTS` + close in `finally`, no GC reliance); explicit `Mutex` serialization (§9); new identifier-safety rules §4.5 (`invalid_column_name`, `table_already_exists`); `StageResult.columns: List<ColumnSchema>`; `StagingFactory.create(executionId, engine)` aligned with dag-executor + per-pipeline `max_memory_mb` precedence; `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` with real helper signatures (§5.3); memory accounting switched to polled `MEMORY_USED()` (§8.2); §7 config replaced by references to configuration.md §3.3 and error codes to pipeline-contract §13.5; §4.1 link fixed to pipeline-contract §10; §6.1 claim-check language replaced by the uniform result-delivery model; terminal-node language → caller node. |
 | 2026-08-08 | v1.3 | P3 build (API HIGH-1) | `stage()` takes `sourceDialect: Dialect` and maps source columns through the **source dialect's** `mapColumn` — not `H2IngressMapper` (§3.2, §10); non-fatal mapping warnings surface on `StageResult.warnings` (§8.2); §4.4 value-reading table added. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
 | 2026-08-09 | v1.4 | P3 build (security MEDIUM-1) | `Staging.connection` property removed; direct SQL goes through `suspend fun <T> withConnection(block)` which holds the internal serialization lock for the whole block (§3.4, §9.2, §10). The v1.2 contract — callers of a `connection` property "responsible for taking the mutex" — was unsatisfiable (the mutex is private) and is corrected, not extended. |
+| 2026-08-09 | v1.8 | P3 build (staging re-review doc-drift) | Propagated the v1.6/v1.7 accounting+cleanup change to the mirror references the amendments missed (spec-internal drift, all LOW): §7.2 cleanup_failed row, §9.2 method list (`query`→`withQuery`), §10 execute comment (+`/DDL`) + StagingStats comment, §11.2 (`MEMORY_USED()` is NOT used — admin-gated), §12 memory-limit test bullet, §13.1 frozen-lifecycle line — all now say enumerate+DROP TABLE / in-process JVM-heap reading. No behavior change; removes reader-facing contradictions for the P4 implementer. |
 | 2026-08-09 | v1.7 | P3 build (staging A2 impl) | §3.1 code block + "username sa" bullet corrected to the two-phase §9.5 non-admin creation (they still showed the pre-§9.5 single-`sa` connection — stale after the v1.6 amendment). §9.5 grant recorded as the empirically-least `GRANT ALTER ANY SCHEMA` (GRANT ALL ON SCHEMA PUBLIC alone leaves CREATE TABLE refused); its INFORMATION_SCHEMA-DDL breadth and the bootstrap `sa` keeping its empty password both accepted (throwaway per-execution DB, no host reach; author SQL cannot open a new connection). |
 | 2026-08-09 | v1.6 | P3 build (staging round-2, empirical H2 finding) | §9.5 mechanism corrected against the pinned H2 2.3.232: `MEMORY_USED()` **and** `DROP ALL OBJECTS` are admin-gated (SQLState 90040), so a non-admin staging user cannot call them — §8.2 accounting switched to an in-process JVM-heap reading (identical quantity: H2's `MEMORY_USED()` is itself post-GC used-heap, not DB allocation — the old "not JVM heap" note was inverted and is corrected), §3.4 cleanup switched to enumerate-`INFORMATION_SCHEMA`-then-`DROP TABLE`; both verified non-admin. §9.5 records the verified 90040 refusals + drops the runtime `allowedClasses` bullet (no-op after class-init; redundant once non-admin). §8.2 now states honestly that the reading is JVM-heap-wide, not per-execution isolated (shared ceiling under concurrent executions) — a v1 simplification, per-execution isolation is v1.1+ (§13.2). |
 | 2026-08-09 | v1.5 | P3 build (Gate C security re-check) | `query(sql): ResultSet` replaced by `withQuery(sql) { rs -> … }` holding the lock for the whole cursor consumption incl. the caller-node Redis drain (§3.3/§9.2/§10) — closes the §6.1-vs-§9.2 interleaving contradiction by construction (ST-SEC-1). New **§9.5 privilege containment**: author SQL runs as a non-admin H2 user (transient `sa` bootstrap creates DB + restricted user, then closes) so `FILE_READ`/`CSVWRITE`/`CREATE ALIAS` etc. cannot reach host files/classes — closes author→`/proc/self/environ`→encryption-key/JWT-secret escalation; gating verified against the pinned H2 driver + `-Dh2.allowedClasses=`. |

@@ -40,7 +40,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 |---|---|---|
 | [templates.md](templates.md) | v1.4 frozen | Freemarker SQL templates: versioning, library imports (`{id, version, alias}`), SSTI hardening, parse-only save validation |
 | [datasources.md](datasources.md) | v1.8 | Named connections, 7 dialects, Hikari/JDBC property passthrough (§5.6 refusal sets), AES-GCM credential storage |
-| [staging.md](staging.md) | v1.7 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
+| [staging.md](staging.md) | v1.8 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
 | [dag-executor.md](dag-executor.md) | v1.2 | Coroutine executor: topological execution, fail-fast, cancellation (Redis flag), result materialization |
 
 ### Surfaces
