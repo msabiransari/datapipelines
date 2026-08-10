@@ -46,6 +46,22 @@ interface ResultStore {
      */
     fun describe(key: String): StoredResultView?
 
+    /**
+     * The store key for [executionId] — the same string [materialize] returns in
+     * [StoredResult.key], and the one [describe] and [page] take.
+     *
+     * A surface that holds only an execution id (the REST cursor
+     * `GET /api/v1/executions/{id}/result`, rest-api §7.2; the MCP result tool) needs that key to
+     * read a result it did not materialize itself. Publishing the mapping here is what keeps it
+     * from being re-spelled — a hardcoded literal at each surface is a second definition of the
+     * key layout, and the layout is the store's to own.
+     *
+     * The mapping is per-implementation on purpose: it is a store's own keyspace, not a shared
+     * constant. It is total and side-effect free — it says nothing about whether a result for
+     * [executionId] exists or has expired; [describe] answers that.
+     */
+    fun keyFor(executionId: UUID): String
+
     /** One page of the stored result, or null when the key is unknown or expired (REST §7.2). */
     fun page(
         key: String,

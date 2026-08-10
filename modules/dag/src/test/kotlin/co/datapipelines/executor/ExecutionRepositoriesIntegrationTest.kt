@@ -155,6 +155,30 @@ class ExecutionRepositoriesIntegrationTest {
     }
 
     @Test
+    fun `the admin listing crosses users, stays newest-first, and still filters by pipeline`() {
+        // rest-api §10.1 with an `admin` principal (auth §7.6): not "my executions", *all* of them.
+        val otherUser = insertUser()
+        val otherPipeline = insertPipelineWithVersion(otherUser)
+        val mine = running().also(executions::create)
+        Thread.sleep(SPACING_MS)
+        val theirs =
+            running()
+                .copy(executionId = UUID.randomUUID(), pipelineId = otherPipeline, triggeredBy = otherUser)
+                .also(executions::create)
+
+        val all = executions.findAll()
+
+        // Newest first, and the user-scoped listing sees only half of what admin sees.
+        all.map { it.executionId } shouldContainExactly listOf(theirs.executionId, mine.executionId)
+        executions.findByUser(userId).map { it.executionId } shouldContainExactly listOf(mine.executionId)
+        executions.findAll(pipelineId = otherPipeline).map { it.executionId } shouldContainExactly
+            listOf(theirs.executionId)
+        // Pagination is over the same newest-first order, so page 2 resumes where page 1 stopped.
+        executions.findAll(limit = 1).map { it.executionId } shouldContainExactly listOf(theirs.executionId)
+        executions.findAll(limit = 1, offset = 1).map { it.executionId } shouldContainExactly listOf(mine.executionId)
+    }
+
+    @Test
     fun `the crash sweep flips only stale RUNNING rows`() {
         // metadata-db §8.3: RUNNING rows whose instance died. Not a cancellation — nothing is
         // running any more, so there is no statement to cancel and no execution_aborted event.

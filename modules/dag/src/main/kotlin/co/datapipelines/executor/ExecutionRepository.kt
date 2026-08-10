@@ -158,6 +158,34 @@ class ExecutionRepository(
         )
 
     /**
+     * Every execution, newest first — the **admin** listing behind `GET /executions` (rest-api
+     * §10.1) when the principal holds `admin` and is therefore not confined to their own runs
+     * (auth §7.6). Deliberately a separate method rather than a nullable `userId` on [findByUser]:
+     * "list across all users" is an authorization decision, and a method whose scoping vanishes
+     * when an argument happens to be null is one null away from leaking another user's history.
+     *
+     * @param pipelineId when set, the same `pipeline_id` filter §10.1 documents — served by
+     *   `idx_executions_pipeline (pipeline_id, started_at DESC)`. Unfiltered, this sorts on
+     *   `started_at` with no index of its own to lean on (metadata-db §4.6 indexes all lead with
+     *   another column); that is acceptable for a paginated admin-only path and is the reason
+     *   [limit] is bounded by default rather than optional.
+     */
+    fun findAll(
+        pipelineId: UUID? = null,
+        limit: Int = DEFAULT_PAGE,
+        offset: Int = 0,
+    ): List<ExecutionRecord> =
+        jdbc.query(
+            """
+            $SELECT_COLUMNS
+            ${if (pipelineId == null) "" else "WHERE pipeline_id = :pipelineId"}
+             ORDER BY started_at DESC LIMIT :limit OFFSET :offset
+            """.trimIndent(),
+            mapOf("pipelineId" to pipelineId, "limit" to limit, "offset" to offset),
+            MAPPER,
+        )
+
+    /**
      * The crash sweep (metadata-db §8.3): `RUNNING` rows older than
      * `datapipelines.executions.stale-timeout-minutes` belong to an instance that died.
      *

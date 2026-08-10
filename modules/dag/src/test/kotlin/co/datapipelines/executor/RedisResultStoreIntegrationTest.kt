@@ -67,6 +67,27 @@ class RedisResultStoreIntegrationTest {
         }
 
     @Test
+    fun `keyFor publishes the same key materialize returns, and describe and page accept it`() =
+        runBlocking<Unit> {
+            // What a surface holding only an execution id needs (rest-api §7.2): it never saw the
+            // StoredResult, so the key it reads with must come from the store, not from a literal.
+            val executionId = UUID.randomUUID()
+            val store = store()
+
+            val stored = store.materialize(executionId, rows(1, 4), Dialect.H2, TTL_SECONDS)
+
+            val key = store.keyFor(executionId)
+            key shouldBe "dp:result:$executionId"
+            key shouldBe stored.key
+            store.describe(key).shouldNotBeNull().totalRows shouldBe 4
+            val tail = store.page(key, offset = 2, limit = 2).shouldNotBeNull()
+            tail.rows.map { it[0] } shouldBe listOf(3, 4)
+            // Total and side-effect free: it answers for an execution that never stored anything,
+            // and the absence shows up as a null read rather than as a bad key.
+            store.describe(store.keyFor(UUID.randomUUID())).shouldBeNull()
+        }
+
+    @Test
     fun `paging is stable because the result is fully materialized first`() =
         runBlocking<Unit> {
             val store = store()

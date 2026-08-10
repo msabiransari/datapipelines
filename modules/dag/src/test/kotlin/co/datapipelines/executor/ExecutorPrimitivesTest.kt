@@ -54,6 +54,17 @@ class ExecutorPrimitivesTest {
     }
 
     @Test
+    fun `a request declares how it was triggered, defaulting to the programmatic value`() {
+        // enums.md §18 / metadata-db §4.6: the CHECK constraint admits UI, REST and MCP only, and
+        // this field is what the execution recorder writes into `triggered_via`.
+        val pipeline = Fixtures.pipeline(listOf(Fixtures.node("a")))
+
+        Fixtures.request(pipeline).triggeredVia shouldBe ExecutionTrigger.REST
+        Fixtures.request(pipeline).copy(triggeredVia = ExecutionTrigger.MCP).triggeredVia shouldBe ExecutionTrigger.MCP
+        Fixtures.request(pipeline).copy(triggeredVia = ExecutionTrigger.UI).triggeredVia shouldBe ExecutionTrigger.UI
+    }
+
+    @Test
     fun `the per-execution render budget never exceeds the engine-wide backstop`() {
         // Wiring a per-execution budget must never *raise* the global ceiling: the default 1024 MB
         // staging budget is ≈536M chars, well past the engine's 64M backstop.

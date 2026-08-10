@@ -71,6 +71,9 @@ class RedisResultStore(
         }
     }
 
+    /** `dp:result:{execution_id}` — the base key both this class's suffixed keys hang off. */
+    override fun keyFor(executionId: UUID): String = baseKey(executionId)
+
     override fun describe(key: String): StoredResultView? {
         requireResultKey(key)
         val meta = readMeta(key) ?: return null

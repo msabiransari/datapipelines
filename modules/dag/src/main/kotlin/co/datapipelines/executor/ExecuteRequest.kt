@@ -29,6 +29,17 @@ enum class ExecutionStatus {
  * @param parameters the raw request `parameters` object; binding, defaults and coercion are
  *   `ParameterBinder`'s job (pipeline-contract §7.1), run at execution start.
  * @param resultTtlSeconds the client's `DP-Result-TTL-Seconds`, clamped by [ResultConfig].
+ * @param triggeredVia how the surface that built this request was reached — `UI` for the editor's
+ *   Run button, `REST` for a programmatic API call, `MCP` for an agent's tool invocation
+ *   (enums.md §18). Only the surface can know this, so only the surface may set it; it is carried
+ *   here purely so the execution recorder can write `pipeline_executions.triggered_via`
+ *   ([ExecutionRecord.triggeredVia], metadata-db §4.6) without a second channel. The executor
+ *   itself never branches on it, and it is **not** part of the `execution_started` wire payload
+ *   (rest-api §6.4.1 does not carry it).
+ *
+ *   The default is [ExecutionTrigger.REST] — the catalogued value for a direct programmatic call,
+ *   which is what an in-process construction is. It exists so callers predating this field still
+ *   compile, not as a value a surface should rely on: `web` and `mcp-server` pass theirs.
  */
 data class ExecuteRequest(
     val pipelineId: UUID,
@@ -39,6 +50,7 @@ data class ExecuteRequest(
     val idempotencyKey: String? = null,
     val resultTtlSeconds: Long? = null,
     val correlationId: UUID? = null,
+    val triggeredVia: ExecutionTrigger = ExecutionTrigger.REST,
 )
 
 /**

@@ -210,7 +210,7 @@ class InMemoryResultStore(
             }
             rows += row
         }
-        val key = "mem:result:$executionId"
+        val key = keyFor(executionId)
         stored[key] =
             StoredResultView(
                 key = key,
@@ -224,6 +224,9 @@ class InMemoryResultStore(
             )
         return StoredResult(key, rows.size.toLong(), bytes, stored.getValue(key).expiresAt, schema.warnings)
     }
+
+    /** This fake owns its own keyspace — deliberately NOT Redis's, so the two never get confused. */
+    override fun keyFor(executionId: UUID): String = "mem:result:$executionId"
 
     override fun describe(key: String): StoredResultView? = stored[key]
 
@@ -522,6 +525,8 @@ class LatchedResultStore(
             message = "store went away mid-drain",
         )
     }
+
+    override fun keyFor(executionId: UUID): String = "latched:result:$executionId"
 
     override fun describe(key: String): StoredResultView? = null
 
