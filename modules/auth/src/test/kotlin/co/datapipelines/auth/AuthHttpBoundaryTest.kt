@@ -1,0 +1,405 @@
+package co.datapipelines.auth
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.security.Keys
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotBeBlank
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.web.servlet.FilterRegistrationBean
+import org.springframework.context.ApplicationContext
+import org.springframework.http.HttpEntity
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpMethod
+import org.springframework.http.ResponseEntity
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.stereotype.Controller
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.ResponseBody
+import org.testcontainers.containers.PostgreSQLContainer
+import java.time.Instant
+import java.util.Base64
+import java.util.Date
+import java.util.UUID
+
+/**
+ * AU-TEST-5: the auth contract asserted **at the wire**, over the real filter chain
+ * assembled by [AuthTestApplication] — the class that proves A1 (`/mcp` refuses
+ * cookies; CSRF exemption follows the credential), A5 (the full error envelope),
+ * B4 (default deny), B9 (session codes at the boundary) and B12 (no double filter
+ * registration) together rather than one mock at a time.
+ *
+ * A probe controller stands in for the endpoints P6a will ship: this module owns the
+ * gate, not the endpoints, so the gate is what gets exercised.
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class AuthHttpBoundaryTest {
+    @Autowired private lateinit var restTemplate: TestRestTemplate
+
+    @Autowired private lateinit var jdbc: NamedParameterJdbcTemplate
+
+    @Autowired private lateinit var jwtService: JwtService
+
+    @Autowired private lateinit var apiKeyService: ApiKeyService
+
+    @Autowired private lateinit var context: ApplicationContext
+
+    private val mapper = ObjectMapper()
+
+    private lateinit var user: User
+    private lateinit var readKey: String
+    private lateinit var expiredKey: String
+    private lateinit var session: String
+
+    /**
+     * Probe endpoints standing in for the controllers P6a will ship — this module owns
+     * the gate, not the endpoints, so the gate is what gets exercised.
+     *
+     * Two wiring facts this arrangement depends on, both verified the hard way:
+     * `@Controller` is required (Spring 6.2's `RequestMappingHandlerMapping.isHandler`
+     * detects only `@Controller`, no longer a bare `@RequestMapping`), and a
+     * `@Component`-meta-annotated class nested inside a `@Configuration` is registered
+     * by `ConfigurationClassParser`'s member-class processing — so it needs no `@Bean`
+     * method, and adding one registers it TWICE (ambiguous mapping). Nesting it inside
+     * this test's `@TestConfiguration` also keeps it out of every other context, since
+     * Boot's `TestTypeExcludeFilter` bars test-nested classes from component scanning.
+     */
+    @TestConfiguration
+    class ProbeConfiguration {
+        @Controller
+        class ProbeController {
+            /** Public probe — §8.3 permitAll. */
+            @GetMapping("/health")
+            @ResponseBody
+            fun health() = mapOf("status" to "UP")
+
+            @GetMapping("/api/v1/probe")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            fun read() = principalPayload()
+
+            @PostMapping("/api/v1/probe")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            fun write() = principalPayload()
+
+            @GetMapping("/api/v1/admin-probe")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+            fun adminOnly() = principalPayload()
+
+            /** Deliberately unannotated — the default-deny case (AUTH-SEC-9). */
+            @GetMapping("/api/v1/unannotated")
+            @ResponseBody
+            fun unannotated() = principalPayload()
+
+            @PostMapping("/mcp")
+            @ResponseBody
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            fun mcp() = principalPayload()
+
+            private fun principalPayload(): Map<String, String?> {
+                val principal =
+                    SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
+                return mapOf(
+                    "email" to principal?.email,
+                    "auth_method" to principal?.authMethod?.name,
+                    "key_id" to principal?.keyId,
+                )
+            }
+        }
+    }
+
+    @BeforeAll
+    fun seed() {
+        jdbc.jdbcTemplate.execute(RepoFiles.read(RepoFiles.MIGRATION_PATH))
+        user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = false)
+        readKey = apiKeyService.issue(user.id, "read-key", setOf(Scope.READ), setOf(Scope.ADMIN)).plaintext
+        expiredKey =
+            apiKeyService
+                .issue(user.id, "expired-key", setOf(Scope.READ), setOf(Scope.ADMIN), Instant.now().minusSeconds(3600))
+                .plaintext
+        session = jwtService.issue(user)
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private fun call(
+        method: HttpMethod,
+        path: String,
+        headers: HttpHeaders = HttpHeaders(),
+    ): ResponseEntity<String> = restTemplate.exchange(path, method, HttpEntity<Any>(headers), String::class.java)
+
+    private fun headers(
+        apiKey: String? = null,
+        bearer: String? = null,
+        cookies: List<String> = emptyList(),
+        csrfToken: String? = null,
+        correlationId: String? = null,
+    ): HttpHeaders =
+        HttpHeaders().apply {
+            apiKey?.let { set(ApiKeyCredential.HEADER, it) }
+            bearer?.let { set("Authorization", "Bearer $it") }
+            if (cookies.isNotEmpty()) set("Cookie", cookies.joinToString("; "))
+            csrfToken?.let { set(SecurityConfig.CSRF_HEADER, it) }
+            correlationId?.let { set(AuthErrorWriter.CORRELATION_HEADER, it) }
+        }
+
+    private fun error(response: ResponseEntity<String>): Map<*, *> {
+        val body = mapper.readValue(response.body, Map::class.java)
+        body["schema_version"] shouldBe 1
+        (body["correlation_id"] as String).shouldNotBeBlank()
+        return body["error"] as Map<*, *>
+    }
+
+    private fun code(response: ResponseEntity<String>): Any? = error(response)["code"]
+
+    // ------------------------------------------------------------- public path
+
+    @Test
+    fun `the health probe is anonymous and 200`() {
+        call(HttpMethod.GET, "/health").statusCode.value() shouldBe 200
+    }
+
+    // ------------------------------------------------- API-key rejection codes
+
+    @Test
+    fun `an anonymous api call is 401 auth-api_key-missing with the full envelope`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(correlationId = "corr-boundary"))
+
+        response.statusCode.value() shouldBe 401
+        val error = error(response)
+        error["code"] shouldBe "auth.api_key.missing"
+        error["user_message"] shouldBe "You are not signed in. Sign in and try again."
+        error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/auth-api-key-missing"
+        mapper.readValue(response.body, Map::class.java)["correlation_id"] shouldBe "corr-boundary"
+        response.headers.getFirst(AuthErrorWriter.CORRELATION_HEADER) shouldBe "corr-boundary"
+    }
+
+    @Test
+    fun `an unrecognized api key is 401 auth-api_key-invalid`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(apiKey = "dpk_ZZZZZZZZZZZZ.${"A".repeat(48)}"))
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.invalid"
+    }
+
+    @Test
+    fun `an expired api key is 401 auth-api_key-expired`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(apiKey = expiredKey))
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.expired"
+    }
+
+    @Test
+    fun `a valid api key authenticates and reaches the handler`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(apiKey = readKey))
+
+        response.statusCode.value() shouldBe 200
+        mapper.readValue(response.body, Map::class.java)["auth_method"] shouldBe "API_KEY"
+    }
+
+    @Test
+    fun `an insufficient scope is 403 auth-scope-insufficient`() {
+        val response = call(HttpMethod.GET, "/api/v1/admin-probe", headers(apiKey = readKey))
+
+        response.statusCode.value() shouldBe 403
+        code(response) shouldBe "auth.scope.insufficient"
+    }
+
+    @Test
+    fun `an unannotated api handler is denied by default (AUTH-SEC-9)`() {
+        val response = call(HttpMethod.GET, "/api/v1/unannotated", headers(apiKey = readKey))
+
+        response.statusCode.value() shouldBe 403
+        (error(response)["details"] as Map<*, *>)["reason"] shouldBe "handler_not_annotated"
+    }
+
+    // -------------------------------------------------- session codes (AU-TEST-3)
+
+    @Test
+    fun `a valid session cookie authenticates on the api surface`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 200
+        mapper.readValue(response.body, Map::class.java)["auth_method"] shouldBe "OIDC"
+    }
+
+    @Test
+    fun `an expired session cookie is 401 auth-session-expired, not api_key-missing`() {
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=${expiredSession()}")))
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.session.expired"
+    }
+
+    /**
+     * The tamper lands on the signature's **first** character, deliberately.
+     *
+     * An HS256 signature is 32 bytes → 43 unpadded base64url characters → 258 encoded
+     * bits, so the **last** character carries only 4 significant bits and its low 2 bits
+     * are padding: `…A`, `…B`, `…C` and `…D` all decode to the SAME 32 signature bytes.
+     * Flipping the last character therefore produces a cookie that is not tampered at
+     * all roughly 1 run in 16 (whenever the signature happens to end in that group), and
+     * the token validates — a 6% flake that reads as an auth bypass. The first character
+     * carries all 6 of its bits, so changing it always changes the MAC.
+     */
+    @Test
+    fun `a tampered session cookie is 401 auth-session-invalid`() {
+        val parts = session.split(".")
+        val signature = parts[2]
+        val tampered = "${parts[0]}.${parts[1]}.${if (signature.first() == 'A') 'B' else 'A'}${signature.drop(1)}"
+
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=$tampered")))
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.session.invalid"
+    }
+
+    @Test
+    fun `an api key wins over a session cookie when both are present (AU-TEST-11)`() {
+        val response =
+            call(
+                HttpMethod.GET,
+                "/api/v1/probe",
+                headers(apiKey = readKey, cookies = listOf("dp_session=$session")),
+            )
+
+        response.statusCode.value() shouldBe 200
+        val body = mapper.readValue(response.body, Map::class.java)
+        body["auth_method"] shouldBe "API_KEY"
+        (body["key_id"] as String) shouldBe readKey.substringBefore('.')
+    }
+
+    // ---------------------------------------------------------- /mcp (AUTH-SEC-1)
+
+    @Test
+    fun `a session cookie authenticates nobody on the mcp endpoint`() {
+        val response = call(HttpMethod.POST, "/mcp", headers(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 401
+        code(response) shouldBe "auth.api_key.missing"
+    }
+
+    @Test
+    fun `the mcp endpoint accepts DP-API-Key and the Bearer dpk_ carrier`() {
+        call(HttpMethod.POST, "/mcp", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+        call(HttpMethod.POST, "/mcp", headers(bearer = readKey)).statusCode.value() shouldBe 200
+    }
+
+    // ---------------------------------------------- CSRF by credential (AUTH-SEC-1)
+
+    @Test
+    fun `a cookie-authenticated state change with no csrf token is 403 reason=missing`() {
+        val response = call(HttpMethod.POST, "/api/v1/probe", headers(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 403
+        val error = error(response)
+        error["code"] shouldBe "auth.csrf.invalid"
+        (error["details"] as Map<*, *>)["reason"] shouldBe "missing"
+    }
+
+    @Test
+    fun `a cookie-authenticated state change with the wrong csrf token is 403 reason=mismatch`() {
+        val response =
+            call(
+                HttpMethod.POST,
+                "/api/v1/probe",
+                headers(cookies = listOf("dp_session=$session", "dp_csrf=the-real-token"), csrfToken = "a-different-token"),
+            )
+
+        response.statusCode.value() shouldBe 403
+        val error = error(response)
+        error["code"] shouldBe "auth.csrf.invalid"
+        (error["details"] as Map<*, *>)["reason"] shouldBe "mismatch"
+    }
+
+    @Test
+    fun `a cookie-authenticated state change with the matching double-submit token succeeds`() {
+        val response =
+            call(
+                HttpMethod.POST,
+                "/api/v1/probe",
+                headers(cookies = listOf("dp_session=$session", "dp_csrf=the-real-token"), csrfToken = "the-real-token"),
+            )
+
+        response.statusCode.value() shouldBe 200
+    }
+
+    @Test
+    fun `an api-key state change needs no csrf token at all`() {
+        call(HttpMethod.POST, "/api/v1/probe", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+    }
+
+    // --------------------------------------------------- filter registration (B12)
+
+    @Test
+    fun `the auth filters are not also registered with the servlet container`() {
+        listOf("apiKeyFilterRegistration", "jwtAuthenticationFilterRegistration", "loginRateLimitFilterRegistration")
+            .forEach { name ->
+                (context.getBean(name) as FilterRegistrationBean<*>).isEnabled shouldBe false
+            }
+    }
+
+    private fun expiredSession(): String {
+        val past = Instant.now().minusSeconds(3600)
+        return Jwts
+            .builder()
+            .subject(user.id.toString())
+            .claim("email", user.email)
+            .claim("name", user.displayName)
+            .claim("scopes", listOf("read"))
+            .issuer("datapipelines")
+            .issuedAt(Date.from(past.minusSeconds(60)))
+            .expiration(Date.from(past))
+            .signWith(Keys.hmacShaKeyFor(Base64.getDecoder().decode(JWT_SECRET)), Jwts.SIG.HS256)
+            .compact()
+    }
+
+    private companion object {
+        val JWT_SECRET: String = Base64.getEncoder().encodeToString(ByteArray(32) { (it + 11).toByte() })
+
+        // Started in the static initializer, not via @Testcontainers: with @SpringBootTest
+        // the context (and @DynamicPropertySource) can load before the extension's
+        // beforeAll would run, so the mapped port would not yet exist. Ryuk reaps it.
+        @JvmStatic
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withDatabaseName("datapipelines")
+                .withUsername("dp")
+                .withPassword("dp")
+
+        val discovery = OidcDiscoveryStub()
+
+        init {
+            postgres.start()
+        }
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun props(registry: DynamicPropertyRegistry) {
+            registry.add("spring.datasource.url", postgres::getJdbcUrl)
+            registry.add("spring.datasource.username", postgres::getUsername)
+            registry.add("spring.datasource.password", postgres::getPassword)
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
+            // Required once a provider is configured (§5.2); no OIDC login happens here.
+            registry.add("datapipelines.auth.base-url") { "https://dp.example.com" }
+            registry.add("datapipelines.auth.oidc.providers[0].name") { "stub" }
+            registry.add("datapipelines.auth.oidc.providers[0].client-id") { "dp-client" }
+            registry.add("datapipelines.auth.oidc.providers[0].client-secret") { "dp-secret" }
+            registry.add("datapipelines.auth.oidc.providers[0].issuer-uri") { discovery.issuer }
+        }
+    }
+}

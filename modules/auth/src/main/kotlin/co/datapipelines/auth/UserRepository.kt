@@ -1,0 +1,200 @@
+package co.datapipelines.auth
+
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.stereotype.Repository
+import java.sql.ResultSet
+import java.util.UUID
+
+/**
+ * `users` persistence (metadata-db §4.1) via `NamedParameterJdbcTemplate` — no JPA
+ * (auth.md §12.3). Every UPDATE sets `updated_at = NOW()` in its own SET clause
+ * (metadata-db §2: "an UPDATE that forgets updated_at is a bug in the repository").
+ *
+ * Email is stored and matched **lowercase** (auth.md §4.2). Normalization is the
+ * caller's contract ([UserService]); this repository additionally lowercases on the
+ * lookup path so a stray mixed-case argument cannot miss an existing row.
+ */
+@Repository
+class UserRepository(
+    private val jdbc: NamedParameterJdbcTemplate,
+) {
+    fun findByEmail(email: String): User? =
+        jdbc
+            .query(
+                "SELECT * FROM users WHERE email = :email",
+                MapSqlParameterSource("email", email.trim().lowercase()),
+                ::map,
+            ).firstOrNull()
+
+    fun findById(id: UUID): User? =
+        jdbc
+            .query(
+                "SELECT * FROM users WHERE id = :id",
+                MapSqlParameterSource("id", id),
+                ::map,
+            ).firstOrNull()
+
+    /** Just the liveness flag — the hot per-request read (metadata-db §4.1 note). */
+    fun isActive(id: UUID): Boolean? =
+        jdbc
+            .query(
+                "SELECT is_active FROM users WHERE id = :id",
+                MapSqlParameterSource("id", id),
+            ) { rs, _ -> rs.getBoolean("is_active") }
+            .firstOrNull()
+
+    fun insert(
+        email: String,
+        displayName: String,
+        profilePictureUrl: String?,
+        provider: String,
+        providerSubject: String,
+        isAdmin: Boolean,
+    ): User {
+        val params =
+            MapSqlParameterSource()
+                .addValue("email", email.trim().lowercase())
+                .addValue("display_name", displayName)
+                .addValue("profile_picture_url", profilePictureUrl)
+                .addValue("provider", provider)
+                .addValue("provider_subject", providerSubject)
+                .addValue("is_admin", isAdmin)
+        return jdbc
+            .query(
+                """
+                INSERT INTO users (email, display_name, profile_picture_url, provider, provider_subject, is_admin)
+                VALUES (:email, :display_name, :profile_picture_url, :provider, :provider_subject, :is_admin)
+                RETURNING *
+                """.trimIndent(),
+                params,
+                ::map,
+            ).first()
+    }
+
+    /** Links an existing account to a (possibly new) OIDC identity on re-login (§4.2). */
+    fun updateIdentity(
+        id: UUID,
+        displayName: String,
+        profilePictureUrl: String?,
+        provider: String,
+        providerSubject: String,
+    ) {
+        jdbc.update(
+            """
+            UPDATE users
+               SET display_name = :display_name,
+                   profile_picture_url = :profile_picture_url,
+                   provider = :provider,
+                   provider_subject = :provider_subject,
+                   updated_at = NOW()
+             WHERE id = :id
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("display_name", displayName)
+                .addValue("profile_picture_url", profilePictureUrl)
+                .addValue("provider", provider)
+                .addValue("provider_subject", providerSubject),
+        )
+    }
+
+    /** Idempotently grants admin (§4.4 / §10.1). Returns true if it flipped. */
+    fun grantAdmin(id: UUID): Boolean =
+        jdbc.update(
+            "UPDATE users SET is_admin = TRUE, updated_at = NOW() WHERE id = :id AND is_admin = FALSE",
+            MapSqlParameterSource("id", id),
+        ) > 0
+
+    /**
+     * Idempotently revokes admin (§10.1 `auth.user.admin_revoked`). Returns true if it
+     * flipped. Once revoked, the §4.4 bootstrap path never re-grants — that path fires
+     * only at row creation.
+     */
+    fun revokeAdmin(id: UUID): Boolean =
+        jdbc.update(
+            "UPDATE users SET is_admin = FALSE, updated_at = NOW() WHERE id = :id AND is_admin = TRUE",
+            MapSqlParameterSource("id", id),
+        ) > 0
+
+    /**
+     * Activates / deactivates a user (§4.2, §10.1). Returns true if the flag changed,
+     * so the caller only audits and invalidates on a real transition.
+     */
+    fun setActive(
+        id: UUID,
+        active: Boolean,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE users SET is_active = :active, updated_at = NOW() WHERE id = :id AND is_active <> :active",
+            MapSqlParameterSource().addValue("id", id).addValue("active", active),
+        ) > 0
+
+    /**
+     * User-administration search (§7.6 `USER_ADMINISTRATION`). Case-insensitive
+     * substring match over email and display name; a blank [query] lists everyone.
+     * Paged by [offset]/[limit] with a stable ordering so pages do not overlap.
+     */
+    fun search(
+        query: String,
+        offset: Int,
+        limit: Int,
+    ): List<User> {
+        val term = query.trim().lowercase()
+        return jdbc.query(
+            """
+            SELECT * FROM users
+             WHERE :term = ''
+                OR LOWER(email) LIKE '%' || :term || '%'
+                OR LOWER(display_name) LIKE '%' || :term || '%'
+             ORDER BY email
+             OFFSET :offset LIMIT :limit
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("term", term)
+                .addValue("offset", offset)
+                .addValue("limit", limit),
+            ::map,
+        )
+    }
+
+    fun updateLastLogin(id: UUID) {
+        jdbc.update(
+            "UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = :id",
+            MapSqlParameterSource("id", id),
+        )
+    }
+
+    /**
+     * Sets the stored theme preference (metadata-db §4.1, ui-screens §4.11).
+     * `null` clears it back to "follow the deployment default".
+     */
+    fun setThemePreference(
+        id: UUID,
+        theme: String?,
+    ) {
+        jdbc.update(
+            "UPDATE users SET theme_preference = :theme, updated_at = NOW() WHERE id = :id",
+            MapSqlParameterSource().addValue("id", id).addValue("theme", theme),
+        )
+    }
+
+    private fun map(
+        rs: ResultSet,
+        @Suppress("UNUSED_PARAMETER") rowNum: Int,
+    ): User =
+        User(
+            id = rs.getObject("id", UUID::class.java),
+            email = rs.getString("email"),
+            displayName = rs.getString("display_name"),
+            profilePictureUrl = rs.getString("profile_picture_url"),
+            provider = rs.getString("provider"),
+            providerSubject = rs.getString("provider_subject"),
+            isActive = rs.getBoolean("is_active"),
+            isAdmin = rs.getBoolean("is_admin"),
+            createdAt = rs.getTimestamp("created_at").toInstant(),
+            updatedAt = rs.getTimestamp("updated_at").toInstant(),
+            lastLoginAt = rs.getTimestamp("last_login_at")?.toInstant(),
+            themePreference = rs.getString("theme_preference"),
+        )
+}

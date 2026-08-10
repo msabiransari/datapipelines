@@ -5,6 +5,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.runApplication
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.FilterType
 
 /**
  * Application entry point — main class `co.datapipelines.DatapipelinesApplicationKt`
@@ -35,6 +37,22 @@ import org.springframework.boot.runApplication
         // SecurityAutoConfiguration would have contributed; excluding one without
         // the other fails context startup outright.
         ManagementWebSecurityAutoConfiguration::class,
+    ],
+)
+// TODO(P7 app wiring — module-structure.md §5.7 / task #10): remove this exclude AND the
+//  three autoconfig excludes above together, then wire auth for real. The `auth` module is
+//  merged and independently tested (150 tests), but its Spring config is NOT scanned by the
+//  app yet: `OidcConfig` requires `datapipelines.auth.base-url` and builds real
+//  ClientRegistrations (OIDC discovery) from the google/microsoft providers in
+//  application.yml, so scanning it fails the smoke test's context load. Wiring auth into the
+//  running app needs a test OIDC provider (a Keycloak Testcontainer or a stub
+//  ClientRegistrationRepository) + base-url, plus support for a provider-less (API-key-only)
+//  deployment — that is P7 integration work, not an interim auth scheme. While this exclude is
+//  in place the application has NO authentication of any kind (same as the P0 scaffold state).
+@ComponentScan(
+    basePackages = ["co.datapipelines"],
+    excludeFilters = [
+        ComponentScan.Filter(type = FilterType.REGEX, pattern = ["co\\.datapipelines\\.auth\\..*"]),
     ],
 )
 class DatapipelinesApplication
