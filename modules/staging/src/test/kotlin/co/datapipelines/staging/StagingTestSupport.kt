@@ -20,18 +20,31 @@ import java.util.UUID
  */
 internal fun <T> Staging.readFromStaging(read: (Connection) -> T): T = runBlocking { withConnection { read(it) } }
 
-/** The JDBC URL a staging instance for [executionId] uses, for lifecycle assertions. */
+/**
+ * The JDBC URL a staging instance for [executionId] uses, for lifecycle assertions.
+ *
+ * Mirrors [H2StagingFactory]'s formula including `DATABASE_TO_LOWER=TRUE` — a peer connection
+ * built from a *different* URL lands in a different in-memory database, which is why the
+ * lifecycle test pins URL equality (it must SEE the staged table through this URL) before
+ * reading anything into a later absence.
+ */
 internal fun stagingUrl(
     executionId: UUID,
     props: H2StagingProperties,
-): String = "jdbc:h2:mem:exec_$executionId;MODE=${props.mode}"
+): String = "jdbc:h2:mem:exec_$executionId;MODE=${props.mode};DATABASE_TO_LOWER=TRUE"
 
-/** Counts base tables in the `PUBLIC` schema of [connection] — the object catalog probe. */
+/**
+ * Counts base tables in the `PUBLIC` schema of [connection] — the object catalog probe.
+ *
+ * `UPPER(...)`, not the bare literal: under `DATABASE_TO_LOWER=TRUE` H2 names the schema
+ * `public`, so `TABLE_SCHEMA = 'PUBLIC'` matches nothing and every `tableCount(...) shouldBe 0`
+ * assertion in this suite would pass vacuously — green while proving nothing.
+ */
 internal fun tableCount(connection: Connection): Int =
     connection.createStatement().use { st ->
         st
             .executeQuery(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC'",
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE UPPER(TABLE_SCHEMA) = 'PUBLIC'",
             ).use { rs ->
                 rs.next()
                 rs.getInt(1)

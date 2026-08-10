@@ -139,8 +139,14 @@ class H2StagingFailurePathTest {
         val thrown =
             shouldThrow<StagingMemoryLimitException> {
                 runBlocking {
+                    // `"X"` is quoted because SYSTEM_RANGE names its result column `X` whatever the
+                    // database's folding is, and this statement runs against the STAGING database,
+                    // which lower-folds unquoted identifiers (DATABASE_TO_LOWER=TRUE, §11.3) — the
+                    // bare `x` resolves as `x` and the driver reports 42122. The two source-side
+                    // uses of SYSTEM_RANGE elsewhere in the suite are unaffected: the source
+                    // stand-in database has no such folding.
                     tiny.execute(
-                        "INSERT INTO \"stg_seed\" SELECT x, RPAD('a', 800, 'a') FROM SYSTEM_RANGE(1, 100000)",
+                        "INSERT INTO \"stg_seed\" SELECT \"X\", RPAD('a', 800, 'a') FROM SYSTEM_RANGE(1, 100000)",
                     )
                 }
             }

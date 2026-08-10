@@ -30,11 +30,22 @@ class H2StagingQueryTest {
     @AfterEach
     fun tearDown() = staging.close()
 
+    /**
+     * Stages three rows under a **lowercase** `id` label.
+     *
+     * The alias is explicit because the source stand-in is H2, which folds an unquoted `id` in
+     * the source SQL up to `ID` — so the staged column would be `"ID"` and the unquoted `id`
+     * references below could not resolve now that the staging database lower-folds (§11.3). A
+     * real Postgres/MySQL source hands us lowercase labels already, and §11.3 tells template
+     * authors to alias to lowercase for exactly this reason; the alias makes this fixture the
+     * shape production sees. Mixed-case labels keep their own coverage in H2StagingTableTest and
+     * H2StagingCaseFoldingTest.
+     */
     private fun stageThreeRows() {
         SourceDb().use { src ->
             src.exec("CREATE TABLE t (id INTEGER)")
             src.exec("INSERT INTO t VALUES (1), (2), (3)")
-            runBlocking { staging.stage(src.query("SELECT id FROM t"), "stg_q", Dialect.H2) }
+            runBlocking { staging.stage(src.query("SELECT id AS \"id\" FROM t"), "stg_q", Dialect.H2) }
         }
     }
 

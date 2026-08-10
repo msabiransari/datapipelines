@@ -57,7 +57,10 @@ class H2StagingPrivilegeTest {
         isAdmin shouldBe false
         // …and it is not the bootstrap identity, which is what would make every refusal below
         // evaporate. The bootstrap connection was closed before this instance was handed over.
-        currentUser() shouldNotBe "SA"
+        // Case-insensitively: under the URL's DATABASE_TO_LOWER=TRUE, CURRENT_USER reports the
+        // sa login as 'sa' (measured on 2.3.232), so the bare `shouldNotBe "SA"` would pass even
+        // against a bootstrap session — a guard that can no longer fail.
+        currentUser().uppercase() shouldNotBe "SA"
     }
 
     // ---------- the host-reaching surface, through the author's own entry points ----------

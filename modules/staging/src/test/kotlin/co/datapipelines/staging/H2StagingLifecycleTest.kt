@@ -109,19 +109,35 @@ class H2StagingLifecycleTest {
         runBlocking { staging.stats() }.tableCount shouldBe 1
 
         DriverManager.getConnection(stagingUrl(executionId, props), "sa", "").use { peer ->
+            // The filter must be able to MATCH before its later emptiness means anything: the
+            // schema was created as a quoted `"side"`, so it is stored lowercase under either
+            // folding — but a literal that matched nothing would make the `shouldBe 0L` below
+            // pass on a query that can only ever return 0 (the vacuous-green shape this suite
+            // hit elsewhere once DATABASE_TO_LOWER lower-cased the catalog's own schema names).
+            sideSchemaTables(peer) shouldBe 1L
+
             staging.close()
 
             execUserCount(peer) shouldBe 1L
-            scalarLong(peer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'side'") shouldBe 0L
+            sideSchemaTables(peer) shouldBe 0L
         }
     }
+
+    /** Base tables parked in the author-created `side` schema, seen through [connection]. */
+    private fun sideSchemaTables(connection: Connection): Long =
+        scalarLong(connection, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'side'")
 
     /**
      * The count of the restricted user the factory creates (§9.5) — 1 while the database lives,
      * 0 once it has been destroyed. This is the falsifiable lifetime signal (§12).
      */
     private fun execUserCount(connection: Connection): Long =
-        scalarLong(connection, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE USER_NAME = 'STAGING_EXEC'")
+        // UPPER(...), not §12's bare literal: the factory creates the user with an UNQUOTED
+        // `CREATE USER STAGING_EXEC`, so under the URL's DATABASE_TO_LOWER=TRUE the catalog stores
+        // it as `staging_exec` (measured on 2.3.232). The literal comparison would return 0 while
+        // the user was very much alive — turning this test's whole point, "the user is gone once
+        // the database dies", into a constant that can no longer distinguish the two states.
+        scalarLong(connection, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME) = 'STAGING_EXEC'")
 
     @Test
     fun `a non-default mode reaches the JDBC URL`() {

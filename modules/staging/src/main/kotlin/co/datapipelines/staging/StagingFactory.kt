@@ -28,11 +28,32 @@ interface StagingFactory {
 /**
  * The H2 staging factory (staging.md §3.1).
  *
- * The JDBC URL is `jdbc:h2:mem:exec_{id};MODE={mode}` with **no `DB_CLOSE_DELAY`**: default
- * H2 semantics discard an in-memory database the moment its last connection closes, which is
- * exactly the per-execution lifetime we want (§3.4). `DB_CLOSE_DELAY=-1` — removed in v1.2 —
- * would keep every abandoned staging database alive until JVM exit: an unbounded leak in a
- * long-lived server.
+ * The JDBC URL is `jdbc:h2:mem:exec_{id};MODE={mode};DATABASE_TO_LOWER=TRUE` with **no
+ * `DB_CLOSE_DELAY`**: default H2 semantics discard an in-memory database the moment its last
+ * connection closes, which is exactly the per-execution lifetime we want (§3.4).
+ * `DB_CLOSE_DELAY=-1` — removed in v1.2 — would keep every abandoned staging database alive
+ * until JVM exit: an unbounded leak in a long-lived server.
+ *
+ * ## Why `DATABASE_TO_LOWER=TRUE` is load-bearing
+ *
+ * Staging emits every generated identifier double-quoted (§4.5), and table names are lowercase
+ * by contract (§4.1) — so a staged table is `"stg_orders"`, stored lowercase. `MODE=PostgreSQL`
+ * alone does **not** make H2 fold *unquoted* identifiers the way PG does: H2 keeps its own
+ * upper-folding, so the author SQL `SELECT n FROM stg_orders` — the style used throughout
+ * dag-executor.md §6.5, pipeline-contract.md §10.1 and templates.md §11 — resolves as
+ * `STG_ORDERS` and fails with SQLState 42S03 against the lowercase table. `DATABASE_TO_LOWER=TRUE`
+ * is the setting that lower-folds unquoted identifiers, which is what makes §11.3's "table names
+ * are lowercase by contract, so unquoted references to them work" actually true. Verified against
+ * the pinned driver (2.3.232): with `MODE=PostgreSQL` alone the unquoted select fails 42S03; with
+ * this parameter it returns the row.
+ *
+ * It is hardcoded rather than exposed as config: it is a correctness invariant of the staged
+ * identifier scheme, not an operator choice — a deployment that turned it off would break every
+ * multi-node pipeline. Note the consequence downstream: an *upper*-case staged column (which an
+ * H2 source's unquoted `SELECT id` produces, since the source database does its own folding) now
+ * needs quoting in author SQL, exactly as §4.2/§11.3 already require for any mixed-case column.
+ * It also lower-cases the catalog's own schema names, which is why the §10/§3.4 catalog
+ * projection in [H2Staging] compares them case-insensitively.
  *
  * The factory opens the **single** operational connection and hands it to [H2Staging]; the
  * executor holds that connection open for the whole execution (§3.5) and closes it in a
@@ -69,7 +90,7 @@ class H2StagingFactory(
             StagingEngine.H2 -> Unit
         }
 
-        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${config.mode}"
+        val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${config.mode};$LOWER_FOLDING"
         val connection = openConnection(jdbcUrl, executionId)
         return H2Staging(executionId, connection, config)
     }
@@ -187,6 +208,12 @@ class H2StagingFactory(
 
         /** The non-admin identity every staging operation and all author SQL runs as (§9.5). */
         const val EXEC_USER = "STAGING_EXEC"
+
+        /**
+         * Lower-folding for unquoted identifiers — the class KDoc explains why this is a
+         * correctness invariant of the staged identifier scheme and not a configuration key.
+         */
+        const val LOWER_FOLDING = "DATABASE_TO_LOWER=TRUE"
 
         const val PASSWORD_BYTES = 32
         val SECURE_RANDOM = SecureRandom()

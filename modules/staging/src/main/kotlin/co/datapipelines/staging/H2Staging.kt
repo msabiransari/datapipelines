@@ -391,10 +391,18 @@ class H2Staging internal constructor(
          * `MODE=PostgreSQL`); a mode that added another catalog schema would show up as extra
          * `tableCount` and as drops that fail — which is why each drop is caught individually
          * rather than aborting the sweep.
+         *
+         * **The comparison is case-folded on purpose.** With `DATABASE_TO_LOWER=TRUE` in the URL
+         * (see [H2StagingFactory]) H2 names its own schemas `information_schema` / `pg_catalog`,
+         * so the bare upper-case literals match nothing: measured against the pinned driver
+         * (2.3.232), this projection returned **36** rows instead of 2 — §10 would over-report
+         * `tableCount` by every catalog table, and the §3.4 belt would issue 34 `DROP TABLE`s
+         * against H2's own catalog. `UPPER(...)` keeps the filter correct under either folding,
+         * so the projection does not silently depend on a URL parameter set in another class.
          */
         const val STAGED_TABLES =
             "INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' " +
-                "AND TABLE_SCHEMA NOT IN ('INFORMATION_SCHEMA', 'PG_CATALOG')"
+                "AND UPPER(TABLE_SCHEMA) NOT IN ('INFORMATION_SCHEMA', 'PG_CATALOG')"
 
         /**
          * H2's SQLState for "object already exists". Read off the pinned driver (2.3.232) from a
