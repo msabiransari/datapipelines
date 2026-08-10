@@ -13,7 +13,7 @@ out/
 # in .gitignore — they become part of the pattern, so keep them on their own line)
 .kotlin/
 # Gate A run logs (scripts/gate.sh)
-.gate-logs/
+gate-logs/
 
 # The wrapper JAR and scripts ARE committed (they are how the build is reproducible);
 # only local Gradle state is ignored.
@@ -56,4 +56,4 @@ lib/*.jar
 credentials.*
 secrets.*
 .claude/worktrees/
-.gate-logs/
+gate-logs/
