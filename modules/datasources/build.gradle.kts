@@ -6,6 +6,7 @@ dependencies {
 
     implementation(libs.hikaricp)
     implementation(libs.spring.boot.starter.jdbc) // DatasourceRepository (§8.1)
+    implementation(libs.jackson.module.kotlin) // properties_json (de)serialization (§4.10)
     // No BouncyCastle (removed 2026-08-07, security review MEDIUM-6 — see §5.4).
     // CredentialEncryptor uses the JDK's SunJCE `AES/GCM/NoPadding` directly.
 
@@ -27,4 +28,15 @@ dependencies {
     if (project.hasProperty("mysql")) {
         runtimeOnly(libs.mysql.connector.j) // GPL + FOSS exception
     }
+
+    // Integration tests via Testcontainers (§13.2): real PG / MySQL / MSSQL containers exercise
+    // each dialect's adapter, encryption round-trip and type mapping. The bundled drivers
+    // (postgresql, mssql-jdbc, h2, …) are already on the test runtime via `runtimeOnly`; the
+    // MySQL driver is not bundled by default, so it is added for the test runtime explicitly.
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.mysql)
+    testImplementation(libs.testcontainers.mssqlserver)
+    testImplementation(libs.postgresql)
+    testRuntimeOnly(libs.mysql.connector.j)
 }
