@@ -54,6 +54,13 @@ object DatasourceErrorCodes {
     /** Delete blocked because one or more non-deleted pipelines reference this datasource (§6.2). */
     const val IN_USE = "datasource.in_use"
 
+    /**
+     * Datasource name unknown on a read/mutate/test path (pipeline-contract §13.8, added
+     * 2026-08-11 with v1.3). Raised by the surfaces (web/mcp), not by this module — mirrored
+     * here so the §13.8 drift guard stays complete.
+     */
+    const val NOT_FOUND = "datasource.not_found"
+
     /** The JDBC driver class for `dialect` is not on the classpath (§10.3) — a packaging state. */
     const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 }
