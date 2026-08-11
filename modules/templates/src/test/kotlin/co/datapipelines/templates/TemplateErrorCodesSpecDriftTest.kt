@@ -42,7 +42,11 @@ class TemplateErrorCodesSpecDriftTest {
             documented.size shouldBeGreaterThanOrEqual MINIMUM_DOCUMENTED_CODES
         }
         withClue("every parsed code must be a template.validation.* spelling") {
-            documented.filterNot { it.startsWith("template.validation.") }.shouldBeEmpty()
+            // §13.9 gained `template.not_found` (404 read-path miss) on 2026-08-11 (v1.3,
+            // gate C) — a surface-raised lookup code, deliberately NOT a `template.validation.*`
+            // write-time rule, so the shape guard admits exactly it (same exclusion style the
+            // datasource drift guard applies to `pipeline.execution.datasource_unreachable`).
+            documented.filterNot { it.startsWith("template.validation.") || it == PipelineErrorCodes.Template.NOT_FOUND }.shouldBeEmpty()
         }
     }
 
