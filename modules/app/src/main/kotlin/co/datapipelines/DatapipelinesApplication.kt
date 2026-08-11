@@ -39,20 +39,27 @@ import org.springframework.context.annotation.FilterType
         ManagementWebSecurityAutoConfiguration::class,
     ],
 )
-// TODO(P7 app wiring — module-structure.md §5.7 / task #10): remove this exclude AND the
-//  three autoconfig excludes above together, then wire auth for real. The `auth` module is
-//  merged and independently tested (150 tests), but its Spring config is NOT scanned by the
-//  app yet: `OidcConfig` requires `datapipelines.auth.base-url` and builds real
-//  ClientRegistrations (OIDC discovery) from the google/microsoft providers in
-//  application.yml, so scanning it fails the smoke test's context load. Wiring auth into the
-//  running app needs a test OIDC provider (a Keycloak Testcontainer or a stub
+// TODO(P7 app wiring — module-structure.md §5.7 / task #10): remove BOTH scan excludes below
+//  (auth AND web) AND the three autoconfig excludes above together, then wire auth for real.
+//  The `auth` module is merged and independently tested (150+ tests), and `web` (P6a) is merged
+//  and independently tested, but neither module's Spring config is scanned by the app yet:
+//  `auth`'s `OidcConfig` requires `datapipelines.auth.base-url` and builds real
+//  ClientRegistrations (OIDC discovery) from the providers in application.yml, so scanning it
+//  fails the smoke test's context load; and `web`'s @Configuration classes inject `auth` beans
+//  (AuthProperties, AuthErrorWriter, the executor collaborators), so scanning `web` while `auth`
+//  is excluded fails the same way. Until P7 the app therefore serves ONLY the health/info probes
+//  — no auth, no REST, no MCP: `mcp-server`'s `McpServerAutoConfiguration` is
+//  `@ConditionalOnBean(PipelineExecutor)` and simply stays dormant without the executor bean
+//  `web`'s EngineConfiguration would have provided (no app change needed for it). Wiring auth
+//  into the running app needs a test OIDC provider (a Keycloak Testcontainer or a stub
 //  ClientRegistrationRepository) + base-url, plus support for a provider-less (API-key-only)
-//  deployment — that is P7 integration work, not an interim auth scheme. While this exclude is
-//  in place the application has NO authentication of any kind (same as the P0 scaffold state).
+//  deployment — that is P7 integration work, not an interim auth scheme. While these excludes
+//  are in place the application has NO authentication of any kind (same as the P0 scaffold
+//  state).
 @ComponentScan(
     basePackages = ["co.datapipelines"],
     excludeFilters = [
-        ComponentScan.Filter(type = FilterType.REGEX, pattern = ["co\\.datapipelines\\.auth\\..*"]),
+        ComponentScan.Filter(type = FilterType.REGEX, pattern = ["co\\.datapipelines\\.(auth|web)\\..*"]),
     ],
 )
 class DatapipelinesApplication

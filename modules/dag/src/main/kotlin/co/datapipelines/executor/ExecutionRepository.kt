@@ -145,17 +145,40 @@ class ExecutionRepository(
             MAPPER,
         )
 
-    /** Executions triggered by one user, newest first — the `idx_executions_user` access path. */
+    /**
+     * Executions triggered by one user, newest first — the `idx_executions_user` access path.
+     *
+     * The optional predicates are evaluated **in SQL**: a surface that paginates (rest-api §10.1)
+     * must cut the page after filtering, or `has_more` and page fullness are wrong — filtering in
+     * memory after `LIMIT` was exactly that bug (gate C, B4). [pipelineId] narrows to one
+     * pipeline; it is not an authorization dimension — [userId] is always required, so no null
+     * can widen the scope onto another user's history.
+     */
+    @Suppress("LongParameterList")
     fun findByUser(
         userId: UUID,
+        pipelineId: UUID? = null,
+        status: ExecutionStatus? = null,
+        startedAfter: Instant? = null,
+        startedBefore: Instant? = null,
         limit: Int = DEFAULT_PAGE,
         offset: Int = 0,
-    ): List<ExecutionRecord> =
-        jdbc.query(
-            "$SELECT_COLUMNS WHERE triggered_by = :userId ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
-            mapOf("userId" to userId, "limit" to limit, "offset" to offset),
+    ): List<ExecutionRecord> {
+        val (where, params) =
+            filteredQuery(
+                "triggered_by = :userId",
+                mapOf("userId" to userId),
+                pipelineId,
+                status,
+                startedAfter,
+                startedBefore,
+            )
+        return jdbc.query(
+            "$SELECT_COLUMNS $where ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+            params + mapOf("limit" to limit, "offset" to offset),
             MAPPER,
         )
+    }
 
     /**
      * Every execution, newest first — the **admin** listing behind `GET /executions` (rest-api
@@ -169,21 +192,61 @@ class ExecutionRepository(
      *   `started_at` with no index of its own to lean on (metadata-db §4.6 indexes all lead with
      *   another column); that is acceptable for a paginated admin-only path and is the reason
      *   [limit] is bounded by default rather than optional.
+     *
+     * The optional status/time predicates are SQL-level for the same reason as [findByUser]'s
+     * (gate C, B4): pagination must happen after filtering, not before it.
      */
+    @Suppress("LongParameterList")
     fun findAll(
         pipelineId: UUID? = null,
+        status: ExecutionStatus? = null,
+        startedAfter: Instant? = null,
+        startedBefore: Instant? = null,
         limit: Int = DEFAULT_PAGE,
         offset: Int = 0,
-    ): List<ExecutionRecord> =
-        jdbc.query(
-            """
-            $SELECT_COLUMNS
-            ${if (pipelineId == null) "" else "WHERE pipeline_id = :pipelineId"}
-             ORDER BY started_at DESC LIMIT :limit OFFSET :offset
-            """.trimIndent(),
-            mapOf("pipelineId" to pipelineId, "limit" to limit, "offset" to offset),
+    ): List<ExecutionRecord> {
+        val (where, params) = filteredQuery(null, emptyMap(), pipelineId, status, startedAfter, startedBefore)
+        return jdbc.query(
+            "$SELECT_COLUMNS $where ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+            params + mapOf("limit" to limit, "offset" to offset),
             MAPPER,
         )
+    }
+
+    /**
+     * Builds the WHERE clause and its parameters from the optional §10.1 filters. Every value is
+     * bound, never interpolated — only the clause *shape* is composed.
+     */
+    private fun filteredQuery(
+        baseClause: String?,
+        baseParams: Map<String, Any?>,
+        pipelineId: UUID?,
+        status: ExecutionStatus?,
+        startedAfter: Instant?,
+        startedBefore: Instant?,
+    ): Pair<String, Map<String, Any?>> {
+        val clauses = mutableListOf<String>()
+        listOfNotNull(baseClause).forEach(clauses::add)
+        val params = baseParams.toMutableMap()
+        if (pipelineId != null) {
+            clauses += "pipeline_id = :pipelineId"
+            params["pipelineId"] = pipelineId
+        }
+        if (status != null) {
+            clauses += "status = :status"
+            params["status"] = status.name
+        }
+        if (startedAfter != null) {
+            clauses += "started_at >= :startedAfter"
+            params["startedAfter"] = java.sql.Timestamp.from(startedAfter)
+        }
+        if (startedBefore != null) {
+            clauses += "started_at <= :startedBefore"
+            params["startedBefore"] = java.sql.Timestamp.from(startedBefore)
+        }
+        val where = if (clauses.isEmpty()) "" else "WHERE " + clauses.joinToString(" AND ")
+        return where to params
+    }
 
     /**
      * The crash sweep (metadata-db §8.3): `RUNNING` rows older than

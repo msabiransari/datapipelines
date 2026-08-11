@@ -31,6 +31,18 @@ class ApiKeyRepository(
             ::map,
         )
 
+    /**
+     * Every key the user owns, revoked included — the `GET /api/v1/auth/api-keys` listing
+     * (rest-api §16.1), whose `is_revoked` field is only meaningful when both values can appear
+     * (gate C, F12c). Owner-scoped in SQL, like everything else here.
+     */
+    fun findByUser(userId: UUID): List<ApiKey> =
+        jdbc.query(
+            "SELECT * FROM api_keys WHERE user_id = :uid ORDER BY created_at DESC",
+            MapSqlParameterSource("uid", userId),
+            ::map,
+        )
+
     fun insert(
         id: String,
         userId: UUID,

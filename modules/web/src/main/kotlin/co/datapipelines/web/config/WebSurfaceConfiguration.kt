@@ -1,0 +1,168 @@
+package co.datapipelines.web.config
+
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.executor.CancellationFlags
+import co.datapipelines.executor.CancellationRegistry
+import co.datapipelines.executor.ExecutionCancellationService
+import co.datapipelines.executor.ExecutionEventRepository
+import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutionSlots
+import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.executor.ExecutorDispatcher
+import co.datapipelines.executor.ExecutorJson
+import co.datapipelines.executor.ExecutorMetrics
+import co.datapipelines.executor.IdempotencyStore
+import co.datapipelines.executor.ResultConfig
+import co.datapipelines.executor.ResultStore
+import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.WritebackRunner
+import co.datapipelines.staging.StagingFactory
+import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.web.executions.ResultCursor
+import co.datapipelines.web.metrics.WebMetrics
+import co.datapipelines.web.pipelines.ExecutionLauncher
+import co.datapipelines.web.ratelimit.RateLimiter
+import co.datapipelines.web.ratelimit.RedisRateLimiter
+import co.datapipelines.web.sse.ExecutionStreamRegistry
+import co.datapipelines.web.sse.SseEventLog
+import co.datapipelines.web.sse.SseLogStreamer
+import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.data.redis.core.StringRedisTemplate
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+
+/**
+ * The web surface's own beans: SSE stream machinery, the per-user limiter, the result cursor and
+ * the execution launcher (module-structure §5.9 — `web` is the aggregation layer).
+ *
+ * The SSE payload mapper is `dag`'s [ExecutorJson.mapper] rather than the servlet mapper: the
+ * payloads are built from executor data (`Instant`, `ColumnSchema`, `TypeMappingWarning`) and
+ * `ExecutorJson` is the mapper whose module set already covers them.
+ */
+@Configuration
+class WebSurfaceConfiguration {
+    /** The per-user limiter the [co.datapipelines.web.ratelimit.RateLimitFilter] enforces. */
+    @Bean
+    fun rateLimiter(
+        redis: StringRedisTemplate,
+        properties: RateLimitProperties,
+    ): RateLimiter = RedisRateLimiter(redis, properties)
+
+    @Bean(destroyMethod = "shutdown")
+    fun sseLogScheduler(): ScheduledExecutorService =
+        Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "dp-sse-log").apply { isDaemon = true }
+        }
+
+    @Bean
+    fun sseEventLog(redis: StringRedisTemplate): SseEventLog = SseEventLog(redis, ExecutorJson.mapper)
+
+    @Bean
+    fun sseLogStreamer(
+        eventLog: SseEventLog,
+        scheduler: ScheduledExecutorService,
+    ): SseLogStreamer = SseLogStreamer(eventLog, ExecutorJson.mapper, scheduler)
+
+    @Bean
+    fun executionStreamRegistry(
+        properties: SseProperties,
+        cancellationService: ExecutionCancellationService,
+    ): ExecutionStreamRegistry = ExecutionStreamRegistry(properties, cancellationService, ExecutorJson.mapper)
+
+    @Bean
+    fun webMetrics(
+        registry: MeterRegistry,
+        streams: ExecutionStreamRegistry,
+    ): WebMetrics = WebMetrics(registry).also { it.bindStreams(streams) }
+
+    @Bean
+    fun resultCursor(
+        executions: ExecutionRepository,
+        resultStore: ResultStore,
+        resultConfig: ResultConfig,
+        metrics: WebMetrics,
+    ): ResultCursor = ResultCursor(executions, resultStore, resultConfig, metrics)
+
+    /**
+     * The scope execute coroutines launch into. `SupervisorJob`: one execution's failure must not
+     * cancel another's. The executor does its own dispatcher switching for blocking work
+     * (dag-executor §15.2), so the launch context only ever orchestrates.
+     *
+     * The holder class exists because `CoroutineScope.cancel` is an extension, not a member —
+     * `destroyMethod` cannot see it.
+     */
+    @Bean(destroyMethod = "close")
+    fun executionScope(): ExecutionCoroutineScope = ExecutionCoroutineScope()
+
+    /** A [CoroutineScope] with a real `close()` for the container's shutdown drain. */
+    class ExecutionCoroutineScope :
+        CoroutineScope,
+        java.io.Closeable {
+        private val job = SupervisorJob()
+        override val coroutineContext = job + Dispatchers.Default
+
+        override fun close() {
+            job.cancel()
+        }
+    }
+
+    @Suppress("LongParameterList")
+    @Bean
+    fun executionLauncher(
+        templateEngine: TemplateEngine,
+        datasourceRegistry: DatasourceRegistry,
+        stagingFactory: StagingFactory,
+        writebackRunner: WritebackRunner,
+        resultStore: ResultStore,
+        cancellationRegistry: CancellationRegistry,
+        cancellationFlags: CancellationFlags,
+        executionSlots: ExecutionSlots,
+        executorDispatcher: ExecutorDispatcher,
+        executorConfig: ExecutorConfig,
+        resultUrls: ResultUrlFactory,
+        executorMetrics: ExecutorMetrics,
+        persistenceDispatcher: CoroutineDispatcher,
+        streams: ExecutionStreamRegistry,
+        eventLog: SseEventLog,
+        streamer: SseLogStreamer,
+        eventRepository: ExecutionEventRepository,
+        executionRepository: ExecutionRepository,
+        idempotencyStore: IdempotencyStore,
+        idempotency: IdempotencyProperties,
+        redis: StringRedisTemplate,
+        metrics: WebMetrics,
+        scope: CoroutineScope,
+    ): ExecutionLauncher =
+        ExecutionLauncher(
+            templateEngine = templateEngine,
+            datasourceRegistry = datasourceRegistry,
+            stagingFactory = stagingFactory,
+            writebackRunner = writebackRunner,
+            resultStore = resultStore,
+            cancellationRegistry = cancellationRegistry,
+            cancellationFlags = cancellationFlags,
+            executionSlots = executionSlots,
+            executorDispatcher = executorDispatcher,
+            executorConfig = executorConfig,
+            resultUrls = resultUrls,
+            executorMetrics = executorMetrics,
+            persistenceDispatcher = persistenceDispatcher,
+            streams = streams,
+            eventLog = eventLog,
+            streamer = streamer,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+            idempotencyStore = idempotencyStore,
+            idempotency = idempotency,
+            redis = redis,
+            mapper = ExecutorJson.mapper,
+            metrics = metrics,
+            scope = scope,
+        )
+}

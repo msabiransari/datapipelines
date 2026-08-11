@@ -1,0 +1,78 @@
+package co.datapipelines.web.config
+
+import co.datapipelines.web.TestRepoFiles
+import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.Test
+
+/**
+ * The standing guard that the `@ConfigurationProperties` defaults equal configuration.md's
+ * documented defaults — that document is the single authority for config keys (§1), and a binding
+ * class that quietly disagrees with it is a second authority.
+ *
+ * Every key this module binds is listed explicitly: a default edited in the doc without a
+ * corresponding property change fails here, and a property default edited without the doc fails
+ * here too.
+ */
+class WebPropertiesSpecDriftTest {
+    private val documented: Map<String, String> by lazy {
+        TestRepoFiles
+            .read(TestRepoFiles.CONFIG_SPEC_PATH)
+            .lineSequence()
+            .mapNotNull { ROW_REGEX.find(it) }
+            .associate { it.groupValues[1] to it.groupValues[2] }
+    }
+
+    @Test
+    fun `sse property defaults match configuration-md section 3-6`() {
+        val props = SseProperties()
+        documented.getValue("datapipelines.sse.heartbeat-interval-seconds") shouldBe props.heartbeatIntervalSeconds.toString()
+        documented.getValue("datapipelines.sse.disconnect-grace-seconds") shouldBe props.disconnectGraceSeconds.toString()
+        documented.getValue("datapipelines.sse.max-streams-per-user") shouldBe props.maxStreamsPerUser.toString()
+    }
+
+    @Test
+    fun `rate-limit property defaults match configuration-md section 3-7`() {
+        val props = RateLimitProperties()
+        documented.getValue("datapipelines.rate-limit.requests-per-second") shouldBe props.requestsPerSecond.toString()
+        documented.getValue("datapipelines.rate-limit.requests-per-minute") shouldBe props.requestsPerMinute.toString()
+    }
+
+    @Test
+    fun `result property defaults match configuration-md section 3-5`() {
+        val props = ResultProperties()
+        documented.getValue("datapipelines.result.ttl-default-seconds") shouldBe props.ttlDefaultSeconds.toString()
+        documented.getValue("datapipelines.result.ttl-min-seconds") shouldBe props.ttlMinSeconds.toString()
+        documented.getValue("datapipelines.result.ttl-max-seconds") shouldBe props.ttlMaxSeconds.toString()
+        documented.getValue("datapipelines.result.max-size-bytes") shouldBe props.maxSizeBytes.toString()
+        documented.getValue("datapipelines.result.page-size-rows") shouldBe props.pageSizeRows.toString()
+        documented.getValue("datapipelines.result.page-max-rows") shouldBe props.pageMaxRows.toString()
+    }
+
+    @Test
+    fun `executor property defaults match configuration-md section 3-2`() {
+        val props = ExecutorProperties()
+        documented.getValue("datapipelines.executor.max-parallel-nodes") shouldBe props.maxParallelNodes.toString()
+        documented.getValue("datapipelines.executor.max-concurrent-executions-per-user") shouldBe
+            props.maxConcurrentExecutionsPerUser.toString()
+        documented.getValue("datapipelines.executor.max-concurrent-executions-global") shouldBe
+            props.maxConcurrentExecutionsGlobal.toString()
+        documented.getValue("datapipelines.executor.node-query-timeout-seconds") shouldBe props.nodeQueryTimeoutSeconds.toString()
+        documented.getValue("datapipelines.executor.execution-timeout-seconds") shouldBe props.executionTimeoutSeconds.toString()
+    }
+
+    @Test
+    fun `staging and idempotency defaults match configuration-md sections 3-3 and 3-8`() {
+        val staging = StagingH2Properties()
+        documented.getValue("datapipelines.staging.h2.mode") shouldBe staging.mode
+        documented.getValue("datapipelines.staging.h2.max-memory-mb") shouldBe staging.maxMemoryMb.toString()
+        documented.getValue("datapipelines.staging.h2.insert-batch-size") shouldBe staging.insertBatchSize.toString()
+        documented.getValue("datapipelines.staging.h2.result-batch-size") shouldBe staging.resultBatchSize.toString()
+        documented.getValue("datapipelines.staging.h2.query-timeout-seconds") shouldBe staging.queryTimeoutSeconds.toString()
+        documented.getValue("datapipelines.idempotency.ttl-seconds") shouldBe IdempotencyProperties().ttlSeconds.toString()
+    }
+
+    private companion object {
+        /** A `| \`datapipelines.*\` | \`default\` | … |` row in the §3 tables. */
+        val ROW_REGEX = Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9]+)`?\s*\|""")
+    }
+}

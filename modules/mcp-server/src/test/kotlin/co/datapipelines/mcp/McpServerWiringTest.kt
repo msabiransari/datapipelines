@@ -144,7 +144,7 @@ class McpServerWiringTest {
         every { pipelines.findAll(null) } returns emptyList()
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { delegate.handleRequest(any(), any()) } returns
             Mono.just(McpSchema.JSONRPCResponse.result("1", mapOf("delegated" to true)))
 

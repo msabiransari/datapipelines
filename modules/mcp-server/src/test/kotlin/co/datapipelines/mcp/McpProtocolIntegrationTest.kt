@@ -140,7 +140,7 @@ class McpProtocolIntegrationTest {
         every { pipelines.findAll(null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val result = call(McpSchema.METHOD_RESOURCES_LIST, emptyMap<String, Any>()).result() as McpSchema.ListResourcesResult
 

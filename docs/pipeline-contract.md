@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.2 (revised — see Change Log)
+**Status:** v1.3 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-11
 
 ---
 
@@ -750,6 +750,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.query_timeout_invalid` | 400 | `query_timeout_seconds` present but < 1 |
 | `datasource.validation.duplicate_name` | 409 | Name already exists |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
+| `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
 
@@ -771,6 +772,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
+| `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 
 ### 13.10 Result retrieval
 
@@ -1032,3 +1034,4 @@ Out of scope for v1.1, tracked for future:
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline contract: schema, nodes, parameters, validation, error codes, lifecycle |
 | 2026-08-05 | v1.1 | review feedback | Replaced `terminal_node_id` with auto-detection (§9). Added `type` enum (DQL/DML/DDL) — §4.6, §8. Added `output` block with `target` (tempdb/caller/datasource) — §4.7, §8.1. Added `settings.tempdb` — §5. Renamed `__staging__` → `tempdb` throughout. Removed `datasources_used` (redundant with node sources). Added `engine` field placeholder for templates. **Rejected `parallel_id`** — `depends_on` is mathematically complete for DAG parallelism (two nodes run in parallel iff neither is reachable from the other); a second parallelism source-of-truth would create reconciliation bugs. |
 | 2026-08-07 | v1.2 | consistency campaign | **D1:** omitted `output` defaults to `caller` (was `tempdb`); topology-based terminal auto-detection replaced by caller-node resolution (§9); any DQL target combination legal — deleted `dql_sink_missing_caller_target`, `no_dql_sink`, `disconnected_terminal`, `dql_missing_output`; `multiple_caller_targets` → `multiple_caller_nodes`; zero caller nodes legal. **D3:** template variables validated by save-time dry-render (§7.4, §12.6); pipeline `parameters` is the single declaration point. **D5:** §13 expanded with §13.7–13.11 (auth normalized to 3-segment codes, datasource, template, result, rate-limit/idempotency) — the single concrete code catalog. §6.3 strict coercion rules; §10.1 per-namespace table uniqueness; §11.4 scan fields + heuristics specified; §15.4 version-counter disambiguation; §17.3 defers DDL to metadata-db. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-11 | v1.3 | gate C review | Additive §13 rows: `template.not_found` (404) and `datasource.not_found` (404) — read/mutate-path misses previously borrowed `pipeline.validation.*` codes, which are 400s for write-time validation. Adjudicated answer to the catalog gap flagged by mcp-server's McpNotFound and web's ApiErrors. |

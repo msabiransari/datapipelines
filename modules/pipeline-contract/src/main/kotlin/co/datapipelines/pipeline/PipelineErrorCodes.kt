@@ -238,6 +238,7 @@ object PipelineErrorCodes {
         const val QUERY_TIMEOUT_INVALID = "datasource.validation.query_timeout_invalid"
         const val DUPLICATE_NAME = "datasource.validation.duplicate_name"
         const val IN_USE = "datasource.in_use"
+        const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
     }
 
@@ -255,6 +256,7 @@ object PipelineErrorCodes {
         const val IMPORT_CYCLE = "template.validation.import_cycle"
         const val IMPORT_DEPTH_EXCEEDED = "template.validation.import_depth_exceeded"
         const val DUPLICATE_ALIAS = "template.validation.duplicate_alias"
+        const val NOT_FOUND = "template.not_found"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */

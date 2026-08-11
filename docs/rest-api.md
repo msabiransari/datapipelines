@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v1.3 (frozen contract — additive-only changes after this point)
+**Status:** v1.4 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-11
 
 ---
 
@@ -60,7 +60,7 @@ Required scopes per operation are defined once in the [Auth §7.6 scope matrix](
 
 ### 3.4 Correlation
 
-Every request may include the `DP-Correlation-Id` header. The server echoes it in the response and includes it in logs. If absent, the server generates one and returns it in the response header.
+Every request may include the `DP-Correlation-Id` header. The server echoes it in the response and includes it in logs. If absent, the server generates one and returns it in the response header. Adoption is conditional on shape: an inbound value that is not a well-formed UUID is replaced with a generated id, because the header is attacker-controlled text that is persisted (UUID column) and echoed on every response (added v1.4).
 
 ### 3.5 Idempotency
 
@@ -634,6 +634,8 @@ GET /executions/{execution_id}/result?format=csv      # text/csv, header row
 
 Arrow: binary IPC stream with embedded schema, full result in one response (no pagination). CSV: header row; big integers/decimals as their wire-string form (Type System rules); full result, no pagination. Both respect the same TTL and auth.
 
+**v1 delivery note (added v1.4):** `format=arrow` is recognized but not served in v1 — no Arrow IPC encoder ships in the v1 dependency set, and a hand-rolled one is unverifiable. The request is answered `400 result.format_unsupported` with `details.supported = ["json", "csv"]`. Arrow delivery remains tracked in §14.
+
 ### 7.6 Endpoint errors
 
 Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval).
@@ -785,8 +787,10 @@ Response: `201 Created` with the datasource entity (excluding password).
 ### 9.2 List datasources
 
 ```
-GET /datasources?dialect={dialect}
+GET /datasources?dialect={dialect}&offset=0&limit=50
 ```
+
+Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints paginate).
 
 ### 9.3 Get datasource (sensitive fields redacted)
 
@@ -874,7 +878,7 @@ Accept: text/event-stream
 
 Re-emits the SSE event stream from the Redis event log, in original order with original timestamps. Useful for debugging pipelines after the fact.
 
-Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour.
+Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour.
 
 ### 10.4 Cancel execution
 
@@ -1062,3 +1066,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-05 | v1.1 | propagation | Updated create-pipeline example to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`, node has `type`/`output`). |
 | 2026-08-05 | v1.2 | SSE hardening | Added SSE heartbeat (§6.6) for LB idle-timeout prevention. Updated stream reconnection (§6.8) for multi-instance without sticky sessions: execution continues on originating instance; client polls/fetches result via REST if SSE reconnects to different instance. |
 | 2026-08-07 | v1.3 | consistency campaign | **D9:** §7 rewritten — every caller result materialized in Redis, `data_ready` = schema + inline first page + cursor, `DP-Result-TTL-Seconds` clamped TTL (fixed expiry), 100MB cap, `result.too_large`/`result.storage_unavailable`/`result.expired`; inline/claim-check split removed. **D7:** §6.8 inverted — client disconnect cancels the execution after grace; `Last-Event-Id` resumption language removed; new `DELETE /executions/{id}` (§10.4) + `execution_aborted` event (§6.4.8) + `pipeline.execution.not_running`. **D10:** `DP-` header sweep + header registry (§3.6); `RateLimit-*` headers. **D5/D15:** per-user rate limits, scope matrix references. New §16: API-key CRUD, `/auth/me`, user admin; deleted stale `/auth/login`//`/auth/refresh` references. §3.5 idempotency scoped to execute only. `jdbc_url` removed from `node_failed` details (redaction). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-11 | v1.4 | P6a gate C doc-sync | Additive implementation-reality notes from the web module's Gate C: §3.4 correlation-id adoption is shape-conditional (non-UUID inbound values are replaced, not echoed); §7.5 `format=arrow` recognized but not served in v1 (`result.format_unsupported`, supported=[json,csv] — tracked in §14); §9.2 datasources list takes offset/limit and returns the §4.3 envelope (§2 principle 6); §10.3's post-expiry 410 named as `result.expired`. §13 gained `template.not_found` / `datasource.not_found` (404) — see pipeline-contract v1.3. |

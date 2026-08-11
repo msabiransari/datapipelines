@@ -40,7 +40,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns emptyList()
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
     }
 
     @Test
@@ -52,7 +52,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns many
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val first = catalog.list(ctx, null)
         val second = catalog.list(ctx, first.nextCursor)
@@ -78,7 +78,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.list(null) } returns listOf(McpFixtures.datasource())
-        every { executions.findByUser(McpFixtures.USER, any(), any()) } returns
+        every { executions.findByUser(McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.executionRecord(startedAt = now.minusSeconds(60)))
 
         val page = catalog.list(ctx, null)
@@ -98,7 +98,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns emptyList()
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(McpFixtures.USER, any(), any()) } returns
+        every { executions.findByUser(McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(
                 McpFixtures.executionRecord(startedAt = now.minusSeconds(3_600)),
                 McpFixtures.executionRecord(executionId = UUID.randomUUID(), startedAt = now.minusSeconds(90_000)),
@@ -116,7 +116,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns emptyList()
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(McpFixtures.OTHER_USER, any(), any()) } returns emptyList()
+        every { executions.findByUser(McpFixtures.OTHER_USER, any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(McpFixtures.ctx(Scope.READ, userId = McpFixtures.OTHER_USER), null)
 
@@ -128,7 +128,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(ctx, null)
 
@@ -195,7 +195,7 @@ class McpResourceCatalogTest {
             }
         every { templates.list(any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         catalog.list(ctx, null)
 
@@ -209,7 +209,7 @@ class McpResourceCatalogTest {
         every { templates.list(any(), any(), 5, any()) } returns listOf(McpFixtures.template(id = "t6"))
         every { templates.list(any(), any(), 0, any()) } returns listOf(McpFixtures.template(id = "t1"))
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(ctx, McpResourceCursor(McpResourceUri.TEMPLATES, 5).encode())
 

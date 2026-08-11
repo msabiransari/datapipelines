@@ -136,7 +136,9 @@ class PipelineErrorCodesSpecDriftTest {
         val KNOWN_TWO_SEGMENT_CODES =
             setOf(
                 PipelineErrorCodes.Datasource.IN_USE,
+                PipelineErrorCodes.Datasource.NOT_FOUND,
                 PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED,
+                PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
