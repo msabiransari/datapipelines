@@ -4,6 +4,16 @@ plugins { id("datapipelines.common-conventions") }
 dependencies {
     testImplementation(project(":modules:app"))
 
+    // The tracer-bullet E2E seeds API keys via SQL, and the stored hash must be a real
+    // Argon2id of the full key (auth.md §7.2). The P7 brief asked for auth's
+    // `Argon2SecretHasher` used as a plain class — but module-structure §4.2 allows
+    // integration-tests ONLY `:modules:app`, and `verifyModuleDependencies` enforces
+    // that mechanically, so the hash is computed with the same pinned library and the
+    // same parameters (2 / 19 456 / 1, see SecretHasher.kt) instead. Reported to the
+    // orchestrator. argon2-jvm's encoded hash is self-describing, so auth's bounded
+    // bean verifies it unchanged; no literal hash enters a fixture (HIGH-2).
+    testImplementation(libs.argon2.jvm)
+
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
@@ -15,4 +25,8 @@ dependencies {
     testImplementation(libs.testcontainers.mssqlserver)
     testImplementation(libs.testcontainers.oracle.xe)
     testImplementation(libs.rest.assured)
+    // The SSE stream's `data:` payloads are parsed as JSON; app exposes its own
+    // dependencies as `implementation`, so jackson is declared explicitly here (same
+    // catalog alias app's tests already use).
+    testImplementation(libs.jackson.module.kotlin)
 }

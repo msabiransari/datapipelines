@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import jakarta.servlet.DispatcherType
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -64,6 +65,15 @@ class SecurityConfig(
                 csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher())
             }.authorizeHttpRequests { auth ->
                 auth
+                    // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
+                    // re-enter this chain with no SecurityContext: the auth filters are
+                    // OncePerRequestFilter and do not re-run on them. The REQUEST dispatch
+                    // already authenticated and authorized the request, so these dispatch
+                    // types are permitted — without this, every completed SSE stream dies
+                    // as Access Denied on the completion dispatch and the container aborts
+                    // the (already committed) response mid-chunk.
+                    .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR)
+                    .permitAll()
                     .requestMatchers(
                         "/health",
                         "/ready",

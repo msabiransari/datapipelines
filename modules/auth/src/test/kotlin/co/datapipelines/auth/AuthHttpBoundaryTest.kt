@@ -176,15 +176,18 @@ class AuthHttpBoundaryTest {
 
     @Test
     fun `an anonymous api call is 401 auth-api_key-missing with the full envelope`() {
-        val response = call(HttpMethod.GET, "/api/v1/probe", headers(correlationId = "corr-boundary"))
+        // UUID-shaped so the §3.4 adoption gate echoes it (a non-UUID inbound value is
+        // attacker-controlled text and is replaced — covered in AuthErrorWriterTest).
+        val correlationId = UUID.randomUUID().toString()
+        val response = call(HttpMethod.GET, "/api/v1/probe", headers(correlationId = correlationId))
 
         response.statusCode.value() shouldBe 401
         val error = error(response)
         error["code"] shouldBe "auth.api_key.missing"
         error["user_message"] shouldBe "You are not signed in. Sign in and try again."
         error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/auth-api-key-missing"
-        mapper.readValue(response.body, Map::class.java)["correlation_id"] shouldBe "corr-boundary"
-        response.headers.getFirst(AuthErrorWriter.CORRELATION_HEADER) shouldBe "corr-boundary"
+        mapper.readValue(response.body, Map::class.java)["correlation_id"] shouldBe correlationId
+        response.headers.getFirst(AuthErrorWriter.CORRELATION_HEADER) shouldBe correlationId
     }
 
     @Test

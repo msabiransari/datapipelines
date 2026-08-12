@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionResult
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultConfig
@@ -46,11 +47,13 @@ private const val PARAMETERS_DESC =
  *   concept the servlet MCP transport gives no hook for: a blocking `POST /mcp` cannot observe
  *   the client going away. Out-of-band cancellation (`DELETE /api/v1/executions/{id}`) still
  *   works and lands here as an abort; the execution timeout remains the backstop.
- * - **`pipeline_executions` is not written here.** The executor mints the execution id internally
- *   and its failure exceptions do not carry it, so this surface never learns the id of an
- *   execution that failed. Recording the row (with `triggered_via = MCP`) therefore belongs to
- *   the event-emitter wiring in `app`, which sees `execution_started` — reported as a P7
- *   carry-forward, together with the missing trigger carrier on [ExecuteRequest].
+ *
+ * ## Recording (P7)
+ * Executions launched here carry `triggered_via = MCP` and are recorded
+ * (`pipeline_executions` + `execution_events` + the 1h Redis log) when the assembling layer has
+ * supplied an [McpExecutionRunner] — `web` does, through a per-run emitter with no SSE stream.
+ * Without one (module slice tests) the shared executor bean runs the request and records
+ * nothing; the tool result is unaffected either way.
  */
 class PipelineExecuteTool(
     private val pipelines: PipelineRepository,
@@ -65,6 +68,11 @@ class PipelineExecuteTool(
      * used when it wrote the result.
      */
     private val resultConfig: ResultConfig = ResultConfig(),
+    /**
+     * The recording path (P7). Null outside the assembled application; see [McpExecutionRunner]
+     * for what an implementation guarantees.
+     */
+    private val executionRunner: McpExecutionRunner? = null,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -110,6 +118,7 @@ class PipelineExecuteTool(
                 userId = ctx.principal.userId,
                 parameters = parameters(args),
                 correlationId = ctx.correlationId,
+                triggeredVia = ExecutionTrigger.MCP,
             )
         val result = execute(request)
         return payload(request, result)
@@ -118,7 +127,7 @@ class PipelineExecuteTool(
     /** Runs the execution, translating the one cancellation path that is not a [DatapipelinesException]. */
     private fun execute(request: ExecuteRequest): ExecutionResult =
         try {
-            runBlocking { executor.execute(request) }
+            runBlocking { executionRunner?.run(request) ?: executor.execute(request) }
         } catch (e: ExecutionAbortedException) {
             // §8.1: abortion extends CancellationException and maps to no executor error code, so
             // the dispatcher's DatapipelinesException path cannot see it. The agent still has to

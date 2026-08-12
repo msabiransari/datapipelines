@@ -6,6 +6,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotBeBlank
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -20,9 +21,15 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * The P0 smoke test (module-structure.md §9.3 / §5.10): the full Spring context
- * loads, Flyway migrates a clean database, and the three root probes answer with
- * the shapes their specs promise.
+ * The P0 smoke test (module-structure.md §9.3 / §5.10), now the P7 full-context test:
+ * the WHOLE application boots — auth's real security chain, web's REST/SSE surface,
+ * the engine, and the MCP autoconfiguration — Flyway migrates a clean database, and
+ * the three root probes answer with the shapes their specs promise.
+ *
+ * OIDC discovery is real but aimed at [OidcDiscoveryStub]: `OidcConfig`'s production
+ * bean builds `ClientRegistration`s from the configured providers exactly as shipped
+ * (auth.md §5.2), against an in-process loopback discovery document — no network, no
+ * container, no test-only substitute bean.
  *
  * Self-contained by design — it starts its own Postgres and Redis rather than
  * assuming `deploy/docker-compose.dev.yml` is up, so CI and a fresh checkout
@@ -111,6 +118,12 @@ class ApplicationSmokeTest {
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
+        /**
+         * In-process OIDC discovery (auth.md §5.2) for the configured providers — the
+         * real `OidcConfig` fetches this at startup; nothing here authenticates anyone.
+         */
+        private val oidc = OidcDiscoveryStub()
+
         /** A fresh, valid, base64 32-byte secret. Never a literal — see the class KDoc. */
         private fun randomSecret(): String =
             Base64
@@ -138,12 +151,29 @@ class ApplicationSmokeTest {
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
-            // The OIDC block in application.yml references these; no provider is wired
-            // yet (the auth module owns that), so placeholders just need to resolve.
-            registry.add("GOOGLE_CLIENT_ID") { "test-unused" }
-            registry.add("GOOGLE_CLIENT_SECRET") { "test-unused" }
-            registry.add("MICROSOFT_CLIENT_ID") { "test-unused" }
-            registry.add("MICROSOFT_CLIENT_SECRET") { "test-unused" }
+            // OIDC (auth.md §5.1/§5.2): the provider LIST is re-declared here in full —
+            // Spring takes a bound list wholesale from the highest-precedence property
+            // source that contains any element of it, so overriding just the issuer-uri
+            // would shadow application.yml's entries and leave their names blank; and
+            // BOTH indices must be redeclared, because an Environment lookup for index 1
+            // otherwise falls through to application.yml's `microsoft` entry whose
+            // ${MICROSOFT_CLIENT_ID} placeholder cannot resolve here. Both entries
+            // discover from the in-process stub; the base-url the redirect URIs are
+            // built from is set explicitly.
+            listOf("google", "microsoft").forEachIndexed { index, name ->
+                registry.add("datapipelines.auth.oidc.providers[$index].name") { name }
+                registry.add("datapipelines.auth.oidc.providers[$index].client-id") { "test-$name-client-id" }
+                registry.add("datapipelines.auth.oidc.providers[$index].client-secret") { "test-$name-client-secret" }
+                registry.add("datapipelines.auth.oidc.providers[$index].issuer-uri") { oidc.issuer }
+                registry.add("datapipelines.auth.oidc.providers[$index].display-name") { "Test $name" }
+            }
+            registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun tearDown() {
+            oidc.close()
         }
     }
 }

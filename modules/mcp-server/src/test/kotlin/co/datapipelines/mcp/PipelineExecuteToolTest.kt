@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.PipelineExecutionFailed
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultConfig
@@ -227,5 +228,38 @@ class PipelineExecuteToolTest {
         shouldThrow<DatapipelinesException> {
             tool.call(McpArguments(mapOf("id" to UUID.randomUUID().toString(), "parameters" to emptyMap<String, Any?>())), ctx)
         }.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
+    }
+
+    @Test
+    fun `the request is stamped triggered via MCP`() {
+        storedPipeline()
+        val request = slot<ExecuteRequest>()
+        coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
+
+        tool.call(args, ctx)
+
+        request.captured.triggeredVia shouldBe ExecutionTrigger.MCP
+    }
+
+    @Test
+    fun `a supplied execution runner takes the call and the shared executor is not used`() {
+        // P7: in the assembled application `web` supplies the runner that records the
+        // execution (triggered_via = MCP); the NONE-emitter executor bean must stay unused.
+        storedPipeline()
+        val runner = mockk<McpExecutionRunner>()
+        val request = slot<ExecuteRequest>()
+        coEvery { runner.run(capture(request)) } returns result(resultRef = null)
+        val withRunner =
+            PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, executionRunner = runner)
+
+        @Suppress("UNCHECKED_CAST")
+        val payload = withRunner.call(args, ctx) as Map<String, Any?>
+
+        assertAll(
+            { payload["status"] shouldBe "SUCCESS" },
+            { request.captured.triggeredVia shouldBe ExecutionTrigger.MCP },
+            { request.captured.pipelineId shouldBe McpFixtures.PIPELINE_ID },
+        )
+        coVerify(exactly = 0) { executor.execute(any()) }
     }
 }

@@ -16,11 +16,13 @@ import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.WritebackRunner
+import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.pipelines.ExecutionLauncher
+import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionStreamRegistry
@@ -164,5 +166,52 @@ class WebSurfaceConfiguration {
             mapper = ExecutorJson.mapper,
             metrics = metrics,
             scope = scope,
+        )
+
+    /**
+     * The recording execution path for MCP-originated runs (P7). `mcp-server`'s autoconfiguration
+     * picks this up through its own [McpExecutionRunner] port — `web` depends on `mcp-server`,
+     * never the reverse, so the port lives there and the implementation here. Shares every engine
+     * collaborator with [executionLauncher]; what it deliberately lacks is anything stream-shaped.
+     */
+    @Suppress("LongParameterList")
+    @Bean
+    fun mcpExecutionRunner(
+        templateEngine: TemplateEngine,
+        datasourceRegistry: DatasourceRegistry,
+        stagingFactory: StagingFactory,
+        writebackRunner: WritebackRunner,
+        resultStore: ResultStore,
+        cancellationRegistry: CancellationRegistry,
+        cancellationFlags: CancellationFlags,
+        executionSlots: ExecutionSlots,
+        executorDispatcher: ExecutorDispatcher,
+        executorConfig: ExecutorConfig,
+        resultUrls: ResultUrlFactory,
+        executorMetrics: ExecutorMetrics,
+        persistenceDispatcher: CoroutineDispatcher,
+        streams: ExecutionStreamRegistry,
+        eventLog: SseEventLog,
+        eventRepository: ExecutionEventRepository,
+        executionRepository: ExecutionRepository,
+    ): McpExecutionRunner =
+        McpRecordingExecutionRunner(
+            templateEngine = templateEngine,
+            datasourceRegistry = datasourceRegistry,
+            stagingFactory = stagingFactory,
+            writebackRunner = writebackRunner,
+            resultStore = resultStore,
+            cancellationRegistry = cancellationRegistry,
+            cancellationFlags = cancellationFlags,
+            executionSlots = executionSlots,
+            executorDispatcher = executorDispatcher,
+            executorConfig = executorConfig,
+            resultUrls = resultUrls,
+            executorMetrics = executorMetrics,
+            persistenceDispatcher = persistenceDispatcher,
+            streams = streams,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
         )
 }

@@ -105,6 +105,31 @@ class ExecutionRepositoriesIntegrationTest {
     }
 
     @Test
+    fun `recordResult fills only the result history columns, after complete`() {
+        // The P7 path: web's surfaces complete the row on the terminal event (no result
+        // size known) and fill these two columns once execute() returns the resultRef.
+        val record = running()
+        executions.create(record)
+        executions.complete(
+            executionId = record.executionId,
+            status = ExecutionStatus.SUCCESS,
+            completedAt = Instant.now().truncatedTo(ChronoUnit.MILLIS),
+            durationMs = 42,
+            nodeStatsJson = NODE_STATS_JSON,
+        )
+
+        executions.recordResult(record.executionId, 2, 1_024).shouldBeTrue()
+
+        val found = executions.findById(record.executionId).shouldNotBeNull()
+        found.resultRowCount shouldBe 2
+        found.resultSizeBytes shouldBe 1_024
+        // Nothing else moved: status and timings are the terminal update's values.
+        found.status shouldBe ExecutionStatus.SUCCESS
+        found.durationMs shouldBe 42
+        executions.recordResult(UUID.randomUUID(), 1, 1) shouldBe false
+    }
+
+    @Test
     fun `a failed execution records its node and error envelope, and a zero-caller run records no result`() {
         val record = running()
         executions.create(record)

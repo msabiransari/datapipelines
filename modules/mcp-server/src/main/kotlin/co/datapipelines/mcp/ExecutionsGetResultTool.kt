@@ -48,16 +48,6 @@ class ExecutionsGetResultTool(
     private val resultStore: ResultStore,
     private val resultUrls: ResultUrlFactory,
     private val resultConfig: ResultConfig = ResultConfig(),
-    /**
-     * How an execution id maps to its stored-result key.
-     *
-     * `ResultStore` exposes no `keyFor(executionId)` — `RedisResultStore` builds `dp:result:{id}`
-     * from a private constant — so the derivation is injected rather than copied as a literal into
-     * a second module. `app` overrides it the day `dag` publishes the authoritative mapping; that
-     * addition is reported to the orchestrator (the REST cursor in `web` needs exactly the same
-     * thing).
-     */
-    private val resultKey: (UUID) -> String = { "dp:result:$it" },
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -142,7 +132,7 @@ class ExecutionsGetResultTool(
      * header-only read ([ResultStore.describe] drags the whole inline first page with it), so the
      * smallest honest read is a single row.
      */
-    private fun probe(record: ExecutionRecord): ResultPage? = resultStore.page(resultKey(record.executionId), 0, 1)
+    private fun probe(record: ExecutionRecord): ResultPage? = resultStore.page(resultStore.keyFor(record.executionId), 0, 1)
 
     /**
      * §6.2.15's error rows, in the order the cursor applies them: unknown or non-owned execution →
@@ -188,7 +178,7 @@ class ExecutionsGetResultTool(
     private fun page(
         record: ExecutionRecord,
         args: McpArguments,
-    ): ResultPage? = resultStore.page(resultKey(record.executionId), offsetOf(args), limitOf(args))
+    ): ResultPage? = resultStore.page(resultStore.keyFor(record.executionId), offsetOf(args), limitOf(args))
 
     /** `offset` — clamped at 0; a page past the end is an empty page, not an error (REST §7.3). */
     private fun offsetOf(args: McpArguments): Long = args.int("offset", default = 0, min = 0, max = Int.MAX_VALUE).toLong()

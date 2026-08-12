@@ -94,6 +94,12 @@ datapipelines:
     encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
 
   auth:
+    # §3.4 — the deployment's exact external origin; OIDC redirect URIs are built
+    # absolutely from it (auth.md §5.2). Startup fails when unset while providers are
+    # configured (OidcConfig + ConfigValidator §7). Empty default = unset.
+    base-url: ${DATAPIPELINES_AUTH_BASE_URL:}
+    # §3.4 — optional; empty = no bootstrap admin (auth.md §4.4).
+    bootstrap-admin-email: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:}
     oidc:
       providers:
         - name: google
@@ -155,6 +161,7 @@ datapipelines:
   templates:
     cache-size: ${DATAPIPELINES_TEMPLATES_CACHE_SIZE:500}
     render-timeout-ms: ${DATAPIPELINES_TEMPLATES_RENDER_TIMEOUT_MS:5000}
+    max-body-chars: ${DATAPIPELINES_TEMPLATES_MAX_BODY_CHARS:262144}
 
   ui:
     theme: ${DATAPIPELINES_UI_THEME:saas}

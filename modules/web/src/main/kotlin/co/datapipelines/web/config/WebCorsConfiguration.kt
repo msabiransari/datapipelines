@@ -7,6 +7,7 @@ import co.datapipelines.web.CorrelationIdFilter
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.ratelimit.RateLimitHeaders
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -70,9 +71,18 @@ class WebCorsConfiguration(
         }
     }
 
-    /** Just after [CorrelationIdFilter] and well before Spring Security. */
+    /**
+     * Just after [CorrelationIdFilter] and well before Spring Security.
+     *
+     * The parameter is `@Qualifier`-pinned: in the full application context Spring MVC's
+     * `HandlerMappingIntrospector` bean *implements* `CorsConfigurationSource`, so an unqualified
+     * by-type injection is ambiguous there (web's slice tests never had the introspector bean,
+     * which is why this only surfaced at app wiring time).
+     */
     @Bean
-    fun corsFilterRegistration(source: CorsConfigurationSource): FilterRegistrationBean<CorsFilter> =
+    fun corsFilterRegistration(
+        @Qualifier("corsConfigurationSource") source: CorsConfigurationSource,
+    ): FilterRegistrationBean<CorsFilter> =
         FilterRegistrationBean(CorsFilter(source)).apply {
             order = CorrelationIdFilter.ORDER + 1
             isAsyncSupported = true

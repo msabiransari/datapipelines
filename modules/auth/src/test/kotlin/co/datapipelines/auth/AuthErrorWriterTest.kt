@@ -2,11 +2,14 @@ package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
+import org.slf4j.MDC
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import java.util.UUID
 
 /**
  * AU-API-1: every auth rejection carries the FULL [REST API §4.2] envelope —
@@ -59,11 +62,40 @@ class AuthErrorWriterTest {
     }
 
     @Test
-    fun `an inbound correlation id is echoed in the body and the response header`() {
-        val (response, body) = write(SessionExpiredException(), correlationId = "corr-42")
+    fun `a UUID-shaped inbound correlation id is echoed in the body and the response header`() {
+        val id = UUID.randomUUID().toString()
+        val (response, body) = write(SessionExpiredException(), correlationId = id)
 
-        body["correlation_id"] shouldBe "corr-42"
-        response.getHeader(AuthErrorWriter.CORRELATION_HEADER) shouldBe "corr-42"
+        body["correlation_id"] shouldBe id
+        response.getHeader(AuthErrorWriter.CORRELATION_HEADER) shouldBe id
+    }
+
+    @Test
+    fun `the MDC id wins over the inbound header`() {
+        // web's CorrelationIdFilter sanitizes into the MDC ahead of the security chain;
+        // the raw header — attacker-controlled text — must never be preferred over it.
+        val mdcId = UUID.randomUUID().toString()
+        MDC.put(AuthErrorWriter.MDC_KEY, mdcId)
+        try {
+            val (response, body) = write(SessionExpiredException(), correlationId = "corr-attacker-controlled")
+
+            body["correlation_id"] shouldBe mdcId
+            response.getHeader(AuthErrorWriter.CORRELATION_HEADER) shouldBe mdcId
+        } finally {
+            MDC.remove(AuthErrorWriter.MDC_KEY)
+        }
+    }
+
+    @Test
+    fun `a non-UUID inbound correlation id is replaced, not echoed`() {
+        // No MDC slot (the filter did not run): the header alone must not reflect
+        // attacker-controlled text onto the response or into the envelope (§3.4).
+        val (response, body) = write(SessionExpiredException(), correlationId = "corr-42-not-a-uuid")
+
+        (body["correlation_id"] as String).shouldNotBeBlank()
+        body["correlation_id"] shouldNotBe "corr-42-not-a-uuid"
+        response.getHeader(AuthErrorWriter.CORRELATION_HEADER) shouldBe body["correlation_id"]
+        UUID.fromString(body["correlation_id"] as String) // parses — the replacement is a real UUID
     }
 
     @Test

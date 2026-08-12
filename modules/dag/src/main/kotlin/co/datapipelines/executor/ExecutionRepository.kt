@@ -127,6 +127,37 @@ class ExecutionRepository(
             ),
         ) == 1
 
+    /**
+     * Fills the §4.6 result-history columns **after** [complete] (P7 additive API).
+     *
+     * The terminal event that completes the row carries no result size, and the emitter
+     * fires before `PipelineExecutor.execute` returns the `resultRef` — so the surface
+     * that receives the `ExecutionResult` describes the stored result and lands
+     * `result_row_count` / `result_size_bytes` here. Without them the REST cursor and
+     * the §10.2 metadata cannot distinguish "succeeded with a result" from "zero caller
+     * nodes" — both would read as NULL.
+     *
+     * @return true when a row was updated; false when [executionId] is unknown.
+     */
+    fun recordResult(
+        executionId: UUID,
+        resultRowCount: Long,
+        resultSizeBytes: Long,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE pipeline_executions
+               SET result_row_count = :resultRowCount,
+                   result_size_bytes = :resultSizeBytes
+             WHERE execution_id = :executionId
+            """.trimIndent(),
+            mapOf(
+                "executionId" to executionId,
+                "resultRowCount" to resultRowCount,
+                "resultSizeBytes" to resultSizeBytes,
+            ),
+        ) == 1
+
     /** One execution's metadata — `GET /api/v1/executions/{id}` (rest-api §10.2). */
     fun findById(executionId: UUID): ExecutionRecord? =
         jdbc

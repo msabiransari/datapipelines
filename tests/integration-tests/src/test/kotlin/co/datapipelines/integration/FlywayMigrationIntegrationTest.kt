@@ -3,6 +3,7 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -255,10 +256,35 @@ class FlywayMigrationIntegrationTest {
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
+        /**
+         * In-process OIDC discovery (auth.md §5.2) for the configured providers — the
+         * real `OidcConfig` fetches this at startup; nothing here authenticates anyone.
+         */
+        private val oidc = OidcDiscoveryStub()
+
         private fun randomSecret(): String =
             Base64
                 .getEncoder()
                 .encodeToString(ByteArray(SECRET_BYTES).also { SecureRandom().nextBytes(it) })
+
+        /**
+         * The OIDC property block every full-context test in this module needs (P7):
+         * the provider list is re-declared in full — Spring takes a bound list wholesale
+         * from the highest-precedence source containing any element of it, and BOTH
+         * indices must be covered because a lookup for an index absent here falls
+         * through to application.yml's `${GOOGLE_CLIENT_ID}`/`${MICROSOFT_CLIENT_ID}`
+         * placeholders, which resolve to nothing in tests.
+         */
+        internal fun oidcProperties(registry: DynamicPropertyRegistry) {
+            listOf("google", "microsoft").forEachIndexed { index, name ->
+                registry.add("datapipelines.auth.oidc.providers[$index].name") { name }
+                registry.add("datapipelines.auth.oidc.providers[$index].client-id") { "test-$name-client-id" }
+                registry.add("datapipelines.auth.oidc.providers[$index].client-secret") { "test-$name-client-secret" }
+                registry.add("datapipelines.auth.oidc.providers[$index].issuer-uri") { oidc.issuer }
+                registry.add("datapipelines.auth.oidc.providers[$index].display-name") { "Test $name" }
+            }
+            registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+        }
 
         @DynamicPropertySource
         @JvmStatic
@@ -280,10 +306,13 @@ class FlywayMigrationIntegrationTest {
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
-            registry.add("GOOGLE_CLIENT_ID") { "test-unused" }
-            registry.add("GOOGLE_CLIENT_SECRET") { "test-unused" }
-            registry.add("MICROSOFT_CLIENT_ID") { "test-unused" }
-            registry.add("MICROSOFT_CLIENT_SECRET") { "test-unused" }
+            oidcProperties(registry)
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun tearDown() {
+            oidc.close()
         }
     }
 }

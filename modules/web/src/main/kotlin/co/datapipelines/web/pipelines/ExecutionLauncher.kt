@@ -9,6 +9,7 @@ import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
@@ -71,8 +72,9 @@ data class ExecuteLaunch(
  * The executor takes its [EventEmitter] at construction, and the emitter captures per-execution
  * state (the stream, the correlation id, `triggered_via`). Building the executor per run through
  * dag's `pipelineExecutor(...)` factory is what keeps two concurrent executions' streams from
- * cross-wiring; the shared, `EventEmitter.NONE`-wired bean in `EngineConfiguration` exists for
- * `mcp-server`'s autoconfiguration, whose documented P7 carry-forward is that it records nothing.
+ * cross-wiring; the shared, `EventEmitter.NONE`-wired bean in `EngineConfiguration` exists only
+ * as the bean-of-record `mcp-server`'s `@ConditionalOnBean` keys off — MCP runs never touch it,
+ * going through [McpRecordingExecutionRunner]'s per-run pair instead (P7).
  *
  * ## Idempotency (§3.5) — and the candidate/alias shim it forces
  * `IdempotencyStore.reserve` must be claimed **before** executing (that is the whole point of the
@@ -279,19 +281,21 @@ class ExecutionLauncher(
         sse: SseEmitter,
     ) {
         try {
-            executor.execute(
-                ExecuteRequest(
-                    pipelineId = request.pipelineId,
-                    pipelineVersion = request.pipelineVersion,
-                    pipeline = request.pipeline,
-                    userId = request.principal.userId,
-                    parameters = request.parameters,
-                    idempotencyKey = request.idempotencyKey,
-                    resultTtlSeconds = request.resultTtlSeconds,
-                    correlationId = request.correlationId,
-                    triggeredVia = ExecutionTrigger.REST,
-                ),
-            )
+            val result =
+                executor.execute(
+                    ExecuteRequest(
+                        pipelineId = request.pipelineId,
+                        pipelineVersion = request.pipelineVersion,
+                        pipeline = request.pipeline,
+                        userId = request.principal.userId,
+                        parameters = request.parameters,
+                        idempotencyKey = request.idempotencyKey,
+                        resultTtlSeconds = request.resultTtlSeconds,
+                        correlationId = request.correlationId,
+                        triggeredVia = ExecutionTrigger.REST,
+                    ),
+                )
+            recordResultColumns(result)
         } catch (e: PipelineConcurrencyLimitException) {
             // Before the first event: the response is uncommitted, so this becomes a real 429.
             failBeforeStart(sse, emitter, e)
@@ -326,6 +330,24 @@ class ExecutionLauncher(
     ) {
         emitter.executionIdOrNull()?.let(streams::close)
         sse.completeWithError(error)
+    }
+
+    /**
+     * The §10.2 result-history columns (`result_row_count` / `result_size_bytes`).
+     *
+     * The emitter completes the row on the terminal event, which carries no result size, so these
+     * land here — after `execute` returns the `resultRef` — described from the stored result
+     * itself rather than inferred from the inline page (wrong for anything over one page). Without
+     * them the cursor cannot tell "succeeded with a result" from "zero caller nodes". Bookkeeping
+     * only: a failure here is logged, never fails the completed execution (dag-executor §10's
+     * emitter policy applied to its sibling write).
+     */
+    private fun recordResultColumns(result: ExecutionResult) {
+        val ref = result.resultRef ?: return
+        runCatching {
+            val view = resultStore.describe(ref) ?: return
+            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes)
+        }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
     /** One executor per run — see the class KDoc. */

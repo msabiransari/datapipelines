@@ -30,6 +30,13 @@ class ExecutionResultToolTest {
 
     private val tool = ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig())
 
+    init {
+        // P7: the tool resolves the Redis key through dag's public `ResultStore.keyFor`;
+        // the mock reproduces RedisResultStore's `dp:result:{id}` layout so the `page`
+        // stubs below keep matching the same keys the production store would serve.
+        every { resultStore.keyFor(any()) } answers { "dp:result:${firstArg<java.util.UUID>()}" }
+    }
+
     private fun page(rows: List<List<Any?>>) =
         ResultPage(
             executionId = McpFixtures.EXECUTION_ID,

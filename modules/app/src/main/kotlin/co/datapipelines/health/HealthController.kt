@@ -24,11 +24,8 @@ import org.springframework.web.bind.annotation.RestController
  *
  * Values are bare by design: an unauthenticated probe surface must not leak
  * topology — no hostnames, no JDBC URLs, no credentials, no exception text
- * (observability.md §6.4/§9.2).
- *
- * TODO(auth module): once `SecurityConfig` exists, `/health`, `/ready` and `/info`
- *  must be added to the permit-all matchers in the Spring Security chain
- *  (auth.md §8) so they stay reachable without a credential.
+ * (observability.md §6.4/§9.2). All three paths are in the security chain's
+ * permit-all set (auth.md §8.3).
  */
 @RestController
 class HealthController(

@@ -18,6 +18,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import io.modelcontextprotocol.server.McpStatelessSyncServer
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
@@ -58,13 +59,26 @@ class McpServerAutoConfiguration {
         pipelineValidator: PipelineValidator,
         templateValidator: TemplateValidator,
         templateEngine: TemplateEngine,
+        // P7: the recording execution path `web` supplies in the assembled application.
+        // A provider, because `web`'s bean exists only where the engine is fully wired —
+        // in a bare module context the tool falls back to the shared executor (records
+        // nothing); see McpExecutionRunner.
+        executionRunner: ObjectProvider<McpExecutionRunner>,
     ): List<McpTool> {
         val deserializer = PipelineDeserializer()
         val serializer = PipelineSerializer()
         return listOf(
             PipelinesListTool(pipelines, deserializer),
             PipelinesGetTool(pipelines),
-            PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, deserializer, executorConfig.result),
+            PipelineExecuteTool(
+                pipelines,
+                executor,
+                resultStore,
+                resultUrls,
+                deserializer,
+                executorConfig.result,
+                executionRunner.getIfAvailable(),
+            ),
             PipelinesCreateTool(pipelines, deserializer, pipelineValidator, serializer),
             PipelinesUpdateTool(pipelines, deserializer, pipelineValidator, serializer),
             TemplatesListTool(templates),

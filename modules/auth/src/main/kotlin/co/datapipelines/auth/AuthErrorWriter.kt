@@ -22,9 +22,15 @@ import java.util.UUID
  * one correlation rule serve them all.
  *
  * ## Correlation (REST API §3.4, Observability §3.3)
- * The id is taken from the inbound `DP-Correlation-Id` header, else the `correlation_id`
- * MDC slot the request filter populates, else generated. It is always echoed back on
- * the response header, so a client that only sees a 401 can still quote an id.
+ * The id is taken from the `correlation_id` MDC slot first — `web`'s
+ * `CorrelationIdFilter` populates it ahead of the security chain, having already
+ * sanitized the inbound header — then from the inbound `DP-Correlation-Id` header
+ * **only when it parses as a UUID**, else generated. Taking the raw header first
+ * would echo attacker-controlled text on 401/403/429 responses, defeating the
+ * filter's sanitize-then-echo design on exactly the paths that need it; the UUID
+ * gate is the fallback for contexts where the filter never ran (auth-only slice
+ * tests). The id is always echoed back on the response header, so a client that
+ * only sees a 401 can still quote an id.
  *
  * ## Reuse
  * The class is public and framework-agnostic beyond the servlet API on purpose: the
@@ -88,9 +94,13 @@ class AuthErrorWriter(
     )
 
     private fun correlationId(request: HttpServletRequest): String =
-        request.getHeader(CORRELATION_HEADER)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: MDC.get(MDC_KEY)?.takeIf { it.isNotEmpty() }
+        MDC.get(MDC_KEY)?.takeIf { it.isNotBlank() }
+            ?: request.getHeader(CORRELATION_HEADER)?.let(::parseUuidOrNull)?.toString()
             ?: UUID.randomUUID().toString()
+
+    /** UUID-shaped [value], or null — the adoption gate for attacker-controlled header text. */
+    private fun parseUuidOrNull(value: String): UUID? =
+        value.trim().takeIf { it.isNotEmpty() }?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
     companion object {
         /** REST API §3.4 / §3.6 — the correlation header, echoed on every response. */

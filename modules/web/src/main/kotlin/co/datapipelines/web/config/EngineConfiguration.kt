@@ -27,6 +27,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -205,7 +206,12 @@ class EngineConfiguration {
         }
 
     @Bean
-    fun eventPersistenceDispatcher(executor: java.util.concurrent.ExecutorService): CoroutineDispatcher = executor.asCoroutineDispatcher()
+    fun eventPersistenceDispatcher(
+        // @Qualifier-pinned: `sseLogScheduler` is also an ExecutorService (ScheduledExecutorService
+        // extends it), so an unqualified by-type injection is ambiguous once both beans share one
+        // context — which only the assembled application does; module slice tests never saw it.
+        @Qualifier("eventPersistenceExecutor") executor: java.util.concurrent.ExecutorService,
+    ): CoroutineDispatcher = executor.asCoroutineDispatcher()
 
     private companion object {
         const val RESULT_PATH_PREFIX = "/api/v1/executions/"
