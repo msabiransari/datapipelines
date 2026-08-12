@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:fragment="page(content)">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link th:href="@{/vendor/design-system/tokens.css}" rel="stylesheet">
+  <link th:id="theme-link"
+        th:href="@{/vendor/design-system/themes/{theme}.css(theme=${activeTheme})}"
+        rel="stylesheet">
+  <link th:href="@{/vendor/design-system/base.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
+  <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
+  <link th:href="@{/css/app.css}" rel="stylesheet">
+
+  <link rel="stylesheet"
+        th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}"
+        media="screen">
+</head>
+<body
+    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;}'"
+    hx-target-error="#toast">
+  <nav class="ds-surface" style="border-bottom: 1px solid var(--border-default); padding: var(--gap-md)">
+    <div style="max-width: var(--container-xl); margin: 0 auto; display: flex; align-items: center; justify-content: space-between;">
+      <a th:href="@{/}" style="font-weight: var(--weight-bold); font-size: var(--text-xl); color: var(--text-primary); text-decoration: none;">datapipelines</a>
+      <div style="display: flex; gap: var(--gap-md); align-items: center;">
+        <a th:href="@{/}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Dashboard</a>
+        <a th:href="@{/pipelines}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Pipelines</a>
+        <a th:href="@{/datasources}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Datasources</a>
+        <a th:href="@{/templates}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Templates</a>
+        <a th:href="@{/executions}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Executions</a>
+        <a th:href="@{/settings}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Settings</a>
+        <a th:href="@{/admin}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Admin</a>
+        <form th:action="@{/logout}" method="post" style="display: inline;">
+          <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Logout</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <div id="toast" aria-live="polite" style="position: fixed; top: var(--header-height); right: var(--gap-md); z-index: var(--z-toast);"></div>
+
+  <main style="max-width: var(--container-xl); margin: 0 auto; padding: var(--gap-lg);">
+    <th:block th:replace="${content}"/>
+  </main>
+
+  <script th:src="@{/webjars/htmx.org/2.0.10/dist/htmx.min.js}"></script>
+</body>
+</html>

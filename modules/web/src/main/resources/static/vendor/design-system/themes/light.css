@@ -1,0 +1,66 @@
+/* ============================================================
+   THEME: LIGHT
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --_surface-page:            #f8f9fb;
+  --_surface-default:         #ffffff;
+  --_surface-raised:          #ffffff;
+  --_surface-overlay:         #ffffff;
+  --_surface-inset:           #f1f3f6;
+  --_surface-hover:           #f1f3f6;
+  --_surface-active:          #e8ecf1;
+  --_surface-selected:        #e8f0fe;
+
+  --_text-primary:            #0f172a;
+  --_text-secondary:          #334155;
+  --_text-muted:              #64748b;
+  --_text-inverted:           #ffffff;
+  --_text-link:               #2563eb;
+  --_text-link-hover:         #1d4ed8;
+  --_text-danger:             #dc2626;
+  --_text-success:            #15803d;
+  --_text-warning:            #a16207;
+
+  --_border-default:          #e2e8f0;
+  --_border-hover:            #cbd5e1;
+  --_border-focus:            #94a3b8;
+  --_border-subtle:           #f1f5f9;
+  --_border-danger:           #fca5a5;
+
+  --_accent-primary:          #0f172a;
+  --_accent-primary-hover:    #1e293b;
+  --_accent-primary-active:   #334155;
+  --_accent-primary-text:     #ffffff;
+
+  --_accent-secondary:        #f1f5f9;
+  --_accent-secondary-hover:  #e2e8f0;
+  --_accent-secondary-text:   #0f172a;
+
+  --_accent-danger:           #dc2626;
+  --_accent-danger-hover:     #b91c1c;
+  --_accent-danger-text:      #ffffff;
+
+  --_accent-success:          #15803d;
+  --_accent-success-bg:       #dcfce7;
+  --_accent-warning:          #a16207;
+  --_accent-warning-bg:       #fef9c3;
+  --_accent-info:             #0369a1;
+  --_accent-info-bg:          #e0f2fe;
+
+  --_focus-ring:              #3b82f6;
+  --_focus-ring-offset:       2px;
+
+  --_shadow-xs:               0 1px 2px 0 rgb(0 0 0 / 0.03);
+  --_shadow-sm:               0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --_shadow-md:               0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --_shadow-lg:               0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.06);
+  --_shadow-xl:               0 20px 25px -5px rgb(0 0 0 / 0.06), 0 8px 10px -6px rgb(0 0 0 / 0.06);
+  --_shadow-inset:            inset 0 2px 4px 0 rgb(0 0 0 / 0.03);
+
+  --_font-sans:               ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --_font-mono:               ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}

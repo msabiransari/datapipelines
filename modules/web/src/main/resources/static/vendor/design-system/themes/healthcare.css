@@ -1,0 +1,68 @@
+/* ============================================================
+   THEME: HEALTHCARE
+   Calming, accessible, trust-forward. Soft greens and warm
+   off-whites for clinics, telehealth, and medical SaaS.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --_surface-page:            #f5f7f4;
+  --_surface-default:         #ffffff;
+  --_surface-raised:          #ffffff;
+  --_surface-overlay:         #ffffff;
+  --_surface-inset:           #eef1ec;
+  --_surface-hover:           #e8ece6;
+  --_surface-active:          #dce2d8;
+  --_surface-selected:        #d4e8d4;
+
+  --_text-primary:            #1a1f1c;
+  --_text-secondary:          #3d4a42;
+  --_text-muted:              #6b7a6e;
+  --_text-inverted:           #ffffff;
+  --_text-link:               #1a6b4a;
+  --_text-link-hover:         #124d34;
+  --_text-danger:             #b42318;
+  --_text-success:            #166c3b;
+  --_text-warning:            #a15f00;
+
+  --_border-default:          #d8dfd6;
+  --_border-hover:            #b8c4b2;
+  --_border-focus:            #8a9a82;
+  --_border-subtle:           #e8ede5;
+  --_border-danger:           #fecaca;
+
+  --_accent-primary:          #1a6b4a;
+  --_accent-primary-hover:    #124d34;
+  --_accent-primary-active:   #0d3d28;
+  --_accent-primary-text:     #ffffff;
+
+  --_accent-secondary:        #e8ede5;
+  --_accent-secondary-hover:  #d8dfd6;
+  --_accent-secondary-text:   #1a1f1c;
+
+  --_accent-danger:           #b42318;
+  --_accent-danger-hover:     #991b1b;
+  --_accent-danger-text:      #ffffff;
+
+  --_accent-success:          #166c3b;
+  --_accent-success-bg:       #d4e8d4;
+  --_accent-warning:          #a15f00;
+  --_accent-warning-bg:       #fef3c7;
+  --_accent-info:             #175e8f;
+  --_accent-info-bg:          #dbeafe;
+
+  --_focus-ring:              #1a6b4a;
+  --_focus-ring-offset:       2px;
+
+  --_shadow-xs:               0 1px 2px 0 rgb(26 31 28 / 0.04);
+  --_shadow-sm:               0 1px 3px 0 rgb(26 31 28 / 0.06);
+  --_shadow-md:               0 3px 5px -1px rgb(26 31 28 / 0.06);
+  --_shadow-lg:               0 8px 12px -3px rgb(26 31 28 / 0.06);
+  --_shadow-xl:               0 16px 24px -6px rgb(26 31 28 / 0.06);
+  --_shadow-inset:            inset 0 1px 2px 0 rgb(26 31 28 / 0.04);
+
+  --_font-sans:               "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --_font-mono:               ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}

@@ -246,14 +246,21 @@ class ConfigValidator(
         /**
          * The vendored theme names, or **null** when the design-system assets are not on the
          * classpath at all (pre-P8) — the difference between "validate" and "nothing to validate
-         * against". Directory listing works on an exploded classes dir; inside a jar there is no
-         * listing, so the configured theme's own directory is probed instead.
+         * against". Theme CSS files live under `themes/` (e.g. `themes/saas.css`); inside a jar
+         * there is no directory listing, so the configured theme's own CSS file is probed instead.
          */
         private fun vendoredThemes(): Set<String>? {
             val root = ClassPathResource(THEME_ROOT)
             if (!root.exists()) return null
-            val file = runCatching { root.file }.getOrNull() ?: return null
-            return file.listFiles { f -> f.isDirectory }?.map { it.name }?.toSet()
+            val baseDir = runCatching { root.file }.getOrNull() ?: return null
+            val themesDir =
+                baseDir
+                    .listFiles { f -> f.isDirectory && f.name == "themes" }
+                    ?.firstOrNull() ?: return null
+            return themesDir
+                .listFiles { f -> f.isFile && f.name.endsWith(".css") }
+                ?.map { it.name.removeSuffix(".css") }
+                ?.toSet()
         }
 
         private fun requirePresent(

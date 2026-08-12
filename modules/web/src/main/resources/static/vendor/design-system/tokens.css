@@ -1,0 +1,238 @@
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================
+   This file declares the semantic contract. Do NOT put
+   concrete values here. Concrete values live in themes/.
+   Your application and components should reference these tokens.
+   ============================================================ */
+
+:root {
+  /* --------------------------------------------------------
+     Surface (backgrounds)
+     -------------------------------------------------------- */
+  --surface-page:             var(--_surface-page);
+  --surface-default:          var(--_surface-default);
+  --surface-raised:           var(--_surface-raised);
+  --surface-overlay:          var(--_surface-overlay);
+  --surface-inset:            var(--_surface-inset);
+  --surface-hover:            var(--_surface-hover);
+  --surface-active:           var(--_surface-active);
+  --surface-selected:         var(--_surface-selected);
+
+  /* --------------------------------------------------------
+     Text
+     -------------------------------------------------------- */
+  --text-primary:             var(--_text-primary);
+  --text-secondary:           var(--_text-secondary);
+  --text-muted:               var(--_text-muted);
+  --text-inverted:            var(--_text-inverted);
+  --text-link:                var(--_text-link);
+  --text-link-hover:          var(--_text-link-hover);
+  --text-danger:              var(--_text-danger);
+  --text-success:             var(--_text-success);
+  --text-warning:             var(--_text-warning);
+
+  /* --------------------------------------------------------
+     Border
+     -------------------------------------------------------- */
+  --border-default:           var(--_border-default);
+  --border-hover:             var(--_border-hover);
+  --border-focus:             var(--_border-focus);
+  --border-subtle:            var(--_border-subtle);
+  --border-danger:            var(--_border-danger);
+
+  /* --------------------------------------------------------
+     Accent (actions + semantics)
+     -------------------------------------------------------- */
+  --accent-primary:           var(--_accent-primary);
+  --accent-primary-hover:     var(--_accent-primary-hover);
+  --accent-primary-active:    var(--_accent-primary-active);
+  --accent-primary-text:      var(--_accent-primary-text);
+
+  --accent-secondary:         var(--_accent-secondary);
+  --accent-secondary-hover:   var(--_accent-secondary-hover);
+  --accent-secondary-text:    var(--_accent-secondary-text);
+
+  --accent-danger:            var(--_accent-danger);
+  --accent-danger-hover:      var(--_accent-danger-hover);
+  --accent-danger-text:       var(--_accent-danger-text);
+
+  --accent-success:           var(--_accent-success);
+  --accent-success-bg:        var(--_accent-success-bg);
+  --accent-warning:           var(--_accent-warning);
+  --accent-warning-bg:        var(--_accent-warning-bg);
+  --accent-info:              var(--_accent-info);
+  --accent-info-bg:           var(--_accent-info-bg);
+
+  /* --------------------------------------------------------
+     Focus Ring
+     -------------------------------------------------------- */
+  --focus-ring:               var(--_focus-ring);
+  --focus-ring-offset:        var(--_focus-ring-offset);
+
+  /* --------------------------------------------------------
+     Disabled / Read-only
+     -------------------------------------------------------- */
+  --opacity-disabled:         0.5;
+  --opacity-readonly:         0.7;
+  --cursor-disabled:          not-allowed;
+  --cursor-readonly:          default;
+
+  /* --------------------------------------------------------
+     Z-Index Scale
+     -------------------------------------------------------- */
+  --z-base:                   0;
+  --z-dropdown:               100;
+  --z-sticky:                 200;
+  --z-fixed:                  300;
+  --z-drawer:                 400;
+  --z-modal-backdrop:         500;
+  --z-modal:                  600;
+  --z-popover:                700;
+  --z-toast:                  800;
+  --z-tooltip:                900;
+
+  /* --------------------------------------------------------
+     Breakpoints (reference values in px)
+     -------------------------------------------------------- */
+  --breakpoint-sm:            640px;
+  --breakpoint-md:            768px;
+  --breakpoint-lg:            1024px;
+  --breakpoint-xl:            1280px;
+  --breakpoint-2xl:           1536px;
+
+  /* --------------------------------------------------------
+     Icon Sizes
+     -------------------------------------------------------- */
+  --icon-xs:                  12px;
+  --icon-sm:                  16px;
+  --icon-md:                  20px;
+  --icon-lg:                  24px;
+  --icon-xl:                  32px;
+
+  /* --------------------------------------------------------
+     Field Heights (inputs, buttons, selects)
+     -------------------------------------------------------- */
+  --field-height-sm:          32px;
+  --field-height-base:        40px;
+  --field-height-lg:          48px;
+
+  /* --------------------------------------------------------
+     Layout
+     -------------------------------------------------------- */
+  --container-sm:             640px;
+  --container-md:             768px;
+  --container-lg:             1024px;
+  --container-xl:             1200px;
+  --container-2xl:            1400px;
+  --sidebar-width:            280px;
+  --header-height:            60px;
+
+  /* --------------------------------------------------------
+     Elevation (shadows)
+     -------------------------------------------------------- */
+  --shadow-xs:                var(--_shadow-xs);
+  --shadow-sm:                var(--_shadow-sm);
+  --shadow-md:                var(--_shadow-md);
+  --shadow-lg:                var(--_shadow-lg);
+  --shadow-xl:                var(--_shadow-xl);
+  --shadow-inset:             var(--_shadow-inset);
+
+  /* --------------------------------------------------------
+     Radius
+     -------------------------------------------------------- */
+  --radius-none:              0px;
+  --radius-sm:                4px;
+  --radius-base:              6px;
+  --radius-md:                8px;
+  --radius-lg:                12px;
+  --radius-xl:                16px;
+  --radius-2xl:               24px;
+  --radius-pill:              9999px;
+  --radius-full:              50%;
+
+  /* --------------------------------------------------------
+     Spacing (rem-based, 1rem = 16px default)
+     -------------------------------------------------------- */
+  --space-0:                  0rem;
+  --space-px:                 1px;
+  --space-0-5:                0.125rem;  /* 2px */
+  --space-1:                  0.25rem;   /* 4px */
+  --space-1-5:                0.375rem;  /* 6px */
+  --space-2:                  0.5rem;    /* 8px */
+  --space-2-5:                0.625rem;  /* 10px */
+  --space-3:                  0.75rem;   /* 12px */
+  --space-3-5:                0.875rem;  /* 14px */
+  --space-4:                  1rem;      /* 16px */
+  --space-5:                  1.25rem;   /* 20px */
+  --space-6:                  1.5rem;    /* 24px */
+  --space-7:                  1.75rem;   /* 28px */
+  --space-8:                  2rem;      /* 32px */
+  --space-9:                  2.25rem;   /* 36px */
+  --space-10:                 2.5rem;    /* 40px */
+  --space-12:                 3rem;      /* 48px */
+  --space-14:                 3.5rem;    /* 56px */
+  --space-16:                 4rem;      /* 64px */
+  --space-20:                 5rem;      /* 80px */
+  --space-24:                 6rem;      /* 96px */
+
+  /* Semantic spacing */
+  --gap-xs:                   var(--space-1);
+  --gap-sm:                   var(--space-2);
+  --gap-md:                   var(--space-4);
+  --gap-lg:                   var(--space-6);
+  --gap-xl:                   var(--space-8);
+
+  /* --------------------------------------------------------
+     Typography
+     -------------------------------------------------------- */
+  --font-sans:                var(--_font-sans);
+  --font-serif:               var(--_font-serif);
+  --font-mono:                var(--_font-mono);
+
+  --text-xs:                  0.75rem;    /* 12px */
+  --text-sm:                  0.875rem;   /* 14px */
+  --text-base:                1rem;       /* 16px */
+  --text-lg:                  1.125rem;   /* 18px */
+  --text-xl:                  1.25rem;    /* 20px */
+  --text-2xl:                 1.5rem;     /* 24px */
+  --text-3xl:                 1.875rem;   /* 30px */
+  --text-4xl:                 2.25rem;    /* 36px */
+
+  --weight-normal:            400;
+  --weight-medium:            500;
+  --weight-semibold:          600;
+  --weight-bold:              700;
+
+  --leading-none:             1;
+  --leading-tight:            1.25;
+  --leading-snug:             1.375;
+  --leading-normal:           1.5;
+  --leading-relaxed:          1.625;
+
+  --tracking-tight:           -0.025em;
+  --tracking-normal:          0em;
+  --tracking-wide:            0.025em;
+
+  /* --------------------------------------------------------
+     Motion
+     -------------------------------------------------------- */
+  --duration-instant:         0ms;
+  --duration-fast:            100ms;
+  --duration-base:            150ms;
+  --duration-normal:          200ms;
+  --duration-slow:            300ms;
+  --duration-slower:          500ms;
+
+  --ease-linear:              linear;
+  --ease-in:                  cubic-bezier(0.4, 0, 1, 1);
+  --ease-out:                 cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out:              cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:              cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --stagger-none:             0ms;
+  --stagger-fast:             20ms;
+  --stagger-base:             40ms;
+  --stagger-slow:             80ms;
+
+}

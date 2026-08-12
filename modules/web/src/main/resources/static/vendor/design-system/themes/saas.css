@@ -1,0 +1,68 @@
+/* ============================================================
+   THEME: SAAS
+   Modern, vibrant indigo. High energy without being childish.
+   Perfect for B2B software, devtools, and modern startups.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --_surface-page:            #fafafa;
+  --_surface-default:         #ffffff;
+  --_surface-raised:          #ffffff;
+  --_surface-overlay:         #ffffff;
+  --_surface-inset:           #f4f4f5;
+  --_surface-hover:           #f4f4f5;
+  --_surface-active:          #e4e4e7;
+  --_surface-selected:        #e0e7ff;
+
+  --_text-primary:            #18181b;
+  --_text-secondary:          #3f3f46;
+  --_text-muted:              #71717a;
+  --_text-inverted:           #ffffff;
+  --_text-link:               #4f46e5;
+  --_text-link-hover:         #4338ca;
+  --_text-danger:             #dc2626;
+  --_text-success:            #047857;
+  --_text-warning:            #92400e;
+
+  --_border-default:          #e4e4e7;
+  --_border-hover:            #d4d4d8;
+  --_border-focus:            #a1a1aa;
+  --_border-subtle:           #f4f4f5;
+  --_border-danger:           #fecaca;
+
+  --_accent-primary:          #4f46e5;
+  --_accent-primary-hover:    #4338ca;
+  --_accent-primary-active:   #3730a3;
+  --_accent-primary-text:     #ffffff;
+
+  --_accent-secondary:        #f4f4f5;
+  --_accent-secondary-hover:  #e4e4e7;
+  --_accent-secondary-text:   #18181b;
+
+  --_accent-danger:           #dc2626;
+  --_accent-danger-hover:     #b91c1c;
+  --_accent-danger-text:      #ffffff;
+
+  --_accent-success:          #14532d;
+  --_accent-success-bg:       #d1fae5;
+  --_accent-warning:          #92400e;
+  --_accent-warning-bg:       #fef3c7;
+  --_accent-info:             #1e40af;
+  --_accent-info-bg:          #dbeafe;
+
+  --_focus-ring:              #4f46e5;
+  --_focus-ring-offset:       2px;
+
+  --_shadow-xs:               0 1px 2px 0 rgb(24 24 27 / 0.04);
+  --_shadow-sm:               0 1px 3px 0 rgb(24 24 27 / 0.08);
+  --_shadow-md:               0 4px 6px -1px rgb(24 24 27 / 0.08);
+  --_shadow-lg:               0 10px 15px -3px rgb(24 24 27 / 0.08);
+  --_shadow-xl:               0 20px 25px -5px rgb(24 24 27 / 0.08);
+  --_shadow-inset:            inset 0 2px 4px 0 rgb(24 24 27 / 0.04);
+
+  --_font-sans:               "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --_font-mono:               "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}

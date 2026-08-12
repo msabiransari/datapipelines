@@ -1,0 +1,71 @@
+/* ============================================================
+   THEME: PROFESSIONAL (Financial / CRM / Enterprise)
+   ============================================================
+   A curated, conservative theme tuned for trust, density,
+   and clarity. Use this for fintech, banking, SaaS dashboards.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --_surface-page:            #f4f6f8;
+  --_surface-default:         #ffffff;
+  --_surface-raised:          #ffffff;
+  --_surface-overlay:         #ffffff;
+  --_surface-inset:           #eef0f3;
+  --_surface-hover:           #eef0f3;
+  --_surface-active:          #e4e7ec;
+  --_surface-selected:        #e0e7ff;
+
+  --_text-primary:            #0a0e1a;
+  --_text-secondary:          #2d3448;
+  --_text-muted:              #5e6578;
+  --_text-inverted:           #ffffff;
+  --_text-link:               #1e40af;
+  --_text-link-hover:         #172554;
+  --_text-danger:             #b91c1c;
+  --_text-success:            #14532d;
+  --_text-warning:            #854d0e;
+
+  --_border-default:          #dadee6;
+  --_border-hover:            #c2c8d4;
+  --_border-focus:            #9aa3b5;
+  --_border-subtle:           #eceef2;
+  --_border-danger:           #fecaca;
+
+  /* Trust-forward primary: deep navy instead of pure black */
+  --_accent-primary:          #0f1d40;
+  --_accent-primary-hover:    #1a2e5e;
+  --_accent-primary-active:   #253d7a;
+  --_accent-primary-text:     #ffffff;
+
+  --_accent-secondary:        #eef0f5;
+  --_accent-secondary-hover:  #dfe3ec;
+  --_accent-secondary-text:   #0f1d40;
+
+  --_accent-danger:           #b91c1c;
+  --_accent-danger-hover:     #991b1b;
+  --_accent-danger-text:      #ffffff;
+
+  --_accent-success:          #15803d;
+  --_accent-success-bg:       #dcfce7;
+  --_accent-warning:          #a16207;
+  --_accent-warning-bg:       #fef9c3;
+  --_accent-info:             #1d4ed8;
+  --_accent-info-bg:          #dbeafe;
+
+  --_focus-ring:              #4f46e5;
+  --_focus-ring-offset:       2px;
+
+  /* Subtle, grounded shadows for a "solid" feel */
+  --_shadow-xs:               0 1px 2px 0 rgb(15 29 64 / 0.04);
+  --_shadow-sm:               0 1px 2px 0 rgb(15 29 64 / 0.06), 0 1px 1px -1px rgb(15 29 64 / 0.04);
+  --_shadow-md:               0 3px 5px -1px rgb(15 29 64 / 0.06), 0 1px 3px -1px rgb(15 29 64 / 0.04);
+  --_shadow-lg:               0 8px 12px -3px rgb(15 29 64 / 0.06), 0 3px 5px -3px rgb(15 29 64 / 0.04);
+  --_shadow-xl:               0 16px 24px -6px rgb(15 29 64 / 0.06), 0 6px 8px -6px rgb(15 29 64 / 0.04);
+  --_shadow-inset:            inset 0 1px 2px 0 rgb(15 29 64 / 0.04);
+
+  --_font-sans:               "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --_font-serif:              ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --_font-mono:               "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}

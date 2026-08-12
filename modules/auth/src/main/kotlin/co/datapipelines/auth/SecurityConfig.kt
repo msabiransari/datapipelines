@@ -85,6 +85,8 @@ class SecurityConfig(
                         "/css/**",
                         "/js/**",
                         "/favicon.ico",
+                        "/error",
+                        "/webjars/**",
                     ).permitAll()
                     .anyRequest()
                     .authenticated()

@@ -1,0 +1,52 @@
+{
+  "design-system": {
+    "package": "@acme/design-tokens",
+    "version": "0.2.0",
+    "source": "../design-system-starter/dist/",
+    "files": [
+      "tokens.css",
+      "base.css",
+      "motion.css",
+      "primitives.css",
+      "icons.css",
+      "themes/saas.css",
+      "themes/light.css",
+      "themes/dark.css",
+      "themes/professional.css",
+      "themes/auto.css",
+      "themes/healthcare.css",
+      "themes/minimal.css",
+      "themes/forest.css",
+      "themes/ocean.css"
+    ],
+    "license": "MIT"
+  },
+  "cytoscape": {
+    "version": "3.34.0",
+    "file": "vendor/cytoscape/cytoscape.min.js",
+    "sha256": "9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3",
+    "source": "https://unpkg.com/cytoscape@3.34.0/dist/cytoscape.min.js",
+    "license": "MIT"
+  },
+  "cytoscape-dagre": {
+    "version": "2.5.0",
+    "file": "vendor/cytoscape/cytoscape-dagre.js",
+    "sha256": "bf70fe402991dcbff33e05a7e4a5271c78020bb75e85d1c80ab7538e4157112e",
+    "source": "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js",
+    "license": "MIT"
+  },
+  "dagre": {
+    "version": "0.8.5",
+    "file": "vendor/dagre/dagre.min.js",
+    "sha256": "62eb9787ccfdbdf4148d4d99d31dbf9ee4770eafee81e637d759b52aac22cd51",
+    "source": "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js",
+    "license": "MIT"
+  },
+  "alpinejs": {
+    "version": "3.14.1",
+    "file": "vendor/alpinejs/alpine.min.js",
+    "sha256": "358d9afbb1ab5befa2f48061a30776e5bcd7707f410a606ba985f98bc3b1c034",
+    "source": "https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js",
+    "license": "MIT"
+  }
+}
