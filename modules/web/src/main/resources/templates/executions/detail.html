@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="margin-bottom: var(--gap-lg);">
+    <a th:href="@{/executions}" style="color: var(--text-muted); font-size: var(--text-sm); text-decoration: none;">&larr; Back to executions</a>
+  </div>
+
+  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--gap-md);">
+      <div>
+        <h1 style="font-size: var(--text-xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);"
+            th:text="${pipeline?.displayName ?: record.pipelineId.toString().substring(0, 8)}">Pipeline</h1>
+        <div style="display: flex; gap: var(--gap-sm); align-items: center; flex-wrap: wrap; margin-bottom: var(--gap-sm);">
+          <span class="ds-badge"
+                th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
+                th:text="${record.status.name()}">status</span>
+          <span style="font-size: var(--text-sm); color: var(--text-muted);">v<span th:text="${record.pipelineVersion}">1</span></span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: var(--gap-md); font-size: var(--text-sm); color: var(--text-secondary);">
+          <div>
+            <span style="color: var(--text-muted);">Started:</span>
+            <span th:text="${#temporals.format(record.startedAt, 'yyyy-MM-dd HH:mm:ss')}">date</span>
+          </div>
+          <div>
+            <span style="color: var(--text-muted);">Duration:</span>
+            <span th:text="${record.durationMs != null} ? ${record.durationMs + 'ms'} : '-'">dur</span>
+          </div>
+          <div>
+            <span style="color: var(--text-muted);">Correlation ID:</span>
+            <code style="font-size: var(--text-xs);" th:text="${correlationId}">corr-id</code>
+          </div>
+          <div>
+            <span style="color: var(--text-muted);">Triggered via:</span>
+            <span th:text="${record.triggeredVia.name()}">UI</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: var(--gap-sm);">
+        <th:block th:if="${canCancel}">
+          <button id="cancel-button" class="ds-button ds-button-danger"
+                  hx-delete="${'/partials/executions/' + record.executionId + '/cancel'}"
+                  hx-swap="outerHTML">Cancel</button>
+        </th:block>
+      </div>
+    </div>
+  </div>
+
+  <th:block th:if="${record.status.name() == 'FAILED' && errorJson != null}">
+    <div class="ds-card" style="border-color: var(--accent-danger); margin-bottom: var(--gap-lg);">
+      <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-sm); color: var(--accent-danger);">Error</h2>
+      <div style="font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-sm);">
+        <span style="color: var(--text-muted);">Failed node:</span>
+        <code th:text="${failedNodeId ?: 'unknown'}">node</code>
+      </div>
+      <pre style="background: var(--surface-inset); padding: var(--gap-md); border-radius: var(--radius-base); font-size: var(--text-xs); font-family: var(--font-mono); overflow-x: auto; white-space: pre-wrap;"
+           th:text="${errorJson.toPrettyString()}">error</pre>
+    </div>
+  </th:block>
+
+  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Node Stats</h2>
+    <th:block th:if="${nodeStats != null && !nodeStats.isEmpty()}">
+      <div th:replace="~{partials/execution-node-stats :: stats(${nodeStats})}">node stats</div>
+    </th:block>
+    <th:block th:unless="${nodeStats != null && !nodeStats.isEmpty()}">
+      <div class="ds-empty">
+        <div class="ds-empty-description">No node stats recorded.</div>
+      </div>
+    </th:block>
+  </div>
+
+  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Result</h2>
+
+    <th:block th:if="${resultState == 'not-applicable'}">
+      <div class="ds-empty">
+        <div class="ds-empty-title">No result</div>
+        <div class="ds-empty-description" th:text="'Execution status: ' + ${record.status.name()}">status</div>
+      </div>
+    </th:block>
+
+    <th:block th:if="${resultState == 'no-caller-result'}">
+      <div class="ds-empty">
+        <div class="ds-empty-title">No caller result</div>
+        <div class="ds-empty-description">This pipeline has no output node or is a pure write-back pipeline.</div>
+      </div>
+    </th:block>
+
+    <th:block th:if="${resultState == 'expired'}">
+      <div class="ds-card-flat" style="text-align: center;">
+        <div class="ds-empty">
+          <div class="ds-empty-title">Result expired</div>
+          <div class="ds-empty-description">The result's TTL has elapsed. Re-run the pipeline to generate a fresh result.</div>
+        </div>
+      </div>
+    </th:block>
+
+    <th:block th:if="${resultState == 'available'}">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--gap-md);">
+        <div style="font-size: var(--text-sm); color: var(--text-secondary);">
+          <span th:text="${resultView.totalRows}">0</span> rows,
+          <span th:text="${resultView.bytes}">0</span> bytes
+          &middot; expires <span th:text="${#temporals.format(resultView.expiresAt, 'yyyy-MM-dd HH:mm')}">date</span>
+        </div>
+        <a th:href="${resultUrl + '?format=json'}" class="ds-button ds-button-secondary ds-button-sm" style="text-decoration: none;">Download JSON</a>
+      </div>
+
+      <div id="result-content"
+           th:hx-get="${'/partials/executions/' + record.executionId + '/result'}"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div style="text-align: center; padding: var(--gap-lg); color: var(--text-muted);">
+          <div class="ds-spinner" style="margin-bottom: var(--gap-md);"></div>
+          <div style="font-size: var(--text-sm);">Loading result...</div>
+        </div>
+      </div>
+    </th:block>
+  </div>
+
+  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Events</h2>
+    <a th:href="${'/api/v1/executions/' + record.executionId + '/events'}"
+       class="ds-button ds-button-secondary"
+       style="text-decoration: none;"
+       target="_blank">View Event Stream</a>
+  </div>
+</th:block>
+</html>

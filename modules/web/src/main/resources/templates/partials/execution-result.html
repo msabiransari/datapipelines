@@ -1,0 +1,43 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="result">
+  <th:block th:if="${#lists.isEmpty(rows)}">
+    <div class="ds-empty">
+      <div class="ds-empty-title">No more rows</div>
+    </div>
+  </th:block>
+  <th:block th:unless="${#lists.isEmpty(rows)}">
+    <div style="overflow-x: auto;">
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th th:each="col : ${schema}" th:text="${col.name}">col</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="row : ${rows}">
+            <td th:each="cell : ${row}" th:text="${cell}">val</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--gap-md); font-size: var(--text-sm); color: var(--text-secondary);">
+      <div>
+        Showing rows <span th:text="${offset + 1}">1</span>&ndash;<span th:text="${offset + #lists.size(rows)}">N</span> of <span th:text="${totalRows}">T</span>
+      </div>
+      <div style="display: flex; gap: var(--gap-sm);">
+        <th:block th:if="${prevOffset != null}">
+          <button class="ds-button ds-button-secondary ds-button-sm"
+                  th:hx-get="${'/partials/executions/' + executionId + '/result?offset=' + prevOffset}"
+                  hx-target="#result-content"
+                  hx-swap="innerHTML">Previous</button>
+        </th:block>
+        <th:block th:if="${hasMore}">
+          <button class="ds-button ds-button-secondary ds-button-sm"
+                  th:hx-get="${'/partials/executions/' + executionId + '/result?offset=' + nextOffset}"
+                  hx-target="#result-content"
+                  hx-swap="innerHTML">Next</button>
+        </th:block>
+      </div>
+    </div>
+  </th:block>
+</th:block>

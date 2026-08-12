@@ -2,10 +2,27 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div style="display: flex; align-items: center; justify-content: center; min-height: 60vh;">
-    <div class="ds-card" style="max-width: 420px; width: 100%; text-align: center;">
-      <h2 style="font-size: var(--text-2xl); font-weight: var(--weight-semibold); margin-bottom: var(--gap-sm);">Dashboard</h2>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm);">Coming soon</p>
+  <div style="margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);">Dashboard</h1>
+    <p style="color: var(--text-secondary); font-size: var(--text-sm);">Overview of your data pipelines</p>
+  </div>
+
+  <div th:replace="~{partials/dashboard-stats :: stats(~{::.ds-stats})}">
+    <div class="ds-stats" hx-get="/partials/dashboard-stats" hx-trigger="load" hx-swap="outerHTML">
+      <div class="ds-skeleton ds-skeleton-card"></div>
+      <div class="ds-skeleton ds-skeleton-card"></div>
+      <div class="ds-skeleton ds-skeleton-card"></div>
+    </div>
+  </div>
+
+  <div style="margin-top: var(--gap-lg);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Recent Executions</h2>
+    <div th:replace="~{partials/recent-executions :: recent(~{::.ds-recent})}">
+      <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+      </div>
     </div>
   </div>
 </th:block>

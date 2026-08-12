@@ -1,0 +1,22 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="stats(nodeStats)">
+  <table class="ds-table">
+    <thead>
+      <tr>
+        <th>Node</th>
+        <th>Rows In</th>
+        <th>Rows Out</th>
+        <th>Duration</th>
+      </tr>
+    </thead>
+    <tbody>
+      <th:block th:if="${nodeStats.isArray()}">
+        <tr th:each="n : ${nodeStats}">
+          <td th:text="${n.has('node_id') ? n.get('node_id').asText() : 'unknown'}">node</td>
+          <td class="num" th:text="${n.has('rows_in') ? n.get('rows_in').asLong() : '-'}">in</td>
+          <td class="num" th:text="${n.has('rows_out') ? n.get('rows_out').asLong() : '-'}">out</td>
+          <td class="num" th:text="${n.has('duration_ms') ? n.get('duration_ms').asLong() + 'ms' : '-'}">dur</td>
+        </tr>
+      </th:block>
+    </tbody>
+  </table>
+</th:block>

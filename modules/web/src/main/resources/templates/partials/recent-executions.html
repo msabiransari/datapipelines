@@ -1,0 +1,36 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="recent(children)">
+  <div th:replace="${children}">
+    <th:block th:if="${#lists.isEmpty(executions)}">
+      <div class="ds-empty">
+        <div class="ds-empty-title">No executions yet</div>
+        <div class="ds-empty-description">Run a pipeline to see results here.</div>
+      </div>
+    </th:block>
+    <th:block th:unless="${#lists.isEmpty(executions)}">
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th>Pipeline</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
+            <td th:text="${r.pipelineId.toString().substring(0, 8) + '...'}">pipeline</td>
+            <td th:text="${r.pipelineVersion}">1</td>
+            <td>
+              <span class="ds-badge"
+                    th:classappend="${r.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${r.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${r.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
+                    th:text="${r.status.name()}">status</span>
+            </td>
+            <td th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>
+            <td th:text="${r.durationMs != null} ? ${r.durationMs + 'ms'} : '-'">dur</td>
+          </tr>
+        </tbody>
+      </table>
+    </th:block>
+  </div>
+</th:block>

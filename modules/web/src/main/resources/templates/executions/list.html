@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);">Executions</h1>
+    <p style="color: var(--text-secondary); font-size: var(--text-sm);">Browse pipeline execution history</p>
+  </div>
+
+  <div class="ds-card" style="margin-bottom: var(--gap-lg); padding: var(--gap-md);">
+    <form id="execution-filters" hx-get="/partials/executions" hx-trigger="change from:select, submit" hx-target="#execution-table" hx-swap="innerHTML" style="display: flex; gap: var(--gap-md); flex-wrap: wrap; align-items: flex-end;">
+      <div class="ds-field">
+        <label class="ds-field-label" for="pipeline_id">Pipeline</label>
+        <select id="pipeline_id" name="pipeline_id" class="ds-select" style="min-width: 200px;">
+          <option value="">All pipelines</option>
+          <option th:each="p : ${pipelines}" th:value="${p.id}" th:text="${p.displayName}">Pipeline</option>
+        </select>
+      </div>
+      <div class="ds-field">
+        <label class="ds-field-label" for="status">Status</label>
+        <select id="status" name="status" class="ds-select">
+          <option value="">All statuses</option>
+          <option th:each="s : ${statuses}" th:value="${s.name()}" th:text="${s.name()}">Status</option>
+        </select>
+      </div>
+      <div class="ds-field">
+        <label class="ds-field-label" for="started_after">After</label>
+        <input type="date" id="started_after" name="started_after" class="ds-input" style="min-width: 160px;">
+      </div>
+      <div class="ds-field">
+        <label class="ds-field-label" for="started_before">Before</label>
+        <input type="date" id="started_before" name="started_before" class="ds-input" style="min-width: 160px;">
+      </div>
+      <div class="ds-field">
+        <button type="submit" class="ds-button ds-button-primary">Filter</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="execution-table" hx-get="/partials/executions" hx-trigger="load" hx-swap="innerHTML">
+    <div style="text-align: center; padding: var(--gap-lg); color: var(--text-muted);">
+      <div class="ds-spinner" style="margin-bottom: var(--gap-md);"></div>
+      <div style="font-size: var(--text-sm);">Loading executions...</div>
+    </div>
+  </div>
+</th:block>
+</html>
