@@ -109,24 +109,32 @@ DATAPIPELINES_DB_ENCRYPTION_KEY=<paste output of: openssl rand -base64 32>
 # Email allowlist (optional — your email domain)
 DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=yourdomain.com
 
+# Auth base URL — REQUIRED whenever OIDC providers are configured (auth §5.2/§11.3).
+# Startup fails without it; OIDC redirect URIs are built from it, never from request headers.
+DATAPIPELINES_AUTH_BASE_URL=http://localhost:8080
+
+# Bootstrap admin (optional — makes your OIDC login an admin on first sign-in, auth §4.4)
+DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=you@yourdomain.com
+
 # UI theme
 DATAPIPELINES_UI_THEME=saas
 
-# OIDC provider secrets — must match the providers configured in application-dev.yml
+# OIDC provider secrets — must match the providers configured in application.yml
 # For Google:
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-# For Microsoft:
-MICROSOFT_CLIENT_ID=your-microsoft-client-id
-MICROSOFT_CLIENT_SECRET=your-microsoft-client-secret
+# For Microsoft: application.yml declares BOTH providers, so both placeholders must
+# resolve even if you only use Google. Any non-empty value works.
+MICROSOFT_CLIENT_ID=unused
+MICROSOFT_CLIENT_SECRET=unused
 
 # For any other OIDC provider, add its env vars here and configure it in application-dev.yml
 # OKTA_CLIENT_ID=...
 # OKTA_CLIENT_SECRET=...
 ```
 
-The provider list itself (names, issuer URIs, display names) is configured in `application-dev.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
+The provider list itself (names, issuer URIs, display names) is configured in `application.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
 
 Generate secrets:
 ```bash
@@ -168,6 +176,25 @@ export $(grep -v '^#' .env.local | xargs)
 Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, active profile `dev`, env vars from `.env.local`.
 
 The app starts on `http://localhost:8080`.
+
+### 6.1 Run from IntelliJ IDEA
+
+1. **Run → Edit Configurations → + → Application.**
+2. **Main class:** `co.datapipelines.DatapipelinesApplicationKt`
+3. **Module classpath:** the `app` Gradle module's `main` source set (in the module picker this reads as the app project's main source set)
+4. **Program arguments:** `--spring.profiles.active=dev`
+5. **Environment variables:** load them from `.env.local`. In the run configuration, the *Environment variables* field has a file-picker icon on the right — select your project-root `.env.local`. IntelliJ exports it into the launched process, same as the `export $(grep -v '^#' .env.local | xargs)` line above. (Do not paste the secrets into the stored run config.)
+6. **Working directory:** the project root (default).
+
+Debug works as usual — set a breakpoint and use the bug icon instead of run. Live reload is not configured; re-run after code changes.
+
+Verify with:
+
+```bash
+curl http://localhost:8080/health
+```
+
+If startup fails with `datapipelines.auth.base-url must be set…`, your env file is missing `DATAPIPELINES_AUTH_BASE_URL` (§4). If it fails on a `MICROSOFT_*` placeholder, both provider placeholder sets must resolve (§4).
 
 ---
 
@@ -258,6 +285,35 @@ No `output` block: an omitted `output` on a DQL node defaults to `target: caller
 Open the pipeline editor in the browser: `http://localhost:8080/pipelines/{id}/editor`
 
 Click **Execute**. Watch the graph node turn blue → green. Result appears in the preview panel.
+
+### 8.5 Connect an Agent (MCP)
+
+Agents (Claude, CoPilot, OpenCode, Kimi, Cursor, …) talk to the running app through its MCP server — a Streamable HTTP endpoint at `POST /mcp` ([MCP spec §3](docs/mcp-server.md#3-transport--protocol)). The transport is **API-key-only**: no browser cookies, no OIDC session. Mint an API key first (Settings → API Keys in the UI, or `POST /api/v1/auth/api-keys`; the secret is returned exactly once) and grant it the scope your agent needs — `admin` covers everything (`admin ⊃ author ⊃ execute ⊃ read`, [Auth §7.5](docs/auth.md#75-scopes)).
+
+Example client configuration (OpenCode — `~/.config/opencode/opencode.jsonc`, or a project-level `opencode.json`):
+
+```jsonc
+{
+  "mcp": {
+    "datapipelines": {
+      "type": "remote",
+      "url": "http://localhost:8080/mcp",
+      "headers": { "DP-API-Key": "dpk_<id>.<secret>" }
+    }
+  }
+}
+```
+
+For clients that can only set the standard Authorization header, `"Authorization": "Bearer dpk_<id>.<secret>"` is equivalent ([MCP §3.2](docs/mcp-server.md#32-auth-headers)). Keep the key out of version control — global config or an untracked file.
+
+Restart your agent client after adding the config (MCP servers are discovered at startup). Once connected, the agent sees 15 tools (`pipelines_create`, `pipelines_execute`, `templates_render`, `executions_get_result`, …) plus 2 prompts (`analyze_pipeline`, `debug_failed_execution`) — the full surface is in [MCP spec §6](docs/mcp-server.md#6-tools).
+
+Notes for agent users:
+
+- `pipelines_execute` is a **single blocking call** — it returns when the execution reaches a terminal state or times out (default 600s). Progress arrives as the `node_stats` array in the final result, not as streamed notifications ([MCP §6.2.3](docs/mcp-server.md#623-pipelines_execute)).
+- Results page through `executions_get_result` within the TTL; `has_more: true` means there are more pages.
+- To cancel a stuck execution: `DELETE /api/v1/executions/{id}` from REST (no MCP cancel tool in v1).
+- `/mcp` shares the per-user rate limiter with `/api/v1` ([REST §12](docs/rest-api.md#12-rate-limiting)).
 
 ---
 
