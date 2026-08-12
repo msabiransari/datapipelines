@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <link th:href="@{/css/pipeline-editor.css}" rel="stylesheet">
+
+  <script th:src="@{/vendor/alpinejs/alpine.min.js}" defer></script>
+  <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+
+  <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}"></script>
+
+  <script th:src="@{/js/pipeline-editor/init.js}"></script>
+  <script th:src="@{/js/pipeline-editor/graph.js}"></script>
+  <script th:src="@{/js/pipeline-editor/sse.js}"></script>
+  <script th:src="@{/js/pipeline-editor/execute.js}"></script>
+  <script th:src="@{/js/pipeline-editor/details.js}"></script>
+  <script th:src="@{/js/pipeline-editor/error.js}"></script>
+  <script th:src="@{/js/pipeline-editor/result.js}"></script>
+  <script th:src="@{/js/pipeline-editor/a11y.js}"></script>
+
+  <div x-data="pipelineEditor()" x-init="init()" class="pe-root">
+
+    <!-- Top toolbar -->
+    <div class="pe-toolbar" role="toolbar" aria-label="Pipeline editor controls">
+      <a th:href="@{/pipelines}" class="ds-button ds-button-ghost ds-button-sm">&larr; Back</a>
+      <h1 class="pe-pipeline-title" x-text="pipeline.display_name || pipeline.name"></h1>
+      <div class="pe-toolbar-actions">
+        <button class="ds-button ds-button-primary" x-bind:disabled="isExecuting" @click="executePipeline()">
+          <span x-show="!isExecuting">Execute</span>
+          <span x-show="isExecuting">Running...</span>
+        </button>
+        <button x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution()">
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <!-- Execution status banner -->
+    <div x-show="banner.text" class="pe-banner" x-bind:class="banner.type" role="alert">
+      <span x-text="banner.text"></span>
+      <button class="pe-banner-dismiss" @click="banner.text = ''" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <div class="pe-layout">
+      <!-- Left sidebar: Settings + Parameters -->
+      <aside class="pe-sidebar" aria-label="Pipeline settings">
+        <div class="pe-sidebar-section">
+          <h2 class="pe-sidebar-heading">Settings</h2>
+          <div class="pe-field">
+            <label class="pe-label">Name</label>
+            <div class="pe-value" x-text="pipeline.name"></div>
+          </div>
+          <div class="pe-field">
+            <label class="pe-label">Display Name</label>
+            <div class="pe-value" x-text="pipeline.display_name"></div>
+          </div>
+          <div class="pe-field">
+            <label class="pe-label">Description</label>
+            <div class="pe-value" x-text="pipeline.description || '—'"></div>
+          </div>
+          <div class="pe-field">
+            <label class="pe-label">Version</label>
+            <div class="pe-value" x-text="pipeline.version"></div>
+          </div>
+          <template x-if="pipeline.settings && pipeline.settings.tempdb && pipeline.settings.tempdb.engine !== 'H2'">
+            <div class="pe-field">
+              <label class="pe-label">Staging Engine</label>
+              <div class="pe-value" x-text="pipeline.settings.tempdb.engine"></div>
+            </div>
+          </template>
+        </div>
+
+        <div class="pe-sidebar-section" x-show="paramKeys.length">
+          <h2 class="pe-sidebar-heading">Parameters</h2>
+          <template x-for="key in paramKeys" :key="key">
+            <div class="pe-field">
+              <label class="pe-label" x-text="key"></label>
+              <template x-if="parameterOverrides[key] !== undefined">
+                <input type="text" class="pe-input" x-model="parameterOverrides[key]"
+                  x-bind:placeholder="parameters[key].default ? 'Default: ' + JSON.stringify(parameters[key].default) : (parameters[key].required ? 'Required' : 'Optional')" />
+              </template>
+              <template x-if="parameterOverrides[key] === undefined">
+                <div class="pe-value pe-value-muted" x-text="parameters[key]?.description || '—'"></div>
+              </template>
+              <span class="pe-type-badge" x-text="parameters[key]?.type"></span>
+            </div>
+          </template>
+        </div>
+      </aside>
+
+      <!-- Center: Cytoscape graph -->
+      <section class="pe-main" aria-label="Pipeline graph">
+        <div class="pe-canvas-container" id="cy-container">
+          <div id="cy-canvas" role="img" aria-label="Pipeline DAG visualization"></div>
+        </div>
+
+        <!-- Accessible node list -->
+        <ul id="pe-node-list" role="listbox" class="pe-node-list" aria-label="Pipeline nodes" tabindex="0"></ul>
+        <div id="pe-live-region" class="sr-only" aria-live="polite" role="status"></div>
+      </section>
+
+      <!-- Right sidebar: Node details -->
+      <aside class="pe-details-panel" x-bind:class="{ 'pe-details-visible': selectedNode }" aria-label="Node details">
+        <template x-if="selectedNode">
+          <div>
+            <div class="pe-details-header">
+              <h2 class="pe-details-title" x-text="selectedNode.id"></h2>
+              <button class="pe-details-close" @click="selectedNode = null" aria-label="Close details">&times;</button>
+            </div>
+            <div class="pe-details-body">
+              <div class="pe-field">
+                <label class="pe-label">Type</label>
+                <div class="pe-value" x-text="selectedNode.type"></div>
+              </div>
+              <div class="pe-field">
+                <label class="pe-label">Source</label>
+                <div class="pe-value" x-text="selectedNode.source || '—'"></div>
+              </div>
+              <div class="pe-field">
+                <label class="pe-label">Template</label>
+                <div class="pe-value" x-text="selectedNode.template?.id || '—'"></div>
+              </div>
+              <template x-if="selectedNode.template && selectedNode.template.version">
+                <div class="pe-field">
+                  <label class="pe-label">Template Version</label>
+                  <div class="pe-value" x-text="selectedNode.template.version"></div>
+                </div>
+              </template>
+              <div class="pe-field">
+                <label class="pe-label">Description</label>
+                <div class="pe-value" x-text="selectedNode.description || '—'"></div>
+              </div>
+              <template x-if="selectedNode.depends_on && selectedNode.depends_on.length">
+                <div class="pe-field">
+                  <label class="pe-label">Depends On</label>
+                  <ul class="pe-depends-list">
+                    <template x-for="dep in selectedNode.depends_on">
+                      <li x-text="dep" class="pe-depends-item"></li>
+                    </template>
+                  </ul>
+                </div>
+              </template>
+              <template x-if="selectedNode.output">
+                <div class="pe-field">
+                  <label class="pe-label">Output</label>
+                  <div class="pe-value" x-text="JSON.stringify(selectedNode.output)"></div>
+                </div>
+              </template>
+              <div class="pe-field" x-show="nodeStates[selectedNode.id]">
+                <label class="pe-label">Status</label>
+                <div class="pe-value" x-text="nodeStates[selectedNode.id]"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </aside>
+    </div>
+
+    <!-- Result panel -->
+    <div x-show="resultPanel.visible" class="pe-result-panel" role="region" aria-label="Execution results">
+      <div class="pe-result-header">
+        <h2>Results</h2>
+        <button class="pe-details-close" @click="resultPanel.visible = false" aria-label="Close results">&times;</button>
+      </div>
+      <div x-show="resultPanel.ttlSeconds > 0" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
+      <div x-show="resultPanel.expired" class="pe-result-expired-card">
+        <p>Result expired — re-run the pipeline to see the latest data.</p>
+      </div>
+      <div x-show="!resultPanel.expired && resultPanel.data">
+        <div class="pe-result-table-container">
+          <table class="pe-result-table">
+            <thead>
+              <tr>
+                <template x-for="col in resultPanel.columns" :key="col">
+                  <th x-text="col"></th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="row in resultPanel.rows" :key="row.__idx">
+                <tr>
+                  <template x-for="col in resultPanel.columns" :key="col">
+                    <td x-text="row[col]"></td>
+                  </template>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="pe-result-actions">
+          <button class="ds-button ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
+          <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
+          <button class="ds-button ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+          <div class="pe-result-downloads">
+            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
+            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
+            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error modal -->
+    <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="errorModal.hide()">
+      <div class="pe-modal" role="alertdialog" aria-label="Execution error">
+        <div class="pe-modal-header">
+          <h2>Execution Failed</h2>
+          <button @click="errorModal.hide()" aria-label="Close">&times;</button>
+        </div>
+        <div class="pe-modal-body">
+          <p x-text="errorModal.message"></p>
+        </div>
+        <div class="pe-modal-footer">
+          <button class="ds-button ds-button-ghost" @click="errorModal.hide()">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</th:block>
+</html>
