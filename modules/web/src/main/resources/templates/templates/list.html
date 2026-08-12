@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Templates</h1>
+    <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+      <button class="ds-button ds-button-primary" disabled
+              style="opacity: 0.6;" th:title="${'Create Template — Phase 2 other worktree'}">Create Template</button>
+    </th:block>
+  </div>
+
+  <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
+    <input type="search" name="q" th:value="${q}"
+           placeholder="Search templates..."
+           style="flex: 1; padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); max-width: 360px;">
+    <select name="dialect" style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
+      <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
+      <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
+              th:selected="${d == selectedDialect}"></option>
+    </select>
+  </div>
+
+  <div id="template-list-wrapper"
+       th:replace="~{partials/templates :: fragment}">
+  </div>
+</th:block>
+</html>
