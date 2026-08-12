@@ -1,0 +1,79 @@
+# Production deployment — deployment.md Appendix A.
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml ps
+#
+# Secrets are EXTERNAL — never committed. Generate before first boot:
+#   openssl rand -base64 32  # JWT_SECRET + DB_ENCRYPTION_KEY
+#   echo "REDIS_PASSWORD=$(openssl rand -base64 24)"
+#   echo "METADATA_DB_PASSWORD=$(openssl rand -base64 24)"
+#
+# The app image is built via `./gradlew bootJar` and containerised via
+# the Dockerfile at the repo root (deployment.md §6.1).
+#
+# OIDC providers are supplied via the mounted application.yml (see Appendix A);
+# at least one fully-configured provider is required, or startup fails
+# (ConfigValidator §7, auth.md §11.1).
+
+services:
+  datapipelines:
+    image: ghcr.io/datapipelines/datapipelines:1.0.0
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
+      SPRING_DATASOURCE_USERNAME: datapipelines
+      SPRING_DATASOURCE_PASSWORD: ${METADATA_DB_PASSWORD}
+
+      DATAPIPELINES_REDIS_HOST: redis
+      DATAPIPELINES_REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+      # REQUIRED, no fallback. Exactly 32 bytes base64.
+      DATAPIPELINES_JWT_SECRET: ${JWT_SECRET}
+      # REQUIRED, exactly 32 bytes base64. Losing this makes every stored
+      # datasource credential unrecoverable.
+      DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+
+      # REQUIRED: at least one OIDC provider (application.yml below).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+    volumes:
+      - ./application.yml:/etc/datapipelines/application.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: datapipelines
+      POSTGRES_USER: datapipelines
+      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datapipelines -d datapipelines"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
