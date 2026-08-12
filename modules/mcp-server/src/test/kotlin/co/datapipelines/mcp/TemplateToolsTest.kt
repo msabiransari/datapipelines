@@ -97,12 +97,12 @@ class TemplateToolsTest {
             {
                 shouldThrow<DatapipelinesException> {
                     TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "nope")), readCtx)
-                }.code shouldBe PipelineErrorCodes.Validation.TEMPLATE_NOT_FOUND
+                }.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
             },
             {
                 shouldThrow<DatapipelinesException> {
                     TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "revenue.sql", "version" to 9)), readCtx)
-                }.code shouldBe PipelineErrorCodes.Validation.TEMPLATE_VERSION_NOT_FOUND
+                }.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
             },
         )
     }
@@ -260,6 +260,6 @@ class TemplateToolsTest {
                 McpArguments(mapOf("id" to "revenue.sql", "version" to 9, "context" to emptyMap<String, Any?>())),
                 authorCtx,
             )
-        }.code shouldBe PipelineErrorCodes.Validation.TEMPLATE_VERSION_NOT_FOUND
+        }.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
     }
 }

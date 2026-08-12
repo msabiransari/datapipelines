@@ -112,6 +112,7 @@ class HealthResponseSerializationTest {
                 // Boot calls them `db` and `redis`; the contract says `database` and `redis`.
                 every { healthForPath("db") } returns Health.up().build()
                 every { healthForPath("redis") } returns Health.up().build()
+                every { healthForPath("h2_factory") } returns Health.up().build()
             }
 
         val response = controller(endpoint).health()
@@ -127,6 +128,7 @@ class HealthResponseSerializationTest {
             mockk<HealthEndpoint> {
                 every { healthForPath("db") } returns Health.up().build()
                 every { healthForPath("redis") } returns Health.down().build()
+                every { healthForPath("h2_factory") } returns Health.up().build()
             }
 
         val response = controller(endpoint).health()
@@ -143,13 +145,14 @@ class HealthResponseSerializationTest {
             mockk<HealthEndpoint> {
                 every { healthForPath("db") } returns null
                 every { healthForPath("redis") } returns null
+                every { healthForPath("h2_factory") } returns null
             }
 
         val response = controller(endpoint).health()
 
         response.status shouldBe Status.DOWN.code
         response.components shouldContainExactly
-            mapOf("database" to "DOWN", "redis" to "DOWN", "h2_factory" to "UP")
+            mapOf("database" to "DOWN", "redis" to "DOWN", "h2_factory" to "DOWN")
     }
 
     @Test

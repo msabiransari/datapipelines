@@ -76,18 +76,12 @@ data class ExecuteLaunch(
  * as the bean-of-record `mcp-server`'s `@ConditionalOnBean` keys off — MCP runs never touch it,
  * going through [McpRecordingExecutionRunner]'s per-run pair instead (P7).
  *
- * ## Idempotency (§3.5) — and the candidate/alias shim it forces
- * `IdempotencyStore.reserve` must be claimed **before** executing (that is the whole point of the
- * `SET NX`), but the executor mints the execution id internally. The reservation therefore holds a
- * web-minted **candidate** id, and the moment `execution_started` reveals the real id the emitter's
- * hook writes `dp:idem-ref:{candidate} → execution_id` into `web`'s own Redis keyspace (module-
- * structure §5.9 — no dag key layout is mirrored). A retry resolves the alias and is served the
- * original's events from the log ([SseLogStreamer.follow]) instead of re-executing.
- *
- * **Reported to the orchestrator:** the honest fix is one field — a caller-supplied execution id on
- * `ExecuteRequest` — which deletes candidate, alias and the bounded alias wait below. Until then,
- * a reservation whose execution never started (e.g. all slots were full) attaches to nothing and
- * answers `409 result.execution_incomplete` until the idempotency TTL elapses.
+ * ## Idempotency (§3.5)
+ * `IdempotencyStore.reserve` is claimed **before** executing (that is the whole point of the
+ * `SET NX`). The reservation's execution id is passed directly to the executor via
+ * `ExecuteRequest.executionId`, so the idempotency store maps directly to the real execution id
+ * with no alias layer. A retry resolves the existing reservation and follows the original's
+ * events from the log ([SseLogStreamer.follow]) instead of re-executing.
  *
  * ## Failure semantics
  * Parameter binding runs **before** anything is reserved or streamed, so a bad request is a 400
@@ -118,7 +112,6 @@ class ExecutionLauncher(
     private val executionRepository: ExecutionRepository,
     private val idempotencyStore: IdempotencyStore,
     private val idempotency: IdempotencyProperties,
-    private val redis: StringRedisTemplate,
     private val mapper: ObjectMapper,
     private val metrics: WebMetrics,
     private val scope: CoroutineScope,
@@ -194,14 +187,7 @@ class ExecutionLauncher(
      * running the stream follows it live. A log that has already expired (> 1h, §10.3) is the same
      * `410` the replay endpoint gives.
      */
-    private fun attachToOriginal(candidateId: UUID): SseEmitter {
-        val executionId =
-            resolveAlias(candidateId)
-                ?: throw ApiException(
-                    PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
-                    "The original execution for this Idempotency-Key is still starting; retry in a moment.",
-                    mapOf("reason" to "original_execution_starting"),
-                )
+    private fun attachToOriginal(executionId: UUID): SseEmitter {
         if (!streamer.hasLog(executionId)) {
             throw ApiException(
                 PipelineErrorCodes.Result.EXPIRED,
@@ -213,23 +199,9 @@ class ExecutionLauncher(
         return streamer.follow(executionId)
     }
 
-    /**
-     * Candidate → real execution id. The alias is written by the emitter hook the instant
-     * `execution_started` is persisted — before staging allocation — so the wait is nominally one
-     * poll; the bound exists for the instance dying in between.
-     */
-    private fun resolveAlias(candidateId: UUID): UUID? {
-        repeat(ALIAS_WAIT_POLLS) {
-            val value = redis.opsForValue().get("$ALIAS_KEY_PREFIX$candidateId")
-            if (value != null) return runCatching { UUID.fromString(value) }.getOrNull()
-            Thread.sleep(ALIAS_POLL_MILLIS)
-        }
-        return null
-    }
-
     private fun startFresh(
         request: ExecuteLaunch,
-        candidateId: UUID?,
+        executionId: UUID?,
     ): SseEmitter {
         val sse = SseEmitter(NEVER_TIMEOUT)
         val context =
@@ -250,11 +222,11 @@ class ExecutionLauncher(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
-            ) { executionId -> onExecutionStarted(executionId, request, sse, candidateId) }
+            ) { onExecutionStarted(it, request, sse) }
         val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter)
 
         scope.launch {
-            runExecution(executor, request, emitter, sse)
+            runExecution(executor, request, emitter, sse, executionId)
         }
         return sse
     }
@@ -264,14 +236,8 @@ class ExecutionLauncher(
         executionId: UUID,
         request: ExecuteLaunch,
         sse: SseEmitter,
-        candidateId: UUID?,
     ) {
         streams.register(ExecutionStream(executionId, request.principal.userId, sse, mapper))
-        if (candidateId != null) {
-            redis
-                .opsForValue()
-                .set("$ALIAS_KEY_PREFIX$candidateId", executionId.toString(), Duration.ofSeconds(idempotency.ttlSeconds))
-        }
     }
 
     private suspend fun runExecution(
@@ -279,6 +245,7 @@ class ExecutionLauncher(
         request: ExecuteLaunch,
         emitter: WebEventEmitter,
         sse: SseEmitter,
+        executionId: UUID?,
     ) {
         try {
             val result =
@@ -293,6 +260,7 @@ class ExecutionLauncher(
                         resultTtlSeconds = request.resultTtlSeconds,
                         correlationId = request.correlationId,
                         triggeredVia = ExecutionTrigger.REST,
+                        executionId = executionId,
                     ),
                 )
             recordResultColumns(result)
@@ -370,12 +338,5 @@ class ExecutionLauncher(
 
     private companion object {
         const val NEVER_TIMEOUT = 0L
-
-        /** `web`-owned keyspace for the idempotency candidate→execution alias (§5.9). */
-        const val ALIAS_KEY_PREFIX = "dp:idem-ref:"
-
-        /** Bounded wait for the original execution's first event: 20 × 100ms. */
-        const val ALIAS_WAIT_POLLS = 20
-        const val ALIAS_POLL_MILLIS = 100L
     }
 }

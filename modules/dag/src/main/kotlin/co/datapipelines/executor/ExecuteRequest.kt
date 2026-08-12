@@ -51,6 +51,7 @@ data class ExecuteRequest(
     val resultTtlSeconds: Long? = null,
     val correlationId: UUID? = null,
     val triggeredVia: ExecutionTrigger = ExecutionTrigger.REST,
+    val executionId: UUID? = null,
 )
 
 /**

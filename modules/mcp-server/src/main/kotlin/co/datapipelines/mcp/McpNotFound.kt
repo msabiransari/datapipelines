@@ -37,29 +37,29 @@ object McpNotFound {
             details = mapOf("pipeline_id" to id.toString(), "version" to version),
         )
 
-    /** Unknown template id (§13.3 `pipeline.validation.template_not_found`). */
+    /** Unknown template id (§13.9 `template.not_found`). */
     fun template(id: String): DatapipelinesException =
         DatapipelinesException(
-            code = PipelineErrorCodes.Validation.TEMPLATE_NOT_FOUND,
+            code = PipelineErrorCodes.Template.NOT_FOUND,
             message = "Template '$id' does not exist.",
             details = mapOf("template_id" to id),
         )
 
-    /** Known template, unknown version (§13.3 `pipeline.validation.template_version_not_found`). */
+    /** Known template, unknown version (§13.9 `template.not_found`). */
     fun templateVersion(
         id: String,
         version: Int,
     ): DatapipelinesException =
         DatapipelinesException(
-            code = PipelineErrorCodes.Validation.TEMPLATE_VERSION_NOT_FOUND,
+            code = PipelineErrorCodes.Template.NOT_FOUND,
             message = "Template '$id' has no version $version.",
             details = mapOf("template_id" to id, "version" to version),
         )
 
-    /** Unknown datasource name (§13.3 `pipeline.validation.unknown_datasource`). */
+    /** Unknown datasource name (§13.8 `datasource.not_found`). */
     fun datasource(name: String): DatapipelinesException =
         DatapipelinesException(
-            code = PipelineErrorCodes.Validation.UNKNOWN_DATASOURCE,
+            code = PipelineErrorCodes.Datasource.NOT_FOUND,
             message = "Datasource '$name' is not registered in this environment.",
             details = mapOf("datasource" to name),
         )

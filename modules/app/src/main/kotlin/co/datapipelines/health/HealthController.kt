@@ -41,10 +41,7 @@ class HealthController(
             mapOf(
                 DATABASE to statusOf(BOOT_DB_INDICATOR),
                 REDIS to statusOf(BOOT_REDIS_INDICATOR),
-                // TODO(staging module — module-structure.md §5.5): replace with a real
-                //  probe that asks StagingFactory to create and drop a throwaway H2
-                //  instance. Reported UP unconditionally until StagingFactory exists.
-                H2_FACTORY to Status.UP.code,
+                H2_FACTORY to statusOf(BOOT_H2_FACTORY_INDICATOR),
             )
         val overall = if (components.values.all { it == Status.UP.code }) Status.UP.code else Status.DOWN.code
         return HealthResponse(status = overall, version = versionOrUnknown(), components = components)
@@ -103,6 +100,7 @@ class HealthController(
         // Spring Boot's own indicator names; remapped to the snake_case contract keys.
         const val BOOT_DB_INDICATOR = "db"
         const val BOOT_REDIS_INDICATOR = "redis"
+        const val BOOT_H2_FACTORY_INDICATOR = "h2_factory"
     }
 }
 

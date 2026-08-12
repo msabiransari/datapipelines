@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":modules:mcp-server"))
 
     implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.thymeleaf)
     implementation(libs.spring.boot.starter.validation)
     // Redis: post-completion SSE event log (1h) + per-user rate-limit counters.

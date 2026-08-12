@@ -137,7 +137,6 @@ class WebSurfaceConfiguration {
         executionRepository: ExecutionRepository,
         idempotencyStore: IdempotencyStore,
         idempotency: IdempotencyProperties,
-        redis: StringRedisTemplate,
         metrics: WebMetrics,
         scope: CoroutineScope,
     ): ExecutionLauncher =
@@ -162,7 +161,6 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
             idempotencyStore = idempotencyStore,
             idempotency = idempotency,
-            redis = redis,
             mapper = ExecutorJson.mapper,
             metrics = metrics,
             scope = scope,

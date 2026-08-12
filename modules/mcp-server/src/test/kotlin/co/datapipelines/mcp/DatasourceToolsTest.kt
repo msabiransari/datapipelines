@@ -78,7 +78,7 @@ class DatasourceToolsTest {
 
         shouldThrow<DatapipelinesException> {
             DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "nope")), readCtx)
-        }.code shouldBe PipelineErrorCodes.Validation.UNKNOWN_DATASOURCE
+        }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
     }
 
     @Test
@@ -125,6 +125,6 @@ class DatasourceToolsTest {
 
         shouldThrow<DatapipelinesException> {
             DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "nope")), authorCtx)
-        }.code shouldBe PipelineErrorCodes.Validation.UNKNOWN_DATASOURCE
+        }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
     }
 }

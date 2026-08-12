@@ -98,7 +98,7 @@ class PipelineExecutor(
      * @throws ExecutionAbortedException the execution was cancelled (§8.3).
      */
     suspend fun execute(request: ExecuteRequest): ExecutionResult {
-        val executionId = UUID.randomUUID()
+        val executionId = request.executionId ?: UUID.randomUUID()
         return executionSlots.withSlot(request.userId) { runExecution(executionId, request) }
     }
 
@@ -108,7 +108,20 @@ class PipelineExecutor(
         request: ExecuteRequest,
     ): ExecutionResult {
         val startedAt = Instant.now()
-        val plan = ExecutablePipeline.from(request.pipeline)
+        val plan =
+            try {
+                ExecutablePipeline.from(request.pipeline)
+            } catch (e: IllegalArgumentException) {
+                // Defence-in-depth: save-time validation makes this unreachable, but a DAG
+                // that somehow carries a duplicate id, dangling dep, self-dep or cycle is
+                // mapped to a catalogued code rather than surfacing as a raw uncatalogued 500.
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Validation.CYCLE_DETECTED,
+                    message = "Pipeline DAG is malformed: ${e.message}",
+                    details = mapOf("pipeline_id" to request.pipelineId.toString()),
+                    cause = e,
+                )
+            }
         // Binding runs before the stream opens, and stays there: a rejected parameter is a 400
         // with no execution at all, and §8.2 catalogues no executor code for it. Everything the
         // catalogue DOES cover moves below the emit (F9).
