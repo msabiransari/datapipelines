@@ -147,7 +147,36 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
         )
 }
 
-class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite")
+/**
+ * SQLite -- an **embedded, in-process** engine, hardened at the adapter per §5.6 (v1.9).
+ *
+ * SQLite runs inside the server JVM, so author-authored SQL against a SQLite datasource executes
+ * in this process. The existing §5.6 refusal set blocks `enable_load_extension` (native code
+ * loading) and `temp_store_directory`, but `ATTACH DATABASE '/any/file.db' AS other` is NOT
+ * blocked by either — an attacker can open and query ANY file on the server filesystem.
+ *
+ * ## What holds the line
+ *
+ * `SQLITE_LIMIT_ATTACHED` controls the maximum number of simultaneously attached databases.
+ * The xerial driver (3.49.1.0) exposes it as the `limit_attached` pragma key. Setting it to 0
+ * at connect time prevents any `ATTACH` — the driver's `sqlite3_limit(conn, SQLITE_LIMIT_ATTACHED, 0)`
+ * call runs before author SQL.
+ *
+ * Both keys are additionally in [DialectRefusalSets.SQLITE], because `properties.jdbc` is applied
+ * **after** [defaultProperties] ([AbstractDialectAdapter.buildHikariConfig]) — without that an
+ * operator could save a datasource carrying `limit_attached=10` and re-open the surface this
+ * class closes.
+ *
+ * This is the datasource analogue of staging §9.5's de-privileging: an in-process engine must not
+ * hand author SQL a filesystem-access primitive.
+ */
+class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
+    override val defaultProperties: Map<String, String> =
+        mapOf(
+            "enable_load_extension" to "false",
+            "limit_attached" to "0",
+        )
+}
 
 /**
  * Dispatches a [Dialect] to its [DialectAdapter]. Total over the enum — every value has an

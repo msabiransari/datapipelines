@@ -258,6 +258,95 @@ class EmbeddedDialectBehaviorTest {
         }
     }
 
+    @Test
+    fun `DS-SEC-21 - the SQLite adapter prevents ATTACH at connect`() {
+        // SQLite runs IN THE SERVER JVM, so ATTACH DATABASE is a filesystem-access primitive that
+        // author SQL must not have. `limit_attached=0` sets SQLITE_LIMIT_ATTACHED to 0, which
+        // makes sqlite3_limit refuse every ATTACH.
+        onHardenedSqlite { connection ->
+            val thrown =
+                shouldThrow<SQLException> {
+                    connection.createStatement().use {
+                        it.execute(
+                            "ATTACH DATABASE '/tmp/dp-should-not-open.db' AS other",
+                        )
+                    }
+                }
+            thrown.message.orEmpty().lowercase() shouldContain "attached"
+        }
+    }
+
+    @Test
+    fun `DS-SEC-21 - SQLite hardening does not break legitimate usage`() {
+        // Over-hardening would be its own defect. `limit_attached=0` must not break
+        // create table / insert / select — the engine's own database operations.
+        onHardenedSqlite { connection ->
+            connection.createStatement().use { it.execute("CREATE TABLE t (n INTEGER)") }
+            connection.createStatement().use { it.execute("INSERT INTO t VALUES (7)") }
+            connection.readSingleString("SELECT n FROM t") shouldBe "7"
+        }
+    }
+
+    @Test
+    fun `DS-SEC-21 - SQLite adapter defaultProperties prevent extension loading`() {
+        // `enable_load_extension=false` prevents LOAD_EXTENSION. The PRAGMA itself is not
+        // readable via executeQuery in the xerial JDBC driver, so prove it behaviorally:
+        // attempting to load a non-existent extension fails with "not authorized" — NOT
+        // with "not found", which would mean the setting was already on.
+        onHardenedSqlite { connection ->
+            val thrown =
+                shouldThrow<SQLException> { connection.createStatement().use { it.execute("SELECT load_extension('nonexistent')") } }
+            thrown.message.orEmpty().lowercase() shouldContain "not authorized"
+        }
+    }
+
+    @Test
+    fun `DS-SEC-21 - an operator cannot override SQLite hardening back via either carrier`() {
+        // properties.jdbc is applied AFTER defaultProperties (§4.2). Without refusing these keys
+        // in the dialect set, a saved datasource carrying `limit_attached=10` would silently
+        // re-open the ATTACH surface.
+        SQLITE_HARDENED_SETTINGS.forEach { key ->
+            withClue("properties.jdbc.$key must be refused for SQLITE") {
+                DatasourceValidator(driverAvailable = { true })
+                    .validate(
+                        Fixtures.forDialect(Dialect.SQLITE, properties = DatasourceProperties(jdbc = mapOf(key to "true"))),
+                        isCreate = true,
+                    ).errors
+                    .map { it.code } shouldContain DatasourceErrorCodes.PROPERTIES_INVALID
+            }
+            withClue("$key smuggled into the SQLite jdbc_url must be refused too") {
+                DialectAdapters
+                    .forDialect(Dialect.SQLITE)
+                    .validateJdbcUrl("jdbc:sqlite:/tmp/a.db;$key=true")
+                    .errors
+                    .single()
+                    .code shouldBe DatasourceErrorCodes.JDBC_URL_MALFORMED
+            }
+        }
+    }
+
+    @Test
+    fun `DS-SEC-21 - SQLite adapter defaultProperties match the expected hardening keys`() {
+        val defaults = DialectAdapters.forDialect(Dialect.SQLITE).defaultProperties
+        defaults shouldBe
+            mapOf(
+                "enable_load_extension" to "false",
+                "limit_attached" to "0",
+            )
+    }
+
+    /** Runs [block] against an in-memory connection built through the real, hardened SQLite adapter. */
+    private fun onHardenedSqlite(block: (Connection) -> Unit) =
+        onSqlite(embedded(Dialect.SQLITE, "sqlite_hardened", "jdbc:sqlite::memory:"), block)
+
+    /** Runs [block] against a fresh pooled connection for [datasource]. */
+    private fun onSqlite(
+        datasource: Datasource,
+        block: (Connection) -> Unit,
+    ) {
+        ConnectionPoolManager.buildHikariPool(datasource).use { pool -> pool.leaseConnection().use(block) }
+    }
+
     /** Runs [block] against an in-memory connection built through the real, hardened DuckDB adapter. */
     private fun onHardenedDuckdb(block: (Connection) -> Unit) =
         onDuckdb(embedded(Dialect.DUCKDB, "duckdb_hardened", "jdbc:duckdb::memory:"), block)
@@ -361,6 +450,13 @@ class EmbeddedDialectBehaviorTest {
                 "allow_unsigned_extensions",
                 "allow_community_extensions",
                 "enable_external_access",
+            )
+
+        /** The §5.6 (v1.9) two that [SqliteDialectAdapter.defaultProperties] must disable. */
+        val SQLITE_HARDENED_SETTINGS =
+            listOf(
+                "enable_load_extension",
+                "limit_attached",
             )
     }
 }

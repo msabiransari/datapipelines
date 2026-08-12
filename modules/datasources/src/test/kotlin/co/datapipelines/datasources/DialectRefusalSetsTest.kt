@@ -112,7 +112,7 @@ class DialectRefusalSetsTest {
 
     @Test
     fun `the SQLITE and H2 sets are exactly their reviewed sets`() {
-        DialectRefusalSets.SQLITE shouldBe setOf("enable_load_extension", "temp_store_directory")
+        DialectRefusalSets.SQLITE shouldBe setOf("enable_load_extension", "temp_store_directory", "limit_attached")
         DialectRefusalSets.H2 shouldBe setOf("init", "runscript")
     }
 
@@ -256,6 +256,7 @@ class DialectRefusalSetsTest {
         smuggled(Dialect.DUCKDB, "jdbc:duckdb:/tmp/a.db;session_init_sql_file=/tmp/evil.sql")
         smuggled(Dialect.DUCKDB, "jdbc:duckdb:/tmp/a.db;session_init_sql_file_sha256=deadbeef")
         smuggled(Dialect.SQLITE, "jdbc:sqlite:/tmp/a.db?enable_load_extension=true")
+        smuggled(Dialect.SQLITE, "jdbc:sqlite:/tmp/a.db?limit_attached=10")
         smuggled(Dialect.ORACLE, "jdbc:oracle:thin:@//h:1521/svc?oracle.net.wallet_location=/tmp/w")
     }
 
@@ -385,6 +386,7 @@ class DialectRefusalSetsTest {
             Dialect.H2 to "INIT",
             Dialect.DUCKDB to "session_init_sql_file",
             Dialect.SQLITE to "enable_load_extension",
+            Dialect.SQLITE to "limit_attached",
             // NEW-3: ORACLE had a URL-side case but no properties.jdbc twin, so "identical in both
             // carriers" was asserted over a smaller key set on this dialect than on the others.
             Dialect.ORACLE to "oracle.net.wallet_location",

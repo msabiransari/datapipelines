@@ -279,8 +279,14 @@ internal object DialectRefusalSets {
      * SQLite 3.49.1.0. `enable_load_extension` (the `LOAD_EXTENSION` pragma) lets a connection
      * load a native extension — arbitrary code; `temp_store_directory` names a directory the
      * engine writes into.
+     *
+     * `limit_attached` is refused as a §5.6 v1.9 hardening: it controls `SQLITE_LIMIT_ATTACHED`,
+     * which [SqliteDialectAdapter.defaultProperties] sets to `0` at connect to prevent
+     * `ATTACH DATABASE` — an in-process engine must not hand author SQL a filesystem-access
+     * primitive. Refused so `properties.jdbc`, applied AFTER `defaultProperties`, cannot re-open
+     * the surface.
      */
-    val SQLITE = setOf("enable_load_extension", "temp_store_directory")
+    val SQLITE = setOf("enable_load_extension", "temp_store_directory", "limit_attached")
 
     /**
      * Oracle ojdbc11 23.7.0.25.01, read from `oracle.jdbc.OracleConnection`'s
