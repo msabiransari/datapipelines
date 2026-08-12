@@ -1,0 +1,11 @@
+<div th:fragment="content">
+  <div style="margin-bottom:var(--gap-md)">
+    <p style="color:var(--text-primary);font-weight:var(--weight-semibold);margin:0 0 var(--gap-xs) 0">Your new API key (shown once):</p>
+    <div style="display:flex;gap:var(--gap-xs);align-items:center">
+      <input type="text" readonly th:value="${key}" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--accent-success);border-radius:var(--radius-base);background:var(--surface-secondary);color:var(--text-primary)">
+      <button class="ds-button ds-button-ghost ds-button-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)" style="white-space:nowrap">Copy</button>
+    </div>
+    <p style="color:var(--accent-danger);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">Copy this key now. You won't see it again.</p>
+  </div>
+  <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0">Key <span th:text="${keyId}" style="font-family:var(--font-mono)">dpk_xxx</span> (<span th:text="${keyName}">name</span>) created successfully.</p>
+</div>

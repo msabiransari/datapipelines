@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-lg)">
+    <div>
+      <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
+      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0" th:text="'ID: ' + ${template?.id ?: '—'}">Template ID</p>
+    </div>
+    <div style="display:flex;gap:var(--gap-sm);align-items:center">
+      <label for="versionSelect" style="color:var(--text-secondary);font-size:var(--text-sm)">Version:</label>
+      <select id="versionSelect" class="ds-select" style="font-size:var(--text-sm)" onchange="updateVersion()">
+        <th:block th:each="v : ${versions}">
+          <option th:value="${v.version}" th:selected="${v.version == template?.version}" th:text="'v' + ${v.version}"></option>
+        </th:block>
+      </select>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--gap-lg)">
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-sm)">
+        <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0">Template Source</h2>
+        <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
+      </div>
+      <textarea id="templateBody" class="ds-textarea" style="width:100%;min-height:280px;font-family:var(--font-mono);font-size:var(--text-sm);tab-size:2;resize:vertical" th:text="${template?.body ?: ''}">Template body</textarea>
+    </div>
+
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-sm)">
+        <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0">Render Context</h2>
+        <div style="display:flex;gap:var(--gap-xs)">
+          <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('kv')" id="tab-kv-btn" style="font-weight:var(--weight-semibold);border-bottom:2px solid var(--accent-primary)">Key/Value</button>
+          <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('json')" id="tab-json-btn" style="border-bottom:2px solid transparent">JSON</button>
+        </div>
+      </div>
+      <div id="context-kv" style="margin-bottom:var(--gap-sm)">
+        <div id="context-rows">
+          <div class="context-row" style="display:flex;gap:var(--gap-xs);margin-bottom:var(--gap-xs)">
+            <input type="text" placeholder="key" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">
+            <input type="text" placeholder="value" style="flex:2;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">
+            <button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)" style="color:var(--accent-danger)">&times;</button>
+          </div>
+        </div>
+        <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()">+ Add Row</button>
+      </div>
+      <div id="context-json" style="display:none">
+        <textarea id="contextJsonTextarea" class="ds-textarea" style="width:100%;min-height:200px;font-family:var(--font-mono);font-size:var(--text-sm);tab-size:2" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:var(--gap-sm);margin:var(--gap-md) 0;align-items:center">
+    <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
+    <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
+  </div>
+
+  <div style="margin-bottom:var(--gap-lg)">
+    <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-sm) 0">Preview Output</h2>
+    <div id="previewPane"></div>
+  </div>
+
+  <th:block th:if="${template?.imports != null && !template.imports.isEmpty()}">
+    <div style="margin-bottom:var(--gap-lg)">
+      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-sm) 0">Imports</h2>
+      <div class="ds-card" style="padding:var(--gap-md)">
+        <table style="width:100%;font-size:var(--text-sm)">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Template ID</th>
+              <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="imp : ${template.imports}">
+              <td style="padding:var(--gap-xs);font-family:var(--font-mono)" th:text="${imp.id}">import_id</td>
+              <td style="padding:var(--gap-xs);font-family:var(--font-mono)" th:text="${imp.version}">1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </th:block>
+
+  <script>
+    let selectedTab = 'kv';
+
+    function switchTab(tab) {
+      selectedTab = tab;
+      document.getElementById('context-kv').style.display = tab === 'kv' ? 'block' : 'none';
+      document.getElementById('context-json').style.display = tab === 'json' ? 'block' : 'none';
+      document.getElementById('tab-kv-btn').style.borderBottom = tab === 'kv' ? '2px solid var(--accent-primary)' : '2px solid transparent';
+      document.getElementById('tab-kv-btn').style.fontWeight = tab === 'kv' ? 'var(--weight-semibold)' : 'var(--weight-normal)';
+      document.getElementById('tab-json-btn').style.borderBottom = tab === 'json' ? '2px solid var(--accent-primary)' : '2px solid transparent';
+      document.getElementById('tab-json-btn').style.fontWeight = tab === 'json' ? 'var(--weight-semibold)' : 'var(--weight-normal)';
+    }
+
+    function addContextRow() {
+      var row = document.createElement('div');
+      row.className = 'context-row';
+      row.style.display = 'flex';
+      row.style.gap = 'var(--gap-xs)';
+      row.style.marginBottom = 'var(--gap-xs)';
+      row.innerHTML = '<input type="text" placeholder="key" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">' +
+        '<input type="text" placeholder="value" style="flex:2;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">' +
+        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)" style="color:var(--accent-danger)">&times;</button>';
+      document.getElementById('context-rows').appendChild(row);
+    }
+
+    function removeContextRow(btn) {
+      btn.closest('.context-row').remove();
+    }
+
+    function buildContextJson() {
+      if (selectedTab === 'json') {
+        return document.getElementById('contextJsonTextarea').value;
+      }
+      var obj = {};
+      var rows = document.querySelectorAll('#context-rows .context-row');
+      rows.forEach(function(row) {
+        var inputs = row.querySelectorAll('input');
+        var key = inputs[0].value.trim();
+        var val = inputs[1].value.trim();
+        if (key) {
+          obj[key] = val.match(/^[0-9]+(?:\.[0-9]+)?$/) ? Number(val) : val;
+        }
+      });
+      return JSON.stringify(obj);
+    }
+
+    function renderPreview() {
+      var btn = document.getElementById('previewBtn');
+      var spinner = document.getElementById('previewSpinner');
+      btn.disabled = true;
+      spinner.style.display = 'inline';
+      var pane = document.getElementById('previewPane');
+
+      var templateId = [[${template?.id ?: "''"}]];
+      var version = document.getElementById('versionSelect')?.value || '1';
+      var body = document.getElementById('templateBody')?.value || '';
+      var context = buildContextJson();
+
+      var params = new URLSearchParams();
+      params.append('body', body);
+      params.append('context', context);
+
+      fetch('/partials/templates/' + encodeURIComponent(templateId) + '/versions/' + version + '/render', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'DP-CSRF-Token': document.querySelector('[hx-headers]')?.getAttribute('hx-headers') ? JSON.parse(document.querySelector('[hx-headers]').getAttribute('hx-headers'))['DP-CSRF-Token'] : ''
+        },
+        body: params
+      }).then(function(r) { return r.text(); })
+        .then(function(html) { pane.innerHTML = html; })
+        .catch(function(e) { pane.innerHTML = '<div class="ds-card" style="padding:var(--gap-md);border-color:var(--accent-danger)"><p style="color:var(--accent-danger);font-size:var(--text-sm)">' + e.message + '</p></div>'; })
+        .finally(function() { btn.disabled = false; spinner.style.display = 'none'; });
+    }
+
+    function updateVersion() {
+      var sel = document.getElementById('versionSelect');
+      var version = sel.value;
+      var templateId = [[${template?.id ?: "''"}]];
+      window.location.search = '';
+    }
+  </script>
+</th:block>
+</html>

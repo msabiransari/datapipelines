@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0 0 var(--gap-lg) 0">User Management</h1>
+
+  <div style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
+    <input type="text" id="userSearch" class="ds-input" placeholder="Search by email or name" style="flex:1;max-width:320px"
+           hx-get="/partials/admin/users"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#user-table-body"
+           hx-swap="innerHTML"
+           name="q">
+    <span class="htmx-indicator" style="color:var(--text-secondary);font-size:var(--text-sm)">Searching...</span>
+  </div>
+
+  <div class="ds-card" style="padding:var(--gap-md)">
+    <table style="width:100%;font-size:var(--text-sm)">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">ID</th>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Name</th>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Email</th>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Status</th>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Role</th>
+          <th style="text-align:right;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="user-table-body">
+        <tr><td colspan="6" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
+          <span class="htmx-indicator">Loading users...</span>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      htmx.ajax('GET', '/partials/admin/users?offset=0&limit=20', {target: '#user-table-body', swap: 'innerHTML'});
+    });
+  </script>
+</th:block>
+</html>
