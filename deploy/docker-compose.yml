@@ -34,11 +34,17 @@ services:
       # datasource credential unrecoverable.
       DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
 
+      # REQUIRED when OIDC providers are configured (auth.md §5.2).
+      DATAPIPELINES_AUTH_BASE_URL: ${DATAPIPELINES_AUTH_BASE_URL}
+
       # REQUIRED: at least one OIDC provider (application.yml below).
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
     volumes:
-      - ./application.yml:/etc/datapipelines/application.yml:ro
+      - ./application.yml:/application.yml:ro
     depends_on:
       postgres:
         condition: service_healthy

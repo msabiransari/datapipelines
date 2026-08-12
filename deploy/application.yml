@@ -1,0 +1,15 @@
+datapipelines:
+  auth:
+    base-url: http://localhost:8080
+    oidc:
+      providers:
+        - name: google
+          client-id: ${GOOGLE_CLIENT_ID}
+          client-secret: ${GOOGLE_CLIENT_SECRET}
+          issuer-uri: https://accounts.google.com
+          display-name: "Sign in with Google"
+        - name: microsoft
+          client-id: ${MICROSOFT_CLIENT_ID}
+          client-secret: ${MICROSOFT_CLIENT_SECRET}
+          issuer-uri: https://login.microsoftonline.com/common/v2.0
+          display-name: "Sign in with Microsoft"
