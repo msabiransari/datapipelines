@@ -219,6 +219,7 @@ curl -X POST http://localhost:8080/api/v1/templates \
   -d '{
     "id": "active_users.sql",
     "dialect": "POSTGRES",
+    "display_name": "Active Users",
     "description": "Get all active users. Declares no parameters.",
     "imports": [],
     "body": "SELECT id, email, name, created_at FROM users WHERE is_active = true ORDER BY created_at DESC"
