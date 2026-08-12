@@ -23,7 +23,7 @@ class DashboardPartialController(
         val principal = currentPrincipal()
         val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
 
-        val totalPipelines = pipelines.findAll().size
+        val totalPipelines = pipelines.countAll()
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
         val recentBatch =

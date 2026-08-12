@@ -60,8 +60,8 @@ class DomainConfiguration {
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
-     * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which memoizes the
-     * unbounded `findAll()` per request — see the note there.
+     * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
+     * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
      */
     @Bean
     fun datasourceReferences(bodies: PipelineBodies): DatasourceReferences =

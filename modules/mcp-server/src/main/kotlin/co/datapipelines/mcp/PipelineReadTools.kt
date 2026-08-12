@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import com.fasterxml.jackson.databind.JsonNode
@@ -10,7 +9,6 @@ import java.util.UUID
 /** `pipelines_list` (mcp-server.md §6.2.1). Scope: `read`. */
 class PipelinesListTool(
     private val pipelines: PipelineRepository,
-    private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -42,11 +40,16 @@ class PipelinesListTool(
         val datasource = args.string("datasource")
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
 
-        return pipelines
-            .findAll(owner)
+        val records =
+            if (datasource != null) {
+                pipelines.findAllByDatasource(datasource, owner)
+            } else {
+                pipelines.findAll(owner)
+            }
+
+        return records
             .asSequence()
             .filter { query == null || it.matches(query) }
-            .filter { datasource == null || usesDatasource(it, datasource) }
             .take(limit)
             .map { it.toMetadata() }
             .toList()
@@ -56,21 +59,6 @@ class PipelinesListTool(
         name.lowercase().contains(query) ||
             displayName.lowercase().contains(query) ||
             description.lowercase().contains(query)
-
-    /**
-     * The `datasource` filter reads each candidate's stored body, because datasource references
-     * are **per node** and are deliberately not aggregated onto the listing (§6.2.1). A pipeline
-     * whose stored body no longer parses is excluded rather than failing the whole listing — one
-     * unreadable row must not make the tool useless.
-     */
-    private fun usesDatasource(
-        record: PipelineRecord,
-        datasource: String,
-    ): Boolean {
-        val body = pipelines.findVersionBody(record.id, record.currentVersion) ?: return false
-        val pipeline = runCatching { deserializer.readOrThrow(body) }.getOrNull() ?: return false
-        return pipeline.nodes.any { node -> node.source == datasource }
-    }
 
     private fun PipelineRecord.toMetadata(): Map<String, Any?> =
         mapOf(

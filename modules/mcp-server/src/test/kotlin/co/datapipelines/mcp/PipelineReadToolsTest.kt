@@ -64,10 +64,8 @@ class PipelineReadToolsTest {
     }
 
     @Test
-    fun `the datasource filter reads node sources from the stored body`() {
-        every { pipelines.findAll(null) } returns listOf(revenue, churn)
-        every { pipelines.findVersionBody(revenue.id, 1) } returns McpFixtures.pipelineBody(source = "pg-prod")
-        every { pipelines.findVersionBody(churn.id, 1) } returns McpFixtures.pipelineBody(name = "customer_churn", source = "mysql-prod")
+    fun `the datasource filter is pushed down to SQL`() {
+        every { pipelines.findAllByDatasource("mysql-prod", null) } returns listOf(churn)
 
         val hits = PipelinesListTool(pipelines).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
 

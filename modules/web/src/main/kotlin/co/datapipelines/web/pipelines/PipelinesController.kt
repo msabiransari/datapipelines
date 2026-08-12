@@ -126,11 +126,8 @@ class PipelinesController(
     /**
      * §5.7 — the listing, with the `owner` / `datasource` / `q` filters.
      *
-     * The datasource filter scans bodies through [PipelineBodies]: one memoized scan per request,
-     * pages cut in memory, a hard ceiling that truncates rather than scanning unboundedly — the
-     * stopgap for the repository's missing push-down (carry-forward #6; the KDoc there names the
-     * cross-module follow-up). `total` is the honest lower bound [Pagination.unknownTotal] reports;
-     * `truncated` flags the ceiling having been hit.
+     * Datasource filtering is pushed down to SQL via [PipelineBodies]; the `q` search remains
+     * in-memory. [PipelineRepository.findAllByDatasource] is the root fix (carry-forward #6).
      */
     @GetMapping
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -143,20 +140,12 @@ class PipelinesController(
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val scan = bodies.scan(owner)
+        val scan = bodies.scan(owner, datasource)
         val filtered =
             scan.records
-                .filter { datasource == null || scan.usesDatasource(it, datasource) }
                 .filter { q == null || scan.matchesQuery(it, q) }
         val items = filtered.drop(page).take(size).map(PipelineResponses::listEntry)
-        // Exact total when the scan is complete; the honest lower bound only when the ceiling
-        // truncated it (gate C, B5) — and has_more is then true by construction.
-        val pagination =
-            if (scan.truncated) {
-                Pagination.unknownTotal(page, size, items.size, hasMore = true)
-            } else {
-                Pagination.of(page, size, filtered.size.toLong(), items.size)
-            }
+        val pagination = Pagination.of(page, size, filtered.size.toLong(), items.size)
         return ApiResponse.of(PagedData(items, pagination))
     }
 

@@ -151,7 +151,7 @@ class McpToolSurfaceSpecDriftTest {
         val urls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
         val deserializer = PipelineDeserializer()
         return listOf(
-            PipelinesListTool(pipelines, deserializer),
+            PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
             PipelineExecuteTool(pipelines, mockk<PipelineExecutor>(), resultStore, urls, deserializer),
             PipelinesCreateTool(pipelines, deserializer, mockk<PipelineValidator>(), PipelineSerializer()),

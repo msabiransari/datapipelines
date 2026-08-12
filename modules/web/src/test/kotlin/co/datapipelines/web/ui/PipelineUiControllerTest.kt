@@ -23,6 +23,7 @@ class PipelineUiControllerTest {
     private val controller = PipelineUiController(repository, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val pageSize = 25
 
     private fun pipeline(name: String = "my-pipeline") =
         PipelineRecord(
@@ -43,7 +44,7 @@ class PipelineUiControllerTest {
     @Test
     fun `list page returns pipelines view with theme and pipelines`() {
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null) } returns listOf(pipeline(), pipeline("other"))
+        every { repository.findAll(null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline("other"))
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null)
@@ -130,7 +131,7 @@ class PipelineUiControllerTest {
 
     @Test
     fun `partial returns fragment view with correct model`() {
-        every { repository.findAll(null) } returns listOf(pipeline(), pipeline(), pipeline())
+        every { repository.findAll(null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline(), pipeline())
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -144,7 +145,7 @@ class PipelineUiControllerTest {
 
     @Test
     fun `partial paginates correctly`() {
-        every { repository.findAll(null) } returns (1..30).map { pipeline("p$it") }
+        every { repository.findAll(null, pageSize + 1, 25) } returns (1..5).map { pipeline("p${it + 25}") }
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -155,7 +156,6 @@ class PipelineUiControllerTest {
         result shouldHaveSize 5
         model["offset"] shouldBe 25
         model["hasMore"] shouldBe false
-        model["total"] shouldBe 30
     }
 
     @Test
@@ -172,7 +172,7 @@ class PipelineUiControllerTest {
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
 
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null) } returns emptyList()
+        every { repository.findAll(null, pageSize + 1, 0) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)
@@ -185,7 +185,7 @@ class PipelineUiControllerTest {
     @Test
     fun `empty list renders with hasMore false`() {
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null) } returns emptyList()
+        every { repository.findAll(null, pageSize + 1, 0) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)

@@ -21,13 +21,26 @@ class PipelinePartialController(
     ): String {
         val page = maxOf(0, offset ?: 0)
         val size = PAGE_SIZE
-        val all = filter(pipelines.findAll(), q?.trim()?.takeIf { it.isNotEmpty() })
-        val items = all.drop(page).take(size)
+        val query = q?.trim()?.takeIf { it.isNotEmpty() }
+        val items: List<co.datapipelines.pipeline.PipelineRecord>
+        val total: Int
+        val hasMore: Boolean
+        if (query == null) {
+            val pageRows = pipelines.findAll(null, size + 1, page)
+            items = pageRows.take(size)
+            total = page + items.size + (if (pageRows.size > size) 1 else 0)
+            hasMore = pageRows.size > size
+        } else {
+            val all = filter(pipelines.findAll(), query)
+            items = all.drop(page).take(size)
+            total = all.size
+            hasMore = all.size > page + size
+        }
         model.addAttribute("pipelines", items)
         model.addAttribute("q", q ?: "")
         model.addAttribute("offset", page)
-        model.addAttribute("hasMore", all.size > page + size)
-        model.addAttribute("total", all.size)
+        model.addAttribute("hasMore", hasMore)
+        model.addAttribute("total", total)
         model.addAttribute("scopes", scopes())
         return "partials/pipelines"
     }

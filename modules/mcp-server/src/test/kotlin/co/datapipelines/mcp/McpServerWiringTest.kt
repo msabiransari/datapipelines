@@ -51,7 +51,7 @@ class McpServerWiringTest {
         val templateValidator = mockk<TemplateValidator>()
         val engine = mockk<TemplateEngine>()
         return listOf(
-            PipelinesListTool(pipelines, deserializer),
+            PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
             PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, deserializer),
             PipelinesCreateTool(pipelines, deserializer, validator, PipelineSerializer()),

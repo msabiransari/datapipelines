@@ -10,10 +10,6 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 
-/**
- * The bounded-scan stopgap (carry-forward #6): one `findAll()` per scan, bodies parsed at most
- * once, the ceiling truncating instead of scanning unboundedly.
- */
 class PipelineBodiesTest {
     private val repository = mockk<PipelineRepository>()
     private val bodies = PipelineBodies(repository)
@@ -34,34 +30,28 @@ class PipelineBodiesTest {
     )
 
     @Test
-    fun `one scan reads the table once and parses each body at most once`() {
+    fun `scan without datasource queries findAll`() {
         val first = record("a")
         val second = record("b")
         every { repository.findAll(null) } returns listOf(first, second)
-        every { repository.findVersionBody(first.id, 1) } returns """{"nodes":[{"source":"pg-prod"}]}"""
-        every { repository.findVersionBody(second.id, 1) } returns """{"nodes":[]}"""
 
         val scan = bodies.scan()
-        scan.usesDatasource(first, "pg-prod") shouldBe true
-        scan.usesDatasource(first, "pg-prod") shouldBe true // memoized, not re-read
-        scan.usesDatasource(second, "pg-prod") shouldBe false
         scan.records.size shouldBe 2
+        scan.records shouldBe listOf(first, second)
 
         verify(exactly = 1) { repository.findAll(null) }
-        verify(exactly = 1) { repository.findVersionBody(first.id, 1) }
     }
 
     @Test
-    fun `the datasource filter sees node sources and output datasources`() {
+    fun `scan with datasource pushes filter to SQL`() {
         val rec = record("p")
-        every { repository.findAll(null) } returns listOf(rec)
-        every { repository.findVersionBody(rec.id, 1) } returns
-            """{"nodes":[{"source":"tempdb","output":{"datasource":"pg-warehouse","table":"t"}}]}"""
+        every { repository.findAllByDatasource("pg-prod", null) } returns listOf(rec)
 
-        val scan = bodies.scan()
-        scan.usesDatasource(rec, "pg-warehouse") shouldBe true
-        scan.usesDatasource(rec, "tempdb") shouldBe true
-        scan.usesDatasource(rec, "pg-prod") shouldBe false
+        val scan = bodies.scan(datasourceName = "pg-prod")
+        scan.records.size shouldBe 1
+        scan.records[0].name shouldBe "p"
+
+        verify(exactly = 1) { repository.findAllByDatasource("pg-prod", null) }
     }
 
     @Test
@@ -77,21 +67,11 @@ class PipelineBodiesTest {
     }
 
     @Test
-    fun `the ceiling truncates and reports it`() {
-        val many = (1..PipelineBodies.MAX_SCANNED_PIPELINES + 5).map { record("p$it") }
-        every { repository.findAll(null) } returns many
+    fun `pipelinesReferencing delegates to findAllByDatasource`() {
+        val a = record("a")
+        val b = record("b")
+        every { repository.findAllByDatasource("pg-prod") } returns listOf(a, b)
 
-        val scan = bodies.scan()
-        scan.records.size shouldBe PipelineBodies.MAX_SCANNED_PIPELINES
-        scan.truncated shouldBe true
-    }
-
-    @Test
-    fun `an unreadable body scans as not-referencing rather than failing the listing`() {
-        val rec = record("broken")
-        every { repository.findAll(null) } returns listOf(rec)
-        every { repository.findVersionBody(rec.id, 1) } returns "not json"
-
-        bodies.scan().usesDatasource(rec, "pg-prod") shouldBe false
+        bodies.pipelinesReferencing("pg-prod") shouldBe listOf("a", "b")
     }
 }

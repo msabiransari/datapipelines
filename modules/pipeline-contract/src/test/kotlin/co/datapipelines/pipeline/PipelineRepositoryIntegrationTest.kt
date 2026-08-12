@@ -180,6 +180,86 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
+    fun `findAll paginates with limit and offset at the SQL level`() {
+        val a = Fixtures.pipeline(name = "pipeline_a")
+        val b = Fixtures.pipeline(name = "pipeline_b")
+        val c = Fixtures.pipeline(name = "pipeline_c")
+        repository.create(NewPipeline.from(a, owner), serializer.write(a), owner)
+        repository.create(NewPipeline.from(b, owner), serializer.write(b), owner)
+        repository.create(NewPipeline.from(c, owner), serializer.write(c), owner)
+
+        repository.findAll(null, limit = 2, offset = 0).map { it.name } shouldContainExactly listOf("pipeline_c", "pipeline_b")
+        repository.findAll(null, limit = 2, offset = 2).map { it.name } shouldContainExactly listOf("pipeline_a")
+        repository.findAll(null, limit = 1, offset = 1).map { it.name } shouldContainExactly listOf("pipeline_b")
+        repository.findAll(null, limit = 5, offset = 0).size shouldBe 3
+    }
+
+    @Test
+    fun `findAllByDatasource returns only pipelines whose current body references the datasource`() {
+        val bodyPg = Fixtures.pipeline(name = "pg_pipeline", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        val bodyMysql = Fixtures.pipeline(name = "mysql_pipeline", nodes = listOf(Fixtures.node(source = "mysql-prod")))
+        val outputNode =
+            Fixtures.node(
+                source = "tempdb",
+                output = NodeOutput.Datasource("pg-warehouse", "cache", WriteMode.REPLACE),
+            )
+        val bodyOutput =
+            Fixtures.pipeline(
+                name = "output_ds",
+                nodes = listOf(outputNode),
+            )
+        repository.create(NewPipeline.from(bodyPg, owner), serializer.write(bodyPg), owner)
+        repository.create(NewPipeline.from(bodyMysql, owner), serializer.write(bodyMysql), owner)
+        repository.create(NewPipeline.from(bodyOutput, owner), serializer.write(bodyOutput), owner)
+
+        repository.findAllByDatasource("pg-prod").map { it.name } shouldContainExactly listOf("pg_pipeline")
+        repository.findAllByDatasource("mysql-prod").map { it.name } shouldContainExactly listOf("mysql_pipeline")
+        repository.findAllByDatasource("pg-warehouse").map { it.name } shouldContainExactly listOf("output_ds")
+        repository.findAllByDatasource("nonexistent") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `findAllByDatasource respects limit and offset`() {
+        val a = Fixtures.pipeline(name = "a", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        val b = Fixtures.pipeline(name = "b", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        val c = Fixtures.pipeline(name = "c", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        repository.create(NewPipeline.from(a, owner), serializer.write(a), owner)
+        repository.create(NewPipeline.from(b, owner), serializer.write(b), owner)
+        repository.create(NewPipeline.from(c, owner), serializer.write(c), owner)
+
+        repository.findAllByDatasource("pg-prod", limit = 2, offset = 0).map { it.name } shouldContainExactly listOf("c", "b")
+        repository.findAllByDatasource("pg-prod", limit = 2, offset = 2).map { it.name } shouldContainExactly listOf("a")
+    }
+
+    @Test
+    fun `findAllByDatasource with owner filter scopes to that owner`() {
+        val other = insertUser(email = "other@example.com", subject = "sub-2")
+        val mine = Fixtures.pipeline(name = "mine", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        val theirs = Fixtures.pipeline(name = "theirs", nodes = listOf(Fixtures.node(source = "pg-prod")))
+        repository.create(NewPipeline.from(mine, owner), serializer.write(mine), owner)
+        repository.create(NewPipeline.from(theirs, other), serializer.write(theirs), other)
+
+        repository.findAllByDatasource("pg-prod", ownerId = owner).map { it.name } shouldContainExactly listOf("mine")
+        repository.findAllByDatasource("pg-prod").map { it.name } shouldContainExactly listOf("theirs", "mine")
+    }
+
+    @Test
+    fun `countAll returns the number of live pipelines`() {
+        repository.countAll() shouldBe 0
+
+        repository.create(NewPipeline.from(Fixtures.pipeline(name = "a"), owner), serializer.write(Fixtures.pipeline(name = "a")), owner)
+        repository.countAll() shouldBe 1
+
+        repository.create(NewPipeline.from(Fixtures.pipeline(name = "b"), owner), serializer.write(Fixtures.pipeline(name = "b")), owner)
+        repository.countAll() shouldBe 2
+
+        val bodyC = Fixtures.pipeline(name = "c")
+        val deleted = repository.create(NewPipeline.from(bodyC, owner), serializer.write(bodyC), owner)
+        repository.softDelete(deleted.id)
+        repository.countAll() shouldBe 2
+    }
+
+    @Test
     fun `an unknown version body reads as null, not as an exception`() {
         val body = Fixtures.pipeline()
         val record = repository.create(NewPipeline.from(body, owner), serializer.write(body), owner)

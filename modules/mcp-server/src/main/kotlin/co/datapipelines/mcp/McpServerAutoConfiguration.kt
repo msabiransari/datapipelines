@@ -68,7 +68,7 @@ class McpServerAutoConfiguration {
         val deserializer = PipelineDeserializer()
         val serializer = PipelineSerializer()
         return listOf(
-            PipelinesListTool(pipelines, deserializer),
+            PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
             PipelineExecuteTool(
                 pipelines,

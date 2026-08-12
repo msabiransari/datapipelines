@@ -54,14 +54,66 @@ class PipelineRepository(
             .singleOrNull()
 
     /** Every live pipeline, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
-    fun findAll(ownerId: UUID? = null): List<PipelineRecord> {
+    fun findAll(
+        ownerId: UUID? = null,
+        limit: Int? = null,
+        offset: Int = 0,
+    ): List<PipelineRecord> {
         val ownerFilter = if (ownerId == null) "" else " AND owner_id = :ownerId"
+        val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
+        val params = mutableMapOf<String, Any?>()
+        if (ownerId != null) params["ownerId"] = ownerId
+        if (limit != null) {
+            params["limit"] = limit
+            params["offset"] = offset
+        }
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE is_deleted = FALSE$ownerFilter ORDER BY created_at DESC",
-            mapOf("ownerId" to ownerId),
+            "$SELECT_COLUMNS WHERE is_deleted = FALSE$ownerFilter ORDER BY created_at DESC$limitClause",
+            params,
             MAPPER,
         )
     }
+
+    /** Live pipelines whose current body references [datasourceName] in any node; newest first. */
+    fun findAllByDatasource(
+        datasourceName: String,
+        ownerId: UUID? = null,
+        limit: Int? = null,
+        offset: Int = 0,
+    ): List<PipelineRecord> {
+        val ownerFilter = if (ownerId == null) "" else " AND p.owner_id = :ownerId"
+        val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
+        val params = mutableMapOf<String, Any?>()
+        params["datasourceName"] = datasourceName
+        if (ownerId != null) params["ownerId"] = ownerId
+        if (limit != null) {
+            params["limit"] = limit
+            params["offset"] = offset
+        }
+        return jdbc.query(
+            """
+            SELECT p.*
+              FROM pipelines p
+              JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
+             WHERE p.is_deleted = FALSE$ownerFilter
+               AND (v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('source', :datasourceName)))
+                    OR v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('output', jsonb_build_object('datasource', :datasourceName)))))
+             ORDER BY p.created_at DESC
+             $limitClause
+            """.trimIndent(),
+            params,
+            MAPPER,
+        )
+    }
+
+    /** Count of live pipelines. */
+    fun countAll(): Int =
+        checkNotNull(
+            jdbc.jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pipelines WHERE is_deleted = FALSE",
+                Int::class.java,
+            ),
+        )
 
     /**
      * The stored body JSON of one version, or null when that version does not exist.

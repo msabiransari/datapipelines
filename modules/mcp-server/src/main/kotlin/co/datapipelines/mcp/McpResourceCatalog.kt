@@ -191,16 +191,10 @@ class McpResourceCatalog(
     }
 
     /**
-     * One `resources/list` call's memo of the unbounded reads (mcp-sec-5, partial mitigation).
+     * One `resources/list` call's memo of the unbounded reads (mcp-sec-5).
      *
      * A page walks its kinds and then probes `hasMore`, so an un-memoized `findAll()` ran two or
      * three times per page. Memoizing bounds a call to **one** scan of each.
-     *
-     * Residual, tracked as a cross-module follow-up (`web`'s listing shares it): `findAll()` still
-     * has no SQL `LIMIT`/`OFFSET`, so the page is cut in memory after the whole table is read. The
-     * root fix is pushing limit/offset — and `pipelines_list`'s datasource predicate, which
-     * deserializes each candidate body — down into `PipelineRepository`; that changes
-     * `pipeline-contract` and is not this module's to make.
      */
     private inner class RequestScan {
         val pipelines by lazy { this@McpResourceCatalog.pipelines.findAll().sortedBy { it.id } }

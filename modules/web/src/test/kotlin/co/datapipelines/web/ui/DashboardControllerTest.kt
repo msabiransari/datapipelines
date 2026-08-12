@@ -57,7 +57,7 @@ class DashboardControllerTest {
     @Test
     fun `stats returns pipeline count executions today and success rate`() {
         authenticate(userId, setOf(Scope.READ))
-        every { pipelines.findAll() } returns listOf(mockk<PipelineRecord>(), mockk<PipelineRecord>())
+        every { pipelines.countAll() } returns 2
         val records = listOf(record(), record(ExecutionStatus.FAILED), record())
         every { executions.findByUser(userId, null, null, null, null, limit = 100, offset = 0) } returns records
 
@@ -101,7 +101,7 @@ class DashboardControllerTest {
     @Test
     fun `admin sees all pipelines and executions`() {
         authenticate(adminId, setOf(Scope.ADMIN))
-        every { pipelines.findAll() } returns listOf(mockk<PipelineRecord>())
+        every { pipelines.countAll() } returns 1
         every { executions.findAll(limit = 100, offset = 0) } returns listOf(record())
 
         val model = ExtendedModelMap()
