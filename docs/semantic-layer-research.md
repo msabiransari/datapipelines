@@ -1,7 +1,10 @@
 # Semantic Layers for Agent-Facing Data — Research Brief
 
 **Status:** research (pre-spec) — input to a future `docs/semantic-layer.md`
-**Date:** 2026-08-13
+**Date:** 2026-08-13 (revised same day after independent adversarial review — 12
+findings, 4 MAJOR, all applied; review verified this doc against mcp-server v1.3,
+ROADMAP v1.1, pipeline-contract v1.3, datasources v1.9, type-system, auth §7.5–7.6,
+templates §4/§7, metadata-db §4.4–4.6)
 **Purpose:** What the field converged on, what dbt actually ships, which libraries exist,
 and how to sequence a semantic layer for datapipelines.co. Motivating problem: MCP
 metadata endpoints let an agent *infer* meaning from schemas, and that inference is
@@ -68,11 +71,13 @@ failure mode isn't ignorance of what a column means — it's that authoring corr
 against a real schema is a hard generation task with a huge output space and no
 validation until execution.
 
-The benchmark record makes the gap concrete. On the original Spider benchmark,
-exact-match accuracy sits around 91%; GPT-4o scored 86.6% there. On **Spider 2.0**
-(enterprise schemas averaging ~800 columns, some >1,000, real BigQuery/Snowflake
-environments) the same model drops to **10.1%**, o1-preview to 17.1%, multi-step
-agentic evaluation ~21%.
+The benchmark record makes the gap concrete. On the original Spider benchmark GPT-4o
+scored 86.6% (top systems ~91%); on **Spider 2.0** (enterprise schemas averaging ~800
+columns, some >1,000, real BigQuery/Snowflake environments) the same model drops to
+**10.1%**, o1-preview to 17.1%, multi-step agentic evaluation ~21%. (Reported metrics
+differ across the two benchmarks — Spider 1.0 figures are commonly exact-match,
+Spider 2.0 execution accuracy — but the collapse is driven by schema scale, not the
+metric change.)
 
 That gap has since been closed, and *how* is the argument for a semantic layer. By
 March 2026 the top Spider 2.0-Snow system reports 96.70% execution accuracy. A 2026
@@ -282,8 +287,8 @@ semantic layer's expensive half is execution, and datapipelines.co already ships
 | Semantic layer needs | datapipelines.co has | Gap |
 |---|---|---|
 | SQL execution against many engines | Dialect adapters per datasource, pooled, credential-encrypted, refused-property hardening | none |
-| Dialect-specific expression variants | The same adapter set OSI's multi-dialect expressions are designed for | none |
-| SQL generation from a structure | Freemarker templates, versioned + immutably pinned, dry-rendered at save time | templates are hand-authored, not compiled from a model |
+| Dialect-specific expression variants | Dialect adapters supply drivers, type mapping, pooling, URL validation — execution and typing only (datasources §4.2) | per-dialect SQL *generation* (identifier quoting, date arithmetic, LIMIT vs FETCH FIRST vs ROWNUM) is new compiler work; OSI's named dialects don't cover this repo's seven |
+| SQL generation from a structure | Freemarker templates, versioned + immutably pinned; parse-checked at template save, dry-rendered at pipeline save (templates §7.1/§7.2) | templates are hand-authored, not compiled from a model |
 | Result delivery, typing, paging | Schema envelope, Redis cursor with TTL, `executions_get_result` pagination, BIG* string encoding | none |
 | Cross-source joins | tempdb staging in per-execution H2 — the federation no other semantic layer has | none |
 | Verified query repository | Named, versioned, parameterised pipelines with typed parameter maps | not yet linked to a semantic vocabulary |
@@ -293,16 +298,28 @@ semantic layer's expensive half is execution, and datapipelines.co already ships
 The architectural move that follows: **compile a semantic query into a one-node
 pipeline and execute it through the existing DAG executor.** A structured request
 resolves against the model, emits SQL for the datasource's dialect, and becomes a
-single DQL node with `output.target: caller`. Everything downstream — result envelope,
-TTL cursor, paging, type mapping, node stats, audit — is reused unchanged. A model
-spanning two datasources compiles to a two-source pipeline staging into tempdb: the
-federated semantic layer nobody else on the shelf can offer.
+single DQL node with `output.target: caller` (omitted `output` — pipeline-contract
+§16.1). Downstream — result envelope, TTL cursor, paging, type mapping, node stats,
+audit — is reused. A model spanning two datasources compiles to a two-source pipeline
+staging into tempdb: the federated semantic layer nobody else on the shelf can offer.
 
-> **Fork to settle in the spec, not the code:** if a semantic query is a pipeline,
-> then `semantics_query` is a thin front end over `pipelines_execute`, and the
-> question is whether compiled pipelines are **ephemeral or persisted**. Ephemeral is
-> simpler and matches the query contract; persisted gives a free verified-query
-> repository and free caching, at the cost of pipeline-namespace pollution.
+> **Fork to settle in the spec, not the code — and the coupling surface is larger
+> than "namespace pollution."** If a semantic query is a pipeline, `semantics_query`
+> is a front end over the execution machinery, and the question is whether compiled
+> pipelines are **ephemeral or persisted**. Per the current contract, *persisted* is
+> the path that matches existing machinery and *ephemeral* is the contract change:
+> (a) a node's `template: {id, version}` is required and SQL lives in template
+> entities, never inline in the pipeline (pipeline-contract §2, §4.6) — compiled SQL
+> has no legal home without minting template entities or amending the contract;
+> (b) `pipeline_executions` carries a NOT NULL FK to `pipeline_versions`
+> (metadata-db §4.6) — an ephemeral pipeline cannot record an execution, which
+> breaks `executions_get_result`, execution-ownership auth, and the
+> `datapipelines://executions/{id}` resource, i.e. the very things reuse is supposed
+> to deliver. Persisted has its own cost beyond clutter: pipeline names are globally
+> unique *including soft-deleted rows* (pipeline-contract §12.1), so every compiled
+> query burns a name forever unless the spec carves out a namespace. Note result
+> caching is itself a deferred v2 item (ROADMAP §3.6) — persistence provides a
+> natural cache key, not free caching.
 
 ### The tool surface, in the house naming convention
 
@@ -320,10 +337,28 @@ semantics_query       # {model, measures[], dimensions[], filters[], grain,
                       #   order_by[], limit} → same result envelope as
                       #   pipelines_execute
 
-# resources (discovery is context, not an action)
-datapipelines://semantics/{datasource}/{model}
-datapipelines://semantics/{datasource}/{model}/examples
+# resources (discovery is context, not an action; keyed by model id per
+#   mcp-server §7.1's pattern — a model may span datasources, so the
+#   datasource list is model content, not a URI segment)
+datapipelines://semantics/{model}
+datapipelines://semantics/{model}/examples
 ```
+
+**Scopes:** auth §7.6 is the only place operation-level scope requirements live, so
+the spec must add matrix rows there in the same change: `semantics_list` /
+`semantics_get` / `semantics_time_range` → `read`; `semantics_query` → `execute`.
+One collision to resolve explicitly: under the *persisted* fork, `semantics_query`
+silently creates pipelines — an `author`-scope operation — while agent keys will
+typically hold only `execute`. Whether semantic-model resources participate in
+`resources/list` scope-filtering (mcp-server §7.3) also needs a row.
+
+**Filters and injection:** `filters[]` values (and `order_by` / `limit` boundaries)
+are open input compiled into raw SQL, and templates §4.4 puts injection prevention on
+the SQL author — which the compiler now is. The spec must choose between
+compiler-side typed-literal escaping and parameterized output; ROADMAP §2 already
+lists **parameterized SQL output (`{sql, params}`)** as the v1.1 item that closes
+this gap, and it is the natural substrate for semantic filters — P4 should probably
+depend on it.
 
 Note what this does to the deferred `create_pipeline_for_question` prompt
 ([mcp-server §8.2](mcp-server.md)): it was pulled from v1 on the reasoning that
@@ -340,11 +375,11 @@ checkable.
 | Phase | Work | Exit gate |
 |---|---|---|
 | **P0** | Ship the deferred introspection tools already in [ROADMAP §2](ROADMAP.md#2-v11-candidates): `datasources_get_schema` / `_get_tables` / `_get_columns` + REST counterparts. Necessary substrate (the model is authored against and validated against it) — necessary, not sufficient, which is precisely the limit already hit. | agent can enumerate every table and column without guessing |
-| **P1** | **Write the spec before the code**: `docs/semantic-layer.md` settling model format (OSI-shaped), storage (metadata DB vs Git-loaded files), the ephemeral-vs-persisted fork, and the tool surface — then move the corresponding ROADMAP items out, per the house rule. | the spec answers the fork without re-litigation |
+| **P1** | **Write the spec before the code**: `docs/semantic-layer.md` settling model format (OSI-shaped), storage (metadata DB vs Git-loaded files), the ephemeral-vs-persisted fork, **model versioning & pinning** (everything else executable in this product is immutable-per-version with explicit pins — pipeline-contract §15.4, templates §5.1; a mutable-in-place model would be the sole exception, and persisted compiled pipelines must record which model version they came from), the filter/injection mechanism, scope rows, and the tool surface — then move the corresponding ROADMAP items out, per the house rule. | the spec answers every fork above without re-litigation |
 | **P2** | Model registry, validator, drift test. Load + validate models at startup; resolve every field/expression/join against the live schema. Ship the drift test **in the same commit as the first model**. | renaming a source column turns the build red |
-| **P3** | Resources, descriptions, synonyms on the MCP resource surface. No compiler yet — agents still author SQL, but against curated vocabulary with worked examples. First measurable accuracy gain; unblocks `create_pipeline_for_question`. | a held-out question set measurably improves |
+| **P3** | Resources, descriptions, synonyms on the MCP resource surface. No compiler yet — agents still author SQL, but against curated vocabulary with worked examples. First measurable accuracy gain; materially improves `create_pipeline_for_question` (P0's introspection tools already unblock it per mcp-server §8.2). Start collecting question → query pairs here — the corpus format locks at P5. | a held-out question set measurably improves |
 | **P4** | The compiler + `semantics_query`. Structured request in, one-node pipeline out. Closed-vocabulary validation before compile, cardinality-aware join proving, declared grain arithmetic, mandatory limit. Log resolved entities, proven join path, emitted SQL on every call. Reuse the existing execution path. | the agent's happy path emits zero SQL |
-| **P5** | Verified queries as a regression corpus: curated question → structured-query pairs, served as context, replayed after every model change. | model changes gated by corpus replay |
+| **P5** | Verified queries as a regression corpus: the pairs collected since P3, converted to P4's structured-query shape, served as context, replayed after every model change. (Placed after P4 only because the corpus format needs P4's query shape; collection starts at P3 per principle 6.) | model changes gated by corpus replay |
 | **P6** | Compile-time access policy: row/column rules injected during compilation; unauthorized requests fail before any data is read, with a structured error. Defer until multi-tenant SaaS is real — same trigger already recorded for OAuth. | an unauthorized request cannot produce a row |
 
 ### What NOT to build
@@ -353,9 +388,11 @@ checkable.
   layer doesn't change the reasoning — we generate SQL from a typed model, not parse it.
 - **Our own YAML dialect.** Naming arguments settled by OSI + MetricFlow; reuse is
   free and buys a migration path.
-- **A tool per model or per metric.** Named failure mode in governed-MCP guidance;
-  degrades as the catalog grows; collides with the v1 decision to keep
-  `tools.listChanged` false.
+- **A tool per model or per metric.** Named failure mode in governed-MCP guidance —
+  faced with twelve tools that all return revenue-shaped numbers, an agent picks the
+  wrong one — and it degrades as the catalog grows. (ROADMAP §3.7 does sanction
+  dynamic per-pipeline tools for v2, flipping `tools.listChanged`, so the argument
+  rests on the failure mode, not the flag.)
 - **A second execution path.** If `semantics_query` doesn't run through the DAG
   executor, we maintain two result envelopes, two cursors, two audit trails.
 - **Model inference at query time.** Reintroduces exactly the guessing the layer
@@ -389,5 +426,15 @@ checkable.
 18. [A Semantic-Layer-Mediated Agent for NL2SQL over Heterogeneous Enterprise Databases](https://arxiv.org/abs/2606.31041) — arXiv 2606.31041
 19. [I Gave My AI Agent a Semantic Layer Instead of Raw SQL](https://builder.aws.com/content/2nHgBx9YiFp5Dm2kUb9mpRH3foM/i-gave-my-ai-agent-a-semantic-layer-instead-of-raw-sql) — AWS Builder Center (title only — page body did not render for retrieval)
 
-**Unverified claims carried in this doc:** the 94.15% figure is the arXiv paper's own
-claim, not reproduced; the AWS case study is cited by title only.
+**Unverified claims carried in this doc:**
+
+- The 94.15% figure is the arXiv paper's own claim, not reproduced.
+- The 96.70% Spider 2.0-Snow figure comes from the vendor's own "we're #1" blog post.
+- **MetricFlow's Apache-2.0 relicensing** (it was BSL-1.1 for most of its life) rests
+  on one dbt Labs blog post plus the GitHub API license field on 2026-08-13 — this is
+  the most load-bearing licence claim in the doc (it underpins "runs standalone at no
+  cost" and the shelf verdict); **re-verify against the repo's LICENSE file before
+  the spec relies on it.**
+- "No JVM semantic-layer library exists" is a negative claim from web search, not
+  proof of absence.
+- The AWS case study is cited by title only (page body did not render for retrieval).
