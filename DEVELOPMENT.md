@@ -34,8 +34,12 @@ docker compose -f deploy/docker-compose.dev.yml up -d
 ```
 
 This starts:
-- **Postgres 16** on `localhost:5432` (DB: `datapipelines`, user: `datapipelines`, password: `datapipelines`)
-- **Redis 7** on `localhost:6379` (no password)
+- **Postgres 16** on `localhost:5434` (DB: `datapipelines`, user: `datapipelines`, password: `datapipelines`)
+- **Redis 7** on `localhost:6381` (no password)
+
+The host ports are deliberately NOT the defaults (5432/6379) — those collide with
+other local stacks on most developer machines. Keep them in sync with
+`application-dev.yml` and configuration.md §6 if you ever change them.
 
 Verify:
 ```bash
@@ -91,13 +95,13 @@ Create `.env.local` in the project root (git-ignored — never commit secrets):
 
 ```bash
 # Metadata DB
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/datapipelines
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5434/datapipelines
 SPRING_DATASOURCE_USERNAME=datapipelines
 SPRING_DATASOURCE_PASSWORD=datapipelines
 
 # Redis
 DATAPIPELINES_REDIS_HOST=localhost
-DATAPIPELINES_REDIS_PORT=6379
+DATAPIPELINES_REDIS_PORT=6381
 
 # JWT signing secret — MUST be real base64 of ≥32 random bytes; a placeholder here
 # fails startup validation (configuration.md §7) by design
@@ -231,7 +235,7 @@ curl -X POST http://localhost:8080/api/v1/datasources \
     "name": "pg-local",
     "display_name": "Local Postgres",
     "dialect": "POSTGRES",
-    "jdbc_url": "jdbc:postgresql://localhost:5432/testdb",
+    "jdbc_url": "jdbc:postgresql://localhost:5434/testdb",
     "username": "postgres",
     "password": "postgres"
   }'

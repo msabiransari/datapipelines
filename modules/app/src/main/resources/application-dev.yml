@@ -13,7 +13,9 @@
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/datapipelines
+    # Host port 5434 (see docker-compose.dev.yml — the default 5432 collides
+    # with other local stacks).
+    url: jdbc:postgresql://localhost:5434/datapipelines
     username: datapipelines
     password: datapipelines
 
@@ -22,13 +24,13 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6381
       password: ""
 
 datapipelines:
   redis:
     host: localhost
-    port: 6379
+    port: 6381
 
   jwt:
     secret: ${DATAPIPELINES_JWT_SECRET}         # from .env.local — never a literal, even in dev (see note above)

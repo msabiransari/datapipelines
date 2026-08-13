@@ -30,7 +30,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [type-system.md](type-system.md) | v1.1 frozen | 11 canonical logical types, wire encodings (`BIG*` = string), per-dialect JDBC mapping tables, UTC normalization |
 | [pipeline-contract.md](pipeline-contract.md) | v1.3 frozen | Pipeline/Node JSON schema, caller-node result model, validation rules, **the single error-code catalog (§13)** |
 | [enums.md](enums.md) | v1.2 living | Every enum's wire value + serialization convention; error-code *domain* registry |
-| [configuration.md](configuration.md) | v1.1 | **The only place config keys are defined** — YAML path, env derivation rule, defaults, validation |
+| [configuration.md](configuration.md) | v1.2 | **The only place config keys are defined** — YAML path, env derivation rule, defaults, validation |
 | [auth.md](auth.md) | v2.5 | Generic OIDC login, internal JWT, API keys, **the scope↔operation matrix (§7.6)**, Spring Security chain |
 | [metadata-db.md](metadata-db.md) | v1.1 frozen | **The only doc that writes DDL** — full Postgres schema, Flyway V1 source, operational jobs |
 

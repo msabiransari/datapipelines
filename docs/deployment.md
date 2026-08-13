@@ -255,8 +255,9 @@ No sticky session affinity needed. Standard `ClusterIP` service with round-robin
 For development:
 ```
 java -Duser.timezone=UTC -jar datapipelines-app.jar \
-  --spring.datasource.url=jdbc:postgresql://localhost:5432/datapipelines \
-  --datapipelines.redis.host=localhost
+  --spring.datasource.url=jdbc:postgresql://localhost:5434/datapipelines \
+  --datapipelines.redis.host=localhost \
+  --datapipelines.redis.port=6381
 ```
 
 `-Duser.timezone=UTC` is required here too (§3.1) — the image sets it for you, a bare JVM does not.

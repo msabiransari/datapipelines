@@ -56,7 +56,7 @@ class ConfigValidatorTest {
         // (openssl rand -base64 32 → 32 decoded bytes each).
         val dev =
             validSnapshot().copy(
-                datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
+                datasourceUrl = "jdbc:postgresql://localhost:5434/datapipelines",
                 redisHost = "localhost",
                 redisPassword = "",
                 activeProfiles = setOf("dev"),

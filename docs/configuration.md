@@ -352,14 +352,14 @@ Overrides for local development. Activated via `--spring.profiles.active=dev`.
 ```yaml
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/datapipelines
+    url: jdbc:postgresql://localhost:5434/datapipelines   # host port 5434 — see note below
     username: datapipelines
     password: datapipelines
 
 datapipelines:
   redis:
     host: localhost
-    port: 6379
+    port: 6381
 
   jwt:
     secret: ${DATAPIPELINES_JWT_SECRET}         # from .env.local — never a literal, even in dev (see note below)
@@ -378,6 +378,8 @@ datapipelines:
     logging:
       format: console               # human-readable in dev
 ```
+
+> **Dev host ports (2026-08-12):** the dev Postgres listens on host port **5434** and dev Redis on **6381** — not the universal defaults 5432/6379, which collide with other local stacks on developer machines (Postgres.app/brew default to 5432). The host mapping lives in `deploy/docker-compose.dev.yml`; these YAML values must stay in sync with it and with DEVELOPMENT.md §2/§4. In production, `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` are operator-set and unaffected.
 
 ---
 
@@ -405,3 +407,4 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |
 | 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-12 | v1.2 | dev infra ports | §6 dev profile now targets host ports 5434 (Postgres) / 6381 (Redis) instead of the colliding defaults 5432/6379; added the dev-host-ports note. Operator-facing keys and production defaults unchanged. |

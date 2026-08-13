@@ -18,10 +18,14 @@ services:
       POSTGRES_PASSWORD: datapipelines
     ports:
       # Loopback-only bind (2026-08-07 security review MEDIUM-4). A bare
-      # "5432:5432" publishes the container on 0.0.0.0 — on any laptop sharing a
+      # "5434:5432" publishes the container on 0.0.0.0 — on any laptop sharing a
       # coffee-shop or conference LAN that is a fixed-credential Postgres open to
       # the network. Dev infra must never be reachable off-host.
-      - "127.0.0.1:5432:5432"
+      # Host port 5434, NOT 5432: 5432/5433 collide with other local stacks
+      # (Postgres.app defaults to 5432; algo-school holds 5433). 5434 is this
+      # project's dev port — keep it in sync with application-dev.yml,
+      # DEVELOPMENT.md §2/§4 and configuration.md §6.
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres-dev-data:/var/lib/postgresql/data
     healthcheck:
@@ -44,7 +48,10 @@ services:
     ports:
       # Loopback-only bind (2026-08-07 security review MEDIUM-4). Dev Redis has no
       # password at all, so an 0.0.0.0 bind is an unauthenticated open Redis.
-      - "127.0.0.1:6379:6379"
+      # Host port 6381, NOT 6379: 6379 is the universal default and algo-school
+      # holds 6380. Keep in sync with application-dev.yml, DEVELOPMENT.md §2/§4
+      # and configuration.md §6.
+      - "127.0.0.1:6381:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
