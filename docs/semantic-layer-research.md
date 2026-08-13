@@ -4,7 +4,8 @@
 **Date:** 2026-08-13 (revised same day after independent adversarial review — 12
 findings, 4 MAJOR, all applied; review verified this doc against mcp-server v1.3,
 ROADMAP v1.1, pipeline-contract v1.3, datasources v1.9, type-system, auth §7.5–7.6,
-templates §4/§7, metadata-db §4.4–4.6)
+templates §4/§7, metadata-db §4.4–4.6. **Part five added same day: owner direction
+discussion — supersedes parts of Part four where they conflict.**)
 **Purpose:** What the field converged on, what dbt actually ships, which libraries exist,
 and how to sequence a semantic layer for datapipelines.co. Motivating problem: MCP
 metadata endpoints let an agent *infer* meaning from schemas, and that inference is
@@ -401,6 +402,110 @@ checkable.
   the format; don't plan a workflow around exporting to someone else's tool.
 - **Caching / pre-aggregation before P4 ships.** Real at warehouse scale, premature
   here; the result cursor already absorbs repeat reads.
+
+---
+
+## Part five — owner direction (2026-08-13 discussion, resume point)
+
+Recorded from a design conversation with the owner after Parts one–four were
+written. **Where this part conflicts with Part four, this part wins.** These are
+direction decisions and open proposals, not yet a spec — P1 is where they get
+settled.
+
+### Decision 1 — no hand-authored model file. The semantic layer is learned.
+
+The owner rejects a hand-authored YAML/OSI model as the authoring mechanism. The
+semantic layer should be **populated and maintained by agents**, harvesting meaning
+from the pipelines engineers already build: when an engineer ships a pipeline that
+computes revenue, that pipeline *is* an executable statement of what revenue means —
+the agent should be able to save that fact and reuse it when authoring the next
+pipeline.
+
+What changes and what survives:
+
+- **Dies:** YAML as an authoring format; the "human writes the model" workflow;
+  OSI as the model's native shape (demote it to an optional *export* format later —
+  costs nothing to keep the door open).
+- **Survives — the anatomy.** Agent-saved facts must be *structured*, not prose
+  notes: measure, expression, dataset, grain, join path + cardinality, time
+  dimension. Prose blobs would be re-inferred every time, reintroducing the
+  guessing. The seven-part anatomy (Part one) becomes the **table schema of the
+  learned store** (metadata DB, Flyway migration — rows, not files).
+- **Survives — provenance + trust.** Every learned fact carries
+  `source_pipeline_id + version` and a trust state (e.g. `observed` →
+  `verified`). Promotion by signals: independent pipelines agreeing, source
+  pipeline still live, optional one-click human confirm. Conflicting definitions
+  (gross vs. net revenue) **coexist with provenance and are shown to the agent as
+  a conflict** — never a silent winner. Rationale: "the pipeline executed" is not
+  evidence of semantic correctness; an unverified store compounds wrong facts.
+- **Survives — the drift guard (P2).** Learned facts referencing renamed/dropped
+  columns are *demoted* on schema drift, not silently served. Template/pipeline
+  version pinning makes this detectable.
+- **Capture mechanism (open fork for P1):** extraction at pipeline-save time vs.
+  an explicit agent tool (e.g. `semantics_record`) vs. both. Also open: promotion
+  rules, retention of superseded facts, whether capture runs on execution success
+  rather than save.
+
+### Decision 2 — the metadata layer is the spine; semantics merge into it
+
+The [ROADMAP §2](ROADMAP.md#2-v11-candidates) schema-introspection tools
+(`datasources_get_schema` / `_get_tables` / `_get_columns`) move from "necessary
+substrate" to **the primary surface**. There is one metadata layer, progressively
+enriched: introspection responses carry raw schema *plus* whatever learned
+semantic facts exist for that table/column (descriptions, known measures touching
+it, known join paths, trust state). Agents get one place to look; semantic
+knowledge appears exactly where the agent is already looking when it authors SQL.
+This replaces Part four's separate `datapipelines://semantics/{model}` catalog as
+the *starting* design (a dedicated surface may still emerge later; P1 decides).
+
+### Decision 3 — components + composition instead of a from-scratch SQL compiler
+
+The owner's alternative to Part four's compiler: engineers build **reusable
+components** — today a Freemarker template (single-source logic), and, with one
+contract addition, a whole **pipeline used as a node inside another pipeline**
+(new node type `pipeline`), so multi-source calculations compose. A pipeline is
+already "a federated query where each engine runs its share"; composition extends
+that. The agent's happy path becomes **pick a verified component + wire
+parameters**, not generate SQL — which achieves the same structural move the
+compiler was for (closed vocabulary, server-side determinism, no model-authored
+SQL) with far less new machinery: "compilation" collapses to instantiating
+pipelines from existing verified pieces.
+
+Trade-off to keep eyes-open (recorded, not resolved): a component vocabulary is
+**coarse-grained** — it answers the questions someone pre-built (softened by
+Freemarker parameterization, e.g. group-by as a parameter). A classic
+measure/dimension compiler is **fine-grained** — any slice of any measure without
+pre-building. Novel slices under the component model fall back to SQL authoring
+against the enriched metadata layer (Decision 2), and the fallback log remains
+the backlog signal. A thin compiler on top of the learned store stays available
+as a later escalation; it is no longer the plan of record.
+
+Contract questions the `pipeline` node type opens (settle in P1/spec, alongside
+the existing ephemeral-vs-persisted fork):
+
+- **Version pinning:** a `pipeline` node must pin the child pipeline version
+  (consistency with template pinning, pipeline-contract §15.4 / templates §5.1).
+- **Cycle detection** across pipeline references, and a depth limit.
+- **Parameter mapping** parent → child (child `parameters` filled from parent
+  values/params).
+- **Output semantics:** child's caller-output rows land as a parent staging
+  table? What happens to a child with `output.target: datasource`?
+- **Execution semantics:** inline the child DAG into the parent execution vs.
+  spawn a child execution record (affects executions FK, stats, audit, SSE).
+- **Auth/scopes:** executing a pipeline that embeds someone else's pipeline.
+
+### Impact on the Part-four phasing
+
+- **P1 (spec-first — unchanged as the next step)** now covers: learned-store
+  schema, capture mechanism + trust states + conflict semantics, metadata-layer
+  enrichment shape, the `pipeline` node type contract, and versioning. The static
+  model format question is gone.
+- **P2** drift test applies to learned facts instead of an authored model.
+- **P3** = serve learned knowledge through the enriched metadata layer.
+- **P4** compiler is demoted from plan-of-record to optional escalation;
+  component composition takes its slot.
+- **P0** (introspection tools) is unchanged and now even higher leverage — it is
+  the surface everything else merges into.
 
 ---
 
