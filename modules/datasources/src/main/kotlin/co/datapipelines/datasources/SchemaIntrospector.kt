@@ -14,6 +14,10 @@ import java.sql.DatabaseMetaData
  * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]); an unknown table/schema
  * filter matches nothing and returns empty — a filter for something that does not exist means
  * "no results", not an error (the same philosophy as `datasources_list`'s dialect filter).
+ *
+ * `table` and `schema` filters are **exact-match identifiers, not LIKE patterns**: `_` and `%`
+ * are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table named
+ * `order_items` cannot match its wildcard sibling `order1items`.
  */
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
@@ -24,7 +28,8 @@ class SchemaIntrospector(
         schemaFilter: String? = null,
     ): List<TableInfo> =
         withMetaData(datasourceName) { meta, _ ->
-            meta.getTables(null, schemaFilter, "%", TABLE_TYPES).use { rs ->
+            val escape = meta.searchStringEscape
+            meta.getTables(null, schemaFilter?.toExactMatch(escape), "%", TABLE_TYPES).use { rs ->
                 buildList {
                     while (rs.next()) {
                         add(TableInfo(rs.getString("TABLE_SCHEM"), rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
@@ -41,7 +46,8 @@ class SchemaIntrospector(
     ): List<ColumnInfo> =
         withMetaData(datasourceName) { meta, datasource ->
             val mapper = DialectAdapters.forDialect(datasource.dialect).typeMapper
-            meta.getColumns(null, schemaFilter, table, "%").use { rs ->
+            val escape = meta.searchStringEscape
+            meta.getColumns(null, schemaFilter?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         val sourceTypeName = rs.getString("TYPE_NAME") ?: ""
@@ -99,6 +105,18 @@ class SchemaIntrospector(
             message = "Datasource '$name' is not registered in this environment.",
             details = mapOf("datasource" to name),
         )
+
+    /**
+     * Escapes `_`, `%` and the escape character itself so the string matches **only itself**
+     * as a JDBC metadata name pattern (the driver's `getSearchStringEscape` says how to escape).
+     */
+    private fun String.toExactMatch(escape: String): String =
+        buildString {
+            this@toExactMatch.forEach { ch ->
+                if (ch == '_' || ch == '%' || (escape.isNotEmpty() && ch == escape[0])) append(escape)
+                append(ch)
+            }
+        }
 
     private companion object {
         /** §7A lists tables and views — the JDBC metadata terms for what pipelines may read. */

@@ -407,6 +407,7 @@ Rules:
 
 - **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-api-v1-datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
 - **Read-only by construction**: only `DatabaseMetaData` calls, no statements.
+- **`table` and `schema` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`.
 - **An unknown table or schema filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
 - **An unknown datasource name is `datasource.not_found`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)).
 - Credentials are never part of any introspection payload — the operations read schema metadata only.

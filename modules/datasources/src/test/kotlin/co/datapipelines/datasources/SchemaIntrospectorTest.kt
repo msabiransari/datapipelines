@@ -3,6 +3,7 @@ package co.datapipelines.datasources
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -122,5 +123,62 @@ class SchemaIntrospectorTest {
             { snapshot.dialect shouldBe "H2" },
             { snapshot.tables.all { it.columns.isNotEmpty() } shouldBe true },
         )
+    }
+
+    @Test
+    fun `a table filter is exact-match - underscore is not a wildcard`() {
+        // `ORDER_ITEMS` and `ORDER1ITEMS` are wildcard siblings: as a raw JDBC LIKE pattern,
+        // "ORDER_ITEMS" also matches "ORDER1ITEMS" (`_` = any single character), merging the
+        // two tables' columns. Escaping via getSearchStringEscape() must keep them apart.
+        h2.createStatement().use { st ->
+            st.execute("CREATE TABLE order_items (id INT, items_note VARCHAR(30))")
+            st.execute("CREATE TABLE order1items (id INT, rogue_flag INT)")
+        }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val columns = introspector.columns("h2-test", "ORDER_ITEMS")
+
+        assertAll(
+            { columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE") },
+            { introspector.columns("h2-test", "ORDER1ITEMS").map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ROGUE_FLAG") },
+        )
+    }
+
+    @Test
+    fun `a schema filter is exact-match - underscore does not match its sibling schemas`() {
+        // The filter itself carries the `_`: as a raw LIKE pattern "MY_SCHEMA" also matches
+        // "MYOSCHEMA". Exact-match must keep the sibling out.
+        h2.createStatement().use { st ->
+            st.execute("CREATE SCHEMA my_schema")
+            st.execute("CREATE SCHEMA myoschema")
+            st.execute("CREATE TABLE my_schema.deals (id INT)")
+            st.execute("CREATE TABLE myoschema.ledger (id INT)")
+        }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val tables = introspector.tables("h2-test", schemaFilter = "MY_SCHEMA")
+
+        tables.map { it.schema?.uppercase() } shouldContainExactly listOf("MY_SCHEMA")
+    }
+
+    @Test
+    fun `snapshot does not cross-contaminate wildcard sibling tables`() {
+        h2.createStatement().use { st ->
+            st.execute("CREATE TABLE order_items (id INT, items_note VARCHAR(30))")
+            st.execute("CREATE TABLE order1items (id INT, rogue_flag INT)")
+        }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val items =
+            introspector.snapshot("h2-test").tables
+                .first { it.table.name.equals("ORDER_ITEMS", ignoreCase = true) }
+
+        items.columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE")
     }
 }

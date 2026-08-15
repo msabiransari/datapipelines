@@ -859,7 +859,7 @@ Notes:
 - `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null).
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
 - The snapshot is capped at 200 tables; `truncated: true` means tables were dropped — page the rest via `/tables` + `/columns`.
-- Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive.
+- Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped).
 - An unknown `schema`/table filter matches nothing and returns an empty list. An unknown datasource name is `404 datasource.not_found`.
 - No pagination: the snapshot is bounded by the cap, and per-table listings are naturally bounded.
 
