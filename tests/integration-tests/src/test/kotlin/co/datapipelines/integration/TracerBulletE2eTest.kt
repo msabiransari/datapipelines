@@ -276,6 +276,76 @@ class TracerBulletE2eTest {
     }
 
     /**
+     * The §9.7 introspection endpoints over HTTP against the live source Postgres: the happy
+     * path (real JDBC metadata through the whole stack), the catalogued not-found envelope,
+     * and the §7.6 scope gate on the new INTROSPECT_DATASOURCE operation.
+     */
+    @Test
+    @Order(4)
+    fun `schema introspection endpoints serve metadata, not-found, and scope denial`() {
+        // Happy path — tables: the seeded users table, no system catalogs, not truncated.
+        val tables =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/datasources/pg-local/tables")
+                .then()
+                .statusCode(200)
+                .body("data.truncated", org.hamcrest.Matchers.equalTo(false))
+                .extract()
+                .jsonPath()
+        val tableNames: List<String> = tables.get("data.tables.name")
+        tableNames shouldContainExactly listOf("users")
+        val schemas: List<String> = tables.get("data.tables.schema")
+        schemas.forEach { schema ->
+            (schema == "pg_catalog" || schema == "information_schema") shouldBe false
+        }
+
+        // Happy path — columns for the table tables() returned.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/datasources/pg-local/tables/users/columns")
+            .then()
+            .statusCode(200)
+            .body("data.size()", org.hamcrest.Matchers.greaterThan(0))
+            .body("data[0].warnings", org.hamcrest.Matchers.notNullValue())
+
+        // Happy path — the whole-schema snapshot.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/datasources/pg-local/schema")
+            .then()
+            .statusCode(200)
+            .body("data.dialect", org.hamcrest.Matchers.equalTo("POSTGRES"))
+            .body("data.truncated", org.hamcrest.Matchers.equalTo(false))
+
+        // Unknown datasource — the catalogued §13.8 not-found envelope, not a 500.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/datasources/no-such-datasource/tables")
+            .then()
+            .statusCode(404)
+            .body("error.code", org.hamcrest.Matchers.equalTo("datasource.not_found"))
+
+        // Scope denial — introspection is `author` (§7.6); a read-scope key is refused.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, READ_ONLY_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/datasources/pg-local/schema")
+            .then()
+            .statusCode(403)
+            .body("error.code", org.hamcrest.Matchers.equalTo("auth.scope.insufficient"))
+    }
+
+    /**
      * Reads the SSE stream to its end, returning (event name, payload) pairs.
      *
      * Deliberately a line reader, not a general SSE parser: `ExecutionStream` writes
