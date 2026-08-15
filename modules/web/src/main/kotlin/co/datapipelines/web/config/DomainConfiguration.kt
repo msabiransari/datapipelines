@@ -7,6 +7,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineValidator
@@ -90,6 +91,10 @@ class DomainConfiguration {
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
         ContractDatasourceRegistry { name -> registry.dialectOf(name) }
+
+    /** The §7A introspector — reads JDBC metadata through the same registry pool (§5.2). */
+    @Bean
+    fun schemaIntrospector(registry: DatasourceRegistry): SchemaIntrospector = SchemaIntrospector(registry)
 
     @Bean
     fun pipelineValidator(

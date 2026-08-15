@@ -26,6 +26,13 @@ object ScopeMatrix {
         CANCEL_EXECUTION(Scope.EXECUTE),
         MUTATE_PIPELINES_TEMPLATES(Scope.AUTHOR),
         TEST_DATASOURCE(Scope.AUTHOR),
+
+        /**
+         * "Introspect a datasource schema" (§7.6, datasources §7A): the three read-only schema
+         * endpoints. `author` like [TEST_DATASOURCE] — each opens a live connection against the
+         * datasource, and the stated consumer is pipeline authoring.
+         */
+        INTROSPECT_DATASOURCE(Scope.AUTHOR),
         MUTATE_DATASOURCES(Scope.ADMIN),
 
         /**
