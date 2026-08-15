@@ -484,6 +484,22 @@ entries are line-targeted (never whole files) with a reason + date comment, and
 the config EXTENDS the gitleaks default ruleset (a bare custom config silently
 replaces it — that mistake was made and caught here).
 
+#### Container scanning (trivy)
+
+```bash
+./scripts/container-scan.sh                  # Dockerfile config scan + production image scan
+./scripts/container-scan.sh --config-only    # Dockerfile config scan only
+```
+
+trivy (pinned in the script, same verified-download pattern) scans the
+Dockerfile for misconfigurations and the locally-built production image for
+package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
+comment per entry; anything NOT ignored exits 1, so new findings fail. We do
+not chase base-image CVE zero — record the count, fix what a base-image bump
+or an obvious Dockerfile change resolves cheaply. trivy 0.74 has no
+docker-compose scanner, so `deploy/*.yml` is not covered. First run needs
+network (vulnerability DB download); the image scan needs a Docker daemon.
+
 ---
 
 ## 11. Project Structure
