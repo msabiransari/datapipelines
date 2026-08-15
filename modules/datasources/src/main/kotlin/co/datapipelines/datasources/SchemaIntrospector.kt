@@ -169,9 +169,12 @@ class SchemaIntrospector(
      * driver class, a property a driver rejects at parse time. Catching only `SQLException`
      * here (round 1) let the RuntimeException family escape as a raw 500 / -32603.
      *
-     * The RuntimeException catch stops at the lease: a RuntimeException thrown by the metadata
-     * walk itself is a defect in this module or a driver bug, and masking it as "the caller's
-     * database is unreachable" would hide it. `Error` is never caught.
+     * Both catches stop at the lease-and-connection boundary: a RuntimeException thrown by the
+     * metadata walk itself is a defect in this module or a driver bug, and masking it as "the
+     * caller's database is unreachable" would hide it. Post-lease, the SQLException catch
+     * narrows to the CONNECTION family only (SQLState class 08, the connection-exception
+     * subclasses, [java.sql.SQLRecoverableException]) — any other SQLException from a metadata
+     * read is likewise a defect and propagates. `Error` is never caught.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun <T> withMetaData(
@@ -190,7 +193,10 @@ class SchemaIntrospector(
         return try {
             connection.use { block(it, it.metaData, datasource) }
         } catch (e: SQLException) {
-            unreachable(datasourceName, e)
+            // Post-lease, only the CONNECTION family means "the database went away" — any
+            // other SQLException from a metadata read is a defect in this module or a driver
+            // bug and propagates, mirroring the RuntimeException policy below.
+            if (e.isConnectionFailure()) unreachable(datasourceName, e) else throw e
         }
     }
 
@@ -202,6 +208,18 @@ class SchemaIntrospector(
 
     /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
     private fun DialectAdapter.isSystemSchema(schema: String?): Boolean = schema != null && schema.lowercase() in introspectionSystemSchemas
+
+    /**
+     * The connection-failure family of a post-lease [SQLException]: SQLState class `08`
+     * (connection exception), the JDBC connection-exception subclasses, or
+     * [java.sql.SQLRecoverableException] (whose subclasses include the connection-died-mid-read
+     * family some drivers raise). Everything else is NOT a connection failure.
+     */
+    private fun SQLException.isConnectionFailure(): Boolean =
+        sqlState?.startsWith("08") == true ||
+            this is java.sql.SQLTransientConnectionException ||
+            this is java.sql.SQLNonTransientConnectionException ||
+            this is java.sql.SQLRecoverableException
 
     /**
      * Where the escaped schema filter goes: the catalog argument for drivers that carry the
@@ -216,15 +234,17 @@ class SchemaIntrospector(
     /**
      * The connection's current schema, in this dialect's own vocabulary: the **catalog** for
      * catalog-routing drivers (Connector/J keeps the current database there and leaves
-     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none —
-     * the caller then reads unfiltered.
+     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none
+     * — and the JDBC blank sentinel counts as none: `""` means "objects without a
+     * catalog/schema", not a schema named `""`, so the caller reads unfiltered rather than
+     * filtering on a name that matches nothing.
      */
     private fun Connection.currentSchema(adapter: DialectAdapter): String? =
         try {
             if (adapter.schemaArrivesInCatalog) catalog else schema
         } catch (_: SQLException) {
             null
-        }
+        }?.takeUnless { it.isNullOrEmpty() }
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(

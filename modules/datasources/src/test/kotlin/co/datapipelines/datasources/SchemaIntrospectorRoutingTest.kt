@@ -265,6 +265,42 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `columns treats the blank current-schema sentinel like none - unfiltered minus system`() {
+        // JDBC's "" sentinel means "objects without a catalog/schema" — a driver reporting it
+        // must get the unfiltered-minus-system fallback, NOT a match-nothing "" filter.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } returns ""
+                    }
+
+                introspector.columns(name, "deals") shouldBe emptyList()
+                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "orders", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } returns ""
+                    }
+
+                introspector.columns(name, "orders") shouldBe emptyList()
+                verify(exactly = 1) { meta.getColumns(null, null, "orders", "%") }
+            },
+        )
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

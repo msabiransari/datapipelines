@@ -16,7 +16,8 @@ import java.sql.SQLException
 /**
  * §7A's work-protocol seam: the cap+1 early-exit (a huge catalog costs cap+1 rows, not a walk)
  * and the [withMetaData][SchemaIntrospector] lease boundary — not-found and both unreachable
- * exception families (the Hikari pool-build path included).
+ * exception families (the Hikari pool-build path included), plus the post-lease SQLException
+ * split: only the connection family translates to unreachable, anything else is a defect.
  */
 class SchemaIntrospectorCapAndLeaseTest {
     private val h2 = java.sql.DriverManager.getConnection("jdbc:h2:mem:introspect-cap;DB_CLOSE_DELAY=-1")
@@ -88,5 +89,68 @@ class SchemaIntrospectorCapAndLeaseTest {
         shouldThrow<DatasourceUnreachableException> { SchemaIntrospector(registry).tables("h2-test") }
             .cause
             ?.message shouldBe "Connection refused"
+    }
+
+    @Test
+    fun `a CONNECTION-family SQLException after the lease is the module's unreachable`() {
+        // Post-lease, only the connection family means "the database went away": SQLState
+        // class 08, the JDBC connection-exception subclasses, or SQLRecoverableException.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                    SQLException("connection exception", "08001")
+                val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                shouldThrow<DatasourceUnreachableException> { introspector.tables(name) }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                    java.sql.SQLTransientConnectionException("connection is closed")
+                val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                shouldThrow<DatasourceUnreachableException> { introspector.tables(name) }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                    java.sql.SQLRecoverableException("recoverable")
+                val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                shouldThrow<DatasourceUnreachableException> { introspector.tables(name) }
+            },
+        )
+    }
+
+    @Test
+    fun `any OTHER SQLException after the lease propagates as a defect`() {
+        // A metadata read failing with a non-connection SQLException (vendor error, bad
+        // state) is a defect in this module or a driver bug — masking it as "the caller's
+        // database is unreachable" would hide it, exactly like the RuntimeException policy
+        // at the same site.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                    SQLException("vendor error", "S1000")
+                val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                shouldThrow<SQLException> { introspector.tables(name) }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                    SQLException("no sqlstate at all")
+                val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                shouldThrow<SQLException> { introspector.tables(name) }
+            },
+        )
     }
 }
