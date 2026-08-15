@@ -838,7 +838,7 @@ Responses (the §4.1 envelope around `data`):
 
 ```json
 // GET /datasources/{name}/tables
-{ "data": [ {"schema": "public", "name": "orders", "type": "TABLE"} ] }
+{ "data": { "tables": [ {"schema": "public", "name": "orders", "type": "TABLE"} ], "truncated": false } }
 
 // GET /datasources/{name}/tables/{table}/columns
 { "data": [
@@ -858,10 +858,10 @@ Notes:
 
 - `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean.
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
-- The snapshot is capped at 200 tables; `truncated: true` means tables were dropped — page the rest via `/tables` + `/columns`.
+- The tables listing is capped at 2000 tables; `truncated: true` means tables were dropped. The snapshot is capped at 200 tables (its own `truncated` flag); page the rest via `/tables` + `/columns`.
 - Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped).
 - An unknown `schema`/table filter matches nothing and returns an empty list. An unknown datasource name is `404 datasource.not_found`. A connection failure against the datasource is `502 pipeline.execution.datasource_unreachable` (the customer's database being down is not a server error).
-- No pagination: the snapshot is bounded by the cap, and per-table listings are naturally bounded.
+- No pagination: the tables listing is bounded by its 2000-table cap (`truncated` flags the drop), the snapshot by its 200-table cap, and per-table listings are naturally bounded.
 
 ---
 

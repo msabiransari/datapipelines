@@ -623,7 +623,7 @@ List a datasource's tables and views.
 }
 ```
 
-Returns: array of `{"schema", "name", "type"}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). The `schema` filter is exact-match, not a LIKE pattern.
+Returns: `{"tables": [{"schema", "name", "type"}], "truncated": bool}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `schema` filter is exact-match, not a LIKE pattern.
 
 **Scope:** `author` — same rationale as `datasources_get_schema`.
 

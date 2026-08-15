@@ -23,15 +23,16 @@ import java.sql.DatabaseMetaData
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
 ) {
-    /** §7A — every live table/view, optionally narrowed to one schema. */
+    /** §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables]. */
     fun tables(
         datasourceName: String,
         schemaFilter: String? = null,
-    ): List<TableInfo> =
+        maxTables: Int = MAX_TABLES,
+    ): TablesPage =
         withMetaData(datasourceName) { meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
-            readTables(meta, adapter, catalog, schemaPattern)
+            readTables(meta, adapter, catalog, schemaPattern, maxTables)
         }
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
@@ -66,7 +67,7 @@ class SchemaIntrospector(
     ): SchemaSnapshot =
         withMetaData(datasourceName) { meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val all = readTables(meta, adapter, null, null)
+            val all = readTables(meta, adapter, null, null).tables
             val kept = all.take(maxTables)
             val columnsByTable = readAllColumns(meta, adapter)
             SchemaSnapshot(
@@ -77,21 +78,32 @@ class SchemaIntrospector(
             )
         }
 
+    /**
+     * The shared getTables walk. [maxRows] caps the iteration at cap+1 `next()` calls (the +1
+     * proves truncation) — `null` walks everything (the snapshot path, which caps afterwards).
+     */
     private fun readTables(
         meta: DatabaseMetaData,
         adapter: DialectAdapter,
         catalog: String?,
         schemaPattern: String?,
-    ): List<TableInfo> =
+        maxRows: Int? = null,
+    ): TablesPage {
+        val out = mutableListOf<TableInfo>()
+        var truncated = false
         meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
-            buildList {
-                while (rs.next()) {
-                    val schema = rs.getString(adapter.schemaResultColumn())
-                    if (adapter.isSystemSchema(schema)) continue
-                    add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
+            while (rs.next()) {
+                val schema = rs.getString(adapter.schemaResultColumn())
+                if (adapter.isSystemSchema(schema)) continue
+                if (maxRows != null && out.size == maxRows) {
+                    truncated = true
+                    break
                 }
+                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
             }
         }
+        return TablesPage(out, truncated)
+    }
 
     /** The bulk column read behind [snapshot], grouped by the (schema, table) the tables listing reports. */
     private fun readAllColumns(
@@ -175,10 +187,19 @@ class SchemaIntrospector(
         }
 
     private companion object {
+        /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */
+        const val MAX_TABLES = 2000
+
         /** The §7A snapshot cap — bounds one `datasources_get_schema` call's payload. */
         const val MAX_SNAPSHOT_TABLES = 200
     }
 }
+
+/** The §7A tables listing: the kept tables plus whether the cap dropped any. */
+data class TablesPage(
+    val tables: List<TableInfo>,
+    val truncated: Boolean,
+)
 
 /** One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...). */
 data class TableInfo(

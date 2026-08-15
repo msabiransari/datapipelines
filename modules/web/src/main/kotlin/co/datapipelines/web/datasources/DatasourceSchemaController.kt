@@ -32,8 +32,8 @@ import java.sql.SQLException
  *
  * All three endpoints are `author`-scoped (§7A, the §8.1 connection-test precedent): each opens a
  * live connection against the datasource, and the stated consumer is pipeline authoring. No
- * pagination — the snapshot is bounded by the 200-table cap and the per-table listings are
- * naturally bounded.
+ * pagination — the tables listing is capped at 2000 (`truncated: true` when the cap dropped
+ * any), the snapshot at 200, and the per-table listings are naturally bounded.
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
@@ -47,14 +47,14 @@ class DatasourceSchemaController(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.snapshot(name).toWireMap() })
 
-    /** §7A — tables and views, optionally narrowed to one schema. */
+    /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
-    ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(introspecting(name) { introspector.tables(name, schema).map { it.toWireMap() } })
+    ): ApiResponse<Map<String, Any?>> =
+        ApiResponse.of(introspecting(name) { introspector.tables(name, schema).toWireMap() })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")

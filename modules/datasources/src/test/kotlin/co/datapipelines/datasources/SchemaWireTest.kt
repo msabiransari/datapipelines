@@ -22,6 +22,16 @@ class SchemaWireTest {
     }
 
     @Test
+    fun `tables page wraps the descriptors with the truncation flag`() {
+        val wire = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true).toWireMap()
+
+        assertAll(
+            { wire["truncated"] shouldBe true },
+            { ((wire["tables"] as List<*>).single() as Map<*, *>)["name"] shouldBe "orders" },
+        )
+    }
+
+    @Test
     fun `column descriptor carries source type and the mapper's warning messages`() {
         val warned =
             ColumnInfo(

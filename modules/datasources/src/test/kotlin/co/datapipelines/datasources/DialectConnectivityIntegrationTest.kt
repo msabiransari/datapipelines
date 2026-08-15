@@ -94,7 +94,7 @@ class DialectConnectivityIntegrationTest {
                 override fun close() = Unit
             }
 
-        val tables = SchemaIntrospector(registry).tables("mysql_intro", schemaFilter = mysql.databaseName)
+        val tables = SchemaIntrospector(registry).tables("mysql_intro", schemaFilter = mysql.databaseName).tables
 
         val routed = tables.first { it.name.equals("routed_orders", ignoreCase = true) }
         assertAll(

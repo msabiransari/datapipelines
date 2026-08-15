@@ -4,6 +4,7 @@ import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
+import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
@@ -33,23 +34,36 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `tables returns snake_case table descriptors`() {
-        every { introspector.tables("pg-prod", null) } returns listOf(TableInfo("public", "orders", "TABLE"))
+        every { introspector.tables("pg-prod", null) } returns TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = false)
 
         val data = controller.tables("pg-prod", schema = null).data
 
         val node = mapper.readTree(mapper.writeValueAsString(data))
         assertAll(
-            { node[0]["schema"].asText() shouldBe "public" },
-            { node[0]["name"].asText() shouldBe "orders" },
-            { node[0]["type"].asText() shouldBe "TABLE" },
+            { node["truncated"].asBoolean() shouldBe false },
+            { node["tables"][0]["schema"].asText() shouldBe "public" },
+            { node["tables"][0]["name"].asText() shouldBe "orders" },
+            { node["tables"][0]["type"].asText() shouldBe "TABLE" },
+        )
+    }
+
+    @Test
+    fun `tables flags truncation when the cap dropped tables`() {
+        every { introspector.tables("pg-prod", null) } returns TablesPage(emptyList(), truncated = true)
+
+        val node = mapper.readTree(mapper.writeValueAsString(controller.tables("pg-prod", schema = null).data))
+
+        assertAll(
+            { node["truncated"].asBoolean() shouldBe true },
+            { node["tables"].size() shouldBe 0 },
         )
     }
 
     @Test
     fun `tables passes the schema filter through`() {
-        every { introspector.tables("pg-prod", "sales") } returns emptyList()
+        every { introspector.tables("pg-prod", "sales") } returns TablesPage(emptyList(), truncated = false)
 
-        controller.tables("pg-prod", schema = "sales").data.size shouldBe 0
+        controller.tables("pg-prod", schema = "sales").data["tables"] shouldBe emptyList<Any?>()
     }
 
     @Test

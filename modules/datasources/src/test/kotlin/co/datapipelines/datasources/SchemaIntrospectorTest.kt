@@ -50,7 +50,7 @@ class SchemaIntrospectorTest {
         every { registry.get("h2-test") } returns ds
         every { registry.poolFor(ds) } returns pool
 
-        val tables = introspector.tables("h2-test")
+        val tables = introspector.tables("h2-test").tables
 
         // H2 reports the SQL-standard spelling "BASE TABLE" for a plain table; the introspector
         // passes the driver's raw TABLE_TYPE through untouched (§7A: raw JDBC table type).
@@ -58,6 +58,44 @@ class SchemaIntrospectorTest {
             { tables.any { it.name.equals("orders", ignoreCase = true) } shouldBe true },
             { tables.first { it.name.equals("orders", ignoreCase = true) }.type shouldBe "BASE TABLE" },
             { tables.first { it.name.equals("orders", ignoreCase = true) }.schema shouldBe "PUBLIC" },
+        )
+    }
+
+    @Test
+    fun `tables is capped and flags truncation`() {
+        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT)") } }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val capped = introspector.tables("h2-test", maxTables = 2)
+        val uncapped = introspector.tables("h2-test")
+
+        assertAll(
+            { capped.tables.size shouldBe 2 },
+            { capped.truncated shouldBe true },
+            { uncapped.tables.size shouldBe 3 },
+            { uncapped.truncated shouldBe false },
+        )
+    }
+
+    @Test
+    fun `tables stops iterating at cap plus one row`() {
+        // The listing must not walk a huge catalog to its end: after cap+1 `next()` calls the
+        // iteration stops (cap rows kept, the +1 proves truncation).
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.H2, meta)
+
+        val page = introspector.tables(name, maxTables = 2)
+
+        assertAll(
+            { io.mockk.verify(exactly = 3) { tablesRs.next() } },
+            { page.tables.size shouldBe 2 },
+            { page.truncated shouldBe true },
         )
     }
 
@@ -70,7 +108,7 @@ class SchemaIntrospectorTest {
 
         // The name comes from tables(), exactly as the §7A caller contract documents — JDBC
         // metadata name patterns are case-sensitive and H2 stores unquoted identifiers uppercased.
-        val name = introspector.tables("h2-test").first { it.name.equals("orders", ignoreCase = true) }.name
+        val name = introspector.tables("h2-test").tables.first { it.name.equals("orders", ignoreCase = true) }.name
         val columns = introspector.columns("h2-test", name)
 
         assertAll(
@@ -98,7 +136,7 @@ class SchemaIntrospectorTest {
         every { registry.poolFor(ds) } returns pool
 
         assertAll(
-            { introspector.tables("h2-test", schemaFilter = "no_such_schema") shouldBe emptyList() },
+            { introspector.tables("h2-test", schemaFilter = "no_such_schema").tables shouldBe emptyList() },
             { introspector.columns("h2-test", "orders", schemaFilter = "no_such_schema") shouldBe emptyList() },
         )
     }
@@ -120,7 +158,7 @@ class SchemaIntrospectorTest {
         every { registry.get("h2-test") } returns ds
         every { registry.poolFor(ds) } returns pool
 
-        val tables = introspector.tables("h2-test")
+        val tables = introspector.tables("h2-test").tables
 
         tables.none { it.schema?.equals("INFORMATION_SCHEMA", ignoreCase = true) == true } shouldBe true
     }
@@ -221,7 +259,7 @@ class SchemaIntrospectorTest {
         every { registry.get("h2-test") } returns ds
         every { registry.poolFor(ds) } returns pool
 
-        val tables = introspector.tables("h2-test", schemaFilter = "MY_SCHEMA")
+        val tables = introspector.tables("h2-test", schemaFilter = "MY_SCHEMA").tables
 
         tables.map { it.schema?.uppercase() } shouldContainExactly listOf("MY_SCHEMA")
     }
@@ -262,7 +300,7 @@ class SchemaIntrospectorTest {
         val (introspector, name) = introspectorOverMockedMetadata(Dialect.MYSQL, meta)
 
         assertAll(
-            { introspector.tables(name, schemaFilter = "app").single().schema shouldBe "app" },
+            { introspector.tables(name, schemaFilter = "app").tables.single().schema shouldBe "app" },
             { introspector.columns(name, "orders", schemaFilter = "app") shouldBe emptyList() },
         )
     }
@@ -281,7 +319,7 @@ class SchemaIntrospectorTest {
 
         val (introspector, name) = introspectorOverMockedMetadata(Dialect.POSTGRES, meta)
 
-        introspector.tables(name, schemaFilter = "public").single().schema shouldBe "public"
+        introspector.tables(name, schemaFilter = "public").tables.single().schema shouldBe "public"
     }
 
     /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */

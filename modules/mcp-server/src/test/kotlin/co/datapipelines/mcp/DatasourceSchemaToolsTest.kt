@@ -6,6 +6,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
+import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
@@ -26,30 +27,39 @@ class DatasourceSchemaToolsTest {
     private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
 
     @Test
-    fun `get_tables returns snake_case table descriptors`() {
-        every { introspector.tables("pg-prod", null) } returns listOf(TableInfo("public", "orders", "TABLE"))
+    fun `get_tables returns the tables-plus-truncated payload`() {
+        every { introspector.tables("pg-prod", null) } returns TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = false)
+
+        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<*, *>
 
         @Suppress("UNCHECKED_CAST")
-        val payload =
-            DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as List<Map<String, Any?>>
-
+        val tables = payload["tables"] as List<Map<String, Any?>>
         assertAll(
-            { payload.size shouldBe 1 },
-            { payload[0]["schema"] shouldBe "public" },
-            { payload[0]["name"] shouldBe "orders" },
-            { payload[0]["type"] shouldBe "TABLE" },
+            { payload["truncated"] shouldBe false },
+            { tables.size shouldBe 1 },
+            { tables[0]["schema"] shouldBe "public" },
+            { tables[0]["name"] shouldBe "orders" },
+            { tables[0]["type"] shouldBe "TABLE" },
         )
     }
 
     @Test
+    fun `get_tables flags truncation when the cap dropped tables`() {
+        every { introspector.tables("pg-prod", null) } returns TablesPage(emptyList(), truncated = true)
+
+        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<*, *>
+
+        payload["truncated"] shouldBe true
+    }
+
+    @Test
     fun `get_tables pushes the schema filter through`() {
-        every { introspector.tables("pg-prod", "sales") } returns emptyList()
+        every { introspector.tables("pg-prod", "sales") } returns TablesPage(emptyList(), truncated = false)
 
-        val payload =
-            DatasourcesGetTablesTool(introspector)
-                .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as List<*>
+        val payload = DatasourcesGetTablesTool(introspector)
+            .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as Map<*, *>
 
-        payload.size shouldBe 0
+        (payload["tables"] as List<*>).size shouldBe 0
     }
 
     @Test

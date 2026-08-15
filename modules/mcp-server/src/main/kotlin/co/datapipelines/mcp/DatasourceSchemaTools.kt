@@ -81,7 +81,7 @@ class DatasourcesGetTablesTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return introspecting(name) { introspector.tables(name, args.string("schema")).map { it.toWireMap() } }
+        return introspecting(name) { introspector.tables(name, args.string("schema")).toWireMap() }
     }
 }
 

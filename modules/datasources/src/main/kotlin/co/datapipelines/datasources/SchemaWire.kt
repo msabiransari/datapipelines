@@ -36,6 +36,13 @@ fun ColumnInfo.toWireMap(): Map<String, Any?> =
         put("warnings", warnings.map { it.message })
     }
 
+/** The §7A tables listing (`datasources_get_tables` / `GET .../tables`). */
+fun TablesPage.toWireMap(): Map<String, Any?> =
+    mapOf(
+        "tables" to tables.map { it.toWireMap() },
+        "truncated" to truncated,
+    )
+
 /** The §7A whole-schema snapshot (`datasources_get_schema` / `GET .../schema`). */
 fun SchemaSnapshot.toWireMap(): Map<String, Any?> =
     mapOf(

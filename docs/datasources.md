@@ -399,7 +399,7 @@ Three read operations, all served by the module's `SchemaIntrospector` through t
 
 | Operation | Returns | Notes |
 |---|---|---|
-| Tables | `[{schema, name, type}]` | Tables and views; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). Optional schema filter. |
+| Tables | `{"tables": [{schema, name, type}], "truncated": bool}` | Tables and views; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). Optional schema filter. Capped at **2000 tables**; `truncated: true` when the cap dropped some. |
 | Columns (one table) | `[{name, type, precision, scale, nullable, source_type, warnings}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name; `warnings` carries the mapper's warning messages (§8.2/§10.5), empty when the mapping was clean. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. |
 | Schema snapshot | `{datasource, dialect, truncated, tables:[{table, columns}]}` | Whole schema in one payload, capped at **200 tables**; `truncated: true` when the cap dropped tables. Served by **one connection lease**: `getTables` plus a single bulk `getColumns` grouped in memory, so the snapshot is read-consistent and never leases a connection per table. |
 
