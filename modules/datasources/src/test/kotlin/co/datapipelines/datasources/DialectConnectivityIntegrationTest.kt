@@ -119,10 +119,15 @@ class DialectConnectivityIntegrationTest {
         // literal catalog argument, and a columns read under the same filter must find the
         // table — the two reads the escaped-catalog defect silently emptied.
         val columns = introspector.columns("mysql_intro", "routed_orders", schemaFilter = mysql.databaseName)
+        // The PRODUCTION set, not an inline copy: when the floor grows (Oracle's grew 5 -> 13
+        // in the last range), this test keeps verifying the new entries instead of silently
+        // pinning yesterday's four. (MySQL's set is exact names; if it ever gains a prefix
+        // entry, the matcher — not membership — becomes the assertion.)
+        val mysqlFloor = DialectAdapters.forDialect(Dialect.MYSQL).introspectionSystemSchemas
         assertAll(
             { routed.schema shouldBe mysql.databaseName },
             { columns.map { it.column.name.lowercase() } shouldContain "id" },
-            { tables.none { it.schema.equals("information_schema", ignoreCase = true) } shouldBe true },
+            { tables.none { it.schema?.lowercase() in mysqlFloor } shouldBe true },
             // F4 against the dialect that produces "": an UNCOMMENTED table/column row carries
             // NO remarks key on the wire, and a COMMENT-ed table/column round-trips its text.
             {
@@ -141,10 +146,10 @@ class DialectConnectivityIntegrationTest {
         )
 
         // The unfiltered listing must not leak the engine's own schemas — sys views arrive as
-        // plain VIEWs, invisible to the table-type vocabulary.
+        // plain VIEWs, invisible to the table-type vocabulary. Same production-set rule.
         val unfilteredSchemas = introspector.tables("mysql_intro").tables.mapNotNull { it.schema?.lowercase() }
         unfilteredSchemas.forEach { schema ->
-            (schema in setOf("mysql", "performance_schema", "sys", "information_schema")) shouldBe false
+            (schema in mysqlFloor) shouldBe false
         }
 
         // The schemas listing reads the DATABASES (catalogs) under Connector/J defaults, with
@@ -152,9 +157,7 @@ class DialectConnectivityIntegrationTest {
         val schemas = introspector.schemas("mysql_intro").schemas
         assertAll(
             { schemas.map { it.lowercase() } shouldContain mysql.databaseName.lowercase() },
-            {
-                schemas.none { it.lowercase() in setOf("mysql", "performance_schema", "sys", "information_schema") } shouldBe true
-            },
+            { schemas.none { it.lowercase() in mysqlFloor } shouldBe true },
         )
     }
 
