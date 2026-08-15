@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
@@ -20,7 +21,6 @@ import io.mockk.mockk
 import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import java.sql.SQLException
 
 class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
@@ -173,10 +173,13 @@ class DatasourceSchemaToolsTest {
     @Test
     fun `a connection failure is the catalogued datasource_unreachable on every introspection tool`() {
         // A customer DB being down must reach the dispatcher as a catalogued
-        // DatapipelinesException (isError envelope), never as -32603.
-        every { introspector.tables("down", null) } throws SQLException("Connection refused")
-        every { introspector.columns("down", "orders", null) } throws SQLException("Connection refused")
-        every { introspector.snapshot("down") } throws SQLException("Connection refused")
+        // DatapipelinesException (isError envelope), never as -32603. The introspector's
+        // DatasourceUnreachableException wraps both failure families (SQLException at the
+        // lease, RuntimeException at pool build — the Hikari path is pinned by
+        // SchemaIntrospectorTest); the tools translate the one type.
+        every { introspector.tables("down", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
+        every { introspector.columns("down", "orders", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
+        every { introspector.snapshot("down") } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
 
         assertAll(
             {

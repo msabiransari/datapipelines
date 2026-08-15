@@ -4,7 +4,9 @@ import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.IngressTypeMapper
 import co.datapipelines.typesystem.TypeMappingWarning
+import java.sql.Connection
 import java.sql.DatabaseMetaData
+import java.sql.SQLException
 
 /**
  * Reads live schema metadata from a registered datasource (datasources.md §7A) via JDBC
@@ -29,7 +31,7 @@ class SchemaIntrospector(
         schemaFilter: String? = null,
         maxTables: Int = MAX_TABLES,
     ): TablesPage =
-        withMetaData(datasourceName) { meta, datasource ->
+        withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
             readTables(meta, adapter, catalog, schemaPattern, maxTables)
@@ -41,7 +43,7 @@ class SchemaIntrospector(
         table: String,
         schemaFilter: String? = null,
     ): List<ColumnInfo> =
-        withMetaData(datasourceName) { meta, datasource ->
+        withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
             meta.getColumns(catalog, schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
@@ -65,7 +67,7 @@ class SchemaIntrospector(
         datasourceName: String,
         maxTables: Int = MAX_SNAPSHOT_TABLES,
     ): SchemaSnapshot =
-        withMetaData(datasourceName) { meta, datasource ->
+        withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val all = readTables(meta, adapter, null, null).tables
             val kept = all.take(maxTables)
@@ -149,12 +151,40 @@ class SchemaIntrospector(
     /** The lookup key [snapshot] joins the tables listing and the bulk column read on. */
     private fun TableInfo.key(): Pair<String?, String> = schema to name
 
+    /**
+     * The lease boundary every operation reads through — and the ONE place a connection failure
+     * becomes [DatasourceUnreachableException].
+     *
+     * Both exception families the registry's probe KDoc names are translated (see
+     * `DefaultDatasourceRegistry.probe`): the `SQLException` of a refused/timed-out lease or a
+     * connection that died mid-read, AND the RuntimeException family of pool construction —
+     * `HikariPool.PoolInitializationException` at first lease on a down database, a missing
+     * driver class, a property a driver rejects at parse time. Catching only `SQLException`
+     * here (round 1) let the RuntimeException family escape as a raw 500 / -32603.
+     *
+     * The RuntimeException catch stops at the lease: a RuntimeException thrown by the metadata
+     * walk itself is a defect in this module or a driver bug, and masking it as "the caller's
+     * database is unreachable" would hide it. `Error` is never caught.
+     */
+    @Suppress("TooGenericExceptionCaught")
     private fun <T> withMetaData(
         datasourceName: String,
-        block: (DatabaseMetaData, Datasource) -> T,
+        block: (Connection, DatabaseMetaData, Datasource) -> T,
     ): T {
         val datasource = registry.get(datasourceName) ?: throw notFound(datasourceName)
-        return registry.poolFor(datasource).leaseConnection().use { block(it.metaData, datasource) }
+        val connection =
+            try {
+                registry.poolFor(datasource).leaseConnection()
+            } catch (e: SQLException) {
+                throw DatasourceUnreachableException(datasourceName, e)
+            } catch (e: RuntimeException) {
+                throw DatasourceUnreachableException(datasourceName, e)
+            }
+        return try {
+            connection.use { block(it, it.metaData, datasource) }
+        } catch (e: SQLException) {
+            throw DatasourceUnreachableException(datasourceName, e)
+        }
     }
 
     /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */

@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
@@ -20,7 +21,6 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import java.sql.SQLException
 
 /**
  * §7A over a mocked introspector — the endpoints are a pure snake_case projection of the
@@ -148,9 +148,13 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `a connection failure during introspection is the catalogued datasource_unreachable`() {
-        // A customer DB being down is not a server error: the raw SQLException must surface as
-        // the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
-        every { introspector.tables("pg-prod", null) } throws SQLException("Connection refused")
+        // A customer DB being down is not a server error: the introspector's
+        // DatasourceUnreachableException (its lease boundary wraps BOTH the SQLException lease
+        // family and the RuntimeException pool-build family — PoolInitializationException on a
+        // down database, which round 1 missed; that path is pinned by SchemaIntrospectorTest)
+        // must surface as the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
+        every { introspector.tables("pg-prod", null) } throws
+            DatasourceUnreachableException("pg-prod", RuntimeException("Connection refused"))
 
         val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
 

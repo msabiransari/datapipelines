@@ -15,6 +15,7 @@ import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.DriverManager
 import java.sql.ResultSet
+import java.sql.SQLException
 
 /**
  * §7A introspection over a **real** in-memory H2 behind a mocked registry — the metadata comes
@@ -341,6 +342,60 @@ class SchemaIntrospectorTest {
             .tables
             .single()
             .schema shouldBe "public"
+    }
+
+    @Test
+    fun `a pool-build failure is the module's unreachable - not an escaping RuntimeException`() {
+        // The true Hikari path for a down database: `poolFor`'s `computeIfAbsent` builds the
+        // pool and `HikariDataSource` construction throws PoolInitializationException — a
+        // RuntimeException, NOT an SQLException. Round 1 caught only SQLException at the
+        // surfaces, so this escaped as a raw 500 / -32603.
+        val ds = datasource()
+        val poolFailure =
+            com.zaxxer.hikari.pool.HikariPool.PoolInitializationException(
+                RuntimeException("Failed to get driver instance for jdbcUrl"),
+            )
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } throws poolFailure
+
+        val thrown =
+            shouldThrow<DatasourceUnreachableException> {
+                introspector.tables("h2-test")
+            }
+
+        assertAll(
+            { thrown.datasourceName shouldBe "h2-test" },
+            { thrown.cause shouldBe poolFailure },
+        )
+    }
+
+    @Test
+    fun `a lease failure SQLException is the module's unreachable`() {
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns
+            object : ConnectionPool {
+                override val name: String = "h2-test"
+
+                override fun leaseConnection(): Connection = throw SQLException("Connection refused")
+
+                override fun close() = Unit
+            }
+
+        shouldThrow<DatasourceUnreachableException> { introspector.snapshot("h2-test") }
+            .cause
+            ?.message shouldBe "Connection refused"
+    }
+
+    @Test
+    fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
+        // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
+        // is — masking it as "datasource unreachable" would hide our own bugs.
+        val meta = mockk<DatabaseMetaData>()
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } throws IllegalStateException("walk bug")
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.H2, meta)
+
+        shouldThrow<IllegalStateException> { introspector.tables(name) }
     }
 
     /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */
