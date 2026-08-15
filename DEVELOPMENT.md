@@ -403,6 +403,32 @@ against [configuration.md](docs/configuration.md), and forbidden legacy spelling
 names, removed entity fields). CI runs it alongside the Kotlin checks — **exit 0 is required before
 merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
 
+### 10.2 Quality tooling
+
+Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
+guard has been proven able to fail (see the handback docs under
+`orchestration/handbacks/`).
+
+#### Coverage (Kover)
+
+```bash
+./gradlew koverHtmlReport   # per-module reports + aggregated root report
+./gradlew koverXmlReport    # XML (Cobertura) equivalents, for tooling
+```
+
+Kover is applied to every module by `CommonConventionsPlugin`; the root project
+additionally aggregates all modules into one report
+(`build/reports/kover/index.html`). `check` depends on `koverVerify`, so a
+coverage regression fails the build.
+
+Each module has a minimum **line coverage** floor — the module's measured
+baseline from the first Kover run (2026-08-15) minus 2 points, rounded down.
+The floors live in `COVERAGE_FLOORS` in
+`buildSrc/src/main/kotlin/CommonConventionsPlugin.kt`. They exist to catch
+regressions, not to force new tests: raise a floor only when a module's
+coverage has genuinely improved, and never lower one to make a build pass.
+`tests/integration-tests` has no floor (no main sources of its own).
+
 ---
 
 ## 11. Project Structure

@@ -53,6 +53,9 @@ spring-boot = "3.5.16"
 foojay-resolver = "1.0.0"
 ktlint-plugin = "14.2.0"
 detekt = "1.23.8"
+# Kover: latest stable on Maven Central (verified 2026-08-15 against
+# repo1.maven.org maven-metadata.xml; no RC/beta newer than it).
+kover = "0.9.9"
 
 # --- SECURITY OVERRIDES (see the clause above) -------------------------------
 # postgresql — GHSA-j92g-9f8w-j867 (HIGH, silent channel-binding authentication
