@@ -64,19 +64,18 @@ class DialectConnectivityIntegrationTest {
     }
 
     /**
-     * §7A against the real Connector/J: the database arrives in TABLE_CAT (TABLE_SCHEM is
-     * null), so introspection must route through the catalog — the schema filter selects the
-     * database and each table reports the database as its schema. And an UNFILTERED listing
-     * must drop MySQL's system schemas: Connector/J reports `sys` / `performance_schema`
-     * views as plain `VIEW`/`TABLE` rows, so only the system-schema list can keep them out.
+     * §7A against the real Connector/J, with the database named `my_app` — the underscore is
+     * the point (R1): the database arrives in TABLE_CAT (TABLE_SCHEM is null), so introspection
+     * routes through the **catalog** argument, which JDBC defines as a LITERAL. If the code
+     * ever escapes the catalog value (`my\_app`), the filter matches nothing and this test
+     * fails with an empty tables listing — the exact zero-match defect class.
      *
-     * The schemas listing routes through the SAME vocabulary: under Connector/J defaults
-     * (`databaseTerm=CATALOG`) `getSchemas()` reports a single blank schema and the databases
-     * arrive as catalogs — so `schemas()` must read `getCatalogs()`/TABLE_CAT, minus the
-     * system schemas.
+     * It also pins the unfiltered system-schema exclusion (Connector/J reports `sys` /
+     * `performance_schema` views as plain `VIEW`/`TABLE` rows) and the schemas listing's
+     * catalog vocabulary (`databaseTerm=CATALOG` → `getCatalogs()`).
      */
     @Test
-    fun `mysql introspection reads the database from the catalog as the schema`() {
+    fun `mysql introspection routes an underscore-named database through the literal catalog`() {
         DriverManager.getConnection(mysql.jdbcUrl, mysql.username, mysql.password).use { connection ->
             connection.createStatement().use { it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)") }
         }
@@ -104,10 +103,15 @@ class DialectConnectivityIntegrationTest {
 
         val introspector = SchemaIntrospector(registry)
         val tables = introspector.tables("mysql_intro", schemaFilter = mysql.databaseName).tables
-
         val routed = tables.first { it.name.equals("routed_orders", ignoreCase = true) }
+
+        // The schema filter (the underscore-named database itself) must match THROUGH the
+        // literal catalog argument, and a columns read under the same filter must find the
+        // table — the two reads the escaped-catalog defect silently emptied.
+        val columns = introspector.columns("mysql_intro", "routed_orders", schemaFilter = mysql.databaseName)
         assertAll(
             { routed.schema shouldBe mysql.databaseName },
+            { columns.map { it.column.name.lowercase() } shouldContain "id" },
             { tables.none { it.schema.equals("information_schema", ignoreCase = true) } shouldBe true },
         )
 
@@ -134,8 +138,10 @@ class DialectConnectivityIntegrationTest {
         @JvmStatic
         val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
 
+        /** `my_app` on purpose: the underscore-named database is what catches an escaped
+         *  catalog argument (a literal must match the stored name exactly). */
         @Container
         @JvmStatic
-        val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4")
+        val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4").withDatabaseName("my_app")
     }
 }

@@ -21,7 +21,10 @@ import java.sql.SQLException
  *
  * `table` and `schema` filters are **exact-match identifiers, not LIKE patterns**: `_` and `%`
  * are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table named
- * `order_items` cannot match its wildcard sibling `order1items`.
+ * `order_items` cannot match its wildcard sibling `order1items`. The escape applies only to
+ * the true pattern arguments (`schemaPattern`, `tableNamePattern`) — the **catalog argument is
+ * a literal** and is never escaped, or a catalog-routing driver (Connector/J) could not select
+ * a database whose stored name contains `_`/`%`.
  */
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
@@ -62,8 +65,12 @@ class SchemaIntrospector(
     ): TablesPage =
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
-            readTables(meta, adapter, catalog, schemaPattern, maxTables)
+            // Route FIRST, then escape only the schemaPattern side: the catalog argument is a
+            // LITERAL ("must match the catalog name as it is stored"), so an escaped value
+            // there matches nothing — any MySQL database named with '_'/'%'. Only true
+            // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(schemaFilter)
+            readTables(meta, adapter, catalog, rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables)
         }
 
     /**
@@ -82,8 +89,12 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val effectiveFilter = schemaFilter ?: connection.currentSchema(adapter)
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(effectiveFilter?.toExactMatch(meta.searchStringEscape))
-            meta.getColumns(catalog, schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
+            // Same rule as tables(): the catalog argument is a literal (never escaped — an
+            // escaped `my_app` catalog matches nothing on MySQL), schemaPattern is a pattern
+            // (always escaped).
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(effectiveFilter)
+            val escape = meta.searchStringEscape
+            meta.getColumns(catalog, rawSchemaPattern?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         val schema = rs.getString(adapter.schemaResultColumn())

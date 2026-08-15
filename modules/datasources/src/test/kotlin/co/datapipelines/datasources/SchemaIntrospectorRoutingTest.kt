@@ -50,6 +50,83 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `the catalog argument is a LITERAL - a mysql database named my_app arrives unescaped`() {
+        // The JDBC catalog argument "must match the catalog name as it is stored" — it is a
+        // LITERAL, never a LIKE pattern. Escaping it (the toExactMatch path) makes any
+        // database whose name carries '_' or '%' match NOTHING: get_tables returns [] and
+        // get_columns returns [] — the zero-columns defect. The stub answers ONLY the raw
+        // "my_app", so an escaped call fails loudly.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables("my_app", null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen false
+        every { tablesRs.getString("TABLE_CAT") } returns "my_app"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.getColumns("my_app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+
+        val (introspector, name) = introspectorOver(Dialect.MYSQL, meta)
+
+        assertAll(
+            {
+                introspector
+                    .tables(name, schemaFilter = "my_app")
+                    .tables
+                    .single()
+                    .schema shouldBe "my_app"
+            },
+            { introspector.columns(name, "orders", schemaFilter = "my_app") shouldBe emptyList() },
+        )
+
+        verify(exactly = 1) { meta.getTables("my_app", null, "%", any<Array<String>>()) }
+        verify(exactly = 0) { meta.getTables(match { it != "my_app" }, null, "%", any<Array<String>>()) }
+        verify(exactly = 1) { meta.getColumns("my_app", null, "orders", "%") }
+        verify(exactly = 0) { meta.getColumns(match { it != "my_app" }, null, "orders", "%") }
+    }
+
+    @Test
+    fun `the mysql current-schema default is a LITERAL catalog too - my_app arrives unescaped`() {
+        // The default comes from connection.getCatalog() — a stored name, routed to the
+        // catalog argument; it must not go through toExactMatch any more than an explicit
+        // filter does.
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns("my_app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOver(Dialect.MYSQL, meta) { connection ->
+                every { connection.catalog } returns "my_app"
+            }
+
+        introspector.columns(name, "orders") shouldBe emptyList()
+
+        verify(exactly = 1) { meta.getColumns("my_app", null, "orders", "%") }
+        verify(exactly = 0) { meta.getColumns(match { it != "my_app" }, null, "orders", "%") }
+    }
+
+    @Test
+    fun `the schemaPattern argument stays escaped - my_schema on postgres arrives escaped`() {
+        // The OTHER side of the fix: schemaPattern (and tableNamePattern) are true LIKE
+        // pattern arguments — `_`/`%` MUST be escaped there. Routing the raw filter into
+        // schemaPattern without escaping would reintroduce the wildcard-sibling defect.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, "my\\_schema", "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns false
+
+        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+        introspector.tables(name, schemaFilter = "my_schema").tables shouldBe emptyList()
+
+        verify(exactly = 1) { meta.getTables(null, "my\\_schema", "%", any<Array<String>>()) }
+    }
+
+    @Test
     fun `schema-filtered dialects keep the filter in the schemaPattern argument`() {
         // The non-MySQL world: TABLE_SCHEM carries the schema and the filter stays in the
         // schemaPattern argument — routing must not move it for them.
