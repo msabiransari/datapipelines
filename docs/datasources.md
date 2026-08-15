@@ -391,6 +391,30 @@ Per-node datasource *usage* remains observable without any credential-audit even
 
 ---
 
+## 7A. Schema Introspection
+
+Shipped in v1.1 (was datasources §14 future work). Read-only live schema metadata over a registered datasource's JDBC `DatabaseMetaData`, so agents can enumerate real tables and columns instead of hallucinating them when authoring SQL templates.
+
+Three read operations, all served by the module's `SchemaIntrospector` through the existing `DatasourceRegistry` pool (`poolFor`, §5.2 — introspection opens a live connection, exactly like a connection test):
+
+| Operation | Returns | Notes |
+|---|---|---|
+| Tables | `[{schema, name, type}]` | Tables and views; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). Optional schema filter. |
+| Columns (one table) | `[{name, type, precision, scale, nullable, source_type}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. |
+| Schema snapshot | `{datasource, dialect, truncated, tables:[{table, columns}]}` | Whole schema in one payload, capped at **200 tables**; `truncated: true` when the cap dropped tables. |
+
+Rules:
+
+- **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-api-v1-datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+- **Read-only by construction**: only `DatabaseMetaData` calls, no statements.
+- **An unknown table or schema filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
+- **An unknown datasource name is `datasource.not_found`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)).
+- Credentials are never part of any introspection payload — the operations read schema metadata only.
+
+Surfaces: REST `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{table}/columns`; MCP `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns`. (Cross-links land with the surface specs' own amendments.)
+
+---
+
 ## 8. Connection Testing
 
 ### 8.1 `POST /api/v1/datasources/{name}/test`
@@ -591,7 +615,6 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 - **Background health checks**: scheduled polling of datasources with UI health indicators.
 - **Datasource groups / failover**: pair primary + replica, fail over on connection failure.
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
-- **Schema introspection tools**: `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{t}/columns` — useful for LLM-assisted pipeline authoring. v1.1 candidate.
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
 - **OAuth / IAM auth for cloud databases**: Snowflake, BigQuery (when those dialects are added).
 
@@ -611,3 +634,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-09 | v1.8 | P3 build (round-3 escalation) | §5.6 DuckDB hardening sharpened on empirical evidence: `enable_external_access=false` is the load-bearing, runtime-non-overridable lock (the two `autoload_*` toggles stay runtime-settable but are inert — no load path without external access); the five extension keys are ALSO refused in `properties.jdbc`/`jdbc_url` (properties override defaults §4.2, so an operator could otherwise re-open the RCE — refused, not merely defaulted). |
 | 2026-08-09 | v1.7 | P3 build (datasources round-2 finding) | §5.6: **embedded in-process dialects** (DuckDB, SQLite run in the server JVM) must harden extension-loading at the adapter — `DuckdbDialectAdapter.defaultProperties` disables native-extension load + external autoload (`allow_community_extensions`/`autoload_known_extensions` default TRUE, reachable with no `properties.jdbc` at all → in-process RCE), non-overridable by session SQL. The datasource analogue of Staging §9.5. |
 | 2026-08-09 | v1.6 | P3 build (Gate C security re-review) | §5.6 hardened: credential refusal now covers a **userinfo authority in any position** (Oracle `thin:user/pw@`, H2 `tcp://user:pw@`, not only `//`-prefixed) (DS-SEC-13); a **secret-valued-property category rule** refuses any `properties.jdbc`/URL key whose value is credential material via a suffix predicate (`*password`/`*passwd`/`*pwd`/`*secret`/`*clientkey` + named dialect secrets) since `properties.jdbc` is plaintext + `read`-visible like `jdbc_url` (DS-SEC-14); MySQL `allowPublicKeyRetrieval` (DS-SEC-16), MSSQL `keyVaultProviderClientKey`/`keyVaultProviderClientId`/`keyStorePrincipalId` (DS-SEC-14/18) added; TLS-switch refusals declared best-effort with the `sslmode` family operator-controlled. §6.3: metadata cache carries a short TTL (60s) for cross-instance coherence, negatives never cached (DS-SEC-15). |
+| 2026-08-14 | v2.0 | v1.1 introspection build | New **§7A Schema Introspection**: three read-only `DatabaseMetaData` operations (tables / columns / 200-table-capped snapshot) served through the registry pool with dialect canonical type mapping, `author` scope on every surface, empty-list-for-unknown-filter rule, `datasource.not_found` for unknown names; §14 future-work line removed (shipped). |

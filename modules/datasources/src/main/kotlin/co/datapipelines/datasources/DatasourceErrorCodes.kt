@@ -56,8 +56,8 @@ object DatasourceErrorCodes {
 
     /**
      * Datasource name unknown on a read/mutate/test path (pipeline-contract §13.8, added
-     * 2026-08-11 with v1.3). Raised by the surfaces (web/mcp), not by this module — mirrored
-     * here so the §13.8 drift guard stays complete.
+     * 2026-08-11 with v1.3). Raised by the read/test surfaces (web/mcp) and by this module's
+     * [SchemaIntrospector] — mirrored here so the §13.8 drift guard stays complete.
      */
     const val NOT_FOUND = "datasource.not_found"
 
