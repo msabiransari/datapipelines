@@ -99,7 +99,15 @@ class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle")
 
 class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver")
 
-class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql")
+/**
+ * MySQL — the catalog-routing dialect (datasources.md §7A): Connector/J defaults put the
+ * database in TABLE_CAT and leave TABLE_SCHEM null, so introspection routes the schema filter
+ * to the catalog argument and reads TABLE_CAT as the schema (see
+ * [DialectAdapter.schemaArrivesInCatalog]).
+ */
+class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql") {
+    override val schemaArrivesInCatalog: Boolean = true
+}
 
 class H2DialectAdapter : AbstractDialectAdapter(Dialect.H2, "h2")
 

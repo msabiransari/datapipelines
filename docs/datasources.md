@@ -405,6 +405,8 @@ Three read operations, all served by the module's `SchemaIntrospector` through t
 
 The table-type vocabulary and the system-schema exclusion are **per-dialect properties on the `DialectAdapter`** (next to the type mapper): every dialect lists at least `TABLE` and `VIEW` and excludes at least `information_schema` (case-insensitive); Postgres additionally lists `PARTITIONED TABLE`, `MATERIALIZED VIEW` and `FOREIGN TABLE`, and excludes `pg_catalog` as well. System catalogs that report under other JDBC types (`SYSTEM TABLE`, `SYSTEM VIEW`) are kept out by the type vocabulary itself.
 
+Identifier routing is a dialect property too ([DialectAdapter.schemaArrivesInCatalog]): on Connector/J defaults the database arrives in the JDBC **catalog** (TABLE_CAT) and TABLE_SCHEM is null, so for MySQL the schema filter routes to the catalog argument of `getTables`/`getColumns` and TABLE_CAT is read as the schema — otherwise a filter selects nothing and every table reports a null schema.
+
 Rules:
 
 - **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-api-v1-datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).

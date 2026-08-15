@@ -63,6 +63,17 @@ interface DialectAdapter {
     val refusedPropertyKeys: Set<String>
 
     /**
+     * §7A introspection: true when this dialect's driver reports the database in the JDBC
+     * **catalog** (TABLE_CAT) and leaves the schema (TABLE_SCHEM) null — Connector/J's default
+     * behavior, where `jdbc:mysql://host/db` puts `db` in TABLE_CAT. Introspection then routes
+     * the schema filter to the **catalog** argument of `getTables`/`getColumns` and reads
+     * TABLE_CAT as the schema — otherwise the filter selects nothing and every table reports
+     * a null schema.
+     */
+    val schemaArrivesInCatalog: Boolean
+        get() = false
+
+    /**
      * Validates a JDBC URL for this dialect (§6.1): scheme match, basic parse, and the §5.6
      * refusal guard — the same union applied to `properties.jdbc`, refusing class-loading /
      * local-file / connect-time-SQL properties and credentials smuggled into the URL (H2

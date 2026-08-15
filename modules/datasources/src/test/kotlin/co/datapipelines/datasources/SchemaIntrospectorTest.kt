@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -11,7 +12,9 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import java.sql.Connection
+import java.sql.DatabaseMetaData
 import java.sql.DriverManager
+import java.sql.ResultSet
 
 /**
  * §7A introspection over a **real** in-memory H2 behind a mocked registry — the metadata comes
@@ -206,5 +209,68 @@ class SchemaIntrospectorTest {
                 .first { it.table.name.equals("ORDER_ITEMS", ignoreCase = true) }
 
         items.columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE")
+    }
+
+    @Test
+    fun `mysql routes the schema filter to the catalog argument and reads TABLE_CAT as the schema`() {
+        // Connector/J defaults: the database arrives in TABLE_CAT, TABLE_SCHEM is null — a
+        // schemaPattern selects nothing. The filter must land in the catalog argument.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables("app", null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen false
+        every { tablesRs.getString("TABLE_CAT") } returns "app"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.MYSQL, meta)
+
+        assertAll(
+            { introspector.tables(name, schemaFilter = "app").single().schema shouldBe "app" },
+            { introspector.columns(name, "orders", schemaFilter = "app") shouldBe emptyList() },
+        )
+    }
+    @Test
+    fun `schema-filtered dialects keep the filter in the schemaPattern argument`() {
+        // The non-MySQL world: TABLE_SCHEM carries the schema and the filter stays in the
+        // schemaPattern argument — routing must not move it for them.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, "public", "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen false
+        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.POSTGRES, meta)
+
+        introspector.tables(name, schemaFilter = "public").single().schema shouldBe "public"
+    }
+
+    /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */
+    private fun introspectorOverMockedMetadata(
+        dialect: Dialect,
+        meta: DatabaseMetaData,
+    ): Pair<SchemaIntrospector, String> {
+        val ds = Fixtures.forDialect(dialect)
+        val connection = mockk<Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get(ds.name) } returns ds
+        every { registry.poolFor(ds) } returns
+            object : ConnectionPool {
+                override val name: String = ds.name
+
+                override fun leaseConnection(): Connection = connection
+
+                override fun close() = Unit
+            }
+        return SchemaIntrospector(registry) to ds.name
     }
 }

@@ -30,10 +30,11 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val escape = meta.searchStringEscape
-            meta.getTables(null, schemaFilter?.toExactMatch(escape), "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
+            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(escape))
+            meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
                 buildList {
                     while (rs.next()) {
-                        val schema = rs.getString("TABLE_SCHEM")
+                        val schema = rs.getString(adapter.schemaResultColumn())
                         if (adapter.isSystemSchema(schema)) continue
                         add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
                     }
@@ -48,9 +49,11 @@ class SchemaIntrospector(
         schemaFilter: String? = null,
     ): List<ColumnInfo> =
         withMetaData(datasourceName) { meta, datasource ->
-            val mapper = DialectAdapters.forDialect(datasource.dialect).typeMapper
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val mapper = adapter.typeMapper
             val escape = meta.searchStringEscape
-            meta.getColumns(null, schemaFilter?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
+            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(escape))
+            meta.getColumns(catalog, schemaPattern, table.toExactMatch(escape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         val sourceTypeName = rs.getString("TYPE_NAME") ?: ""
@@ -105,6 +108,16 @@ class SchemaIntrospector(
     /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
     private fun DialectAdapter.isSystemSchema(schema: String?): Boolean =
         schema != null && schema.lowercase() in introspectionSystemSchemas
+
+    /**
+     * Where the escaped schema filter goes: the catalog argument for drivers that carry the
+     * database there ([DialectAdapter.schemaArrivesInCatalog]), the schemaPattern otherwise.
+     */
+    private fun DialectAdapter.routeSchemaFilter(filter: String?): Pair<String?, String?> =
+        if (schemaArrivesInCatalog) filter to null else null to filter
+
+    /** The result column that carries the schema: TABLE_CAT for catalog-routing drivers, TABLE_SCHEM otherwise. */
+    private fun DialectAdapter.schemaResultColumn(): String = if (schemaArrivesInCatalog) "TABLE_CAT" else "TABLE_SCHEM"
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(
