@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pre-commit — staged-changes secret scan (gitleaks).
+# Installed by scripts/install-hooks.sh via core.hooksPath; see DEVELOPMENT.md §10.2.
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/secret-scan.sh" --staged

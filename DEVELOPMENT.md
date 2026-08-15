@@ -443,6 +443,22 @@ date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
 stage; when the machine is offline the stage warns and does NOT fail (the scan
 is meaningless without osv.dev — the skip is printed, never silent).
 
+#### Secret scanning (gitleaks)
+
+```bash
+./scripts/secret-scan.sh            # full-history scan
+./scripts/secret-scan.sh --staged   # staged changes only (what the hook runs)
+./scripts/install-hooks.sh          # one-time: point git at .githooks/
+```
+
+gitleaks (pinned in the script, same verified-download pattern) scans the full
+history or just staged changes. `install-hooks.sh` sets plain git
+`core.hooksPath` to the committed `.githooks/` directory — no hooks framework —
+so the pre-commit hook blocks staged secrets. The allowlist is `.gitleaks.toml`;
+entries are line-targeted (never whole files) with a reason + date comment, and
+the config EXTENDS the gitleaks default ruleset (a bare custom config silently
+replaces it — that mistake was made and caught here).
+
 ---
 
 ## 11. Project Structure

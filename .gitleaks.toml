@@ -1,0 +1,42 @@
+# .gitleaks.toml — allowlist for scripts/secret-scan.sh (gitleaks 8.30.1).
+#
+# RULE: every entry carries a reason + date comment (project rule). Entries are
+# LINE-targeted (regexTarget = "line") so a future REAL secret on a different
+# line of the same file still fires — never allowlist a whole path here.
+#
+# Baseline: full-history scan on 2026-08-15 found 5 hits, all rule
+# `generic-api-key`, all triaged as false positives below.
+
+title = "datapipelines gitleaks config"
+
+# Keep the built-in rule set — a custom config REPLACES the defaults otherwise
+# (proven the hard way 2026-08-15: without this line a staged AWS key sailed
+# through the pre-commit hook).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Triaged false positives — see per-entry comments (2026-08-15)"
+regexTarget = "line"
+regexes = [
+  # docs/configuration.md — `${DATAPIPELINES_DB_ENCRYPTION_KEY}` is an env-var
+  # REFERENCE in a YAML example, not a literal key. (2026-08-15)
+  '''\$\{DATAPIPELINES_DB_ENCRYPTION_KEY\}''',
+  # docs/rest-api.md — `dpk_ab12cd34ef56.9f8e7d6c...` is a truncated EXAMPLE
+  # API key in the docs, not a credential. (2026-08-15)
+  '''dpk_ab12cd34ef56''',
+  # modules/app ConfigValidatorTest.kt — `oidc-secret-456` is a deliberate
+  # fixture value for OIDC config validation tests. (2026-08-15)
+  '''oidc-secret-456''',
+  # deploy/.env.example — two working base64 values for the LOCAL dev compose
+  # stack. They secure nothing (localhost-only services; DEVELOPMENT.md tells
+  # every developer to generate their own), but they are high-entropy strings,
+  # so gitleaks flags them. (2026-08-15)
+  '''JWT_SECRET=cSZIW7DsvYRYUZWghr3t1mG2qGfGOMBRBcqNMiWSpX8=''',
+  '''ENCRYPTION_KEY=0mzTN2khjqIJ/vBX59Y79xmOrNNrceuNkMo0H5xE\+yQ=''',
+  # docs/configuration.md HISTORY (removed before this scan; commit c105d58) —
+  # the old dev-only value is base64 of the literal string
+  # "dev-encryption-key-32-bytes!", a placeholder, never a real key. Kept so
+  # full-history scans stay clean. (2026-08-15)
+  '''ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==''',
+]
