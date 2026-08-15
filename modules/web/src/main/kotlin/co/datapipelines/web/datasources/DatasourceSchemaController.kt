@@ -2,10 +2,8 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
-import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.datasources.SchemaSnapshot
-import co.datapipelines.datasources.TableInfo
+import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiResponse
@@ -19,8 +17,10 @@ import java.sql.SQLException
 /**
  * The schema-introspection endpoints (datasources.md §7A, rest-api.md §9.7).
  *
- * A thin projection of [SchemaIntrospector]: this controller binds paths and emits snake_case
- * DTOs, nothing more. An unknown datasource name propagates the introspector's catalogued
+ * A thin projection of [SchemaIntrospector]: this controller binds paths and emits the shared
+ * §7A wire maps (`toWireMap`, in `modules/datasources` beside the data classes — the same
+ * projections the MCP tools use, so the two surfaces cannot drift), nothing more. An unknown
+ * datasource name propagates the introspector's catalogued
  * `datasource.not_found` to [co.datapipelines.web.api.ApiExceptionHandler] (HTTP 404), and an
  * unknown table/schema filter is the introspector's empty list — "no results", not an error.
  *
@@ -45,7 +45,7 @@ class DatasourceSchemaController(
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun schema(
         @PathVariable name: String,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.snapshot(name).toResponse() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.snapshot(name).toWireMap() })
 
     /** §7A — tables and views, optionally narrowed to one schema. */
     @GetMapping("/{name}/tables")
@@ -54,7 +54,7 @@ class DatasourceSchemaController(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
     ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(introspecting(name) { introspector.tables(name, schema).map { it.toResponse() } })
+        ApiResponse.of(introspecting(name) { introspector.tables(name, schema).map { it.toWireMap() } })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -64,7 +64,7 @@ class DatasourceSchemaController(
         @PathVariable table: String,
         @RequestParam(required = false) schema: String?,
     ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(introspecting(name) { introspector.columns(name, table, schema).map { it.toResponse() } })
+        ApiResponse.of(introspecting(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
 
     /**
      * The §7A connection-failure boundary: an [SQLException] from the lease is the catalogued
@@ -86,34 +86,4 @@ class DatasourceSchemaController(
             )
         }
 
-    private fun TableInfo.toResponse(): Map<String, Any?> =
-        mapOf(
-            "schema" to schema,
-            "name" to name,
-            "type" to type,
-        )
-
-    /**
-     * The §7A column descriptor. Omitted-when-null follows the envelope convention
-     * (type-system §7.3): a missing `precision`/`scale`/`nullable` key carries its documented
-     * meaning, and `"nullable": null` would assert a fact nobody reported.
-     */
-    private fun ColumnInfo.toResponse(): Map<String, Any?> =
-        buildMap {
-            put("name", column.name)
-            put("type", column.type.wire)
-            column.precision?.let { put("precision", it) }
-            column.scale?.let { put("scale", it) }
-            column.nullable?.let { put("nullable", it) }
-            put("source_type", sourceTypeName)
-        }
-
-    private fun SchemaSnapshot.toResponse(): Map<String, Any?> =
-        mapOf(
-            "datasource" to datasource,
-            "dialect" to dialect,
-            "truncated" to truncated,
-            "tables" to
-                tables.map { (table, columns) -> mapOf("table" to table.toResponse(), "columns" to columns.map { it.toResponse() }) },
-        )
 }

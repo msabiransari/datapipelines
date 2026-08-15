@@ -842,8 +842,8 @@ Responses (the §4.1 envelope around `data`):
 
 // GET /datasources/{name}/tables/{table}/columns
 { "data": [
-  {"name": "id", "type": "INTEGER", "nullable": false, "source_type": "int4"},
-  {"name": "amount", "type": "DECIMAL", "precision": 10, "scale": 2, "source_type": "numeric"}
+  {"name": "id", "type": "INTEGER", "nullable": false, "source_type": "int4", "warnings": []},
+  {"name": "amount", "type": "DECIMAL", "precision": 10, "scale": 2, "source_type": "numeric", "warnings": []}
 ] }
 
 // GET /datasources/{name}/schema
@@ -856,7 +856,7 @@ Responses (the §4.1 envelope around `data`):
 
 Notes:
 
-- `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null).
+- `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean.
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
 - The snapshot is capped at 200 tables; `truncated: true` means tables were dropped — page the rest via `/tables` + `/columns`.
 - Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped).

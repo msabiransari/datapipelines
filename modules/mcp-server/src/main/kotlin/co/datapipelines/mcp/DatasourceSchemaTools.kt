@@ -1,9 +1,7 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.datasources.SchemaSnapshot
-import co.datapipelines.datasources.TableInfo
+import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import java.sql.SQLException
@@ -13,9 +11,10 @@ import java.sql.SQLException
  * over [SchemaIntrospector], the same service the REST endpoints use.
  *
  * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
- * datasource, matching the `datasources_test` precedent. Payloads are hand-built snake_case maps
- * (the §6.2.16–18 shapes), never a serialized entity; credentials are not part of schema metadata
- * at all, and building the maps field-by-field keeps it that way by construction.
+ * datasource, matching the `datasources_test` precedent. Payloads are the shared §7A wire maps
+ * (`toWireMap`, in `modules/datasources` beside the data classes — the same projections the REST
+ * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
+ * at all, and the field-by-field maps keep it that way by construction.
  *
  * A connection failure while leasing is translated here to the catalogued
  * `pipeline.execution.datasource_unreachable` and thrown as a [DatapipelinesException] — the
@@ -50,7 +49,7 @@ class DatasourcesGetSchemaTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return introspecting(name) { introspector.snapshot(name).toMcpSnapshot() }
+        return introspecting(name) { introspector.snapshot(name).toWireMap() }
     }
 }
 
@@ -82,7 +81,7 @@ class DatasourcesGetTablesTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return introspecting(name) { introspector.tables(name, args.string("schema")).map { it.toMcpTable() } }
+        return introspecting(name) { introspector.tables(name, args.string("schema")).map { it.toWireMap() } }
     }
 }
 
@@ -116,7 +115,7 @@ class DatasourcesGetColumnsTool(
     ): Any {
         val name = args.requiredString("name")
         val table = args.requiredString("table")
-        return introspecting(name) { introspector.columns(name, table, args.string("schema")).map { it.toMcpColumn() } }
+        return introspecting(name) { introspector.columns(name, table, args.string("schema")).map { it.toWireMap() } }
     }
 }
 
@@ -140,35 +139,3 @@ private fun <T> introspecting(
             cause = e,
         )
     }
-
-/** The §6.2.17 table descriptor. */
-internal fun TableInfo.toMcpTable(): Map<String, Any?> =
-    mapOf(
-        "schema" to schema,
-        "name" to name,
-        "type" to type,
-    )
-
-/**
- * The §6.2.18 column descriptor. Omitted-when-null follows the envelope convention
- * (type-system §7.3): a missing `precision`/`scale`/`nullable` key carries its documented
- * meaning; `"nullable": null` would assert a fact nobody reported.
- */
-internal fun ColumnInfo.toMcpColumn(): Map<String, Any?> =
-    buildMap {
-        put("name", column.name)
-        put("type", column.type.wire)
-        column.precision?.let { put("precision", it) }
-        column.scale?.let { put("scale", it) }
-        column.nullable?.let { put("nullable", it) }
-        put("source_type", sourceTypeName)
-    }
-
-/** The §6.2.16 whole-schema snapshot. */
-internal fun SchemaSnapshot.toMcpSnapshot(): Map<String, Any?> =
-    mapOf(
-        "datasource" to datasource,
-        "dialect" to dialect,
-        "truncated" to truncated,
-        "tables" to tables.map { (table, columns) -> mapOf("table" to table.toMcpTable(), "columns" to columns.map { it.toMcpColumn() }) },
-    )

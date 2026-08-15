@@ -647,7 +647,7 @@ List one table's columns with canonical types.
 }
 ```
 
-Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type"}` — `type` is the canonical Type System type, `source_type` the driver's own type name; `precision`/`scale`/`nullable` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned.
+Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean); `precision`/`scale`/`nullable` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned.
 
 **Scope:** `author` — same rationale as `datasources_get_schema`.
 

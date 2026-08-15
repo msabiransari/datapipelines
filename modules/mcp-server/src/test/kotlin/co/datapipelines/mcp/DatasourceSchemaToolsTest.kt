@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.TypeMappingWarning
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -70,9 +71,29 @@ class DatasourceSchemaToolsTest {
             { payload[0]["type"] shouldBe "INTEGER" },
             { payload[0]["nullable"] shouldBe false },
             { payload[0]["source_type"] shouldBe "int4" },
+            { payload[0]["warnings"] shouldBe emptyList<String>() },
             { payload[1]["precision"] shouldBe 10 },
             { payload[1]["scale"] shouldBe 2 },
         )
+    }
+
+    @Test
+    fun `get_columns carries the mapper's warning messages`() {
+        every { introspector.columns("pg-prod", "wide", null) } returns
+            listOf(
+                ColumnInfo(
+                    ColumnSchema("mystery", LogicalType.STRING),
+                    "sql_variant",
+                    listOf(TypeMappingWarning.sqlVariant("mystery")),
+                ),
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            DatasourcesGetColumnsTool(introspector)
+                .call(McpArguments(mapOf("name" to "pg-prod", "table" to "wide")), authorCtx) as List<Map<String, Any?>>
+
+        payload[0]["warnings"] shouldBe listOf(TypeMappingWarning.sqlVariant("mystery").message)
     }
 
     @Test

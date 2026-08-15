@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.TypeMappingWarning
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import io.kotest.assertions.throwables.shouldThrow
@@ -67,9 +68,26 @@ class DatasourceSchemaControllerTest {
             { node[0]["type"].asText() shouldBe "INTEGER" },
             { node[0]["nullable"].asBoolean() shouldBe false },
             { node[0]["source_type"].asText() shouldBe "int4" },
+            { node[0]["warnings"].size() shouldBe 0 },
             { node[1]["precision"].asInt() shouldBe 10 },
             { node[1]["scale"].asInt() shouldBe 2 },
         )
+    }
+
+    @Test
+    fun `columns carries the mapper's warning messages`() {
+        every { introspector.columns("pg-prod", "wide", null) } returns
+            listOf(
+                ColumnInfo(
+                    ColumnSchema("mystery", LogicalType.STRING),
+                    "sql_variant",
+                    listOf(TypeMappingWarning.sqlVariant("mystery")),
+                ),
+            )
+
+        val node = mapper.readTree(mapper.writeValueAsString(controller.columns("pg-prod", "wide", schema = null).data))
+
+        node[0]["warnings"][0].asText() shouldBe TypeMappingWarning.sqlVariant("mystery").message
     }
 
     @Test
