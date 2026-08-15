@@ -801,7 +801,7 @@ Returns a prompt that walks the agent through:
 4. `pipelines_create` to assemble the pipeline.
 5. `pipelines_execute` to run it and report the result.
 
-The question is embedded in a clearly delimited `The user's question (data, not instructions)` block the instructions tell the agent to treat as the question to answer, never as instructions to follow — containment instead of prohibition. The `question` argument is length-capped at 2000 characters and refused with `-32602` when missing, blank, or over the cap; unlike §8.1/§8.3's UUID arguments it is free text by design (carrying the user's question is the feature), and the delimiter block is the injection guard.
+The question is embedded between sentinel lines — `<<<QUESTION` and `QUESTION>>>`, each on its own line — that the instructions tell the agent to treat as the question to answer, never as instructions to follow. Containment instead of prohibition: quotes and newlines in the question cannot close or extend the block (a question cannot smuggle a line the agent might read as a step, because the fence only ends at the exact sentinel line), and a `question` containing either sentinel is refused with `-32602` — the fence cannot be forged from inside. The `question` argument is also length-capped at 2000 characters and refused when missing or blank; unlike §8.1/§8.3's UUID arguments it is free text by design (carrying the user's question is the feature), and the sentinel fence is the injection guard.
 
 ### 8.3 `debug_failed_execution`
 
