@@ -31,7 +31,7 @@ interface DialectAdapter {
 
     /**
      * §7A introspection: the JDBC table types this dialect treats as **user data** — what
-     * `getTables` asks for and what the tables/snapshot operations list. The SQL-standard
+     * `getTables` asks for and what the tables operation lists. The SQL-standard
      * floor is `TABLE` + `VIEW`; a dialect adds the types its users actually create (Postgres:
      * partitioned/materialized/foreign tables). System catalogs that arrive under other types
      * (`SYSTEM TABLE`, `SYSTEM VIEW`) are excluded by the type vocabulary itself.
