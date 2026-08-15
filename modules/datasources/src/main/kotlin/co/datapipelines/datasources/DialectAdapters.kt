@@ -224,6 +224,14 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
  * hand author SQL a filesystem-access primitive.
  */
 class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
+    /**
+     * §7A: SQLite has no JDBC schema dimension at all — `getSchemas()` reports no rows and
+     * `getSchema()` is hardcoded null in the vendored driver — so an unqualified
+     * tables()/columns() read cannot merge same-named tables and is exempt from the
+     * unknown-current-schema guard (see [DialectAdapter.introspectionSchemaless]).
+     */
+    override val introspectionSchemaless: Boolean = true
+
     override val defaultProperties: Map<String, String> =
         mapOf(
             "enable_load_extension" to "false",

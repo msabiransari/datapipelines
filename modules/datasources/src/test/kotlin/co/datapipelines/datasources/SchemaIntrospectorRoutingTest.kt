@@ -185,10 +185,13 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
-    fun `columns falls back to unfiltered minus system schemas when the driver reports no current schema`() {
-        // A driver may return null (or throw SQLFeatureNotSupportedException) from
-        // getSchema()/getCatalog() — the read is then unfiltered, with system schemas still
-        // excluded row by row.
+    fun `a no-schema read on a datasource with no current schema FAILS instead of merging`() {
+        // The cannot-merge theorem (§7A, rest-api §9.7, mcp-server §6.2.18): a driver that
+        // reports no current schema — null, or the blank sentinel — leaves an unqualified
+        // read UNFILTERED, which on a database-less MySQL registration merges db1.orders with
+        // db2.orders. The fallback used to be "read unfiltered anyway"; the theorem is now
+        // enforced by failing with a dedicated exception the surfaces translate to the
+        // catalogued invalid-argument code telling the caller to pass an explicit schema.
         assertAll(
             {
                 val meta = mockk<DatabaseMetaData>()
@@ -201,24 +204,76 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.schema } returns null
                     }
 
-                introspector.columns(name, "deals") shouldBe emptyList()
-                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
             },
             {
                 val meta = mockk<DatabaseMetaData>()
                 val columnsRs = mockk<ResultSet>(relaxed = true)
                 every { meta.searchStringEscape } returns "\\"
-                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
+                every { meta.getColumns(null, null, "orders", "%") } returns columnsRs
                 every { columnsRs.next() } returns false
                 val (introspector, name) =
-                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
-                        every { connection.schema } throws SQLFeatureNotSupportedException()
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } returns ""
                     }
 
-                introspector.columns(name, "deals") shouldBe emptyList()
-                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "orders") }
+            },
+            {
+                // tables() shares the theorem: an unfiltered listing on such a datasource
+                // would span EVERY database the server grants (catalog routing), so it fails
+                // the same way — the caller recovers via schemas().
+                val meta = mockk<DatabaseMetaData>()
+                val tablesRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+                every { tablesRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } returns null
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.tables(name) }
             },
         )
+    }
+
+    @Test
+    fun `an EXPLICIT schema still works on a datasource with no current schema`() {
+        // The failure above directs the caller to pass a schema from the schemas listing —
+        // that recovery path must keep working on the very datasource that failed.
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns("db1", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOver(Dialect.MYSQL, meta) { connection ->
+                every { connection.catalog } returns null
+            }
+
+        introspector.columns(name, "orders", schemaFilter = "db1") shouldBe emptyList()
+
+        verify(exactly = 1) { meta.getColumns("db1", null, "orders", "%") }
+    }
+
+    @Test
+    fun `a schemaless dialect never fails the unknown-current-schema guard`() {
+        // SQLite has NO JDBC schema dimension at all (getSchemas() is empty, every object
+        // reports a null schema — verified against the vendored 3.49.1.0), so an unqualified
+        // read cannot merge same-named tables and the caller has no schema to pass anyway:
+        // the schemas() listing is empty. The guard is for schema-capable dialects only.
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns(null, null, "t", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOver(Dialect.SQLITE, meta) { connection ->
+                every { connection.schema } returns null
+            }
+
+        introspector.columns(name, "t") shouldBe emptyList()
     }
 
     @Test
@@ -294,6 +349,8 @@ class SchemaIntrospectorRoutingTest {
                 introspector.tables(name).tables.single().schema shouldBe null
             },
             {
+                // A whitespace-only current schema is "none" — and "none" on a schema-capable
+                // dialect trips the unknown-current-schema guard, exactly like the "" sentinel.
                 val meta = mockk<DatabaseMetaData>()
                 val columnsRs = mockk<ResultSet>(relaxed = true)
                 every { meta.searchStringEscape } returns "\\"
@@ -304,46 +361,27 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.schema } returns "   "
                     }
 
-                introspector.columns(name, "deals") shouldBe emptyList()
-                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
             },
         )
     }
 
     @Test
-    fun `columns treats the blank current-schema sentinel like none - unfiltered minus system`() {
+    fun `columns treats the blank current-schema sentinel like none - the guard fires`() {
         // JDBC's "" sentinel means "objects without a catalog/schema" — a driver reporting it
-        // must get the unfiltered-minus-system fallback, NOT a match-nothing "" filter.
-        assertAll(
-            {
-                val meta = mockk<DatabaseMetaData>()
-                val columnsRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
-                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
-                every { columnsRs.next() } returns false
-                val (introspector, name) =
-                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
-                        every { connection.schema } returns ""
-                    }
+        // must get the unknown-current-schema guard, NOT a match-nothing "" filter.
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns(null, null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOver(Dialect.MYSQL, meta) { connection ->
+                every { connection.catalog } returns ""
+            }
 
-                introspector.columns(name, "deals") shouldBe emptyList()
-                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
-            },
-            {
-                val meta = mockk<DatabaseMetaData>()
-                val columnsRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
-                every { meta.getColumns(null, null, "orders", "%") } returns columnsRs
-                every { columnsRs.next() } returns false
-                val (introspector, name) =
-                    introspectorOver(Dialect.MYSQL, meta) { connection ->
-                        every { connection.catalog } returns ""
-                    }
-
-                introspector.columns(name, "orders") shouldBe emptyList()
-                verify(exactly = 1) { meta.getColumns(null, null, "orders", "%") }
-            },
-        )
+        shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "orders") }
+        verify(exactly = 0) { meta.getColumns(any(), any(), any(), any()) }
     }
 
     @Test

@@ -74,7 +74,8 @@ class DatasourcesGetTablesTool(
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
                     "The listing spans schemas — pass each table's reported schema to datasources_get_columns. " +
-                    "Read-only, for pipeline authoring.",
+                    "Without a schema argument the listing fails on a datasource that reports no current schema " +
+                    "(call datasources_get_schemas and pass one). Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -107,7 +108,9 @@ class DatasourcesGetColumnsTool(
             description =
                 "List one table's columns with canonical types, read from the datasource's live JDBC metadata. " +
                     "Pass the table name exactly as datasources_get_tables returned it. Without a schema argument " +
-                    "only the connection's current schema is read. Read-only, for pipeline authoring.",
+                    "only the connection's current schema is read; if the datasource reports no current schema, " +
+                    "an explicit schema is required (list them with datasources_get_schemas). " +
+                    "Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -133,11 +136,14 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
- * The §7A connection-failure boundary shared by the three tools: the introspector's
+ * The §7A error boundaries shared by the three tools: the introspector's
  * [DatasourceUnreachableException] is the catalogued
  * `pipeline.execution.datasource_unreachable` thrown as a [DatapipelinesException], so the
- * dispatcher envelopes it (§9.2) instead of mapping it to JSON-RPC -32603. Message is static —
- * driver text stays off the wire.
+ * dispatcher envelopes it (§9.2) instead of mapping it to JSON-RPC -32603; its
+ * [co.datapipelines.datasources.CurrentSchemaUnknownException] is the catalogued
+ * `pipeline.execution.parameter_required` — the closest §13.3 invalid-argument code, reused
+ * per the additive-catalog rule — with a message naming the recovery tool. Messages are
+ * static — driver text stays off the wire.
  */
 private fun <T> introspecting(
     name: String,
@@ -149,6 +155,15 @@ private fun <T> introspecting(
         throw DatapipelinesException(
             code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
             message = "Datasource '$name' could not be reached for schema introspection.",
+            details = mapOf("datasource" to name),
+            cause = e,
+        )
+    } catch (e: co.datapipelines.datasources.CurrentSchemaUnknownException) {
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
+            message = "Datasource '$name' reports no current schema, so an unqualified read could merge " +
+                "same-named tables across schemas. Pass an explicit schema (list them with " +
+                "datasources_get_schemas).",
             details = mapOf("datasource" to name),
             cause = e,
         )

@@ -124,6 +124,8 @@ class DatasourceSchemaToolsTest {
         val connection = mockk<java.sql.Connection>()
         every { connection.metaData } returns meta
         every { connection.close() } returns Unit
+        every { connection.schema } returns "public"
+        every { connection.catalog } returns "app"
         val datasource =
             co.datapipelines.datasources.Datasource(
                 name = "down",
@@ -144,6 +146,51 @@ class DatasourceSchemaToolsTest {
                 override fun close() = Unit
             }
         return SchemaIntrospector(registry)
+    }
+
+    @Test
+    fun `a no-schema read on a datasource with no current schema is the catalogued invalid-argument code`() {
+        // The cannot-merge promise (mcp-server §6.2.17/§6.2.18) made mechanical: a database-less
+        // MySQL registration yields no current schema and the unqualified read would merge
+        // same-named tables across every visible database. Through a REAL introspector the
+        // tool must surface the catalogued code (isError envelope via the dispatcher), never
+        // a merged answer — with the message pointing at datasources_get_schemas.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        every { connection.catalog } returns null
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "Down",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get("down") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "down"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        val real = SchemaIntrospector(registry)
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.PARAMETER_REQUIRED },
+            { thrown.message?.contains("datasources_get_schemas", ignoreCase = true) shouldBe true },
+        )
     }
 
     @Test

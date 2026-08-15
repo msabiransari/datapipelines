@@ -73,11 +73,15 @@ class DatasourceSchemaController(
         ApiResponse.of(introspecting(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
 
     /**
-     * The §7A connection-failure boundary: the introspector's [DatasourceUnreachableException]
-     * (both the SQLException lease family and the RuntimeException pool-build family, translated
-     * at its lease boundary) is the catalogued
-     * `pipeline.execution.datasource_unreachable`, never a raw 500. Message is static — driver
-     * text stays off the wire (§13 forbids internal topology in error messages).
+     * The §7A error boundaries shared by the three endpoints. The introspector's
+     * [DatasourceUnreachableException] (both the SQLException lease family and the
+     * RuntimeException pool-build family, translated at its lease boundary) is the catalogued
+     * `pipeline.execution.datasource_unreachable`, never a raw 500; its
+     * [co.datapipelines.datasources.CurrentSchemaUnknownException] is the catalogued
+     * `pipeline.execution.parameter_required` — the closest §13.3 invalid-argument code,
+     * reused per the additive-catalog rule — with a message that names the recovery (list
+     * schemas, then pass one). Messages are static — driver text stays off the wire (§13
+     * forbids internal topology in error messages).
      */
     private fun <T> introspecting(
         name: String,
@@ -89,6 +93,15 @@ class DatasourceSchemaController(
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                 message = "Datasource '$name' could not be reached for schema introspection.",
+                details = mapOf("datasource" to name),
+                cause = e,
+            )
+        } catch (e: co.datapipelines.datasources.CurrentSchemaUnknownException) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
+                message = "Datasource '$name' reports no current schema, so an unqualified read could merge " +
+                    "same-named tables across schemas. Pass an explicit schema (list them with " +
+                    "GET /api/v1/datasources/$name/schemas).",
                 details = mapOf("datasource" to name),
                 cause = e,
             )

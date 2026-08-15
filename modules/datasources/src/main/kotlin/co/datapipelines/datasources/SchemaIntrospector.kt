@@ -55,22 +55,34 @@ class SchemaIntrospector(
             }
         }
 
-    /** §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables]. */
+    /**
+     * §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables].
+     *
+     * Without a schema filter the listing **spans schemas** (each row carries its own). The one
+     * exception is a datasource whose connection reports **no current schema** and whose
+     * dialect is not [DialectAdapter.introspectionSchemaless] — typically a database-less
+     * MySQL URL, where unfiltered means *every database the server grants*: that read fails
+     * with [CurrentSchemaUnknownException] instead, and the caller recovers via [schemas].
+     */
     fun tables(
         datasourceName: String,
         schemaFilter: String? = null,
         maxTables: Int = MAX_TABLES,
     ): TablesPage =
-        withMetaData(datasourceName) { _, meta, datasource ->
+        withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             // The caller's filter goes through the same blank-sentinel rule as driver-reported
             // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
             // schemas — never the JDBC '' sentinel, which matches nothing on any dialect.
+            val filter = schemaFilter.asNonBlankOrNull()
+            if (filter == null && !adapter.introspectionSchemaless && connection.currentSchema(adapter) == null) {
+                throw CurrentSchemaUnknownException(datasourceName)
+            }
             // Then route FIRST, and escape only the schemaPattern side: the catalog argument
             // is a LITERAL ("must match the catalog name as it is stored"), so an escaped
             // value there matches nothing — any MySQL database named with '_'/'%'. Only true
             // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
-            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(schemaFilter.asNonBlankOrNull())
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(filter)
             readTables(meta, adapter, catalog, rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables)
         }
 
@@ -80,7 +92,12 @@ class SchemaIntrospector(
      * Without a schema filter the read defaults to the **connection's current schema** (routed
      * per dialect exactly like an explicit filter): an unfiltered `getColumns` would merge the
      * columns of same-named tables across schemas into one list. A driver that reports no
-     * current schema falls back to unfiltered — with system schemas still excluded row by row.
+     * current schema — or the JDBC blank sentinel, which means "objects without a
+     * catalog/schema", not a schema named `""` — cannot honor that default, and the unfiltered
+     * fallback it used to take is exactly the merge the contract forbids: the read fails with
+     * [CurrentSchemaUnknownException] and the caller passes an explicit schema from [schemas].
+     * The schemaless dialects are the deliberate exception — no schema dimension means no
+     * same-named siblings to merge ([DialectAdapter.introspectionSchemaless]).
      */
     fun columns(
         datasourceName: String,
@@ -92,6 +109,9 @@ class SchemaIntrospector(
             // A blank caller filter is absent (the same blank-sentinel rule tables() applies),
             // so the current-schema default — never the JDBC '' sentinel — takes over.
             val effectiveFilter = schemaFilter.asNonBlankOrNull() ?: connection.currentSchema(adapter)
+            if (effectiveFilter == null && !adapter.introspectionSchemaless) {
+                throw CurrentSchemaUnknownException(datasourceName)
+            }
             // Same rule as tables(): the catalog argument is a literal (never escaped — an
             // escaped `my_app` catalog matches nothing on MySQL), schemaPattern is a pattern
             // (always escaped).

@@ -145,6 +145,53 @@ class DatasourceSchemaControllerTest {
         io.mockk.verify(exactly = 0) { meta.getColumns("", null, "orders", "%") }
     }
 
+    @Test
+    fun `a no-schema read on a datasource with no current schema is the catalogued 400 - not a merged answer`() {
+        // The cannot-merge promise (§9.7) made mechanical: a MySQL registration with a
+        // database-less URL yields no current schema, and the unqualified read would merge
+        // same-named tables across every visible database. Through a REAL introspector the
+        // controller must surface the catalogued invalid-argument code (HTTP 400), with the
+        // message directing the caller to the schemas listing.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        io.mockk.every { meta.searchStringEscape } returns "\\"
+        val connection = mockk<java.sql.Connection>()
+        io.mockk.every { connection.metaData } returns meta
+        io.mockk.every { connection.close() } returns Unit
+        io.mockk.every { connection.catalog } returns null
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "pg-prod",
+                displayName = "PG",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
+        io.mockk.every { registry.get("pg-prod") } returns datasource
+        io.mockk.every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "pg-prod"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        val controller = DatasourceSchemaController(SchemaIntrospector(registry))
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.PARAMETER_REQUIRED },
+            {
+                co.datapipelines.web.api.ApiErrorCatalog.statusFor(thrown.code) shouldBe
+                    org.springframework.http.HttpStatus.BAD_REQUEST
+            },
+            { thrown.message?.contains("schema", ignoreCase = true) shouldBe true },
+            { thrown.details["datasource"] shouldBe "pg-prod" },
+        )
+    }
+
     /** A real [SchemaIntrospector] over one mock connection carrying [meta] (MySQL routing). */
     private fun realIntrospectorOver(
         meta: java.sql.DatabaseMetaData,
@@ -184,6 +231,8 @@ class DatasourceSchemaControllerTest {
         val connection = mockk<java.sql.Connection>()
         io.mockk.every { connection.metaData } returns meta
         io.mockk.every { connection.close() } returns Unit
+        io.mockk.every { connection.schema } returns "public"
+        io.mockk.every { connection.catalog } returns "app"
         val datasource =
             co.datapipelines.datasources.Datasource(
                 name = "pg-prod",
