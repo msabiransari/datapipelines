@@ -233,6 +233,31 @@ that you did not intend; investigate, don't commit.
   adding a new resolvable configuration (e.g. a new plugin) requires a
   `--write-locks` run before the build goes green again.
 
+### 6.3 Dependency verification (checksums)
+
+Every artifact the build downloads — dependencies AND plugins, for every module
+and buildSrc — is verified against a committed SHA-256 checksum in
+`gradle/verification-metadata.xml` (Gradle's dependency verification, strict
+mode). A download whose checksum differs from the committed one fails the
+build naming the artifact: this is the supply-chain twin of the lockfiles
+(locks pin WHICH version; verification pins WHAT BYTES).
+
+PGP/signature verification is deliberately NOT enabled (deferred — key
+management for ~500 artifacts is its own project; checksums already close the
+"artifact changed upstream / MITM mirror" hole against a trusted first
+download).
+
+**Updating the metadata** — required whenever a dependency change is
+deliberate, in the same commit as the lockfile update:
+
+```bash
+./gradlew --write-verification-metadata sha256 --write-locks resolveAndLockAll
+```
+
+This resolves every configuration (the point of `resolveAndLockAll`) and
+records each artifact's checksum. Review the diff like the lockfile diff:
+new entries must be exactly the artifacts your change introduced.
+
 ---
 
 ## 7. Verify
