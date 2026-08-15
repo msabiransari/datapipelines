@@ -123,7 +123,10 @@ class McpPromptCatalog {
     /**
      * §8.2 — every step uses a shipped tool, and the schema is grounded by introspection: the
      * prompt forbids referencing a table the introspection tools did not return, which is what
-     * makes it admissible (the admission rule of §8).
+     * makes it admissible (the admission rule of §8). The grounding step is the full
+     * schemas → tables → columns flow — `datasources_get_schemas` to see the schemas,
+     * `datasources_get_tables(schema)` to list a schema's tables, `datasources_get_columns`
+     * for only the tables the SQL needs.
      *
      * The question sits between the sentinel lines [FENCE_OPEN]/[FENCE_CLOSE], each on its own
      * line: quotes and newlines in the question cannot close or extend the block, so a forged
@@ -150,10 +153,12 @@ class McpPromptCatalog {
                 """
                 1. Call datasources_list to see the datasources registered on this instance and pick the
                    one that holds the data the question needs.
-                2. Ground the schema before writing any SQL: call datasources_get_tables for that
-                   datasource, then datasources_get_columns for the tables you intend to query. Never
-                   reference a table or column these tools did not return — if the question needs data
-                   that is not there, stop and say so instead of guessing.
+                2. Ground the schema before writing any SQL — three steps: call datasources_get_schemas
+                   to see the schemas, then datasources_get_tables for the schema that holds the data,
+                   then datasources_get_columns for only the tables the SQL will read, passing each
+                   table's reported schema. Never reference a table or column these tools did not
+                   return — if the question needs data that is not there, stop and say so instead of
+                   guessing.
                 3. Call templates_create to author the SQL template for the query, describing the
                    variables it expects in its description.
                 4. Call pipelines_create to assemble the pipeline: a node per template, the datasource as

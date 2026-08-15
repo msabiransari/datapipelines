@@ -796,7 +796,7 @@ Returns a prompt instructing the agent to fetch the pipeline definition (`pipeli
 Returns a prompt that walks the agent through:
 
 1. `datasources_list` to pick the datasource holding the data the question needs.
-2. `datasources_get_tables` / `datasources_get_columns` to ground the schema — **never reference a table or column these tools did not return**; if the data is not there, the agent stops and says so instead of guessing.
+2. `datasources_get_schemas` to see the schemas, then `datasources_get_tables(schema)` to list that schema's tables, then `datasources_get_columns` for **only the tables the SQL needs** — **never reference a table or column these tools did not return**; if the data is not there, the agent stops and says so instead of guessing.
 3. `templates_create` for the SQL template, describing its expected variables in its description.
 4. `pipelines_create` to assemble the pipeline.
 5. `pipelines_execute` to run it and report the result.
@@ -966,3 +966,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-15 | v1.6 | surface restructure (part 1) | **`datasources_get_schema` removed** (§6.2.16 block deleted) together with its REST twin `GET /datasources/{name}/schema`: the bundled whole-schema snapshot bundled columns into the table listing; table listings stay lightweight so more tables fit in one response. Tool surface 18 → **17**; §6.1, §5.1, §8 admission-rule counts updated; the introspection flow remains `datasources_get_tables` → `datasources_get_columns` until the schemas listing lands. |
 | 2026-08-15 | v1.7 | surface restructure (part 2) | New §6.2.16 `datasources_get_schemas` — the introspection flow's entry point (schemas → tables → columns). Tool surface 17 → **18**; §6.1, §5.1, §8 counts updated. §6.2.17 `datasources_get_tables` description + Returns now state the flow contract: the unfiltered listing spans schemas — pass each table's schema to `datasources_get_columns`; §6.2.18's description now states that without a schema argument only the connection's current schema is read. MySQL databases arrive as JDBC catalogs, so the schemas listing reads `getCatalogs()`; an empty list is valid on schemaless dialects. |
 | 2026-08-15 | v1.8 | semantics via remarks | §6.2.17/§6.2.18: table and column descriptors gain `remarks` — the engine-stored comment from JDBC REMARKS, omitted when the driver/database has none. |
+| 2026-08-15 | v1.9 | surface restructure (part 3) | §8.2 `create_pipeline_for_question` walkthrough rewritten to the three-step grounding flow: `datasources_get_schemas` → `datasources_get_tables(schema)` → `datasources_get_columns` for only the tables the SQL needs. The never-reference-unreturned-tables rule and the sentinel fence are unchanged. |

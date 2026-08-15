@@ -393,7 +393,7 @@ Per-node datasource *usage* remains observable without any credential-audit even
 
 ## 7A. Schema Introspection
 
-Shipped in v1.1 (was datasources §14 future work). Read-only live schema metadata over a registered datasource's JDBC `DatabaseMetaData`, so agents can enumerate real tables and columns instead of hallucinating them when authoring SQL templates.
+Shipped in v1.1 (was datasources §14 future work). Read-only live schema metadata over a registered datasource's JDBC `DatabaseMetaData`, so agents can enumerate real schemas, tables and columns instead of hallucinating them when authoring SQL templates.
 
 Three read operations, all served by the module's `SchemaIntrospector` through the existing `DatasourceRegistry` pool (`poolFor`, §5.2 — introspection opens a live connection, exactly like a connection test). They form the **only introspection flow**: schemas → tables → columns — list the schemas, list one schema's tables, then read columns for only the tables the SQL needs. Nothing bundles columns into a table listing; table listings stay lightweight so more tables fit in one response.
 
@@ -644,3 +644,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-15 | v2.1 | surface restructure (part 1) | §7A: the **Schema snapshot operation is removed** (`datasources_get_schema` / `GET /datasources/{name}/schema`) — bundling columns into a table listing made responses heavy; the tables listing stays lightweight so more tables fit in one response, and columns are read per table. Tables row documents the lightweight rule. |
 | 2026-08-15 | v2.2 | surface restructure (part 2) | §7A: new **Schemas operation** — the flow's entry point (`datasources_get_schemas` / `GET /datasources/{name}/schemas`): plain list of driver-reported schema names, system schemas excluded, `getCatalogs()` under MySQL's catalog routing, **empty list valid** on schemaless dialects. Flow declared: schemas → tables → columns; tables row now documents that the unfiltered listing spans schemas (pass each table's schema to columns). |
 | 2026-08-15 | v2.3 | semantics via remarks | §7A: tables and columns rows gain `remarks` — the engine-stored comment from JDBC REMARKS, null-omitted on the wire when the driver/database has none. Schemas carry none (`getSchemas()` has no REMARKS). |
+| 2026-08-15 | v2.4 | surface restructure (part 3) | §7A: the flow description made explicit — schemas → tables → columns, with `datasources_get_columns` reading only the tables the SQL needs (mirrors mcp-server §8.2's rewritten walkthrough, same commit). |
