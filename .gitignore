@@ -64,3 +64,6 @@ gate-logs/
 # A `git add -A` from the main checkout must never stage another lane's
 # in-progress tree.
 .worktrees/
+
+# --- Local AI-assistant state (per-developer, never shared) ---
+.claude/
