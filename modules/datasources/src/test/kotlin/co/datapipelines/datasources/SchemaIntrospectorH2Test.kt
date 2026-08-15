@@ -222,6 +222,35 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
+    fun `remarks round-trip through COMMENT ON TABLE and COMMENT ON COLUMN`() {
+        // REMARKS is the JDBC column for engine-stored comments: null when the driver or the
+        // database has none (SQLite reports none; a table never commented carries none), the
+        // comment text when it does. H2 supports COMMENT ON, so the round-trip is provable
+        // against a live driver.
+        h2.createStatement().use { st ->
+            st.execute("CREATE TABLE annotated (id INT, note VARCHAR(30))")
+            st.execute("CREATE TABLE plain (id INT)")
+            st.execute("COMMENT ON TABLE annotated IS 'customer orders'")
+            st.execute("COMMENT ON COLUMN annotated.id IS 'surrogate primary key'")
+        }
+        wireDatasource()
+
+        val tables = introspector.tables("h2-test").tables
+        val annotated = tables.first { it.name.equals("ANNOTATED", ignoreCase = true) }
+        val plain = tables.first { it.name.equals("PLAIN", ignoreCase = true) }
+        val columns = introspector.columns("h2-test", annotated.name)
+        val id = columns.first { it.column.name.equals("ID", ignoreCase = true) }
+
+        assertAll(
+            { annotated.remarks shouldBe "customer orders" },
+            { plain.remarks shouldBe null },
+            { id.remarks shouldBe "surrogate primary key" },
+            // The un-commented sibling column carries null, not an empty string.
+            { columns.first { it.column.name.equals("NOTE", ignoreCase = true) }.remarks shouldBe null },
+        )
+    }
+
+    @Test
     fun `an unknown datasource is the catalogued not-found`() {
         every { registry.get("nope") } returns null
 

@@ -841,11 +841,11 @@ Responses (the §4.1 envelope around `data`):
 { "data": ["public", "sales"] }
 
 // GET /datasources/{name}/tables
-{ "data": { "tables": [ {"schema": "public", "name": "orders", "type": "TABLE"} ], "truncated": false } }
+{ "data": { "tables": [ {"schema": "public", "name": "orders", "type": "TABLE", "remarks": "customer orders"} ], "truncated": false } }
 
 // GET /datasources/{name}/tables/{table}/columns
 { "data": [
-  {"name": "id", "type": "INTEGER", "nullable": false, "source_type": "int4", "warnings": []},
+  {"name": "id", "type": "INTEGER", "nullable": false, "source_type": "int4", "warnings": [], "remarks": "surrogate primary key"},
   {"name": "amount", "type": "DECIMAL", "precision": 10, "scale": 2, "source_type": "numeric", "warnings": []}
 ] }
 ```
@@ -853,7 +853,7 @@ Responses (the §4.1 envelope around `data`):
 Notes:
 
 - `GET /schemas` returns the driver-reported schema names with the engine's system schemas excluded; on MySQL the databases arrive as JDBC catalogs, so the listing reads them from `getCatalogs()`. An empty list is a valid result on schemaless datasources (SQLite, single-db DuckDB).
-- `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean.
+- `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean. `remarks` in a table or column descriptor is the engine-stored comment (JDBC REMARKS), omitted when the driver/database has none; the schemas listing carries no remarks (`getSchemas()` has none).
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
 - The tables listing is capped at 2000 tables; `truncated: true` means tables were dropped. Without a `schema` parameter the tables listing spans schemas — pass each table's reported `schema` to `/columns`.
 - Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped). System schemas are excluded everywhere; `/columns` without a `schema` parameter defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns.
@@ -1106,3 +1106,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-14 | v1.5 | v1.1 introspection build | New **§9.7 schema introspection**: `GET /datasources/{name}/schema`, `/tables?schema=`, `/tables/{table}/columns?schema=` — read-only JDBC metadata with canonical type mapping, `author` scope, 200-table snapshot cap, empty-list-for-unknown-filter. Sourced from datasources §7A; three MCP twins per mcp-server §6.2.16–18. |
 | 2026-08-15 | v1.6 | surface restructure (part 1) | §9.7: `GET /datasources/{name}/schema` removed (bundled whole-schema snapshot deleted; table listings stay lightweight so more tables fit in one response). Snapshot example and cap notes dropped. |
 | 2026-08-15 | v1.7 | surface restructure (part 2) | §9.7: new `GET /datasources/{name}/schemas` — the flow's entry point; system schemas excluded, `getCatalogs()` on MySQL, empty list valid on schemaless datasources. Tables note now states the unfiltered listing spans schemas and each table's schema belongs in `/columns`. |
+| 2026-08-15 | v1.8 | semantics via remarks | §9.7: table and column descriptors gain `remarks` (JDBC REMARKS, omitted when none); schemas listing carries none by construction. |

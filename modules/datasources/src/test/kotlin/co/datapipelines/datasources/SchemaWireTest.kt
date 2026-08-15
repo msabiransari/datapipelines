@@ -22,6 +22,17 @@ class SchemaWireTest {
     }
 
     @Test
+    fun `table descriptor carries remarks when present and omits the key when null`() {
+        // `remarks` comes from JDBC REMARKS — the engine-stored comment, when one exists.
+        // The envelope convention (omitted is not null) keeps a driver that reports no
+        // comments from asserting a fact nobody reported.
+        assertAll(
+            { TableInfo("public", "orders", "TABLE", remarks = "customer orders").toWireMap()["remarks"] shouldBe "customer orders" },
+            { TableInfo("public", "orders", "TABLE").toWireMap().containsKey("remarks") shouldBe false },
+        )
+    }
+
+    @Test
     fun `tables page wraps the descriptors with the truncation flag`() {
         val wire = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true).toWireMap()
 
@@ -65,6 +76,21 @@ class SchemaWireTest {
             { wire.containsKey("scale") shouldBe false },
             { wire.containsKey("nullable") shouldBe false },
             { (wire["warnings"] as List<*>) shouldBe emptyList<String>() },
+        )
+    }
+
+    @Test
+    fun `column descriptor carries remarks when present and omits the key when null`() {
+        assertAll(
+            {
+                ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList(), remarks = "surrogate key")
+                    .toWireMap()["remarks"] shouldBe "surrogate key"
+            },
+            {
+                ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())
+                    .toWireMap()
+                    .containsKey("remarks") shouldBe false
+            },
         )
     }
 }

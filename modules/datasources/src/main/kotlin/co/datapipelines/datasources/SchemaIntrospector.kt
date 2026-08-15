@@ -119,7 +119,7 @@ class SchemaIntrospector(
                     truncated = true
                     break
                 }
-                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
+                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE"), rs.getString("REMARKS")))
             }
         }
         return TablesPage(out, truncated)
@@ -144,7 +144,7 @@ class SchemaIntrospector(
                         else -> null
                     },
             )
-        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
+        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings, rs.getString("REMARKS"))
     }
 
     /**
@@ -254,16 +254,24 @@ data class TablesPage(
     val truncated: Boolean,
 )
 
-/** One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...). */
+/**
+ * One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...); `remarks` is
+ * the engine-stored comment from JDBC REMARKS, null when the driver/database has none.
+ */
 data class TableInfo(
     val schema: String?,
     val name: String,
     val type: String,
+    val remarks: String? = null,
 )
 
-/** One column: the canonical [column] descriptor plus the source type name it came from. */
+/**
+ * One column: the canonical [column] descriptor plus the source type name it came from;
+ * `remarks` is the engine-stored comment from JDBC REMARKS, null when there is none.
+ */
 data class ColumnInfo(
     val column: ColumnSchema,
     val sourceTypeName: String,
     val warnings: List<TypeMappingWarning>,
+    val remarks: String? = null,
 )
