@@ -112,6 +112,34 @@ object ApiErrorCatalog {
             PipelineErrorCodes.TypeMapping.SQL_VARIANT,
         )
 
+    /**
+     * Every code the catalog maps to HTTP 502 (BAD_GATEWAY) — derived from [EXCEPTIONS], so a
+     * new 502 mapping lands here automatically. Each member is a deliberate per-code decision:
+     * 502 means "a party behind us failed", which splits into the caller's own downstream
+     * ([CALLER_DOWNSTREAM_DOWN]) and possibly-our-bug (`query_execution_failed` — the rendered
+     * SQL can be the defect). [ApiErrorCatalogGatewayCodesTest] pins the partition so a future
+     * gateway code cannot join either side silently.
+     */
+    val GATEWAY_CODES: Set<String> =
+        EXCEPTIONS
+            .entries
+            .filter { it.value == HttpStatus.BAD_GATEWAY }
+            .map { it.key }
+            .toSet()
+
+    /**
+     * The only codes whose 5xx status is demoted to WARN without a stack: both mean the
+     * downstream the CALLER pointed us at (their own database) is down — not an operator
+     * incident. Membership is a deliberate per-code decision; a status alone proves nothing
+     * (`query_execution_failed` is also 502 and stays at ERROR with the stack). Kept beside
+     * [GATEWAY_CODES] so the coupling test can hold the two sets together.
+     */
+    val CALLER_DOWNSTREAM_DOWN: Set<String> =
+        setOf(
+            PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
+            PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
+        )
+
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
 
     private val FAMILY_USER_MESSAGE: Map<String, String> =
