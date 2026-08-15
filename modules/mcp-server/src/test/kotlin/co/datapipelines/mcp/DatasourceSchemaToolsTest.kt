@@ -5,9 +5,7 @@ import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
-import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -60,28 +58,6 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
-    fun `get_schema threads its arguments and serves the shared wire projection`() {
-        val snapshot =
-            SchemaSnapshot(
-                datasource = "pg-prod",
-                dialect = "POSTGRES",
-                truncated = false,
-                tables =
-                    listOf(
-                        TableWithColumns(
-                            TableInfo("public", "orders", "TABLE"),
-                            listOf(ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())),
-                        ),
-                    ),
-            )
-        every { introspector.snapshot("pg-prod") } returns snapshot
-
-        val payload = DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
-
-        payload shouldBe snapshot.toWireMap()
-    }
-
-    @Test
     fun `get_columns without a table argument is invalid params`() {
         shouldThrow<McpError> {
             DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
@@ -106,11 +82,6 @@ class DatasourceSchemaToolsTest {
                     DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
-            {
-                shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemaTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
-                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
-            },
         )
     }
 
@@ -123,7 +94,6 @@ class DatasourceSchemaToolsTest {
         // introspector tests); the tools translate the one type.
         every { introspector.tables("down", null) } throws unreachable("down")
         every { introspector.columns("down", "orders", null) } throws unreachable("down")
-        every { introspector.snapshot("down") } throws unreachable("down")
 
         assertAll(
             {
@@ -134,11 +104,6 @@ class DatasourceSchemaToolsTest {
             {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
-                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
-            },
-            {
-                shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
         )

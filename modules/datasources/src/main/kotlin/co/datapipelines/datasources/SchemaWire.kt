@@ -42,12 +42,3 @@ fun TablesPage.toWireMap(): Map<String, Any?> =
         "tables" to tables.map { it.toWireMap() },
         "truncated" to truncated,
     )
-
-/** The §7A whole-schema snapshot (`datasources_get_schema` / `GET .../schema`). */
-fun SchemaSnapshot.toWireMap(): Map<String, Any?> =
-    mapOf(
-        "datasource" to datasource,
-        "dialect" to dialect,
-        "truncated" to truncated,
-        "tables" to tables.map { (table, columns) -> mapOf("table" to table.toWireMap(), "columns" to columns.map { it.toWireMap() }) },
-    )

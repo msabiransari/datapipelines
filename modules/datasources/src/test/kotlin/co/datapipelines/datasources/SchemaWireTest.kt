@@ -67,32 +67,4 @@ class SchemaWireTest {
             { (wire["warnings"] as List<*>) shouldBe emptyList<String>() },
         )
     }
-
-    @Test
-    fun `snapshot descriptor nests table and column descriptors`() {
-        val snapshot =
-            SchemaSnapshot(
-                datasource = "pg-prod",
-                dialect = "POSTGRES",
-                truncated = false,
-                tables =
-                    listOf(
-                        TableWithColumns(
-                            TableInfo("public", "orders", "TABLE"),
-                            listOf(ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())),
-                        ),
-                    ),
-            )
-
-        val wire = snapshot.toWireMap()
-        val firstTable = (wire["tables"] as List<*>).single() as Map<*, *>
-
-        assertAll(
-            { wire["datasource"] shouldBe "pg-prod" },
-            { wire["dialect"] shouldBe "POSTGRES" },
-            { wire["truncated"] shouldBe false },
-            { (firstTable["table"] as Map<*, *>)["name"] shouldBe "orders" },
-            { ((firstTable["columns"] as List<*>).single() as Map<*, *>)["source_type"] shouldBe "int4" },
-        )
-    }
 }

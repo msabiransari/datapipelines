@@ -7,12 +7,13 @@ import java.util.UUID
  * The prompt surface (mcp-server.md §8) — exactly three prompts.
  *
  * **Admission rule (§8):** a prompt ships only if every step it instructs the agent to take is
- * achievable with the 18 tools of §6.1 and the resources of §7. `create_pipeline_for_question`
- * (§8.2) is now **admissible** precisely because the introspection tools it depends on
- * (`datasources_get_schema` / `_get_tables` / `_get_columns`, §6.2.16–18) ship with it: the
- * prompt's schema-grounding step has an implementation, so the walkthrough cannot dead-end the
- * agent or tempt it into hallucinating tables. Every step of every prompt below names a shipped
- * tool, and `analyze_pipeline` remains read-only: it never instructs the agent to modify anything.
+ * achievable with the 17 tools of §6.1 and the resources of §7. `create_pipeline_for_question`
+ * (§8.2) is **admissible** precisely because the introspection tools it depends on
+ * (`datasources_get_tables` / `_get_columns`, §6.2.17–18) ship with it: the
+ * prompt's schema-grounding step has an implementation, so the walkthrough cannot dead-end
+ * the agent or tempt it into hallucinating tables. Every step of every prompt below names a
+ * shipped tool, and `analyze_pipeline` remains read-only: it never instructs the agent to
+ * modify anything.
  */
 class McpPromptCatalog {
     /** The three admissible prompts, in `prompts/list` order (§8.1, §8.2, §8.3). */
@@ -196,7 +197,7 @@ class McpPromptCatalog {
                     listOf(McpSchema.PromptArgument("execution_id", null, "The failed execution to diagnose (UUID).", true)),
                 ).build()
 
-        /** §8.2 — returned with the introspection tools it depends on (§6.2.16–18). */
+        /** §8.2 — returned with the introspection tools it depends on (§6.2.17–18). */
         val CREATE_PIPELINE_FOR_QUESTION: McpSchema.Prompt =
             McpSchema.Prompt
                 .builder(CREATE_PIPELINE_FOR_QUESTION_NAME)

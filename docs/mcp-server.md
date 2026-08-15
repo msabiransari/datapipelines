@@ -145,7 +145,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 }
 ```
 
-- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 18 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 17 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -173,7 +173,6 @@ Tools are named `{domain}_{action}`:
 - `datasources_list`
 - `datasources_get`
 - `datasources_test`
-- `datasources_get_schema`
 - `datasources_get_tables`
 - `datasources_get_columns`
 - `executions_list`
@@ -582,28 +581,6 @@ This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-r
 
 **Scope:** `read` (+ ownership).
 
-#### 6.2.16 `datasources_get_schema`
-
-Read a datasource's whole schema in one payload.
-
-```json
-{
-  "name": "datasources_get_schema",
-  "description": "Read a datasource's whole schema — its tables with their columns — in one payload, capped at 200 tables (truncated: true when tables were dropped). Read-only, for pipeline authoring.",
-  "inputSchema": {
-    "type": "object",
-    "required": ["name"],
-    "properties": {
-      "name": {"type": "string", "description": "Datasource name."}
-    }
-  }
-}
-```
-
-Returns: `{"datasource", "dialect", "truncated", "tables": [{"table": {"schema","name","type"}, "columns": [...]}]}` — column descriptors shaped exactly like `datasources_get_columns`'s. `truncated: true` means tables were dropped by the 200-table cap; page the rest with `datasources_get_tables` + `datasources_get_columns`. Column types are the canonical Type System types; see [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
-
-**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
-
 #### 6.2.17 `datasources_get_tables`
 
 List a datasource's tables and views.
@@ -625,7 +602,7 @@ List a datasource's tables and views.
 
 Returns: `{"tables": [{"schema", "name", "type"}], "truncated": bool}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `schema` filter is exact-match, not a LIKE pattern.
 
-**Scope:** `author` — same rationale as `datasources_get_schema`.
+**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
 #### 6.2.18 `datasources_get_columns`
 
@@ -649,7 +626,7 @@ List one table's columns with canonical types.
 
 Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean); `precision`/`scale`/`nullable` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns.
 
-**Scope:** `author` — same rationale as `datasources_get_schema`.
+**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
 ### 6.3 Tool result schema
 
@@ -755,7 +732,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 18 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 17 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -777,7 +754,7 @@ Returns a prompt instructing the agent to fetch the pipeline definition (`pipeli
 
 ### 8.2 `create_pipeline_for_question`
 
-**Shipped in v1.1** — returned together with the introspection tools it depends on (§6.2.16–18), which is what satisfies §8's admission rule: its schema-grounding step has an implementation, so the walkthrough cannot dead-end the agent or tempt it into hallucinating tables. (In v1 it was deliberately withheld for exactly that reason — a sequencing decision, not a rejection.)
+**Shipped in v1.1** — returned together with the introspection tools it depends on (§6.2.17–18), which is what satisfies §8's admission rule: its schema-grounding step has an implementation, so the walkthrough cannot dead-end the agent or tempt it into hallucinating tables. (In v1 it was deliberately withheld for exactly that reason — a sequencing decision, not a rejection.)
 
 ```json
 {
@@ -963,3 +940,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.11. **[D11]** §3.2/§4.1 auth rewritten: `DP-API-Key` **or** `Authorization: Bearer dpk_...` through one validation path; session JWTs explicitly rejected; security-chain note added (auth §8.5). **[D15]** Scope row on all 15 tools sourced from the auth §7.6 matrix; `read-only` → `read`; `admin` acknowledged as required by no v1 tool. **[D9]** §6.2.15 rewritten to the uniform REST §7 cursor (offset/limit/format, fixed TTL, stable order, ownership check), 1 MB inline cap with cursor-URL fallback, `result.*` error table; §6.2.3 returns first page + `result_url` (claim-check language gone). **[D3/D12]** `templates_create` drops `params_schema`, gains `imports [{id,version,alias}]`, `is_library`, `engine`; `templates_render` context is a free-form parameter map. **[D1]** `pipelines_create` node description: omitted `output` → `caller`, at most one caller node, zero legal. **[D7]** §6.2.3 documents blocking-call semantics, execution timeout, abandoned-call cancellation after grace, and deferral of MCP progress notifications. **[D10]** `X-API-Key` → `DP-API-Key`. **[M]** §5.1 `listChanged: false` across capabilities; §6.2.1 drops `datasources_used`; §7.3 `resources/list` pagination specified (opaque cursor, page size 100, 24h execution window, scope filtering); §8.2 `create_pipeline_for_question` removed from the v1 surface (ROADMAP §2); §3.1 verification marker reframed as an implementation-gate checklist; §12 futures re-tiered against ROADMAP; §13 checklist expanded. |
 | 2026-08-14 | v1.4 | v1.1 introspection build | Tool surface 15 → **18**: new §6.2.16 `datasources_get_schema`, §6.2.17 `datasources_get_tables`, §6.2.18 `datasources_get_columns` — read-only JDBC metadata introspection (`author` scope, the `datasources_test` precedent), sourced from datasources §7A with canonical type mapping, 200-table snapshot cap, empty-list-for-unknown-filter. §6.1 lists the three; §5.1 static-surface count updated; §12 future-work bullet removed (shipped). |
 | 2026-08-14 | v1.5 | v1.1 introspection build | §8 prompt surface 2 → **3**: `create_pipeline_for_question` (§8.2) returns with the introspection tools it depends on. Admission-rule paragraph rewritten (18 tools; all three prompts meet the bar). `question` argument: free text by design, length-capped at 2000 chars (`-32602` outside 1..2000), embedded in a delimited data-not-instructions block. |
+| 2026-08-15 | v1.6 | surface restructure (part 1) | **`datasources_get_schema` removed** (§6.2.16 block deleted) together with its REST twin `GET /datasources/{name}/schema`: the bundled whole-schema snapshot bundled columns into the table listing; table listings stay lightweight so more tables fit in one response. Tool surface 18 → **17**; §6.1, §5.1, §8 admission-rule counts updated; the introspection flow remains `datasources_get_tables` → `datasources_get_columns` until the schemas listing lands. |

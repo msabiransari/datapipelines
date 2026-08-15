@@ -827,7 +827,6 @@ Returns `200 OK` with `{connected: true, server_version: "..."}` on success, or 
 ### 9.7 Schema introspection
 
 ```
-GET /datasources/{name}/schema
 GET /datasources/{name}/tables?schema={schema}
 GET /datasources/{name}/tables/{table}/columns?schema={schema}
 ```
@@ -845,23 +844,16 @@ Responses (the §4.1 envelope around `data`):
   {"name": "id", "type": "INTEGER", "nullable": false, "source_type": "int4", "warnings": []},
   {"name": "amount", "type": "DECIMAL", "precision": 10, "scale": 2, "source_type": "numeric", "warnings": []}
 ] }
-
-// GET /datasources/{name}/schema
-{ "data": {
-    "datasource": "pg-prod", "dialect": "POSTGRES", "truncated": false,
-    "tables": [ {"table": {"schema": "public", "name": "orders", "type": "TABLE"},
-                 "columns": [ ...column descriptors as above... ]} ]
-} }
 ```
 
 Notes:
 
 - `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean.
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
-- The tables listing is capped at 2000 tables; `truncated: true` means tables were dropped. The snapshot is capped at 200 tables (its own `truncated` flag); page the rest via `/tables` + `/columns`.
+- The tables listing is capped at 2000 tables; `truncated: true` means tables were dropped.
 - Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped). System schemas are excluded everywhere; `/columns` without a `schema` parameter defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns.
 - An unknown `schema`/table filter matches nothing and returns an empty list. An unknown datasource name is `404 datasource.not_found`. A connection failure against the datasource is `502 pipeline.execution.datasource_unreachable` (the customer's database being down is not a server error).
-- No pagination: the tables listing is bounded by its 2000-table cap (`truncated` flags the drop), the snapshot by its 200-table cap, and per-table listings are naturally bounded.
+- No pagination: the tables listing is bounded by its 2000-table cap (`truncated` flags the drop), and per-table listings are naturally bounded.
 
 ---
 
@@ -1107,3 +1099,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-07 | v1.3 | consistency campaign | **D9:** §7 rewritten — every caller result materialized in Redis, `data_ready` = schema + inline first page + cursor, `DP-Result-TTL-Seconds` clamped TTL (fixed expiry), 100MB cap, `result.too_large`/`result.storage_unavailable`/`result.expired`; inline/claim-check split removed. **D7:** §6.8 inverted — client disconnect cancels the execution after grace; `Last-Event-Id` resumption language removed; new `DELETE /executions/{id}` (§10.4) + `execution_aborted` event (§6.4.8) + `pipeline.execution.not_running`. **D10:** `DP-` header sweep + header registry (§3.6); `RateLimit-*` headers. **D5/D15:** per-user rate limits, scope matrix references. New §16: API-key CRUD, `/auth/me`, user admin; deleted stale `/auth/login`//`/auth/refresh` references. §3.5 idempotency scoped to execute only. `jdbc_url` removed from `node_failed` details (redaction). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-11 | v1.4 | P6a gate C doc-sync | Additive implementation-reality notes from the web module's Gate C: §3.4 correlation-id adoption is shape-conditional (non-UUID inbound values are replaced, not echoed); §7.5 `format=arrow` recognized but not served in v1 (`result.format_unsupported`, supported=[json,csv] — tracked in §14); §9.2 datasources list takes offset/limit and returns the §4.3 envelope (§2 principle 6); §10.3's post-expiry 410 named as `result.expired`. §13 gained `template.not_found` / `datasource.not_found` (404) — see pipeline-contract v1.3. |
 | 2026-08-14 | v1.5 | v1.1 introspection build | New **§9.7 schema introspection**: `GET /datasources/{name}/schema`, `/tables?schema=`, `/tables/{table}/columns?schema=` — read-only JDBC metadata with canonical type mapping, `author` scope, 200-table snapshot cap, empty-list-for-unknown-filter. Sourced from datasources §7A; three MCP twins per mcp-server §6.2.16–18. |
+| 2026-08-15 | v1.6 | surface restructure (part 1) | §9.7: `GET /datasources/{name}/schema` removed (bundled whole-schema snapshot deleted; table listings stay lightweight so more tables fit in one response). Snapshot example and cap notes dropped. |

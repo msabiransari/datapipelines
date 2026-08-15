@@ -114,24 +114,6 @@ internal class JdbcUrlPool(
     override fun close() = Unit
 }
 
-/** [JdbcUrlPool] plus a lease counter — proves the one-lease snapshot protocol. */
-internal class CountingPool(
-    url: String,
-    override val name: String = "counted",
-) : ConnectionPool {
-    private val delegate = JdbcUrlPool(url)
-
-    var leases = 0
-        private set
-
-    override fun leaseConnection(): Connection {
-        leases++
-        return delegate.leaseConnection()
-    }
-
-    override fun close() = Unit
-}
-
 /**
  * An [SchemaIntrospector] whose registry hands out ONE connection carrying the given mocked
  * [DatabaseMetaData]. Returns (introspector, datasource name). [connectionSetup] stubs

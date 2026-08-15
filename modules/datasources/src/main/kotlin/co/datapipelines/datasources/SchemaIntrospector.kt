@@ -66,35 +66,6 @@ class SchemaIntrospector(
         }
 
     /**
-     * §7A — the whole schema in one payload, capped at [maxTables] tables (each with its
-     * columns). [SchemaSnapshot.truncated] is `true` when the cap dropped tables, so a caller
-     * knows to fall back to `tables` + `columns` for the remainder.
-     *
-     * **One connection lease**, and bounded work on it: the `getTables` walk reuses the
-     * tested cap+1 early-exit (a huge catalog costs cap+1 `next()` calls, not a full walk),
-     * then each kept table's columns are read by a **per-table `getColumns` on the same leased
-     * connection**, carrying that table's own reported schema routed per dialect. The old
-     * server-wide bulk `getColumns(null, null, "%", "%")` walked every column of every schema
-     * (unbounded) and joined rows in memory by the schema column the TABLES listing did not
-     * use for catalog-routing drivers — MySQL tables silently reported zero columns.
-     */
-    fun snapshot(
-        datasourceName: String,
-        maxTables: Int = MAX_SNAPSHOT_TABLES,
-    ): SchemaSnapshot =
-        withMetaData(datasourceName) { _, meta, datasource ->
-            val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val page = readTables(meta, adapter, null, null, maxRows = maxTables)
-            val escape = meta.searchStringEscape
-            SchemaSnapshot(
-                datasource = datasourceName,
-                dialect = datasource.dialect.wire,
-                tables = page.tables.map { TableWithColumns(it, readColumnsFor(meta, adapter, it, escape)) },
-                truncated = page.truncated,
-            )
-        }
-
-    /**
      * The shared getTables walk. [maxRows] caps the iteration at cap+1 `next()` calls (the +1
      * proves truncation); `null` walks everything.
      */
@@ -123,30 +94,6 @@ class SchemaIntrospector(
             }
         }
         return TablesPage(out, truncated)
-    }
-
-    /**
-     * One table's column read for [snapshot] — a per-table `getColumns` on the SAME leased
-     * connection, carrying the table's own reported schema routed per dialect (the catalog
-     * argument for Connector/J). System-schema rows stay excluded for consistency with every
-     * other read.
-     */
-    private fun readColumnsFor(
-        meta: DatabaseMetaData,
-        adapter: DialectAdapter,
-        table: TableInfo,
-        escape: String,
-    ): List<ColumnInfo> {
-        val (catalog, schemaPattern) = adapter.routeSchemaFilter(table.schema?.toExactMatch(escape))
-        return meta.getColumns(catalog, schemaPattern, table.name.toExactMatch(escape), "%").use { rs ->
-            buildList {
-                while (rs.next()) {
-                    val schema = rs.getString(adapter.schemaResultColumn())
-                    if (adapter.isSystemSchema(schema)) continue
-                    add(mapColumnRow(rs, adapter.typeMapper))
-                }
-            }
-        }
     }
 
     private fun mapColumnRow(
@@ -269,9 +216,6 @@ class SchemaIntrospector(
     private companion object {
         /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */
         const val MAX_TABLES = 2000
-
-        /** The §7A snapshot cap — bounds one `datasources_get_schema` call's payload. */
-        const val MAX_SNAPSHOT_TABLES = 200
     }
 }
 
@@ -293,18 +237,4 @@ data class ColumnInfo(
     val column: ColumnSchema,
     val sourceTypeName: String,
     val warnings: List<TypeMappingWarning>,
-)
-
-/** A table with its columns, as carried by [SchemaSnapshot]. */
-data class TableWithColumns(
-    val table: TableInfo,
-    val columns: List<ColumnInfo>,
-)
-
-/** The whole-schema payload of `datasources_get_schema` / `GET .../schema` (§7A). */
-data class SchemaSnapshot(
-    val datasource: String,
-    val dialect: String,
-    val tables: List<TableWithColumns>,
-    val truncated: Boolean,
 )

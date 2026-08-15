@@ -7,10 +7,10 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 
 /*
- * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
+ * The schema-introspection tools (mcp-server.md §6.2.17–18, datasources.md §7A) — thin adapters
  * over [SchemaIntrospector], the same service the REST endpoints use.
  *
- * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
+ * Scope: `author` on both (auth.md §7.6) — each opens a live connection against the
  * datasource, matching the `datasources_test` precedent. Payloads are the shared §7A wire maps
  * (`toWireMap`, in `modules/datasources` beside the data classes — the same projections the REST
  * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
@@ -26,37 +26,6 @@ import co.datapipelines.typesystem.DatapipelinesException
  * `pipeline-contract`, a sibling of `datasources`, so each surface keeps its own three-line
  * translation (accepted in the round-2 hardening review).
  */
-
-/** `datasources_get_schema` (mcp-server.md §6.2.16). Scope: `author`. */
-class DatasourcesGetSchemaTool(
-    private val introspector: SchemaIntrospector,
-) : McpTool {
-    override val definition =
-        McpTools.tool(
-            name = "datasources_get_schema",
-            description =
-                "Read a datasource's whole schema — its tables with their columns — in one payload, capped at 200 " +
-                    "tables (truncated: true when tables were dropped). Read-only, for pipeline authoring.",
-            schema =
-                """
-                {
-                  "type": "object",
-                  "required": ["name"],
-                  "properties": {
-                    "name": {"type": "string", "description": "Datasource name."}
-                  }
-                }
-                """.trimIndent(),
-        )
-
-    override fun call(
-        args: McpArguments,
-        ctx: McpToolContext,
-    ): Any {
-        val name = args.requiredString("name")
-        return introspecting(name) { introspector.snapshot(name).toWireMap() }
-    }
-}
 
 /** `datasources_get_tables` (mcp-server.md §6.2.17). Scope: `author`. */
 class DatasourcesGetTablesTool(
@@ -125,7 +94,7 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
- * The §7A connection-failure boundary shared by the three tools: the introspector's
+ * The §7A connection-failure boundary shared by the tools: the introspector's
  * [DatasourceUnreachableException] is the catalogued
  * `pipeline.execution.datasource_unreachable` thrown as a [DatapipelinesException], so the
  * dispatcher envelopes it (§9.2) instead of mapping it to JSON-RPC -32603. Message is static —

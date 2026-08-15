@@ -145,31 +145,6 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
-    fun `snapshot routes each table's columns through the catalog for catalog-routing dialects`() {
-        // The per-table read routes each table's own reported schema exactly like the filters:
-        // for Connector/J the schema column IS TABLE_CAT, so it must land in the catalog
-        // argument — the old bulk read keyed rows by TABLE_SCHEM (null for MySQL) and every
-        // table silently reported zero columns via orEmpty().
-        val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
-        every { meta.searchStringEscape } returns "\\"
-        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "app"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
-        val columnsRs = mockk<ResultSet>(relaxed = true)
-        every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
-        every { columnsRs.next() } returns false
-        val (introspector, name) = introspectorOver(Dialect.MYSQL, meta)
-
-        val snapshot = introspector.snapshot(name)
-
-        verify(exactly = 1) { meta.getColumns("app", null, "orders", "%") }
-        snapshot.tables.single().columns shouldBe emptyList()
-    }
-
-    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

@@ -14,9 +14,9 @@ import java.sql.ResultSet
 import java.sql.SQLException
 
 /**
- * §7A's work-protocol seam: the cap+1 early-exit (a huge catalog costs cap+1 rows, not a walk),
- * the one-lease snapshot rule, and the [withMetaData][SchemaIntrospector] lease boundary —
- * not-found and both unreachable exception families (the Hikari pool-build path included).
+ * §7A's work-protocol seam: the cap+1 early-exit (a huge catalog costs cap+1 rows, not a walk)
+ * and the [withMetaData][SchemaIntrospector] lease boundary — not-found and both unreachable
+ * exception families (the Hikari pool-build path included).
  */
 class SchemaIntrospectorCapAndLeaseTest {
     private val h2 = java.sql.DriverManager.getConnection("jdbc:h2:mem:introspect-cap;DB_CLOSE_DELAY=-1")
@@ -44,55 +44,6 @@ class SchemaIntrospectorCapAndLeaseTest {
             { verify(exactly = 3) { tablesRs.next() } },
             { page.tables.size shouldBe 2 },
             { page.truncated shouldBe true },
-        )
-    }
-
-    @Test
-    fun `snapshot stops the tables walk at cap plus one and never issues the server-wide bulk getColumns`() {
-        // A huge catalog must cost cap+1 `next()` calls, not a full walk — and the old
-        // server-wide `getColumns(null, null, "%", "%")` (every column of every schema,
-        // including system schemas filtered only afterwards) must be gone entirely.
-        val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
-        every { meta.searchStringEscape } returns "\\"
-        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true
-        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
-        val columnsRs = mockk<ResultSet>(relaxed = true)
-        every { meta.getColumns(null, "public", "orders", "%") } returns columnsRs
-        every { columnsRs.next() } returns false
-        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
-
-        val snapshot = introspector.snapshot(name, maxTables = 2)
-
-        assertAll(
-            { verify(exactly = 3) { tablesRs.next() } },
-            { snapshot.truncated shouldBe true },
-            { verify(exactly = 0) { meta.getColumns(null, null, "%", "%") } },
-            { verify(exactly = 2) { meta.getColumns(null, "public", "orders", "%") } },
-        )
-    }
-
-    @Test
-    fun `snapshot leases ONE connection - tables and per-table columns on a single consistent lease`() {
-        // One lease per table (up to 201 for a full snapshot) starves the pool and reads the
-        // schema across connections that may disagree mid-flight; the per-table column reads
-        // must all ride the SAME lease as the tables walk.
-        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT, note VARCHAR(10))") } }
-        val pool = CountingPool("jdbc:h2:mem:introspect-cap;DB_CLOSE_DELAY=-1", "h2-test")
-        val ds = Fixtures.h2(name = "h2-test")
-        every { registry.get("h2-test") } returns ds
-        every { registry.poolFor(ds) } returns pool
-
-        val snapshot = SchemaIntrospector(registry).snapshot("h2-test", maxTables = 2)
-
-        assertAll(
-            { pool.leases shouldBe 1 },
-            { snapshot.tables.size shouldBe 2 },
-            { snapshot.truncated shouldBe true },
-            { snapshot.tables.all { it.columns.size == 2 } shouldBe true },
         )
     }
 
@@ -134,7 +85,7 @@ class SchemaIntrospectorCapAndLeaseTest {
                 override fun close() = Unit
             }
 
-        shouldThrow<DatasourceUnreachableException> { SchemaIntrospector(registry).snapshot("h2-test") }
+        shouldThrow<DatasourceUnreachableException> { SchemaIntrospector(registry).tables("h2-test") }
             .cause
             ?.message shouldBe "Connection refused"
     }
