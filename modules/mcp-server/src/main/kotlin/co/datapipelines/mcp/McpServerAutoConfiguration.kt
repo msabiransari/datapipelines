@@ -90,7 +90,7 @@ class McpServerAutoConfiguration {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
-            DatasourcesGetSchemaTool(introspector),
+            DatasourcesGetSchemasTool(introspector),
             DatasourcesGetTablesTool(introspector),
             DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),

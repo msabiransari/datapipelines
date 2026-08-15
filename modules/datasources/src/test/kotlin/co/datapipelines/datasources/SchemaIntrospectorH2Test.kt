@@ -114,38 +114,13 @@ class SchemaIntrospectorH2Test {
     @Test
     fun `tables excludes the driver's system schemas`() {
         // H2 keeps its catalog in INFORMATION_SCHEMA; those rows must not leak into the
-        // listing (pre-fix they ride along on the VIEW type and eat the snapshot cap).
+        // listing (pre-fix they ride along on the VIEW type and eat the tables cap).
         h2.createStatement().use { it.execute("CREATE TABLE orders (id INT PRIMARY KEY)") }
         wireDatasource()
 
         val tables = introspector.tables("h2-test").tables
 
         tables.none { it.schema?.equals("INFORMATION_SCHEMA", ignoreCase = true) == true } shouldBe true
-    }
-
-    @Test
-    fun `snapshot excludes the driver's system schemas`() {
-        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT)") } }
-        wireDatasource()
-
-        val snapshot = introspector.snapshot("h2-test", maxTables = 3)
-
-        snapshot.tables.none { it.table.schema?.equals("INFORMATION_SCHEMA", ignoreCase = true) == true } shouldBe true
-    }
-
-    @Test
-    fun `snapshot flags truncation when the table count exceeds the cap`() {
-        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT)") } }
-        wireDatasource()
-
-        val snapshot = introspector.snapshot("h2-test", maxTables = 2)
-
-        assertAll(
-            { snapshot.tables.size shouldBe 2 },
-            { snapshot.truncated shouldBe true },
-            { snapshot.dialect shouldBe "H2" },
-            { snapshot.tables.all { it.columns.isNotEmpty() } shouldBe true },
-        )
     }
 
     @Test
@@ -188,23 +163,6 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
-    fun `snapshot does not cross-contaminate wildcard sibling tables`() {
-        h2.createStatement().use { st ->
-            st.execute("CREATE TABLE order_items (id INT, items_note VARCHAR(30))")
-            st.execute("CREATE TABLE order1items (id INT, rogue_flag INT)")
-        }
-        wireDatasource()
-
-        val items =
-            introspector
-                .snapshot("h2-test")
-                .tables
-                .first { it.table.name.equals("ORDER_ITEMS", ignoreCase = true) }
-
-        items.columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE")
-    }
-
-    @Test
     fun `columns without a schema filter defaults to the connection's current schema`() {
         // Same-named tables in two schemas: an unfiltered getColumns merges BOTH tables'
         // columns into one list. The default is the connection's current schema (here PUBLIC
@@ -232,24 +190,63 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
-    fun `snapshot reads each table's columns with that table's own reported schema`() {
-        // Per-table attribution: two same-named tables in two schemas must each get THEIR OWN
-        // columns, read via a per-table getColumns carrying the table's own schema.
+    fun `schemas lists user schemas and excludes the driver's system schemas`() {
         h2.createStatement().use { st ->
-            st.execute("CREATE SCHEMA sa")
-            st.execute("CREATE SCHEMA sb")
-            st.execute("CREATE TABLE sa.deals (sa_col INT)")
-            st.execute("CREATE TABLE sb.deals (sb_col INT)")
+            st.execute("CREATE SCHEMA sales")
+            st.execute("CREATE TABLE sales.deals (id INT)")
         }
         wireDatasource()
 
-        val snapshot = introspector.snapshot("h2-test")
+        val schemas = introspector.schemas("h2-test")
 
-        val bySchema = snapshot.tables.associateBy { it.table.schema?.uppercase() }
+        // H2 reports INFORMATION_SCHEMA beside every user schema; PUBLIC is the default
+        // schema a fresh database carries. System schemas stay out, user schemas stay in —
+        // case preserved as the driver reported it (§7A: pass-through, no normalization).
         assertAll(
-            { bySchema.keys shouldContainExactly setOf("SA", "SB") },
-            { bySchema.getValue("SA").columns.map { it.column.name.uppercase() } shouldContainExactly listOf("SA_COL") },
-            { bySchema.getValue("SB").columns.map { it.column.name.uppercase() } shouldContainExactly listOf("SB_COL") },
+            { schemas.map { it.uppercase() } shouldContainExactly listOf("PUBLIC", "SALES") },
+            { schemas.none { it.equals("INFORMATION_SCHEMA", ignoreCase = true) } shouldBe true },
+        )
+    }
+
+    @Test
+    fun `an empty schemas listing is a result, not an error`() {
+        // A schemaless dialect (SQLite, single-db DuckDB) legitimately reports no schemas:
+        // the empty list is the answer, and the operation must not invent an error for it.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        val emptyRs = mockk<java.sql.ResultSet>(relaxed = true)
+        every { meta.schemas } returns emptyRs
+        every { emptyRs.next() } returns false
+        val (mockedIntrospector, name) = introspectorOver(co.datapipelines.typesystem.Dialect.SQLITE, meta)
+
+        mockedIntrospector.schemas(name) shouldBe emptyList()
+    }
+
+    @Test
+    fun `remarks round-trip through COMMENT ON TABLE and COMMENT ON COLUMN`() {
+        // REMARKS is the JDBC column for engine-stored comments: null when the driver or the
+        // database has none (SQLite reports none; a table never commented carries none), the
+        // comment text when it does. H2 supports COMMENT ON, so the round-trip is provable
+        // against a live driver.
+        h2.createStatement().use { st ->
+            st.execute("CREATE TABLE annotated (id INT, note VARCHAR(30))")
+            st.execute("CREATE TABLE plain (id INT)")
+            st.execute("COMMENT ON TABLE annotated IS 'customer orders'")
+            st.execute("COMMENT ON COLUMN annotated.id IS 'surrogate primary key'")
+        }
+        wireDatasource()
+
+        val tables = introspector.tables("h2-test").tables
+        val annotated = tables.first { it.name.equals("ANNOTATED", ignoreCase = true) }
+        val plain = tables.first { it.name.equals("PLAIN", ignoreCase = true) }
+        val columns = introspector.columns("h2-test", annotated.name)
+        val id = columns.first { it.column.name.equals("ID", ignoreCase = true) }
+
+        assertAll(
+            { annotated.remarks shouldBe "customer orders" },
+            { plain.remarks shouldBe null },
+            { id.remarks shouldBe "surrogate primary key" },
+            // The un-commented sibling column carries null, not an empty string.
+            { columns.first { it.column.name.equals("NOTE", ignoreCase = true) }.remarks shouldBe null },
         )
     }
 
@@ -258,6 +255,8 @@ class SchemaIntrospectorH2Test {
         every { registry.get("nope") } returns null
 
         shouldThrow<DatapipelinesException> { introspector.tables("nope") }
+            .code shouldBe DatasourceErrorCodes.NOT_FOUND
+        shouldThrow<DatapipelinesException> { introspector.schemas("nope") }
             .code shouldBe DatasourceErrorCodes.NOT_FOUND
     }
 }

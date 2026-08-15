@@ -5,9 +5,7 @@ import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
-import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -36,6 +34,15 @@ class DatasourceSchemaToolsTest {
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
     @Test
+    fun `get_schemas threads its arguments and serves the plain name list`() {
+        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+
+        val payload = DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+
+        payload shouldBe listOf("public", "sales")
+    }
+
+    @Test
     fun `get_tables threads its arguments and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page
@@ -60,28 +67,6 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
-    fun `get_schema threads its arguments and serves the shared wire projection`() {
-        val snapshot =
-            SchemaSnapshot(
-                datasource = "pg-prod",
-                dialect = "POSTGRES",
-                truncated = false,
-                tables =
-                    listOf(
-                        TableWithColumns(
-                            TableInfo("public", "orders", "TABLE"),
-                            listOf(ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())),
-                        ),
-                    ),
-            )
-        every { introspector.snapshot("pg-prod") } returns snapshot
-
-        val payload = DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
-
-        payload shouldBe snapshot.toWireMap()
-    }
-
-    @Test
     fun `get_columns without a table argument is invalid params`() {
         shouldThrow<McpError> {
             DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
@@ -98,17 +83,17 @@ class DatasourceSchemaToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemasTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+            {
+                shouldThrow<DatapipelinesException> {
                     DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
             {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
-                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
-            },
-            {
-                shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemaTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
         )
@@ -121,11 +106,16 @@ class DatasourceSchemaToolsTest {
         // DatasourceUnreachableException wraps both failure families (SQLException at the
         // lease, RuntimeException at pool build — the Hikari path is pinned by the
         // introspector tests); the tools translate the one type.
+        every { introspector.schemas("down") } throws unreachable("down")
         every { introspector.tables("down", null) } throws unreachable("down")
         every { introspector.columns("down", "orders", null) } throws unreachable("down")
-        every { introspector.snapshot("down") } throws unreachable("down")
 
         assertAll(
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+            },
             {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
@@ -134,11 +124,6 @@ class DatasourceSchemaToolsTest {
             {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
-                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
-            },
-            {
-                shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
         )

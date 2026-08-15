@@ -8,7 +8,9 @@ import co.datapipelines.typesystem.DatapipelinesException
 
 /*
  * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
- * over [SchemaIntrospector], the same service the REST endpoints use.
+ * over [SchemaIntrospector], the same service the REST endpoints use. Together they form the
+ * ONE introspection flow: get_schemas → get_tables(schema) → get_columns for only the tables
+ * the SQL needs.
  *
  * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
  * datasource, matching the `datasources_test` precedent. Payloads are the shared §7A wire maps
@@ -27,16 +29,20 @@ import co.datapipelines.typesystem.DatapipelinesException
  * translation (accepted in the round-2 hardening review).
  */
 
-/** `datasources_get_schema` (mcp-server.md §6.2.16). Scope: `author`. */
-class DatasourcesGetSchemaTool(
+/**
+ * `datasources_get_schemas` (mcp-server.md §6.2.16) — the flow's entry point. Scope: `author`.
+ */
+class DatasourcesGetSchemasTool(
     private val introspector: SchemaIntrospector,
 ) : McpTool {
     override val definition =
         McpTools.tool(
-            name = "datasources_get_schema",
+            name = "datasources_get_schemas",
             description =
-                "Read a datasource's whole schema — its tables with their columns — in one payload, capped at 200 " +
-                    "tables (truncated: true when tables were dropped). Read-only, for pipeline authoring.",
+                "List the schemas of a registered datasource by reading its live JDBC metadata, excluding the " +
+                    "engine's own system schemas. The entry point of schema discovery: call this first, then " +
+                    "get_tables(schema), then get_columns for only the tables the SQL needs. An empty list on a " +
+                    "schemaless datasource is a valid answer. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -54,7 +60,7 @@ class DatasourcesGetSchemaTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return introspecting(name) { introspector.snapshot(name).toWireMap() }
+        return introspecting(name) { introspector.schemas(name) }
     }
 }
 
@@ -67,6 +73,7 @@ class DatasourcesGetTablesTool(
             name = "datasources_get_tables",
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
+                    "The listing spans schemas — pass each table's reported schema to datasources_get_columns. " +
                     "Read-only, for pipeline authoring.",
             schema =
                 """
@@ -99,7 +106,8 @@ class DatasourcesGetColumnsTool(
             name = "datasources_get_columns",
             description =
                 "List one table's columns with canonical types, read from the datasource's live JDBC metadata. " +
-                    "Pass the table name exactly as datasources_get_tables returned it. Read-only, for pipeline authoring.",
+                    "Pass the table name exactly as datasources_get_tables returned it. Without a schema argument " +
+                    "only the connection's current schema is read. Read-only, for pipeline authoring.",
             schema =
                 """
                 {

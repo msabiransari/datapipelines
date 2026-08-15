@@ -1,9 +1,7 @@
 package co.datapipelines.datasources
 
-import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.IngressTypeMapper
-import co.datapipelines.typesystem.TypeMappingWarning
 import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.SQLException
@@ -11,7 +9,8 @@ import java.sql.SQLException
 /**
  * Reads live schema metadata from a registered datasource (datasources.md §7A) via JDBC
  * [DatabaseMetaData], mapping column types through the dialect's IngressTypeMapper so agents see
- * canonical types, not driver-specific names.
+ * canonical types, not driver-specific names. The introspection flow is
+ * [schemas] → [tables] → [columns]: nothing bundles columns into a table listing.
  *
  * Read-only by construction: only `metaData` calls, no statements. An unknown datasource is the
  * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]); an unknown table/schema
@@ -20,11 +19,42 @@ import java.sql.SQLException
  *
  * `table` and `schema` filters are **exact-match identifiers, not LIKE patterns**: `_` and `%`
  * are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table named
- * `order_items` cannot match its wildcard sibling `order1items`.
+ * `order_items` cannot match its wildcard sibling `order1items`. The escape applies only to
+ * the true pattern arguments (`schemaPattern`, `tableNamePattern`) — the **catalog argument is
+ * a literal** and is never escaped, or a catalog-routing driver (Connector/J) could not select
+ * a database whose stored name contains `_`/`%`.
  */
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
 ) {
+    /**
+     * §7A — the schema listing, the entry point of the introspection flow (schemas → tables →
+     * columns). A plain list of schema names as the driver reported them, with the dialect's
+     * system schemas excluded.
+     *
+     * The vocabulary follows [DialectAdapter.schemaArrivesInCatalog]: for catalog-routing
+     * drivers (Connector/J defaults) the databases ARE the JDBC catalogs, so the listing reads
+     * `getCatalogs()`/TABLE_CAT — `getSchemas()` there reports a single blank schema. An EMPTY
+     * list is a valid result, not an error: a schemaless dialect (SQLite, single-db DuckDB)
+     * genuinely has no schemas to list.
+     */
+    fun schemas(datasourceName: String): List<String> =
+        withMetaData(datasourceName) { _, meta, datasource ->
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
+            rs.use {
+                buildList {
+                    while (it.next()) {
+                        val schema = it.getString(adapter.schemaResultColumn())
+                        // The JDBC "" sentinel ("objects without a catalog") is not a schema
+                        // an agent can pass to get_tables — skip it rather than list it.
+                        if (schema.isNullOrBlank() || adapter.isSystemSchema(schema)) continue
+                        add(schema)
+                    }
+                }
+            }
+        }
+
     /** §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables]. */
     fun tables(
         datasourceName: String,
@@ -33,8 +63,12 @@ class SchemaIntrospector(
     ): TablesPage =
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
-            readTables(meta, adapter, catalog, schemaPattern, maxTables)
+            // Route FIRST, then escape only the schemaPattern side: the catalog argument is a
+            // LITERAL ("must match the catalog name as it is stored"), so an escaped value
+            // there matches nothing — any MySQL database named with '_'/'%'. Only true
+            // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(schemaFilter)
+            readTables(meta, adapter, catalog, rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables)
         }
 
     /**
@@ -53,8 +87,12 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val effectiveFilter = schemaFilter ?: connection.currentSchema(adapter)
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(effectiveFilter?.toExactMatch(meta.searchStringEscape))
-            meta.getColumns(catalog, schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
+            // Same rule as tables(): the catalog argument is a literal (never escaped — an
+            // escaped `my_app` catalog matches nothing on MySQL), schemaPattern is a pattern
+            // (always escaped).
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(effectiveFilter)
+            val escape = meta.searchStringEscape
+            meta.getColumns(catalog, rawSchemaPattern?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         val schema = rs.getString(adapter.schemaResultColumn())
@@ -63,35 +101,6 @@ class SchemaIntrospector(
                     }
                 }
             }
-        }
-
-    /**
-     * §7A — the whole schema in one payload, capped at [maxTables] tables (each with its
-     * columns). [SchemaSnapshot.truncated] is `true` when the cap dropped tables, so a caller
-     * knows to fall back to `tables` + `columns` for the remainder.
-     *
-     * **One connection lease**, and bounded work on it: the `getTables` walk reuses the
-     * tested cap+1 early-exit (a huge catalog costs cap+1 `next()` calls, not a full walk),
-     * then each kept table's columns are read by a **per-table `getColumns` on the same leased
-     * connection**, carrying that table's own reported schema routed per dialect. The old
-     * server-wide bulk `getColumns(null, null, "%", "%")` walked every column of every schema
-     * (unbounded) and joined rows in memory by the schema column the TABLES listing did not
-     * use for catalog-routing drivers — MySQL tables silently reported zero columns.
-     */
-    fun snapshot(
-        datasourceName: String,
-        maxTables: Int = MAX_SNAPSHOT_TABLES,
-    ): SchemaSnapshot =
-        withMetaData(datasourceName) { _, meta, datasource ->
-            val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val page = readTables(meta, adapter, null, null, maxRows = maxTables)
-            val escape = meta.searchStringEscape
-            SchemaSnapshot(
-                datasource = datasourceName,
-                dialect = datasource.dialect.wire,
-                tables = page.tables.map { TableWithColumns(it, readColumnsFor(meta, adapter, it, escape)) },
-                truncated = page.truncated,
-            )
         }
 
     /**
@@ -119,34 +128,10 @@ class SchemaIntrospector(
                     truncated = true
                     break
                 }
-                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
+                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE"), rs.getString("REMARKS")))
             }
         }
         return TablesPage(out, truncated)
-    }
-
-    /**
-     * One table's column read for [snapshot] — a per-table `getColumns` on the SAME leased
-     * connection, carrying the table's own reported schema routed per dialect (the catalog
-     * argument for Connector/J). System-schema rows stay excluded for consistency with every
-     * other read.
-     */
-    private fun readColumnsFor(
-        meta: DatabaseMetaData,
-        adapter: DialectAdapter,
-        table: TableInfo,
-        escape: String,
-    ): List<ColumnInfo> {
-        val (catalog, schemaPattern) = adapter.routeSchemaFilter(table.schema?.toExactMatch(escape))
-        return meta.getColumns(catalog, schemaPattern, table.name.toExactMatch(escape), "%").use { rs ->
-            buildList {
-                while (rs.next()) {
-                    val schema = rs.getString(adapter.schemaResultColumn())
-                    if (adapter.isSystemSchema(schema)) continue
-                    add(mapColumnRow(rs, adapter.typeMapper))
-                }
-            }
-        }
     }
 
     private fun mapColumnRow(
@@ -168,7 +153,7 @@ class SchemaIntrospector(
                         else -> null
                     },
             )
-        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
+        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings, rs.getString("REMARKS"))
     }
 
     /**
@@ -182,9 +167,12 @@ class SchemaIntrospector(
      * driver class, a property a driver rejects at parse time. Catching only `SQLException`
      * here (round 1) let the RuntimeException family escape as a raw 500 / -32603.
      *
-     * The RuntimeException catch stops at the lease: a RuntimeException thrown by the metadata
-     * walk itself is a defect in this module or a driver bug, and masking it as "the caller's
-     * database is unreachable" would hide it. `Error` is never caught.
+     * Both catches stop at the lease-and-connection boundary: a RuntimeException thrown by the
+     * metadata walk itself is a defect in this module or a driver bug, and masking it as "the
+     * caller's database is unreachable" would hide it. Post-lease, the SQLException catch
+     * narrows to the CONNECTION family only (SQLState class 08, the connection-exception
+     * subclasses, [java.sql.SQLRecoverableException]) — any other SQLException from a metadata
+     * read is likewise a defect and propagates. `Error` is never caught.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun <T> withMetaData(
@@ -203,7 +191,10 @@ class SchemaIntrospector(
         return try {
             connection.use { block(it, it.metaData, datasource) }
         } catch (e: SQLException) {
-            unreachable(datasourceName, e)
+            // Post-lease, only the CONNECTION family means "the database went away" — any
+            // other SQLException from a metadata read is a defect in this module or a driver
+            // bug and propagates, mirroring the RuntimeException policy below.
+            if (e.isConnectionFailure()) unreachable(datasourceName, e) else throw e
         }
     }
 
@@ -213,8 +204,30 @@ class SchemaIntrospector(
         cause: Throwable,
     ): Nothing = throw DatasourceUnreachableException(datasourceName, cause)
 
-    /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
-    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean = schema != null && schema.lowercase() in introspectionSystemSchemas
+    /**
+     * [DialectAdapter.introspectionSystemSchemas]: exact names match case-insensitively; an
+     * entry ending in `*` matches by case-insensitive PREFIX (Oracle's versioned `apex_*`
+     * schemas). Null is never a system schema.
+     */
+    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean {
+        if (schema == null) return false
+        val lower = schema.lowercase()
+        return introspectionSystemSchemas.any { entry ->
+            if (entry.endsWith("*")) lower.startsWith(entry.dropLast(1)) else lower == entry
+        }
+    }
+
+    /**
+     * The connection-failure family of a post-lease [SQLException]: SQLState class `08`
+     * (connection exception), the JDBC connection-exception subclasses, or
+     * [java.sql.SQLRecoverableException] (whose subclasses include the connection-died-mid-read
+     * family some drivers raise). Everything else is NOT a connection failure.
+     */
+    private fun SQLException.isConnectionFailure(): Boolean =
+        sqlState?.startsWith("08") == true ||
+            this is java.sql.SQLTransientConnectionException ||
+            this is java.sql.SQLNonTransientConnectionException ||
+            this is java.sql.SQLRecoverableException
 
     /**
      * Where the escaped schema filter goes: the catalog argument for drivers that carry the
@@ -229,15 +242,17 @@ class SchemaIntrospector(
     /**
      * The connection's current schema, in this dialect's own vocabulary: the **catalog** for
      * catalog-routing drivers (Connector/J keeps the current database there and leaves
-     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none —
-     * the caller then reads unfiltered.
+     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none
+     * — and the JDBC blank sentinel counts as none: `""` means "objects without a
+     * catalog/schema", not a schema named `""`, so the caller reads unfiltered rather than
+     * filtering on a name that matches nothing.
      */
     private fun Connection.currentSchema(adapter: DialectAdapter): String? =
         try {
             if (adapter.schemaArrivesInCatalog) catalog else schema
         } catch (_: SQLException) {
             null
-        }
+        }?.takeUnless { it.isNullOrEmpty() }
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(
@@ -269,42 +284,5 @@ class SchemaIntrospector(
     private companion object {
         /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */
         const val MAX_TABLES = 2000
-
-        /** The §7A snapshot cap — bounds one `datasources_get_schema` call's payload. */
-        const val MAX_SNAPSHOT_TABLES = 200
     }
 }
-
-/** The §7A tables listing: the kept tables plus whether the cap dropped any. */
-data class TablesPage(
-    val tables: List<TableInfo>,
-    val truncated: Boolean,
-)
-
-/** One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...). */
-data class TableInfo(
-    val schema: String?,
-    val name: String,
-    val type: String,
-)
-
-/** One column: the canonical [column] descriptor plus the source type name it came from. */
-data class ColumnInfo(
-    val column: ColumnSchema,
-    val sourceTypeName: String,
-    val warnings: List<TypeMappingWarning>,
-)
-
-/** A table with its columns, as carried by [SchemaSnapshot]. */
-data class TableWithColumns(
-    val table: TableInfo,
-    val columns: List<ColumnInfo>,
-)
-
-/** The whole-schema payload of `datasources_get_schema` / `GET .../schema` (§7A). */
-data class SchemaSnapshot(
-    val datasource: String,
-    val dialect: String,
-    val tables: List<TableWithColumns>,
-    val truncated: Boolean,
-)

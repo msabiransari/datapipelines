@@ -3,9 +3,7 @@ package co.datapipelines.web.datasources
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
-import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -33,6 +31,16 @@ class DatasourceSchemaControllerTest {
     private val controller = DatasourceSchemaController(introspector)
 
     @Test
+    fun `schemas delegates to the introspector and serves the plain name list`() {
+        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+
+        val data = controller.schemas("pg-prod").data
+
+        data shouldBe listOf("public", "sales")
+        verify(exactly = 1) { introspector.schemas("pg-prod") }
+    }
+
+    @Test
     fun `tables delegates to the introspector and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page
@@ -56,29 +64,6 @@ class DatasourceSchemaControllerTest {
 
         data shouldBe columns.map { it.toWireMap() }
         verify(exactly = 1) { introspector.columns("pg-prod", "orders", null) }
-    }
-
-    @Test
-    fun `schema delegates to the introspector and serves the shared wire projection`() {
-        val snapshot =
-            SchemaSnapshot(
-                datasource = "pg-prod",
-                dialect = "POSTGRES",
-                truncated = false,
-                tables =
-                    listOf(
-                        TableWithColumns(
-                            TableInfo("public", "orders", "TABLE"),
-                            listOf(ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())),
-                        ),
-                    ),
-            )
-        every { introspector.snapshot("pg-prod") } returns snapshot
-
-        val data = controller.schema("pg-prod").data
-
-        data shouldBe snapshot.toWireMap()
-        verify(exactly = 1) { introspector.snapshot("pg-prod") }
     }
 
     @Test

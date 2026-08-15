@@ -22,6 +22,17 @@ class SchemaWireTest {
     }
 
     @Test
+    fun `table descriptor carries remarks when present and omits the key when null`() {
+        // `remarks` comes from JDBC REMARKS — the engine-stored comment, when one exists.
+        // The envelope convention (omitted is not null) keeps a driver that reports no
+        // comments from asserting a fact nobody reported.
+        assertAll(
+            { TableInfo("public", "orders", "TABLE", remarks = "customer orders").toWireMap()["remarks"] shouldBe "customer orders" },
+            { TableInfo("public", "orders", "TABLE").toWireMap().containsKey("remarks") shouldBe false },
+        )
+    }
+
+    @Test
     fun `tables page wraps the descriptors with the truncation flag`() {
         val wire = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true).toWireMap()
 
@@ -69,30 +80,17 @@ class SchemaWireTest {
     }
 
     @Test
-    fun `snapshot descriptor nests table and column descriptors`() {
-        val snapshot =
-            SchemaSnapshot(
-                datasource = "pg-prod",
-                dialect = "POSTGRES",
-                truncated = false,
-                tables =
-                    listOf(
-                        TableWithColumns(
-                            TableInfo("public", "orders", "TABLE"),
-                            listOf(ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())),
-                        ),
-                    ),
-            )
-
-        val wire = snapshot.toWireMap()
-        val firstTable = (wire["tables"] as List<*>).single() as Map<*, *>
-
+    fun `column descriptor carries remarks when present and omits the key when null`() {
         assertAll(
-            { wire["datasource"] shouldBe "pg-prod" },
-            { wire["dialect"] shouldBe "POSTGRES" },
-            { wire["truncated"] shouldBe false },
-            { (firstTable["table"] as Map<*, *>)["name"] shouldBe "orders" },
-            { ((firstTable["columns"] as List<*>).single() as Map<*, *>)["source_type"] shouldBe "int4" },
+            {
+                ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList(), remarks = "surrogate key")
+                    .toWireMap()["remarks"] shouldBe "surrogate key"
+            },
+            {
+                ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())
+                    .toWireMap()
+                    .containsKey("remarks") shouldBe false
+            },
         )
     }
 }

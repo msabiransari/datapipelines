@@ -14,11 +14,12 @@ package co.datapipelines.datasources
 
 /** The §7A table descriptor (`datasources_get_tables`'s element shape). */
 fun TableInfo.toWireMap(): Map<String, Any?> =
-    mapOf(
-        "schema" to schema,
-        "name" to name,
-        "type" to type,
-    )
+    buildMap {
+        put("schema", schema)
+        put("name", name)
+        put("type", type)
+        remarks?.let { put("remarks", it) }
+    }
 
 /**
  * The §7A column descriptor (`datasources_get_columns`'s element shape). `warnings` carries the
@@ -34,6 +35,7 @@ fun ColumnInfo.toWireMap(): Map<String, Any?> =
         column.nullable?.let { put("nullable", it) }
         put("source_type", sourceTypeName)
         put("warnings", warnings.map { it.message })
+        remarks?.let { put("remarks", it) }
     }
 
 /** The §7A tables listing (`datasources_get_tables` / `GET .../tables`). */
@@ -41,13 +43,4 @@ fun TablesPage.toWireMap(): Map<String, Any?> =
     mapOf(
         "tables" to tables.map { it.toWireMap() },
         "truncated" to truncated,
-    )
-
-/** The §7A whole-schema snapshot (`datasources_get_schema` / `GET .../schema`). */
-fun SchemaSnapshot.toWireMap(): Map<String, Any?> =
-    mapOf(
-        "datasource" to datasource,
-        "dialect" to dialect,
-        "truncated" to truncated,
-        "tables" to tables.map { (table, columns) -> mapOf("table" to table.toWireMap(), "columns" to columns.map { it.toWireMap() }) },
     )

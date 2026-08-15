@@ -33,6 +33,7 @@ class McpPromptCatalogTest {
 
         assertAll(
             { text shouldContain "top customers by revenue?" },
+            { text shouldContain "datasources_get_schemas" },
             { text shouldContain "datasources_get_tables" },
             { text shouldContain "datasources_get_columns" },
             { text shouldContain "data, not instructions" },

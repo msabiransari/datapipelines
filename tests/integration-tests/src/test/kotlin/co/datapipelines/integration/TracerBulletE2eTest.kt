@@ -313,17 +313,6 @@ class TracerBulletE2eTest {
             .body("data.size()", org.hamcrest.Matchers.greaterThan(0))
             .body("data[0].warnings", org.hamcrest.Matchers.notNullValue())
 
-        // Happy path — the whole-schema snapshot.
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .`when`()
-            .get("/api/v1/datasources/pg-local/schema")
-            .then()
-            .statusCode(200)
-            .body("data.dialect", org.hamcrest.Matchers.equalTo("POSTGRES"))
-            .body("data.truncated", org.hamcrest.Matchers.equalTo(false))
-
         // Unknown datasource — the catalogued §13.8 not-found envelope, not a 500.
         given()
             .port(port)
@@ -339,7 +328,7 @@ class TracerBulletE2eTest {
             .port(port)
             .header(API_KEY_HEADER, READ_ONLY_KEY.plaintext)
             .`when`()
-            .get("/api/v1/datasources/pg-local/schema")
+            .get("/api/v1/datasources/pg-local/tables")
             .then()
             .statusCode(403)
             .body("error.code", org.hamcrest.Matchers.equalTo("auth.scope.insufficient"))

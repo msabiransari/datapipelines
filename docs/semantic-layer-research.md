@@ -375,7 +375,7 @@ checkable.
 
 | Phase | Work | Exit gate |
 |---|---|---|
-| **P0** | Ship the deferred introspection tools already in [ROADMAP §2](ROADMAP.md#2-v11-candidates): `datasources_get_schema` / `_get_tables` / `_get_columns` + REST counterparts. Necessary substrate (the model is authored against and validated against it) — necessary, not sufficient, which is precisely the limit already hit. | agent can enumerate every table and column without guessing |
+| **P0** | Ship the deferred introspection tools already in [ROADMAP §2](ROADMAP.md#2-v11-candidates): `datasources_get_schemas` / `_get_tables` / `_get_columns` + REST counterparts. Necessary substrate (the model is authored against and validated against it) — necessary, not sufficient, which is precisely the limit already hit. | agent can enumerate every schema, table and column without guessing |
 | **P1** | **Write the spec before the code**: `docs/semantic-layer.md` settling model format (OSI-shaped), storage (metadata DB vs Git-loaded files), the ephemeral-vs-persisted fork, **model versioning & pinning** (everything else executable in this product is immutable-per-version with explicit pins — pipeline-contract §15.4, templates §5.1; a mutable-in-place model would be the sole exception, and persisted compiled pipelines must record which model version they came from), the filter/injection mechanism, scope rows, and the tool surface — then move the corresponding ROADMAP items out, per the house rule. | the spec answers every fork above without re-litigation |
 | **P2** | Model registry, validator, drift test. Load + validate models at startup; resolve every field/expression/join against the live schema. Ship the drift test **in the same commit as the first model**. | renaming a source column turns the build red |
 | **P3** | Resources, descriptions, synonyms on the MCP resource surface. No compiler yet — agents still author SQL, but against curated vocabulary with worked examples. First measurable accuracy gain; materially improves `create_pipeline_for_question` (P0's introspection tools already unblock it per mcp-server §8.2). Start collecting question → query pairs here — the corpus format locks at P5. | a held-out question set measurably improves |
@@ -449,7 +449,7 @@ What changes and what survives:
 ### Decision 2 — the metadata layer is the spine; semantics merge into it
 
 The [ROADMAP §2](ROADMAP.md#2-v11-candidates) schema-introspection tools
-(`datasources_get_schema` / `_get_tables` / `_get_columns`) move from "necessary
+(`datasources_get_schemas` / `_get_tables` / `_get_columns`) move from "necessary
 substrate" to **the primary surface**. There is one metadata layer, progressively
 enriched: introspection responses carry raw schema *plus* whatever learned
 semantic facts exist for that table/column (descriptions, known measures touching

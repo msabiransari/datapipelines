@@ -96,10 +96,29 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
 }
 
 class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
-    // The instance's administrative schemas ship as ordinary TABLE/VIEW rows in DBA_/ALL_
-    // listings; the type vocabulary cannot keep them out of a user's listing.
+    // The instance's administrative schemas ship as ordinary TABLE/VIEW rows in ALL_/DBA_
+    // listings; the type vocabulary cannot keep them out of a user's listing. A FLOOR,
+    // deliberately known-incomplete: these are the schemas every Oracle install maintains;
+    // site-specific engine schemas (Spatial, Text, Java VM options beyond MDSYS/CTXSYS) are
+    // additions, not omissions. No `information_schema` — Oracle has no such schema. `apex_*`
+    // is the one prefix entry: Oracle versions its APEX schemas (APEX_220200, APEX_240100, …),
+    // so no exact-name list could enumerate them.
     override val introspectionSystemSchemas: Set<String> =
-        setOf("information_schema", "sys", "system", "outln", "xdb")
+        setOf(
+            "sys",
+            "system",
+            "outln",
+            "xdb",
+            "ctxsys",
+            "mdsys",
+            "ordsys",
+            "dbsnmp",
+            "wmsys",
+            "audsys",
+            "olapsys",
+            "xs\$null",
+            "apex_*",
+        )
 }
 
 class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {

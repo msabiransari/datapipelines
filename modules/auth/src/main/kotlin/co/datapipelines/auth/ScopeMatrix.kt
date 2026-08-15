@@ -78,7 +78,7 @@ object ScopeMatrix {
             "templates_create" to Scope.AUTHOR,
             "templates_render" to Scope.AUTHOR,
             "datasources_test" to Scope.AUTHOR,
-            "datasources_get_schema" to Scope.AUTHOR,
+            "datasources_get_schemas" to Scope.AUTHOR,
             "datasources_get_tables" to Scope.AUTHOR,
             "datasources_get_columns" to Scope.AUTHOR,
         )

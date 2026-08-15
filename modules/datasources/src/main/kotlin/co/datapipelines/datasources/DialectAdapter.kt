@@ -31,7 +31,7 @@ interface DialectAdapter {
 
     /**
      * §7A introspection: the JDBC table types this dialect treats as **user data** — what
-     * `getTables` asks for and what the tables/snapshot operations list. The SQL-standard
+     * `getTables` asks for and what the tables operation lists. The SQL-standard
      * floor is `TABLE` + `VIEW`; a dialect adds the types its users actually create (Postgres:
      * partitioned/materialized/foreign tables). System catalogs that arrive under other types
      * (`SYSTEM TABLE`, `SYSTEM VIEW`) are excluded by the type vocabulary itself.
@@ -42,9 +42,14 @@ interface DialectAdapter {
     /**
      * §7A introspection: schemas that belong to the engine, not the user — rows in these are
      * dropped from every introspection result (they would otherwise ride along on the `VIEW`
-     * type and eat the snapshot cap). Declared **lowercase**; matching is case-insensitive,
+     * type and eat the tables cap). Declared **lowercase**; matching is case-insensitive,
      * because drivers report the standard schema variously as `INFORMATION_SCHEMA` (H2),
-     * `information_schema` (Postgres, MySQL).
+     * `information_schema` (Postgres, MySQL). An entry ending in `*` matches by
+     * case-insensitive prefix — Oracle's versioned `apex_*` schemas cannot be enumerated by
+     * exact name.
+     *
+     * These lists are a **floor, deliberately known-incomplete**: they name the schemas the
+     * pinned drivers verifiably report as plain user rows, not every schema an engine ships.
      */
     val introspectionSystemSchemas: Set<String>
         get() = setOf("information_schema")

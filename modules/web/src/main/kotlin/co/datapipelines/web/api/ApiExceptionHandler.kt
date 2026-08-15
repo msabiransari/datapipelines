@@ -29,12 +29,13 @@ import org.springframework.web.servlet.resource.NoResourceFoundException
  * 5xx logs at ERROR with the stack trace; 4xx logs at DEBUG without one — a caller's malformed
  * request is not an operator's incident, and logging it at WARN with a trace makes the real
  * incidents unfindable. The only 5xx demoted to WARN-without-stack are the codes in
- * [CALLER_DOWNSTREAM_DOWN] — `pipeline.execution.datasource_unreachable` and
+ * [ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN] — `pipeline.execution.datasource_unreachable` and
  * `pipeline.node.datasource_connection_failed`, both meaning the downstream the CALLER pointed
  * us at (their own database) is down. The demotion keys on the **code, not the status**:
  * `pipeline.node.query_execution_failed` is also HTTP 502, but it can be OUR bug — the SQL we
- * rendered — and it logs at ERROR with the stack like every other 5xx. Nothing is swallowed
- * in any branch.
+ * rendered — and it logs at ERROR with the stack like every other 5xx. The set lives beside
+ * [ApiErrorCatalog.GATEWAY_CODES] with a coupling test, so a future gateway code cannot
+ * silently log ERROR+stack. Nothing is swallowed in any branch.
  *
  * ## Spec gaps this handler stands in for
  * §13 catalogues no transport-level code ("body is not JSON", "method not allowed") and no
@@ -206,7 +207,7 @@ class ApiExceptionHandler {
             // The caller's own downstream (their database) is down — not this server breaking.
             // Keyed on the code: other 502s (query_execution_failed) can be our bug and stay
             // at ERROR with the stack.
-            code in CALLER_DOWNSTREAM_DOWN -> {
+            code in ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN -> {
                 log.warn("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
             }
 
@@ -230,17 +231,6 @@ class ApiExceptionHandler {
     private companion object {
         val JSON: MediaType = MediaType.APPLICATION_JSON
 
-        /**
-         * The only codes whose 5xx status is demoted to WARN without a stack: both mean the
-         * downstream the CALLER pointed us at (their own database) is down — not an operator
-         * incident. Membership is a deliberate per-code decision; a status alone proves
-         * nothing (`query_execution_failed` is also 502).
-         */
-        val CALLER_DOWNSTREAM_DOWN: Set<String> =
-            setOf(
-                PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
-                PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
-            )
         const val API_PREFIX = "/api/v1"
         const val MAX_MESSAGE_CHARS = 200
 
