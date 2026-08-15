@@ -121,6 +121,61 @@ class DatasourceSchemaControllerTest {
         )
     }
 
+    @Test
+    fun `an empty schema query param binds to non-null blank and still gets the default`() {
+        // Spring binds `?schema=` (present-but-empty query param) to "", NOT null — the exact
+        // binding a stray trailing `&` or an emptied form field produces. Driven through a
+        // REAL introspector under the controller: the blank must normalize to absent, so
+        // columns() takes the current-schema default (catalog "app" here) instead of sending
+        // the '' sentinel to JDBC and silently reporting zero columns for an existing table.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val columnsRs = mockk<java.sql.ResultSet>(relaxed = true)
+        every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val introspector = realIntrospectorOver(meta) { connection ->
+            every { connection.catalog } returns "app"
+        }
+        val controller = DatasourceSchemaController(introspector)
+
+        val data = controller.columns("pg-prod", "orders", schema = "").data
+
+        (data as List<*>) shouldBe emptyList<Any?>()
+        io.mockk.verify(exactly = 1) { meta.getColumns("app", null, "orders", "%") }
+        io.mockk.verify(exactly = 0) { meta.getColumns("", null, "orders", "%") }
+    }
+
+    /** A real [SchemaIntrospector] over one mock connection carrying [meta] (MySQL routing). */
+    private fun realIntrospectorOver(
+        meta: java.sql.DatabaseMetaData,
+        connectionSetup: (java.sql.Connection) -> Unit = {},
+    ): SchemaIntrospector {
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        connectionSetup(connection)
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "pg-prod",
+                displayName = "PG",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306/app",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
+        every { registry.get("pg-prod") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "pg-prod"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        return SchemaIntrospector(registry)
+    }
+
     /** A real [SchemaIntrospector] over one connection whose metadata walk throws [failure]. */
     private fun realIntrospectorThrowing(failure: java.sql.SQLException): SchemaIntrospector {
         val meta = mockk<java.sql.DatabaseMetaData>()

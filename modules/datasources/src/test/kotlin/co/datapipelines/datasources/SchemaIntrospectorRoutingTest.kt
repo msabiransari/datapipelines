@@ -347,6 +347,47 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `a BLANK caller filter behaves like an absent one - the default applies, not the empty sentinel`() {
+        // Spring binds `?schema=` (empty query param) to a NON-NULL "" — which must not reach
+        // JDBC: the empty string is the sentinel for "objects WITHOUT a schema" on
+        // Postgres/H2 and a catalog literal on MySQL, silently matching nothing. The caller's
+        // filter is normalized with the same blank-sentinel rule as driver-reported values,
+        // so REST (`?schema=`) and MCP (which nulls blanks in MccpArguments) behave
+        // identically: tables() spans schemas, columns() takes the current-schema default.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } returns "app"
+                    }
+
+                introspector.columns(name, "orders", schemaFilter = "") shouldBe emptyList()
+
+                verify(exactly = 1) { meta.getColumns("app", null, "orders", "%") }
+                verify(exactly = 0) { meta.getColumns("", null, "orders", "%") }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val tablesRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+                every { tablesRs.next() } returns false
+                val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+                introspector.tables(name, schemaFilter = "").tables shouldBe emptyList()
+
+                verify(exactly = 1) { meta.getTables(null, null, "%", any<Array<String>>()) }
+                verify(exactly = 0) { meta.getTables(null, "", "%", any<Array<String>>()) }
+            },
+        )
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

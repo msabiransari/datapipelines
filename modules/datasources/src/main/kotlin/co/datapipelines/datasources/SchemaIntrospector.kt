@@ -63,11 +63,14 @@ class SchemaIntrospector(
     ): TablesPage =
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            // Route FIRST, then escape only the schemaPattern side: the catalog argument is a
-            // LITERAL ("must match the catalog name as it is stored"), so an escaped value
-            // there matches nothing — any MySQL database named with '_'/'%'. Only true
+            // The caller's filter goes through the same blank-sentinel rule as driver-reported
+            // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
+            // schemas — never the JDBC '' sentinel, which matches nothing on any dialect.
+            // Then route FIRST, and escape only the schemaPattern side: the catalog argument
+            // is a LITERAL ("must match the catalog name as it is stored"), so an escaped
+            // value there matches nothing — any MySQL database named with '_'/'%'. Only true
             // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
-            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(schemaFilter)
+            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(schemaFilter.asNonBlankOrNull())
             readTables(meta, adapter, catalog, rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables)
         }
 
@@ -86,7 +89,9 @@ class SchemaIntrospector(
     ): List<ColumnInfo> =
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val effectiveFilter = schemaFilter ?: connection.currentSchema(adapter)
+            // A blank caller filter is absent (the same blank-sentinel rule tables() applies),
+            // so the current-schema default — never the JDBC '' sentinel — takes over.
+            val effectiveFilter = schemaFilter.asNonBlankOrNull() ?: connection.currentSchema(adapter)
             // Same rule as tables(): the catalog argument is a literal (never escaped — an
             // escaped `my_app` catalog matches nothing on MySQL), schemaPattern is a pattern
             // (always escaped).
