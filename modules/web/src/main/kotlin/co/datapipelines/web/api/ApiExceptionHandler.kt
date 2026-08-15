@@ -28,7 +28,10 @@ import org.springframework.web.servlet.resource.NoResourceFoundException
  * ## Logging discipline (rules/02, observability §3.2)
  * 5xx logs at ERROR with the stack trace; 4xx logs at DEBUG without one — a caller's malformed
  * request is not an operator's incident, and logging it at WARN with a trace makes the real
- * incidents unfindable. Nothing is swallowed either way.
+ * incidents unfindable. The one 5xx exception is **502 Bad Gateway**: the downstream the CALLER
+ * pointed us at is broken (their own database, typically — `pipeline.execution.datasource_unreachable`),
+ * which logs at WARN without a stack: not silent, not an incident either. Nothing is swallowed
+ * in any branch.
  *
  * ## Spec gaps this handler stands in for
  * §13 catalogues no transport-level code ("body is not JSON", "method not allowed") and no
@@ -195,10 +198,14 @@ class ApiExceptionHandler {
         request: HttpServletRequest,
         error: Throwable,
     ) {
-        if (status.is5xxServerError) {
-            log.error("{} {} {}", status.value(), request.method, request.requestURI, error)
-        } else {
-            log.debug("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
+        when {
+            // 502 is the caller's downstream being down, not this server breaking — WARN, no stack.
+            status == HttpStatus.BAD_GATEWAY ->
+                log.warn("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
+            status.is5xxServerError ->
+                log.error("{} {} {}", status.value(), request.method, request.requestURI, error)
+            else ->
+                log.debug("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
         }
     }
 

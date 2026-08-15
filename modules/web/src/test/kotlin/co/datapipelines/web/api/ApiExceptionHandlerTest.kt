@@ -26,6 +26,14 @@ class ApiExceptionHandlerTest {
 
         @GetMapping("/probe/unexpected")
         fun unexpected(): Nothing = error("boom")
+
+        @GetMapping("/probe/unreachable")
+        fun unreachable(): Nothing =
+            throw co.datapipelines.typesystem.DatapipelinesException(
+                code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
+                message = "Datasource 'pg-prod' could not be reached for schema introspection.",
+                details = mapOf("datasource" to "pg-prod"),
+            )
     }
 
     private val mvc: MockMvc =
@@ -51,5 +59,24 @@ class ApiExceptionHandlerTest {
         val result = mvc.perform(get("/probe/unexpected")).andExpect(status().isInternalServerError).andReturn()
         result.response.contentAsString shouldContain "\"reason\":\"internal_error\""
         result.response.contentAsString.contains("IllegalStateException") shouldBe false
+    }
+
+    @Test
+    fun `a customer database being down is 502 logged at WARN - not a 5xx ERROR stack`() {
+        // 502 means the DOWNSTREAM is broken (the caller's own database, typically) — an ERROR
+        // with a stack per request would bury the operator's real incidents.
+        val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            mvc.perform(get("/probe/unreachable")).andExpect(status().isBadGateway)
+
+            val levels = appender.list.map { it.level.toString() }
+            assert(levels.contains("WARN")) { "expected a WARN event for 502, got $levels" }
+            assert(!levels.contains("ERROR")) { "a customer DB being down must not log ERROR, got $levels" }
+        } finally {
+            logger.detachAppender(appender)
+        }
     }
 }

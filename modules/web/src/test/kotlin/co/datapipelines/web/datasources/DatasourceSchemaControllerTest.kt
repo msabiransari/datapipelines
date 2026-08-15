@@ -13,10 +13,12 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.sql.SQLException
 
 /**
  * §7A over a mocked introspector — the endpoints are a pure snake_case projection of the
@@ -110,5 +112,20 @@ class DatasourceSchemaControllerTest {
 
         shouldThrow<DatapipelinesException> { controller.tables("nope", schema = null) }
             .code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+    }
+
+    @Test
+    fun `a connection failure during introspection is the catalogued datasource_unreachable`() {
+        // A customer DB being down is not a server error: the raw SQLException must surface as
+        // the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
+        every { introspector.tables("pg-prod", null) } throws SQLException("Connection refused")
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE },
+            { thrown.details["datasource"] shouldBe "pg-prod" },
+            { thrown.message shouldNotContain "Connection refused" },
+        )
     }
 }

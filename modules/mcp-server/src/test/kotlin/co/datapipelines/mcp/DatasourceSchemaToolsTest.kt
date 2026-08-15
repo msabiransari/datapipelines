@@ -18,6 +18,7 @@ import io.mockk.mockk
 import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.sql.SQLException
 
 class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
@@ -133,6 +134,33 @@ class DatasourceSchemaToolsTest {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetSchemaTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+        )
+    }
+
+    @Test
+    fun `a connection failure is the catalogued datasource_unreachable on every introspection tool`() {
+        // A customer DB being down must reach the dispatcher as a catalogued
+        // DatapipelinesException (isError envelope), never as -32603.
+        every { introspector.tables("down", null) } throws SQLException("Connection refused")
+        every { introspector.columns("down", "orders", null) } throws SQLException("Connection refused")
+        every { introspector.snapshot("down") } throws SQLException("Connection refused")
+
+        assertAll(
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
         )
     }

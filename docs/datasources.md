@@ -414,6 +414,7 @@ Rules:
 - **`table` and `schema` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`.
 - **An unknown table or schema filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
 - **An unknown datasource name is `datasource.not_found`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)).
+- **A connection failure during introspection is `pipeline.execution.datasource_unreachable`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource); HTTP 502 on REST, an `isError` envelope on MCP) — a customer database being down is not a server error: no raw 500, no `-32603`, logged at WARN without a stack. Driver text never reaches the wire (the caller can run the §8.1 connection test for the scrubbed failure detail).
 - Credentials are never part of any introspection payload — the operations read schema metadata only.
 
 Surfaces: REST `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{table}/columns` ([REST API §9.7](rest-api.md#97-schema-introspection)); MCP `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` ([MCP §6.2.16–18](mcp-server.md#6216-datasources_get_schema)).

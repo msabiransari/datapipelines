@@ -600,7 +600,7 @@ Read a datasource's whole schema in one payload.
 }
 ```
 
-Returns: `{"datasource", "dialect", "truncated", "tables": [{"table": {"schema","name","type"}, "columns": [...]}]}` — column descriptors shaped exactly like `datasources_get_columns`'s. `truncated: true` means tables were dropped by the 200-table cap; page the rest with `datasources_get_tables` + `datasources_get_columns`. Column types are the canonical Type System types; see [Datasources §7A](datasources.md#7a-schema-introspection).
+Returns: `{"datasource", "dialect", "truncated", "tables": [{"table": {"schema","name","type"}, "columns": [...]}]}` — column descriptors shaped exactly like `datasources_get_columns`'s. `truncated: true` means tables were dropped by the 200-table cap; page the rest with `datasources_get_tables` + `datasources_get_columns`. Column types are the canonical Type System types; see [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
