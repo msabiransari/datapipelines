@@ -70,10 +70,13 @@ class SchemaIntrospector(
      * columns). [SchemaSnapshot.truncated] is `true` when the cap dropped tables, so a caller
      * knows to fall back to `tables` + `columns` for the remainder.
      *
-     * **One connection lease**: `getTables` plus a single bulk `getColumns(catalog, schema,
-     * "%", "%")` grouped by (schema, table) in memory. Leasing per table (up to 201 leases for
-     * a full snapshot) would starve the pool and read the schema across connections that can
-     * disagree mid-flight; one lease keeps the snapshot read-consistent.
+     * **One connection lease**, and bounded work on it: the `getTables` walk reuses the
+     * tested cap+1 early-exit (a huge catalog costs cap+1 `next()` calls, not a full walk),
+     * then each kept table's columns are read by a **per-table `getColumns` on the same leased
+     * connection**, carrying that table's own reported schema routed per dialect. The old
+     * server-wide bulk `getColumns(null, null, "%", "%")` walked every column of every schema
+     * (unbounded) and joined rows in memory by the schema column the TABLES listing did not
+     * use for catalog-routing drivers — MySQL tables silently reported zero columns.
      */
     fun snapshot(
         datasourceName: String,
@@ -81,20 +84,19 @@ class SchemaIntrospector(
     ): SchemaSnapshot =
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val all = readTables(meta, adapter, null, null).tables
-            val kept = all.take(maxTables)
-            val columnsByTable = readAllColumns(meta, adapter)
+            val page = readTables(meta, adapter, null, null, maxRows = maxTables)
+            val escape = meta.searchStringEscape
             SchemaSnapshot(
                 datasource = datasourceName,
                 dialect = datasource.dialect.wire,
-                tables = kept.map { TableWithColumns(it, columnsByTable[it.key()].orEmpty()) },
-                truncated = all.size > kept.size,
+                tables = page.tables.map { TableWithColumns(it, readColumnsFor(meta, adapter, it, escape)) },
+                truncated = page.truncated,
             )
         }
 
     /**
      * The shared getTables walk. [maxRows] caps the iteration at cap+1 `next()` calls (the +1
-     * proves truncation) — `null` walks everything (the snapshot path, which caps afterwards).
+     * proves truncation); `null` walks everything.
      */
     private fun readTables(
         meta: DatabaseMetaData,
@@ -123,20 +125,29 @@ class SchemaIntrospector(
         return TablesPage(out, truncated)
     }
 
-    /** The bulk column read behind [snapshot], grouped by the (schema, table) the tables listing reports. */
-    private fun readAllColumns(
+    /**
+     * One table's column read for [snapshot] — a per-table `getColumns` on the SAME leased
+     * connection, carrying the table's own reported schema routed per dialect (the catalog
+     * argument for Connector/J). System-schema rows stay excluded for consistency with every
+     * other read.
+     */
+    private fun readColumnsFor(
         meta: DatabaseMetaData,
         adapter: DialectAdapter,
-    ): Map<Pair<String?, String>, List<ColumnInfo>> =
-        meta.getColumns(null, null, "%", "%").use { rs ->
-            buildList<Pair<Pair<String?, String>, ColumnInfo>> {
+        table: TableInfo,
+        escape: String,
+    ): List<ColumnInfo> {
+        val (catalog, schemaPattern) = adapter.routeSchemaFilter(table.schema?.toExactMatch(escape))
+        return meta.getColumns(catalog, schemaPattern, table.name.toExactMatch(escape), "%").use { rs ->
+            buildList {
                 while (rs.next()) {
                     val schema = rs.getString(adapter.schemaResultColumn())
                     if (adapter.isSystemSchema(schema)) continue
-                    add(schema to rs.getString("TABLE_NAME") to mapColumnRow(rs, adapter.typeMapper))
+                    add(mapColumnRow(rs, adapter.typeMapper))
                 }
-            }.groupBy({ it.first }, { it.second })
+            }
         }
+    }
 
     private fun mapColumnRow(
         rs: java.sql.ResultSet,
@@ -159,9 +170,6 @@ class SchemaIntrospector(
             )
         return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
     }
-
-    /** The lookup key [snapshot] joins the tables listing and the bulk column read on. */
-    private fun TableInfo.key(): Pair<String?, String> = schema to name
 
     /**
      * The lease boundary every operation reads through — and the ONE place a connection failure

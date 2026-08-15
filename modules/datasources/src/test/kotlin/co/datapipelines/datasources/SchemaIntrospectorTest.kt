@@ -502,6 +502,83 @@ class SchemaIntrospectorTest {
         )
     }
 
+    @Test
+    fun `snapshot stops the tables walk at cap plus one and never issues the server-wide bulk getColumns`() {
+        // A huge catalog must cost cap+1 `next()` calls, not a full walk — and the old
+        // server-wide `getColumns(null, null, "%", "%")` (every column of every schema,
+        // including system schemas filtered only afterwards) must be gone entirely.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true
+        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.getColumns(null, "public", "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.POSTGRES, meta)
+
+        val snapshot = introspector.snapshot(name, maxTables = 2)
+
+        assertAll(
+            { io.mockk.verify(exactly = 3) { tablesRs.next() } },
+            { snapshot.truncated shouldBe true },
+            { io.mockk.verify(exactly = 0) { meta.getColumns(null, null, "%", "%") } },
+            { io.mockk.verify(exactly = 2) { meta.getColumns(null, "public", "orders", "%") } },
+        )
+    }
+
+    @Test
+    fun `snapshot reads each table's columns with that table's own reported schema`() {
+        // Per-table attribution: two same-named tables in two schemas must each get THEIR OWN
+        // columns, read via a per-table getColumns carrying the table's own schema.
+        h2.createStatement().use { st ->
+            st.execute("CREATE SCHEMA sa")
+            st.execute("CREATE SCHEMA sb")
+            st.execute("CREATE TABLE sa.deals (sa_col INT)")
+            st.execute("CREATE TABLE sb.deals (sb_col INT)")
+        }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val snapshot = introspector.snapshot("h2-test")
+
+        val bySchema = snapshot.tables.associateBy { it.table.schema?.uppercase() }
+        assertAll(
+            { bySchema.keys shouldContainExactly setOf("SA", "SB") },
+            { bySchema.getValue("SA").columns.map { it.column.name.uppercase() } shouldContainExactly listOf("SA_COL") },
+            { bySchema.getValue("SB").columns.map { it.column.name.uppercase() } shouldContainExactly listOf("SB_COL") },
+        )
+    }
+
+    @Test
+    fun `snapshot routes each table's columns through the catalog for catalog-routing dialects`() {
+        // The per-table read routes each table's own reported schema exactly like the filters:
+        // for Connector/J the schema column IS TABLE_CAT, so it must land in the catalog
+        // argument — the old bulk read keyed rows by TABLE_SCHEM (null for MySQL) and every
+        // table silently reported zero columns via orEmpty().
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen false
+        every { tablesRs.getString("TABLE_CAT") } returns "app"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) = introspectorOverMockedMetadata(Dialect.MYSQL, meta)
+
+        val snapshot = introspector.snapshot(name)
+
+        io.mockk.verify(exactly = 1) { meta.getColumns("app", null, "orders", "%") }
+        snapshot.tables.single().columns shouldBe emptyList()
+    }
+
     /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */
     private fun introspectorOverMockedMetadata(
         dialect: Dialect,
