@@ -283,6 +283,20 @@ class TracerBulletE2eTest {
     @Test
     @Order(4)
     fun `schema introspection endpoints serve metadata, not-found, and scope denial`() {
+        // Happy path — schemas: the flow's entry point; user schemas listed, system schemas out.
+        val schemaNames: List<String> =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/datasources/pg-local/schemas")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .get("data")
+        schemaNames shouldContainExactly listOf("public")
+
         // Happy path — tables: the seeded users table, no system catalogs, not truncated.
         val tables =
             given()
