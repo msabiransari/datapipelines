@@ -115,7 +115,8 @@ class DatasourceSchemaControllerTest {
         assertAll(
             { thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE },
             {
-                co.datapipelines.web.api.ApiErrorCatalog.statusFor(thrown.code) shouldBe
+                co.datapipelines.web.api.ApiErrorCatalog
+                    .statusFor(thrown.code) shouldBe
                     org.springframework.http.HttpStatus.BAD_GATEWAY
             },
             { thrown.message shouldNotContain "network is dead" },
@@ -134,9 +135,10 @@ class DatasourceSchemaControllerTest {
         val columnsRs = mockk<java.sql.ResultSet>(relaxed = true)
         every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false
-        val introspector = realIntrospectorOver(meta) { connection ->
-            every { connection.catalog } returns "app"
-        }
+        val introspector =
+            realIntrospectorOver(meta) { connection ->
+                every { connection.catalog } returns "app"
+            }
         val controller = DatasourceSchemaController(introspector)
 
         val data = controller.columns("pg-prod", "orders", schema = "").data
@@ -185,7 +187,8 @@ class DatasourceSchemaControllerTest {
         assertAll(
             { thrown.code shouldBe PipelineErrorCodes.Execution.PARAMETER_REQUIRED },
             {
-                co.datapipelines.web.api.ApiErrorCatalog.statusFor(thrown.code) shouldBe
+                co.datapipelines.web.api.ApiErrorCatalog
+                    .statusFor(thrown.code) shouldBe
                     org.springframework.http.HttpStatus.BAD_REQUEST
             },
             { thrown.message?.contains("schema", ignoreCase = true) shouldBe true },

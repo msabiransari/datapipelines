@@ -346,7 +346,11 @@ class SchemaIntrospectorRoutingTest {
                 every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
-                introspector.tables(name).tables.single().schema shouldBe null
+                introspector
+                    .tables(name)
+                    .tables
+                    .single()
+                    .schema shouldBe null
             },
             {
                 // A whitespace-only current schema is "none" — and "none" on a schema-capable
@@ -512,7 +516,11 @@ class SchemaIntrospectorRoutingTest {
                 every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) = introspectorOver(Dialect.ORACLE, meta, introspectionIncludeSchemas = include)
 
-                introspector.tables(name).tables.single().schema shouldBe "APEX_REPORTING"
+                introspector
+                    .tables(name)
+                    .tables
+                    .single()
+                    .schema shouldBe "APEX_REPORTING"
             },
             {
                 val meta = mockk<DatabaseMetaData>()

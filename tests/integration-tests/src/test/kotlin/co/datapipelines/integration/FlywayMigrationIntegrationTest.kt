@@ -41,13 +41,17 @@ class FlywayMigrationIntegrationTest {
     private lateinit var dataSource: DataSource
 
     @Test
-    fun `V1 is recorded as applied and successful`() {
+    fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
                 "SELECT version || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
             ) { it.getString(1) }
 
-        rows shouldContainExactly listOf("1|initial schema|true")
+        rows shouldContainExactly
+            listOf(
+                "1|initial schema|true",
+                "2|datasource introspection include schemas|true",
+            )
     }
 
     @Test

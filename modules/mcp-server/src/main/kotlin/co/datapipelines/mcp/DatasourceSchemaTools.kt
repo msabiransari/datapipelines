@@ -161,9 +161,10 @@ private fun <T> introspecting(
     } catch (e: co.datapipelines.datasources.CurrentSchemaUnknownException) {
         throw DatapipelinesException(
             code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
-            message = "Datasource '$name' reports no current schema, so an unqualified read could merge " +
-                "same-named tables across schemas. Pass an explicit schema (list them with " +
-                "datasources_get_schemas).",
+            message =
+                "Datasource '$name' reports no current schema, so an unqualified read could merge " +
+                    "same-named tables across schemas. Pass an explicit schema (list them with " +
+                    "datasources_get_schemas).",
             details = mapOf("datasource" to name),
             cause = e,
         )

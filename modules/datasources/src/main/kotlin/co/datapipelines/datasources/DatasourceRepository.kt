@@ -185,7 +185,7 @@ class DatasourceRepository(
                 passwordEncrypted = rs.getBytes("password_encrypted"),
                 properties = readProperties(rs.getString("properties_json")),
                 queryTimeoutSeconds = rs.getObject("query_timeout_seconds") as? Int,
-                introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas")),
+                introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas_json")),
                 isDeleted = rs.getBoolean("is_deleted"),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
@@ -199,8 +199,7 @@ class DatasourceRepository(
      * lowercase-normalized from the registration bind; the save-time validator has already
      * rejected pattern entries.
      */
-    private fun includeSchemasJson(datasource: Datasource): String =
-        objectMapper.writeValueAsString(datasource.introspectionIncludeSchemas)
+    private fun includeSchemasJson(datasource: Datasource): String = objectMapper.writeValueAsString(datasource.introspectionIncludeSchemas)
 
     private fun readIncludeSchemas(json: String?): List<String> {
         if (json.isNullOrBlank()) return emptyList()
@@ -237,7 +236,7 @@ class DatasourceRepository(
 
         const val COLUMNS =
             "name, display_name, description, dialect, jdbc_url, username, password_encrypted, " +
-                "properties_json, query_timeout_seconds, introspection_include_schemas, " +
+                "properties_json, query_timeout_seconds, introspection_include_schemas_json, " +
                 "is_deleted, created_at, updated_at, created_by"
 
         const val SELECT_COLUMNS = "SELECT $COLUMNS FROM datasources"
@@ -246,7 +245,7 @@ class DatasourceRepository(
             """
             INSERT INTO datasources
                 (name, display_name, description, dialect, jdbc_url, username, password_encrypted,
-                 properties_json, query_timeout_seconds, introspection_include_schemas, created_by)
+                 properties_json, query_timeout_seconds, introspection_include_schemas_json, created_by)
             VALUES
                 (:name, :displayName, :description, :dialect, :jdbcUrl, :username, :passwordEncrypted,
                  CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
@@ -268,7 +267,7 @@ class DatasourceRepository(
                        username = :username,
                        ${passwordClause}properties_json = CAST(:propertiesJson AS jsonb),
                        query_timeout_seconds = :queryTimeoutSeconds,
-                       introspection_include_schemas = CAST(:introspectionIncludeSchemas AS jsonb),
+                       introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
                        updated_at = NOW()
                  WHERE name = :name AND is_deleted = FALSE
                 RETURNING $COLUMNS

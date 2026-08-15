@@ -384,7 +384,6 @@ class DatasourceRegistryIntegrationTest {
         }
 
     private companion object {
-
         @Container
         @JvmStatic
         val postgres: PostgreSQLContainer<*> =

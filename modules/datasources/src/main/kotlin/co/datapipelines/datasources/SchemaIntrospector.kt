@@ -50,8 +50,10 @@ class SchemaIntrospector(
             rs.use {
                 val out = mutableListOf<String>()
                 var truncated = false
-                // Same jump discipline as readTables: system rows are skipped WITHOUT counting
-                // against the cap, and the cap+1-th USER row is the truncation proof.
+                // Same jump discipline as readTables (whose suppression this mirrors): system
+                // rows are skipped WITHOUT counting against the cap, and the cap+1-th USER
+                // row is the truncation proof.
+                @Suppress("LoopWithTooManyJumpStatements")
                 while (it.next()) {
                     // The JDBC "" sentinel ("objects without a catalog") is not a schema
                     // an agent can pass to get_tables — skip it rather than list it.
@@ -92,7 +94,11 @@ class SchemaIntrospector(
             }
             val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(filter, meta)
             readTables(
-                meta, adapter, catalog, escapedSchemaPattern, maxTables,
+                meta,
+                adapter,
+                catalog,
+                escapedSchemaPattern,
+                maxTables,
                 datasource.introspectionIncludeSchemas.toSet(),
             )
         }

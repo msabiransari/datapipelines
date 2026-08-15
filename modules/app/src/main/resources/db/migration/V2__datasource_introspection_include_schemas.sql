@@ -4,4 +4,4 @@
 -- absent means today's behavior. JSONB array of lowercase schema names, like the
 -- properties_json document beside it.
 ALTER TABLE datasources
-    ADD COLUMN introspection_include_schemas JSONB NOT NULL DEFAULT '[]';
+    ADD COLUMN introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]';
