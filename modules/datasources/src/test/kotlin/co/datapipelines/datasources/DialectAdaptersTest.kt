@@ -76,9 +76,28 @@ class DialectAdaptersTest {
                 "xs\$null",
                 "apex_*",
             )
-        // MSSQL: the hidden schemas beside INFORMATION_SCHEMA.
+        // MSSQL: the hidden schemas beside INFORMATION_SCHEMA, plus the built-in fixed-role/
+        // special schemas present in every SQL Server database (R3 F3). A FLOOR, like Oracle's.
         DialectAdapters.forDialect(Dialect.MSSQL).introspectionSystemSchemas shouldContainExactlyInAnyOrder
-            listOf("information_schema", "sys")
+            setOf(
+                "information_schema",
+                "sys",
+                "db_owner",
+                "db_accessadmin",
+                "db_securityadmin",
+                "db_ddladmin",
+                "db_backupoperator",
+                "db_datareader",
+                "db_datawriter",
+                "db_denydatareader",
+                "db_denydatawriter",
+                "guest",
+            )
+        // DuckDB is Postgres-lineage: its engine catalogs report as plain rows (verified against
+        // the pinned duckdb_jdbc 1.5.5.1 — getSchemas() returns main, information_schema,
+        // pg_catalog), so the bare {information_schema} default leaks pg_catalog.
+        DialectAdapters.forDialect(Dialect.DUCKDB).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            setOf("information_schema", "pg_catalog")
     }
 
     @Test

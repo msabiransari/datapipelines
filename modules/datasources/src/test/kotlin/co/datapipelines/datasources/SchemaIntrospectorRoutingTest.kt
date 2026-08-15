@@ -450,6 +450,38 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `schemas excludes the mssql fixed-role floor - dbo is user data and stays`() {
+        // SQL Server's built-in fixed-role/special schemas (db_owner, db_datareader, guest, ...)
+        // list as ordinary schemas; dbo is the database's DEFAULT USER schema and must NOT be
+        // excluded. No arm64 MSSQL container exists (pre-existing) — this is the
+        // mocked-metadata unit verification, not container coverage.
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true andThen true andThen true andThen true andThen false
+        every { schemasRs.getString("TABLE_SCHEM") } returns "dbo" andThen "db_datareader" andThen "guest" andThen "sales"
+        val (introspector, name) = introspectorOver(Dialect.MSSQL, meta)
+
+        introspector.schemas(name).schemas shouldBe listOf("dbo", "sales")
+    }
+
+    @Test
+    fun `schemas excludes duckdb's pg_catalog beside information_schema`() {
+        // Verified against the pinned duckdb_jdbc 1.5.5.1: getSchemas() reports main,
+        // information_schema and pg_catalog — the bare {information_schema} default leaked
+        // pg_catalog into the listing. No arm64 DuckDB-flavored container matrix here; like
+        // MSSQL, this is the mocked-metadata unit verification.
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true andThen true andThen true andThen false
+        every { schemasRs.getString("TABLE_SCHEM") } returns "main" andThen "pg_catalog" andThen "information_schema"
+        val (introspector, name) = introspectorOver(Dialect.DUCKDB, meta)
+
+        introspector.schemas(name).schemas shouldBe listOf("main")
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.
