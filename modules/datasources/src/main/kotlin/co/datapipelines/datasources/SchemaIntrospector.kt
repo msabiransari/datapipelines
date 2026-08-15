@@ -206,8 +206,18 @@ class SchemaIntrospector(
         cause: Throwable,
     ): Nothing = throw DatasourceUnreachableException(datasourceName, cause)
 
-    /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
-    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean = schema != null && schema.lowercase() in introspectionSystemSchemas
+    /**
+     * [DialectAdapter.introspectionSystemSchemas]: exact names match case-insensitively; an
+     * entry ending in `*` matches by case-insensitive PREFIX (Oracle's versioned `apex_*`
+     * schemas). Null is never a system schema.
+     */
+    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean {
+        if (schema == null) return false
+        val lower = schema.lowercase()
+        return introspectionSystemSchemas.any { entry ->
+            if (entry.endsWith("*")) lower.startsWith(entry.dropLast(1)) else lower == entry
+        }
+    }
 
     /**
      * The connection-failure family of a post-lease [SQLException]: SQLState class `08`

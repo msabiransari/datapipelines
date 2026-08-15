@@ -7,6 +7,8 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Test
 
 /**
@@ -45,20 +47,57 @@ class DialectAdaptersTest {
         // ...and excludes its system catalogs.
         DialectAdapters.forDialect(Dialect.POSTGRES).introspectionSystemSchemas shouldContainExactlyInAnyOrder
             listOf("pg_catalog", "information_schema")
-        // Every other dialect excludes at least the SQL-standard system schema.
-        Dialect.entries.filter { it != Dialect.POSTGRES }.forEach { dialect ->
+        // Every dialect that HAS an information_schema excludes at least the SQL-standard
+        // system schema. Oracle is the exception by design: it has no such schema, so the
+        // entry there would be dead weight (R4).
+        Dialect.entries.filter { it != Dialect.POSTGRES && it != Dialect.ORACLE }.forEach { dialect ->
             ("information_schema" in DialectAdapters.forDialect(dialect).introspectionSystemSchemas) shouldBe true
         }
         // MySQL: Connector/J reports the sys/performance_schema/mysql schemas as plain TABLE/
         // VIEW rows — the type vocabulary CANNOT catch them, only the schema list can.
         DialectAdapters.forDialect(Dialect.MYSQL).introspectionSystemSchemas shouldContainExactlyInAnyOrder
             listOf("information_schema", "mysql", "performance_schema", "sys")
-        // Oracle: the instance's administrative schemas.
+        // Oracle: the instance's administrative schemas. A FLOOR, known-incomplete — no
+        // information_schema (Oracle has none), and `apex_*` is the one prefix entry (Oracle
+        // versions its APEX schemas: APEX_220200, APEX_240100, ...).
         DialectAdapters.forDialect(Dialect.ORACLE).introspectionSystemSchemas shouldContainExactlyInAnyOrder
-            listOf("information_schema", "sys", "system", "outln", "xdb")
+            setOf(
+                "sys",
+                "system",
+                "outln",
+                "xdb",
+                "ctxsys",
+                "mdsys",
+                "ordsys",
+                "dbsnmp",
+                "wmsys",
+                "audsys",
+                "olapsys",
+                "xs\$null",
+                "apex_*",
+            )
         // MSSQL: the hidden schemas beside INFORMATION_SCHEMA.
         DialectAdapters.forDialect(Dialect.MSSQL).introspectionSystemSchemas shouldContainExactlyInAnyOrder
             listOf("information_schema", "sys")
+    }
+
+    @Test
+    fun `a trailing star entry matches by case-insensitive prefix`() {
+        // Oracle's APEX schemas are version-prefixed (APEX_220200, ...) — an exact-name entry
+        // could never enumerate them. `apex_*` means: every schema whose lowercase name starts
+        // with `apex_`. Verified through the introspector's row filter, where the matching
+        // lives.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        val tablesRs = mockk<java.sql.ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen true andThen true andThen false
+        every { tablesRs.getString("TABLE_SCHEM") } returns "APEX_240100" andThen "ORDSYS" andThen "SALES"
+        every { tablesRs.getString("TABLE_NAME") } returns "t"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val (introspector, name) = introspectorOver(Dialect.ORACLE, meta)
+
+        introspector.tables(name).tables.map { it.schema } shouldBe listOf("SALES")
     }
 
     @Test
