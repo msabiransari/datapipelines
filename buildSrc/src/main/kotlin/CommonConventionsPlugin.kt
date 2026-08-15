@@ -5,12 +5,14 @@ import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
+import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.dependencies
+import org.gradle.kotlin.dsl.dependencyLocking
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -24,7 +26,7 @@ import java.util.zip.ZipFile
  *
  * Configures: the JDK 21 toolchain (§7.2), strict Kotlin compilation, the
  * Spring Boot BOM as a dependency platform, the JUnit 5 + MockK + Kotest test
- * stack (§7.4), and ktlint + detekt (§7.3).
+ * stack (§7.4), ktlint + detekt (§7.3), and STRICT dependency locking (§7.6).
  *
  * ## Rule: ONE JUnit Platform TestEngine per Test task
  *
@@ -175,6 +177,37 @@ class CommonConventionsPlugin : Plugin<Project> {
                 showExceptions = true
                 showCauses = true
                 exceptionFormat = TestExceptionFormat.FULL
+            }
+        }
+
+        // Dependency locking — STRICT, every configuration (module-structure.md §7.6).
+        // Resolution is validated against the committed gradle.lockfile: any drift from
+        // the locked versions FAILS the build. Regenerate after a deliberate dependency
+        // change with `./gradlew resolveAndLockAll --write-locks` (DEVELOPMENT.md §6.2).
+        // STRICT (not DEFAULT) so that a NEW configuration with no recorded lock state
+        // is also a failure — silence is exactly what locking exists to prevent.
+        project.dependencyLocking {
+            lockAllConfigurations()
+            lockMode.set(LockMode.STRICT)
+        }
+
+        // The documented "lock all configurations in a single build execution" pattern
+        // (docs.gradle.org/current/userguide/dependency_locking.html): the built-in
+        // `dependencies` task only covers ONE project, so each module registers this
+        // and `./gradlew resolveAndLockAll --write-locks` fans out across all of them.
+        project.tasks.register("resolveAndLockAll") {
+            group = "verification"
+            description = "Resolves every resolvable configuration; run with --write-locks to (re)generate gradle.lockfile."
+            notCompatibleWithConfigurationCache("Resolves configurations eagerly at execution time")
+            doFirst {
+                require(project.gradle.startParameter.isWriteDependencyLocks) {
+                    "$path must be run with --write-locks; its only purpose is regenerating gradle.lockfile"
+                }
+            }
+            doLast {
+                project.configurations
+                    .filter { it.isCanBeResolved }
+                    .forEach { it.resolve() }
             }
         }
 

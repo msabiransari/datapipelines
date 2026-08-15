@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.2 (frozen contract — additive-only changes after this point)
+**Status:** v1.3 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-15
 
 ---
 
@@ -523,7 +523,7 @@ flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql
 
 **Redis client:** no explicit entry — `spring-boot-starter-data-redis` brings **Lettuce** as its default client, version-managed by the Spring Boot BOM. Adding a second, separately-pinned Lettuce entry would let it drift from the BOM; if Jedis is ever wanted instead, that is an explicit exclusion + dependency, and a spec change here.
 
-> **Gate G2 — RESOLVED 2026-08-07** (except the lockfile, deliberately deferred to P9 — see below). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the table above is historical.** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) lands at P9 when the dependency set is stable, so mid-build module additions don't fight the lock. The original G2 procedure is retained below for future catalog changes:
+> **Gate G2 — RESOLVED 2026-08-07** (lockfile sub-item closed 2026-08-15, §7.6). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the table above is historical.** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) landed 2026-08-15 per §7.6. The original G2 procedure is retained below for future catalog changes:
 > 1. Resolve the current stable release: `curl -s 'https://search.maven.org/solrsearch/select?q=g:"org.flywaydb"+AND+a:"flyway-core"&core=gav&rows=5&wt=json' | jq -r '.response.docs[].v'` (repeat per artifact; or run `./gradlew dependencyUpdates` once the build exists).
 > 2. Reject anything that is not a released stable version — **no ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta** (§6.1, and the project-wide version-pinning rule).
 > 3. Check BOM-managed artifacts are **not** pinned here at all: anything the `spring-boot` BOM manages (Jackson, Micrometer, Lettuce, HikariCP, the Spring modules) takes its version from the BOM. A local pin that disagrees with the BOM is a silent runtime-incompatibility source.
@@ -537,7 +537,7 @@ flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql
 - **Pin every dependency to an exact version.** No ranges, no `+`, no SNAPSHOT in production.
 - **Upgrade deliberately.** Dependabot or Renovate can open PRs, but no auto-merge.
 - **Track security advisories.** GitHub Dependabot alerts + Snyk (or equivalent) on the repo.
-- **Lockfile committed.** Gradle generates `gradle.lockfile` for repeatable builds.
+- **Lockfile committed.** Gradle generates `gradle.lockfile` for repeatable builds (§7.6).
 
 ---
 
@@ -627,6 +627,34 @@ class CommonConventionsPlugin : Plugin<Project> {
 ./gradlew -Pmysql build               # build with MySQL driver bundled
 ./gradlew clean build                 # full rebuild
 ```
+
+### 7.6 Dependency locking
+
+Every module — and buildSrc itself — resolves dependencies against a committed
+`gradle.lockfile`. Locking covers **all configurations**
+(`lockAllConfigurations()`) in **STRICT** mode, applied by
+`CommonConventionsPlugin` to every module and declared directly in
+`buildSrc/build.gradle.kts` (an included build is not reached by the main
+build's locking). A resolution that drifts from the lock — a version bump, a
+new or removed dependency, a shifting transitive — **fails the build**. This is
+the mechanical twin of §6: the catalog records what we ASK for, the lockfile
+records what was actually RESOLVED, and STRICT mode additionally fails on any
+locked configuration with no recorded lock state, so a newly added
+configuration cannot escape silently.
+
+- Maintenance procedure (the only way locks may change): DEVELOPMENT.md §6.2 —
+  `./gradlew resolveAndLockAll --write-locks`, then review and commit the diff
+  with the dependency change that caused it.
+- `resolveAndLockAll` is the documented "lock all configurations in a single
+  build execution" pattern (docs.gradle.org dependency_locking); the built-in
+  `dependencies` task resolves only one project's configurations, so each
+  project registers its own copy.
+- Exactly two artifacts are excluded from lock validation, both declared with
+  their reason in `modules/datasources/build.gradle.kts`: the §5.4.1
+  flag-gated drivers `ojdbc11` and `mysql-connector-j`. One committed lockfile
+  cannot validate both the default build and `-Poracle` / `-Pmysql` builds.
+- The root project has no lockfile: it applies no conventions plugin, declares
+  no dependencies, and nothing ever resolves there.
 
 ---
 
@@ -826,7 +854,7 @@ Out of scope for v1:
 These are the two items this spec deliberately does **not** resolve on paper. Each has an exact check; neither may be closed by recall.
 
 - [x] **G1 — MCP SDK coordinates** (§5.8): **resolved 2026-08-07** — `io.modelcontextprotocol.sdk:mcp-core:2.0.0` + `mcp-json-jackson2:2.0.0`, Streamable HTTP transports confirmed by jar inspection; see the resolved gate note in §5.8.
-- [x] **G2 — version catalog vs Maven Central** (§6): **resolved 2026-08-07** — all entries verified, BOM-managed artifacts version-less, `gradle/libs.versions.toml` is the ratified source. Remaining sub-item: `gradle.lockfile` deferred to P9 (see §6 gate note).
+- [x] **G2 — version catalog vs Maven Central** (§6): **resolved 2026-08-07** — all entries verified, BOM-managed artifacts version-less, `gradle/libs.versions.toml` is the ratified source. Lockfile sub-item **closed 2026-08-15** (§7.6): committed `gradle.lockfile` per module + buildSrc, STRICT mode.
 
 ### 13.2 Build checklist
 
@@ -846,7 +874,7 @@ Before considering the module structure "ready":
 - [ ] Every module has a README.
 - [ ] Every module's public API has KDoc.
 - [ ] Version catalog has exact versions for every dependency (no `+`, no SNAPSHOT).
-- [ ] Gradle lockfile committed.
+- [x] Gradle lockfile committed (§7.6 — per-module `gradle.lockfile`, STRICT mode, 2026-08-15).
 - [ ] No internal module depends on `app` (one-way dependency).
 - [ ] `tests/integration-tests` runs end-to-end pipeline against a real PG container.
 
@@ -859,3 +887,4 @@ Before considering the module structure "ready":
 | 2026-08-05 | v1.0 | initial draft | Initial module structure spec: 10 modules + integration tests, dependency graph, version catalog, build conventions, Spring Boot conventions |
 | 2026-08-05 | v1.1 | design system integration | Added `@acme/design-tokens` as the styling foundation for the `web` module. Documented vendoring approach (CSS files, not npm). Referenced Pipeline Editor spec for integration details. |
 | 2026-08-07 | v1.2 | consistency campaign | **Persistence ownership** (§3.1): repositories live in their owning domain module (`PipelineRepository`, `TemplateRepository`, `DatasourceRepository`, `UserRepository`/`ApiKeyRepository`, `ExecutionRepository`/`ExecutionEventRepository`), each taking `spring-boot-starter-jdbc`; Flyway dep + migrations confined to `app`; Redis (`spring-boot-starter-data-redis`, Lettuce) confined to `dag` and `web`; catalog gains flyway-core + flyway-database-postgresql. **§4.1** graph regenerated to match the §5.x lists; **§4.2** ambiguous layering rules replaced by one machine-checkable allowed-dependency table (+ Gradle verification task). **§5.1** `H2TypeMapper` → `H2IngressMapper` / `H2EgressMapper` (staging §5.3). **§5.2** `TerminalDetector` → `CallerNodeResolver` [D1], `PipelineRepository` added, Jackson named as the ser/deser stack. **§5.3** params-schema types dropped [D3]. **§5.4.1** new: `-Poracle`/`-Pmysql` conditional `runtimeOnly` sketch + `lib/` drop-in via `PropertiesLauncher`/`loader.path`. **§5.6** dag API gains `NodeResult`, `CancellationRegistry`, `CancellationHandle`, `ResultStore`, `ExecutionSlots`, `ExecutionAbortedException`, `AbortReason`, `ExecutorDispatcher`. **§5.11** `db2` Testcontainer removed (not a supported dialect); Redis container added. Both "Verification needed" markers converted to implementation gates G1/G2 with exact commands (§13.1). Duplicate `### 8.2` renumbered (→ 8.3/8.4). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-15 | v1.3 | dependency locking | **§7.6** new: STRICT `lockAllConfigurations()` dependency locking applied by `CommonConventionsPlugin` to every module and declared in `buildSrc/build.gradle.kts`; committed `gradle.lockfile` per module + buildSrc + settings; `resolveAndLockAll --write-locks` is the documented regeneration path (DEVELOPMENT.md §6.2). §5.4.1's flag-gated drivers (`ojdbc11`, `mysql-connector-j`) are the only lock-validation exclusions, declared in `modules/datasources/build.gradle.kts`. Closes the §13.1 G2 sub-item (lockfile was deferred to P9) and the §13.2 "Gradle lockfile committed" checklist row. Zero dependency version changes — the locks record current resolution. |

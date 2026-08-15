@@ -1,0 +1,48 @@
+# This is a Gradle generated file for dependency locking.
+# Manual edits can break the build and are not advised.
+# This file is expected to be part of source control.
+# To regenerate this file, run: ./gradlew :dependencies --write-locks
+com.google.code.gson:gson:2.11.0=buildScriptClasspath
+com.google.errorprone:error_prone_annotations:2.27.0=buildScriptClasspath
+io.gitlab.arturbosch.detekt:detekt-gradle-plugin:1.23.8=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:fus-statistics-gradle-plugin:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-allopen:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-assignment-compiler-plugin-embeddable:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-build-statistics:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-build-tools-api:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-build-tools-api:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-build-tools-compat:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-build-tools-cri-impl:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-build-tools-impl:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-compiler-embeddable:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-compiler-runner:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-compiler-runner:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-daemon-client:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-daemon-client:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-daemon-embeddable:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugin-annotations:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugin-api:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugin-idea-proto:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugin-idea:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-gradle-plugins-bom:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-klib-commonizer-api:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-native-utils:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-reflect:1.6.10=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-reflect:2.4.0=compileClasspath
+org.jetbrains.kotlin:kotlin-sam-with-receiver-compiler-plugin-embeddable:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-script-runtime:2.4.0=kotlinBuildToolsApiClasspath,kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-scripting-common:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-scripting-compiler-impl-embeddable:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-scripting-jvm:2.4.0=kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-stdlib:2.4.0=compileClasspath,kotlinBuildToolsApiClasspath,kotlinCompilerPluginClasspathMain
+org.jetbrains.kotlin:kotlin-tooling-core:2.4.0=kotlinBuildToolsApiClasspath
+org.jetbrains.kotlin:kotlin-tooling-core:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-util-io:2.4.10=buildScriptClasspath,compileClasspath
+org.jetbrains.kotlin:kotlin-util-klib-metadata:2.4.10=buildScriptClasspath
+org.jetbrains.kotlin:kotlin-util-klib:2.4.10=buildScriptClasspath
+org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.0=buildScriptClasspath,kotlinBuildToolsApiClasspath
+org.jetbrains:annotations:13.0=compileClasspath,kotlinBuildToolsApiClasspath,kotlinCompilerPluginClasspathMain
+org.jlleitschuh.gradle:ktlint-gradle:14.2.0=buildScriptClasspath,compileClasspath
+empty=kotlinScriptDefExtensions

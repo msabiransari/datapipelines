@@ -200,6 +200,39 @@ curl http://localhost:8080/health
 
 If startup fails with `datapipelines.auth.base-url must be set…`, your env file is missing `DATAPIPELINES_AUTH_BASE_URL` (§4). If it fails on a `MICROSOFT_*` placeholder, both provider placeholder sets must resolve (§4).
 
+### 6.2 Dependency lockfiles
+
+Every module resolves its dependencies against its committed `gradle.lockfile`
+(module-structure.md §7.6). Locking is STRICT: if resolution drifts from the
+lock — a version changed in `gradle/libs.versions.toml`, a dependency added or
+removed in a module build file, a transitive shifting — the build FAILS with a
+lock-state error. That failure is the guard working; do not try to bypass it.
+
+**Updating the locks** — the only correct response to a *deliberate* dependency
+change:
+
+```bash
+./gradlew resolveAndLockAll --write-locks
+```
+
+This resolves every resolvable configuration in every module and rewrites all
+`gradle.lockfile` files (plus `buildSrc/gradle.lockfile`). Read the resulting
+diff like any dependency review — it shows exactly which versions moved — and
+commit it in the same commit as the catalog/build-file change that caused it.
+A lockfile diff with no corresponding dependency change means something drifted
+that you did not intend; investigate, don't commit.
+
+- To move a single module (say, bump only SLF4J): change the version, then
+  `./gradlew resolveAndLockAll --write-locks --update-locks org.slf4j:slf4j-api`.
+- Never edit a `gradle.lockfile` by hand (its own header says why).
+- The `-Poracle` / `-Pmysql` drivers are deliberately excluded from lock
+  validation — one lockfile cannot validate both flag states; the reason is
+  commented in `modules/datasources/build.gradle.kts`. They are the only
+  exclusions.
+- STRICT mode also fails when a configuration has no recorded lock state, so
+  adding a new resolvable configuration (e.g. a new plugin) requires a
+  `--write-locks` run before the build goes green again.
+
 ---
 
 ## 7. Verify

@@ -40,3 +40,18 @@ dependencies {
     testImplementation(libs.postgresql)
     testRuntimeOnly(libs.mysql.connector.j)
 }
+
+// Dependency-locking exclusion for the §5.4.1 flag-gated drivers above
+// (docs.gradle.org dependency_locking, "Ignoring specific dependencies from the
+// lock state"). These artifacts exist on the runtime classpath only under
+// -Poracle / -Pmysql, but ONE committed gradle.lockfile must validate BOTH flag
+// states: with the driver locked, the default build fails on an unmatched lock
+// entry; without it, the flagged build fails on an unlocked extra module. No
+// single lockfile can satisfy both, so these two are the build's only ignored
+// dependencies. Side effect: mysql-connector-j on the always-present TEST
+// runtime classpath is also unvalidated — accepted; its version is still
+// BOM-pinned, and every other artifact in every configuration stays locked.
+dependencyLocking {
+    ignoredDependencies.add("com.oracle.database.jdbc:ojdbc11")
+    ignoredDependencies.add("com.mysql:mysql-connector-j")
+}
