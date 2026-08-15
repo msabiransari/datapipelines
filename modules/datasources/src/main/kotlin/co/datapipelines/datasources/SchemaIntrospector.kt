@@ -52,11 +52,12 @@ class SchemaIntrospector(
                                 precision = rs.getInt("COLUMN_SIZE"),
                                 scale = rs.getInt("DECIMAL_DIGITS"),
                                 typeName = sourceTypeName,
-                                nullable = when (rs.getInt("NULLABLE")) {
-                                    DatabaseMetaData.columnNoNulls -> false
-                                    DatabaseMetaData.columnNullable -> true
-                                    else -> null
-                                },
+                                nullable =
+                                    when (rs.getInt("NULLABLE")) {
+                                        DatabaseMetaData.columnNoNulls -> false
+                                        DatabaseMetaData.columnNullable -> true
+                                        else -> null
+                                    },
                             )
                         add(ColumnInfo(mapped.column, sourceTypeName, mapped.warnings))
                     }
@@ -109,13 +110,29 @@ class SchemaIntrospector(
 }
 
 /** One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...). */
-data class TableInfo(val schema: String?, val name: String, val type: String)
+data class TableInfo(
+    val schema: String?,
+    val name: String,
+    val type: String,
+)
 
 /** One column: the canonical [column] descriptor plus the source type name it came from. */
-data class ColumnInfo(val column: ColumnSchema, val sourceTypeName: String, val warnings: List<TypeMappingWarning>)
+data class ColumnInfo(
+    val column: ColumnSchema,
+    val sourceTypeName: String,
+    val warnings: List<TypeMappingWarning>,
+)
 
 /** A table with its columns, as carried by [SchemaSnapshot]. */
-data class TableWithColumns(val table: TableInfo, val columns: List<ColumnInfo>)
+data class TableWithColumns(
+    val table: TableInfo,
+    val columns: List<ColumnInfo>,
+)
 
 /** The whole-schema payload of `datasources_get_schema` / `GET .../schema` (§7A). */
-data class SchemaSnapshot(val datasource: String, val dialect: String, val tables: List<TableWithColumns>, val truncated: Boolean)
+data class SchemaSnapshot(
+    val datasource: String,
+    val dialect: String,
+    val tables: List<TableWithColumns>,
+    val truncated: Boolean,
+)

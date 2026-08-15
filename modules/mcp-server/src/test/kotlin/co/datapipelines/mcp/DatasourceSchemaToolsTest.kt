@@ -43,7 +43,11 @@ class DatasourceSchemaToolsTest {
     fun `get_tables pushes the schema filter through`() {
         every { introspector.tables("pg-prod", "sales") } returns emptyList()
 
-        (DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as List<*>).size shouldBe 0
+        val payload =
+            DatasourcesGetTablesTool(introspector)
+                .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as List<*>
+
+        payload.size shouldBe 0
     }
 
     @Test
@@ -56,7 +60,8 @@ class DatasourceSchemaToolsTest {
 
         @Suppress("UNCHECKED_CAST")
         val payload =
-            DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx) as List<Map<String, Any?>>
+            DatasourcesGetColumnsTool(introspector)
+                .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx) as List<Map<String, Any?>>
 
         assertAll(
             { payload.size shouldBe 2 },

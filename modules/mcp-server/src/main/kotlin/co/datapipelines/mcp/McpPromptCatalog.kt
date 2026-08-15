@@ -169,8 +169,18 @@ class McpPromptCatalog {
         val CREATE_PIPELINE_FOR_QUESTION: McpSchema.Prompt =
             McpSchema.Prompt
                 .builder(CREATE_PIPELINE_FOR_QUESTION_NAME)
-                .description("Guide the agent through building a pipeline that answers a natural-language question: discover the datasource, introspect its real schema, author the SQL template, create and execute the pipeline.")
-                .arguments(listOf(McpSchema.PromptArgument("question", null, "The natural-language question to build a pipeline for (max 2000 characters).", true)))
-                .build()
+                .description(
+                    "Guide the agent through building a pipeline that answers a natural-language question: discover the " +
+                        "datasource, introspect its real schema, author the SQL template, create and execute the pipeline.",
+                ).arguments(
+                    listOf(
+                        McpSchema.PromptArgument(
+                            "question",
+                            null,
+                            "The natural-language question to build a pipeline for (max 2000 characters).",
+                            true,
+                        ),
+                    ),
+                ).build()
     }
 }

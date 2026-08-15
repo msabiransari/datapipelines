@@ -5,7 +5,7 @@ import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
 
-/**
+/*
  * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
  * over [SchemaIntrospector], the same service the REST endpoints use.
  *
@@ -14,6 +14,7 @@ import co.datapipelines.datasources.TableInfo
  * (the §6.2.16–18 shapes), never a serialized entity; credentials are not part of schema metadata
  * at all, and building the maps field-by-field keeps it that way by construction.
  */
+
 /** `datasources_get_schema` (mcp-server.md §6.2.16). Scope: `author`. */
 class DatasourcesGetSchemaTool(
     private val introspector: SchemaIntrospector,

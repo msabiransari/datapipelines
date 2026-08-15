@@ -82,6 +82,7 @@ class DatasourceSchemaController(
             "datasource" to datasource,
             "dialect" to dialect,
             "truncated" to truncated,
-            "tables" to tables.map { (table, columns) -> mapOf("table" to table.toResponse(), "columns" to columns.map { it.toResponse() }) },
+            "tables" to
+                tables.map { (table, columns) -> mapOf("table" to table.toResponse(), "columns" to columns.map { it.toResponse() }) },
         )
 }
