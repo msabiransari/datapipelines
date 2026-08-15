@@ -37,18 +37,30 @@ class SchemaIntrospector(
             readTables(meta, adapter, catalog, schemaPattern, maxTables)
         }
 
-    /** §7A — one table's columns with canonical types; empty when the table does not exist. */
+    /**
+     * §7A — one table's columns with canonical types; empty when the table does not exist.
+     *
+     * Without a schema filter the read defaults to the **connection's current schema** (routed
+     * per dialect exactly like an explicit filter): an unfiltered `getColumns` would merge the
+     * columns of same-named tables across schemas into one list. A driver that reports no
+     * current schema falls back to unfiltered — with system schemas still excluded row by row.
+     */
     fun columns(
         datasourceName: String,
         table: String,
         schemaFilter: String? = null,
     ): List<ColumnInfo> =
-        withMetaData(datasourceName) { _, meta, datasource ->
+        withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
+            val effectiveFilter = schemaFilter ?: connection.currentSchema(adapter)
+            val (catalog, schemaPattern) = adapter.routeSchemaFilter(effectiveFilter?.toExactMatch(meta.searchStringEscape))
             meta.getColumns(catalog, schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
                 buildList {
-                    while (rs.next()) add(mapColumnRow(rs, adapter.typeMapper))
+                    while (rs.next()) {
+                        val schema = rs.getString(adapter.schemaResultColumn())
+                        if (adapter.isSystemSchema(schema)) continue
+                        add(mapColumnRow(rs, adapter.typeMapper))
+                    }
                 }
             }
         }
@@ -199,6 +211,19 @@ class SchemaIntrospector(
 
     /** The result column that carries the schema: TABLE_CAT for catalog-routing drivers, TABLE_SCHEM otherwise. */
     private fun DialectAdapter.schemaResultColumn(): String = if (schemaArrivesInCatalog) "TABLE_CAT" else "TABLE_SCHEM"
+
+    /**
+     * The connection's current schema, in this dialect's own vocabulary: the **catalog** for
+     * catalog-routing drivers (Connector/J keeps the current database there and leaves
+     * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none —
+     * the caller then reads unfiltered.
+     */
+    private fun Connection.currentSchema(adapter: DialectAdapter): String? =
+        try {
+            if (adapter.schemaArrivesInCatalog) catalog else schema
+        } catch (_: SQLException) {
+            null
+        }
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(

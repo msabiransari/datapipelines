@@ -398,15 +398,121 @@ class SchemaIntrospectorTest {
         shouldThrow<IllegalStateException> { introspector.tables(name) }
     }
 
+    @Test
+    fun `columns without a schema filter defaults to the connection's current schema`() {
+        // Same-named tables in two schemas: an unfiltered getColumns merges BOTH tables'
+        // columns into one list. The default is the connection's current schema (here PUBLIC
+        // for a fresh H2 lease), so `DEALS` unambiguously means the current schema's DEALS.
+        h2.createStatement().use { st ->
+            st.execute("CREATE SCHEMA other")
+            st.execute("CREATE TABLE deals (id INT, amount DECIMAL(10,2))")
+            st.execute("CREATE TABLE other.deals (id INT, rogue_flag INT)")
+        }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val columns = introspector.columns("h2-test", "DEALS")
+
+        columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "AMOUNT")
+    }
+
+    @Test
+    fun `columns excludes the driver's system schemas`() {
+        // INFORMATION_SCHEMA.TABLES is a real system table H2 reports; a columns read must not
+        // return its rows even when the schema is named explicitly (the house rule: unknown /
+        // system schema matches nothing).
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        introspector.columns("h2-test", "TABLES", schemaFilter = "INFORMATION_SCHEMA") shouldBe emptyList()
+    }
+
+    @Test
+    fun `columns reads the current schema from the schemaPattern argument for schema-filtered dialects`() {
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns(null, "sales", "deals", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOverMockedMetadata(Dialect.POSTGRES, meta) { connection ->
+                every { connection.schema } returns "sales"
+            }
+
+        introspector.columns(name, "deals") shouldBe emptyList()
+
+        io.mockk.verify(exactly = 1) { meta.getColumns(null, "sales", "deals", "%") }
+    }
+
+    @Test
+    fun `columns reads the current schema from the catalog argument for catalog-routing dialects`() {
+        // Connector/J keeps the current database in the CATALOG (getSchema() returns null under
+        // the default databaseTerm) — the default must route exactly like the schema filter does.
+        val meta = mockk<DatabaseMetaData>()
+        val columnsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
+        every { columnsRs.next() } returns false
+        val (introspector, name) =
+            introspectorOverMockedMetadata(Dialect.MYSQL, meta) { connection ->
+                every { connection.catalog } returns "app"
+            }
+
+        introspector.columns(name, "orders") shouldBe emptyList()
+
+        io.mockk.verify(exactly = 1) { meta.getColumns("app", null, "orders", "%") }
+    }
+
+    @Test
+    fun `columns falls back to unfiltered minus system schemas when the driver reports no current schema`() {
+        // A driver may return null (or throw SQLFeatureNotSupportedException) from
+        // getSchema()/getCatalog() — the read is then unfiltered, with system schemas still
+        // excluded row by row.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOverMockedMetadata(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } returns null
+                    }
+
+                introspector.columns(name, "deals") shouldBe emptyList()
+                io.mockk.verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOverMockedMetadata(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLFeatureNotSupportedException()
+                    }
+
+                introspector.columns(name, "deals") shouldBe emptyList()
+                io.mockk.verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+            },
+        )
+    }
+
     /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */
     private fun introspectorOverMockedMetadata(
         dialect: Dialect,
         meta: DatabaseMetaData,
+        connectionSetup: (Connection) -> Unit = {},
     ): Pair<SchemaIntrospector, String> {
         val ds = Fixtures.forDialect(dialect)
         val connection = mockk<Connection>()
         every { connection.metaData } returns meta
         every { connection.close() } returns Unit
+        connectionSetup(connection)
         val registry = mockk<DatasourceRegistry>()
         every { registry.get(ds.name) } returns ds
         every { registry.poolFor(ds) } returns
