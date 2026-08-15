@@ -4,8 +4,8 @@ import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
-import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.TableWithColumns
+import co.datapipelines.datasources.TablesPage
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException

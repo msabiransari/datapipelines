@@ -65,8 +65,10 @@ class RequiredScopeCoverageTest {
             // Production coverage only: on the test runtime classpath this package also holds
             // @RestController test probes (e.g. ApiExceptionHandlerTest.ProbeController), which
             // live in the test compile output and are exercised by their own tests.
-            .filter { it.protectionDomain.codeSource.location.path.contains("/main/") }
-            .map { it.kotlin }
+            .filter {
+                it.protectionDomain.codeSource.location.path
+                    .contains("/main/")
+            }.map { it.kotlin }
             .sortedBy { it.qualifiedName }
 
     private fun isHttpHandler(method: java.lang.reflect.Method?): Boolean {

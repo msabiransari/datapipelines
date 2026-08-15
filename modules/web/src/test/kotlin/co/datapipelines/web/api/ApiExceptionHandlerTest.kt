@@ -66,7 +66,9 @@ class ApiExceptionHandlerTest {
         // 502 means the DOWNSTREAM is broken (the caller's own database, typically) — an ERROR
         // with a stack per request would bury the operator's real incidents.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {

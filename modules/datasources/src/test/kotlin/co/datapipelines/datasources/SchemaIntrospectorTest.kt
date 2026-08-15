@@ -108,7 +108,12 @@ class SchemaIntrospectorTest {
 
         // The name comes from tables(), exactly as the §7A caller contract documents — JDBC
         // metadata name patterns are case-sensitive and H2 stores unquoted identifiers uppercased.
-        val name = introspector.tables("h2-test").tables.first { it.name.equals("orders", ignoreCase = true) }.name
+        val name =
+            introspector
+                .tables("h2-test")
+                .tables
+                .first { it.name.equals("orders", ignoreCase = true) }
+                .name
         val columns = introspector.columns("h2-test", name)
 
         assertAll(
@@ -241,7 +246,10 @@ class SchemaIntrospectorTest {
 
         assertAll(
             { columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE") },
-            { introspector.columns("h2-test", "ORDER1ITEMS").map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ROGUE_FLAG") },
+            {
+                introspector.columns("h2-test", "ORDER1ITEMS").map { it.column.name.uppercase() } shouldContainExactly
+                    listOf("ID", "ROGUE_FLAG")
+            },
         )
     }
 
@@ -275,7 +283,9 @@ class SchemaIntrospectorTest {
         every { registry.poolFor(ds) } returns pool
 
         val items =
-            introspector.snapshot("h2-test").tables
+            introspector
+                .snapshot("h2-test")
+                .tables
                 .first { it.table.name.equals("ORDER_ITEMS", ignoreCase = true) }
 
         items.columns.map { it.column.name.uppercase() } shouldContainExactly listOf("ID", "ITEMS_NOTE")
@@ -300,10 +310,17 @@ class SchemaIntrospectorTest {
         val (introspector, name) = introspectorOverMockedMetadata(Dialect.MYSQL, meta)
 
         assertAll(
-            { introspector.tables(name, schemaFilter = "app").tables.single().schema shouldBe "app" },
+            {
+                introspector
+                    .tables(name, schemaFilter = "app")
+                    .tables
+                    .single()
+                    .schema shouldBe "app"
+            },
             { introspector.columns(name, "orders", schemaFilter = "app") shouldBe emptyList() },
         )
     }
+
     @Test
     fun `schema-filtered dialects keep the filter in the schemaPattern argument`() {
         // The non-MySQL world: TABLE_SCHEM carries the schema and the filter stays in the
@@ -319,7 +336,11 @@ class SchemaIntrospectorTest {
 
         val (introspector, name) = introspectorOverMockedMetadata(Dialect.POSTGRES, meta)
 
-        introspector.tables(name, schemaFilter = "public").tables.single().schema shouldBe "public"
+        introspector
+            .tables(name, schemaFilter = "public")
+            .tables
+            .single()
+            .schema shouldBe "public"
     }
 
     /** An introspector whose registry hands out a connection with the given mocked metadata. Returns (introspector, datasource name). */

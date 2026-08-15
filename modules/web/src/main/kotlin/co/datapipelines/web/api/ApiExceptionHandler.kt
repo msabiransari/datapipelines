@@ -200,12 +200,17 @@ class ApiExceptionHandler {
     ) {
         when {
             // 502 is the caller's downstream being down, not this server breaking — WARN, no stack.
-            status == HttpStatus.BAD_GATEWAY ->
+            status == HttpStatus.BAD_GATEWAY -> {
                 log.warn("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
-            status.is5xxServerError ->
+            }
+
+            status.is5xxServerError -> {
                 log.error("{} {} {}", status.value(), request.method, request.requestURI, error)
-            else ->
+            }
+
+            else -> {
                 log.debug("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
+            }
         }
     }
 

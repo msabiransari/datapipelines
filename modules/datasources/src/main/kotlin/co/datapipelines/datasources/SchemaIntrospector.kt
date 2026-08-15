@@ -92,6 +92,10 @@ class SchemaIntrospector(
         val out = mutableListOf<TableInfo>()
         var truncated = false
         meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
+            // Two jumps on purpose: system-schema rows are skipped WITHOUT counting against
+            // the cap, and the cap+1-th USER row is the truncation proof — checking the cap
+            // before the system-row test would flag truncation on a trailing system row.
+            @Suppress("LoopWithTooManyJumpStatements")
             while (rs.next()) {
                 val schema = rs.getString(adapter.schemaResultColumn())
                 if (adapter.isSystemSchema(schema)) continue
@@ -154,8 +158,7 @@ class SchemaIntrospector(
     }
 
     /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
-    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean =
-        schema != null && schema.lowercase() in introspectionSystemSchemas
+    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean = schema != null && schema.lowercase() in introspectionSystemSchemas
 
     /**
      * Where the escaped schema filter goes: the catalog argument for drivers that carry the
@@ -177,14 +180,22 @@ class SchemaIntrospector(
     /**
      * Escapes `_`, `%` and the escape character itself so the string matches **only itself**
      * as a JDBC metadata name pattern (the driver's `getSearchStringEscape` says how to escape).
+     * An empty escape string means the driver defines none — the name passes through as-is.
      */
-    private fun String.toExactMatch(escape: String): String =
-        buildString {
+    private fun String.toExactMatch(escape: String): String {
+        if (escape.isEmpty()) return this
+        val escapeChar = escape[0]
+        return buildString {
             this@toExactMatch.forEach { ch ->
-                if (ch == '_' || ch == '%' || (escape.isNotEmpty() && ch == escape[0])) append(escape)
+                if (ch == '_' || ch == '%') {
+                    append(escape)
+                } else if (ch == escapeChar) {
+                    append(escape)
+                }
                 append(ch)
             }
         }
+    }
 
     private companion object {
         /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */

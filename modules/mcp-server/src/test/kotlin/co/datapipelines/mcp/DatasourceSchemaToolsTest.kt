@@ -6,8 +6,8 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
-import co.datapipelines.datasources.TablesPage
 import co.datapipelines.datasources.TableWithColumns
+import co.datapipelines.datasources.TablesPage
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
@@ -56,8 +56,9 @@ class DatasourceSchemaToolsTest {
     fun `get_tables pushes the schema filter through`() {
         every { introspector.tables("pg-prod", "sales") } returns TablesPage(emptyList(), truncated = false)
 
-        val payload = DatasourcesGetTablesTool(introspector)
-            .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as Map<*, *>
+        val payload =
+            DatasourcesGetTablesTool(introspector)
+                .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as Map<*, *>
 
         (payload["tables"] as List<*>).size shouldBe 0
     }

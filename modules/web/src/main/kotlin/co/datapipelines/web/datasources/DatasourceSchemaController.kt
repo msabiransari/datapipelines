@@ -53,8 +53,7 @@ class DatasourceSchemaController(
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
-    ): ApiResponse<Map<String, Any?>> =
-        ApiResponse.of(introspecting(name) { introspector.tables(name, schema).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.tables(name, schema).toWireMap() })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -85,5 +84,4 @@ class DatasourceSchemaController(
                 cause = e,
             )
         }
-
 }

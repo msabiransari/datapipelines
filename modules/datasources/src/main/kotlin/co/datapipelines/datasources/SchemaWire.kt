@@ -1,6 +1,6 @@
 package co.datapipelines.datasources
 
-/**
+/*
  * The shared §7A wire projections — ONE definition per payload shape, used verbatim by BOTH
  * surfaces (the REST endpoints of `modules/web` and the MCP tools of `modules/mcp-server`), so
  * the two cannot drift apart and neither invents its own field names.
