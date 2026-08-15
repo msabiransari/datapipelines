@@ -109,6 +109,32 @@ class SchemaIntrospectorTest {
     }
 
     @Test
+    fun `tables excludes the driver's system schemas`() {
+        // H2 keeps its catalog in INFORMATION_SCHEMA; those rows must not leak into the
+        // listing (pre-fix they ride along on the VIEW type and eat the snapshot cap).
+        h2.createStatement().use { it.execute("CREATE TABLE orders (id INT PRIMARY KEY)") }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val tables = introspector.tables("h2-test")
+
+        tables.none { it.schema?.equals("INFORMATION_SCHEMA", ignoreCase = true) == true } shouldBe true
+    }
+
+    @Test
+    fun `snapshot excludes the driver's system schemas`() {
+        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT)") } }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns pool
+
+        val snapshot = introspector.snapshot("h2-test", maxTables = 3)
+
+        snapshot.tables.none { it.table.schema?.equals("INFORMATION_SCHEMA", ignoreCase = true) == true } shouldBe true
+    }
+
+    @Test
     fun `snapshot flags truncation when the table count exceeds the cap`() {
         h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT)") } }
         val ds = datasource()

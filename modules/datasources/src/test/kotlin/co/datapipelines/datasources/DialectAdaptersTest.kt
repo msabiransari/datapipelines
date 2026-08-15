@@ -30,6 +30,28 @@ class DialectAdaptersTest {
     }
 
     @Test
+    fun `every dialect declares an introspection table-type vocabulary and system-schema exclusion`() {
+        // §7A: the vocabulary is a per-dialect property, not a hardcoded constant — every
+        // adapter must carry one, and matching against the exclusion is case-insensitive.
+        DialectAdapters.all().forEach { adapter ->
+            assert(adapter.introspectionTableTypes.isNotEmpty()) { "${adapter.dialect} has no table-type vocabulary" }
+            assert(adapter.introspectionSystemSchemas.all { it == it.lowercase() }) {
+                "${adapter.dialect} system schemas must be declared lowercase"
+            }
+        }
+        // Postgres carries the extra user-data types beyond TABLE/VIEW...
+        DialectAdapters.forDialect(Dialect.POSTGRES).introspectionTableTypes shouldContainExactlyInAnyOrder
+            listOf("TABLE", "VIEW", "PARTITIONED TABLE", "MATERIALIZED VIEW", "FOREIGN TABLE")
+        // ...and excludes its system catalogs.
+        DialectAdapters.forDialect(Dialect.POSTGRES).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            listOf("pg_catalog", "information_schema")
+        // Every other dialect excludes at least the SQL-standard system schema.
+        Dialect.entries.filter { it != Dialect.POSTGRES }.forEach { dialect ->
+            ("information_schema" in DialectAdapters.forDialect(dialect).introspectionSystemSchemas) shouldBe true
+        }
+    }
+
+    @Test
     fun `a well-formed URL for the dialect passes`() {
         DialectAdapters
             .forDialect(Dialect.POSTGRES)

@@ -30,6 +30,26 @@ interface DialectAdapter {
     val typeMapper: IngressTypeMapper
 
     /**
+     * §7A introspection: the JDBC table types this dialect treats as **user data** — what
+     * `getTables` asks for and what the tables/snapshot operations list. The SQL-standard
+     * floor is `TABLE` + `VIEW`; a dialect adds the types its users actually create (Postgres:
+     * partitioned/materialized/foreign tables). System catalogs that arrive under other types
+     * (`SYSTEM TABLE`, `SYSTEM VIEW`) are excluded by the type vocabulary itself.
+     */
+    val introspectionTableTypes: List<String>
+        get() = listOf("TABLE", "VIEW")
+
+    /**
+     * §7A introspection: schemas that belong to the engine, not the user — rows in these are
+     * dropped from every introspection result (they would otherwise ride along on the `VIEW`
+     * type and eat the snapshot cap). Declared **lowercase**; matching is case-insensitive,
+     * because drivers report the standard schema variously as `INFORMATION_SCHEMA` (H2),
+     * `information_schema` (Postgres, MySQL).
+     */
+    val introspectionSystemSchemas: Set<String>
+        get() = setOf("information_schema")
+
+    /**
      * This dialect's **refusal set** (§5.6): property keys the pinned driver would read as a class
      * name to instantiate, a file path, connect-time SQL, or a TLS-verification switch. Lowercase;
      * matching is case-insensitive.

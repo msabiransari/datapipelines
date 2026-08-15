@@ -403,6 +403,8 @@ Three read operations, all served by the module's `SchemaIntrospector` through t
 | Columns (one table) | `[{name, type, precision, scale, nullable, source_type}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. |
 | Schema snapshot | `{datasource, dialect, truncated, tables:[{table, columns}]}` | Whole schema in one payload, capped at **200 tables**; `truncated: true` when the cap dropped tables. |
 
+The table-type vocabulary and the system-schema exclusion are **per-dialect properties on the `DialectAdapter`** (next to the type mapper): every dialect lists at least `TABLE` and `VIEW` and excludes at least `information_schema` (case-insensitive); Postgres additionally lists `PARTITIONED TABLE`, `MATERIALIZED VIEW` and `FOREIGN TABLE`, and excludes `pg_catalog` as well. System catalogs that report under other JDBC types (`SYSTEM TABLE`, `SYSTEM VIEW`) are kept out by the type vocabulary itself.
+
 Rules:
 
 - **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-api-v1-datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).

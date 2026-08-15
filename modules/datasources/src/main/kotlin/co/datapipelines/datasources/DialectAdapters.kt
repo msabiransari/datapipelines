@@ -82,7 +82,18 @@ abstract class AbstractDialectAdapter(
     }
 }
 
-class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgresql")
+/**
+ * Postgres — the one adapter whose introspection vocabulary differs (datasources.md §7A):
+ * users create partitioned tables, materialized views and foreign tables, and the engine's own
+ * catalogs (`pg_catalog`, `information_schema`) report their contents under the plain `VIEW`
+ * type, so the type vocabulary alone cannot keep them out.
+ */
+class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgresql") {
+    override val introspectionTableTypes: List<String> =
+        listOf("TABLE", "VIEW", "PARTITIONED TABLE", "MATERIALIZED VIEW", "FOREIGN TABLE")
+
+    override val introspectionSystemSchemas: Set<String> = setOf("pg_catalog", "information_schema")
+}
 
 class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle")
 

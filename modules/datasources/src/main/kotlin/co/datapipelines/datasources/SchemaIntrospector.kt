@@ -27,12 +27,15 @@ class SchemaIntrospector(
         datasourceName: String,
         schemaFilter: String? = null,
     ): List<TableInfo> =
-        withMetaData(datasourceName) { meta, _ ->
+        withMetaData(datasourceName) { meta, datasource ->
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
             val escape = meta.searchStringEscape
-            meta.getTables(null, schemaFilter?.toExactMatch(escape), "%", TABLE_TYPES).use { rs ->
+            meta.getTables(null, schemaFilter?.toExactMatch(escape), "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
                 buildList {
                     while (rs.next()) {
-                        add(TableInfo(rs.getString("TABLE_SCHEM"), rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
+                        val schema = rs.getString("TABLE_SCHEM")
+                        if (adapter.isSystemSchema(schema)) continue
+                        add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
                     }
                 }
             }
@@ -99,6 +102,10 @@ class SchemaIntrospector(
         return registry.poolFor(datasource).leaseConnection().use { block(it.metaData, datasource) }
     }
 
+    /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
+    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean =
+        schema != null && schema.lowercase() in introspectionSystemSchemas
+
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(
             code = DatasourceErrorCodes.NOT_FOUND,
@@ -119,9 +126,6 @@ class SchemaIntrospector(
         }
 
     private companion object {
-        /** §7A lists tables and views — the JDBC metadata terms for what pipelines may read. */
-        val TABLE_TYPES = arrayOf("TABLE", "VIEW")
-
         /** The §7A snapshot cap — bounds one `datasources_get_schema` call's payload. */
         const val MAX_SNAPSHOT_TABLES = 200
     }
