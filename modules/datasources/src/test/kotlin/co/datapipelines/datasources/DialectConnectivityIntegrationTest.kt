@@ -124,7 +124,7 @@ class DialectConnectivityIntegrationTest {
 
         // The schemas listing reads the DATABASES (catalogs) under Connector/J defaults, with
         // the engine's own databases excluded the same way.
-        val schemas = introspector.schemas("mysql_intro")
+        val schemas = introspector.schemas("mysql_intro").schemas
         assertAll(
             { schemas.map { it.lowercase() } shouldContain mysql.databaseName.lowercase() },
             {

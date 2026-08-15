@@ -36,8 +36,8 @@ import org.springframework.web.bind.annotation.RestController
  *
  * All three endpoints are `author`-scoped (§7A, the §8.1 connection-test precedent): each opens a
  * live connection against the datasource, and the stated consumer is pipeline authoring. No
- * pagination — the tables listing is capped at 2000 (`truncated: true` when the cap dropped
- * any), the schemas and per-table listings are naturally bounded.
+ * pagination — the tables and schemas listings are each capped at 2000 (`truncated: true` when
+ * the cap dropped any); per-table column listings are naturally bounded.
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
@@ -46,13 +46,14 @@ class DatasourceSchemaController(
 ) {
     /**
      * §7A — the schema listing, the introspection flow's entry point (schemas → tables →
-     * columns). A plain list of names; empty is a valid answer on schemaless dialects.
+     * columns). The shared wire projection (`{"schemas": [...], "truncated": bool}`); empty is
+     * a valid answer on schemaless dialects.
      */
     @GetMapping("/{name}/schemas")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun schemas(
         @PathVariable name: String,
-    ): ApiResponse<List<String>> = ApiResponse.of(introspecting(name) { introspector.schemas(name) })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.schemas(name).toWireMap() })
 
     /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")

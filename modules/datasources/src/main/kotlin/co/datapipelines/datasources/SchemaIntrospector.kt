@@ -30,7 +30,8 @@ class SchemaIntrospector(
     /**
      * §7A — the schema listing, the entry point of the introspection flow (schemas → tables →
      * columns). A plain list of schema names as the driver reported them, with the dialect's
-     * system schemas excluded.
+     * system schemas excluded, capped at [maxSchemas] (`truncated: true` when the cap dropped
+     * any — the same cap+1 early-exit discipline as [tables]).
      *
      * The vocabulary follows [DialectAdapter.schemaArrivesInCatalog]: for catalog-routing
      * drivers (Connector/J defaults) the databases ARE the JDBC catalogs, so the listing reads
@@ -38,20 +39,30 @@ class SchemaIntrospector(
      * list is a valid result, not an error: a schemaless dialect (SQLite, single-db DuckDB)
      * genuinely has no schemas to list.
      */
-    fun schemas(datasourceName: String): List<String> =
+    fun schemas(
+        datasourceName: String,
+        maxSchemas: Int = MAX_LISTING_ROWS,
+    ): SchemasPage =
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
             rs.use {
-                buildList {
-                    while (it.next()) {
-                        // The JDBC "" sentinel ("objects without a catalog") is not a schema
-                        // an agent can pass to get_tables — skip it rather than list it.
-                        val schema = it.getString(adapter.schemaResultColumn()).asNonBlankOrNull() ?: continue
-                        if (adapter.isSystemSchema(schema)) continue
-                        add(schema)
+                val out = mutableListOf<String>()
+                var truncated = false
+                // Same jump discipline as readTables: system rows are skipped WITHOUT counting
+                // against the cap, and the cap+1-th USER row is the truncation proof.
+                while (it.next()) {
+                    // The JDBC "" sentinel ("objects without a catalog") is not a schema
+                    // an agent can pass to get_tables — skip it rather than list it.
+                    val schema = it.getString(adapter.schemaResultColumn()).asNonBlankOrNull() ?: continue
+                    if (adapter.isSystemSchema(schema)) continue
+                    if (out.size == maxSchemas) {
+                        truncated = true
+                        break
                     }
+                    out.add(schema)
                 }
+                SchemasPage(out, truncated)
             }
         }
 
@@ -67,7 +78,7 @@ class SchemaIntrospector(
     fun tables(
         datasourceName: String,
         schemaFilter: String? = null,
-        maxTables: Int = MAX_TABLES,
+        maxTables: Int = MAX_LISTING_ROWS,
     ): TablesPage =
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
@@ -361,8 +372,12 @@ class SchemaIntrospector(
     }
 
     private companion object {
-        /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */
-        const val MAX_TABLES = 2000
+        /**
+         * The §7A listing cap — bounds ONE introspection call's payload and walk, shared by the
+         * tables and schemas listings (both hold the pooled lease while they iterate; on MySQL
+         * catalog routing the schemas walk is every database the server grants).
+         */
+        const val MAX_LISTING_ROWS = 2000
 
         /** The vendored sqlite-jdbc's exception class (never compiled against — §10.3). */
         const val SQLITE_EXCEPTION_CLASS = "org.sqlite.SQLiteException"

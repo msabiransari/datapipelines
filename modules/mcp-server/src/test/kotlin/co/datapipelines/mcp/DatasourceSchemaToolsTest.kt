@@ -34,12 +34,13 @@ class DatasourceSchemaToolsTest {
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
     @Test
-    fun `get_schemas threads its arguments and serves the plain name list`() {
-        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+    fun `get_schemas threads its arguments and serves the shared wire projection`() {
+        val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
+        every { introspector.schemas("pg-prod") } returns page
 
         val payload = DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
 
-        payload shouldBe listOf("public", "sales")
+        payload shouldBe page.toWireMap()
     }
 
     @Test

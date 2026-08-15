@@ -43,6 +43,19 @@ class SchemaWireTest {
     }
 
     @Test
+    fun `schemas page wraps the names with the truncation flag`() {
+        // The schemas listing is capped like the tables listing — the flag tells the agent
+        // the listing is partial, not exhaustive.
+        assertAll(
+            {
+                SchemasPage(listOf("public", "sales"), truncated = false).toWireMap() shouldBe
+                    mapOf("schemas" to listOf("public", "sales"), "truncated" to false)
+            },
+            { SchemasPage(emptyList(), truncated = true).toWireMap()["truncated"] shouldBe true },
+        )
+    }
+
+    @Test
     fun `column descriptor carries source type and the mapper's warning messages`() {
         val warned =
             ColumnInfo(

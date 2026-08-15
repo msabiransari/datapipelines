@@ -287,7 +287,7 @@ class SchemaIntrospectorRoutingTest {
 
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
-        introspector.schemas(name) shouldBe listOf("public")
+        introspector.schemas(name).schemas shouldBe listOf("public")
     }
 
     @Test
@@ -303,7 +303,7 @@ class SchemaIntrospectorRoutingTest {
 
         val (introspector, name) = introspectorOver(Dialect.MYSQL, meta)
 
-        introspector.schemas(name) shouldBe listOf("my_app")
+        introspector.schemas(name).schemas shouldBe listOf("my_app")
     }
 
     @Test
@@ -316,7 +316,7 @@ class SchemaIntrospectorRoutingTest {
 
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
-        introspector.schemas(name) shouldBe listOf("public")
+        introspector.schemas(name).schemas shouldBe listOf("public")
     }
 
     @Test
@@ -333,7 +333,7 @@ class SchemaIntrospectorRoutingTest {
                 every { schemasRs.getString("TABLE_SCHEM") } returns "   " andThen "public"
                 val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
-                introspector.schemas(name) shouldBe listOf("public")
+                introspector.schemas(name).schemas shouldBe listOf("public")
             },
             {
                 val meta = mockk<DatabaseMetaData>()

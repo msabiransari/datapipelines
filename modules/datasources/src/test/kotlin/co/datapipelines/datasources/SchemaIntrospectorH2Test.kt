@@ -197,14 +197,16 @@ class SchemaIntrospectorH2Test {
         }
         wireDatasource()
 
-        val schemas = introspector.schemas("h2-test")
+        val page = introspector.schemas("h2-test")
 
         // H2 reports INFORMATION_SCHEMA beside every user schema; PUBLIC is the default
         // schema a fresh database carries. System schemas stay out, user schemas stay in —
-        // case preserved as the driver reported it (§7A: pass-through, no normalization).
+        // case preserved as the driver reported it (§7A: pass-through, no normalization) —
+        // and a small database is not truncated.
         assertAll(
-            { schemas.map { it.uppercase() } shouldContainExactly listOf("PUBLIC", "SALES") },
-            { schemas.none { it.equals("INFORMATION_SCHEMA", ignoreCase = true) } shouldBe true },
+            { page.schemas.map { it.uppercase() } shouldContainExactly listOf("PUBLIC", "SALES") },
+            { page.schemas.none { it.equals("INFORMATION_SCHEMA", ignoreCase = true) } shouldBe true },
+            { page.truncated shouldBe false },
         )
     }
 
@@ -218,7 +220,7 @@ class SchemaIntrospectorH2Test {
         every { emptyRs.next() } returns false
         val (mockedIntrospector, name) = introspectorOver(co.datapipelines.typesystem.Dialect.SQLITE, meta)
 
-        mockedIntrospector.schemas(name) shouldBe emptyList()
+        mockedIntrospector.schemas(name).schemas shouldBe emptyList()
     }
 
     @Test

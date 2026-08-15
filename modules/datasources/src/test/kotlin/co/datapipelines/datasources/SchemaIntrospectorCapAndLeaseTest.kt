@@ -49,6 +49,47 @@ class SchemaIntrospectorCapAndLeaseTest {
     }
 
     @Test
+    fun `schemas stops iterating at cap plus one row and flags truncation`() {
+        // schemas() walks getCatalogs()/getSchemas() under the pooled lease — on MySQL
+        // catalog routing that is EVERY database the server grants. The same cap+1
+        // early-exit as tables() bounds the walk and the payload, and the page flags the
+        // drop so the caller knows the listing is partial.
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true
+        every { schemasRs.getString("TABLE_SCHEM") } returns "s"
+        val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+        val page = introspector.schemas(name, maxSchemas = 2)
+
+        assertAll(
+            { verify(exactly = 3) { schemasRs.next() } },
+            { page.schemas.size shouldBe 2 },
+            { page.truncated shouldBe true },
+        )
+    }
+
+    @Test
+    fun `system-schema rows do not count against the schemas cap`() {
+        // Same jump discipline as tables(): a trailing system row is skipped WITHOUT
+        // counting, and truncation is only flagged when the cap+1-th USER row exists.
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true andThen true andThen true andThen false
+        every { schemasRs.getString("TABLE_SCHEM") } returns "pg_catalog" andThen "public" andThen "sales"
+        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+        val page = introspector.schemas(name, maxSchemas = 2)
+
+        assertAll(
+            { page.schemas shouldBe listOf("public", "sales") },
+            { page.truncated shouldBe false },
+        )
+    }
+
+    @Test
     fun `a pool-build failure is the module's unreachable - not an escaping RuntimeException`() {
         // The true Hikari path for a down database: `poolFor`'s `computeIfAbsent` builds the
         // pool and `HikariDataSource` construction throws PoolInitializationException — a

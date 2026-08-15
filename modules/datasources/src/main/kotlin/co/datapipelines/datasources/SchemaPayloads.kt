@@ -16,6 +16,17 @@ data class TablesPage(
 )
 
 /**
+ * The §7A schemas listing: the kept schema names plus whether the cap dropped any. A plain
+ * list of names was the v2.2 shape; the page (v2.6) mirrors TablesPage because the listing
+ * walks `getCatalogs()`/`getSchemas()` under the pooled lease and on MySQL catalog routing
+ * that is every database the server grants — bounded like tables() or not at all.
+ */
+data class SchemasPage(
+    val schemas: List<String>,
+    val truncated: Boolean,
+)
+
+/**
  * One live table/view: `type` is the raw JDBC table type (`TABLE`, `VIEW`, ...); `remarks` is
  * the engine-stored comment from JDBC REMARKS, null when the driver/database has none.
  */

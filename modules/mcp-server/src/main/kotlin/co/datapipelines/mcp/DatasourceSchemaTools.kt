@@ -60,7 +60,7 @@ class DatasourcesGetSchemasTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return introspecting(name) { introspector.schemas(name) }
+        return introspecting(name) { introspector.schemas(name).toWireMap() }
     }
 }
 
