@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.IngressTypeMapper
 import co.datapipelines.typesystem.TypeMappingWarning
 import java.sql.DatabaseMetaData
 
@@ -29,17 +30,8 @@ class SchemaIntrospector(
     ): List<TableInfo> =
         withMetaData(datasourceName) { meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val escape = meta.searchStringEscape
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(escape))
-            meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
-                buildList {
-                    while (rs.next()) {
-                        val schema = rs.getString(adapter.schemaResultColumn())
-                        if (adapter.isSystemSchema(schema)) continue
-                        add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
-                    }
-                }
-            }
+            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
+            readTables(meta, adapter, catalog, schemaPattern)
         }
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
@@ -50,29 +42,10 @@ class SchemaIntrospector(
     ): List<ColumnInfo> =
         withMetaData(datasourceName) { meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val mapper = adapter.typeMapper
-            val escape = meta.searchStringEscape
-            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(escape))
-            meta.getColumns(catalog, schemaPattern, table.toExactMatch(escape), "%").use { rs ->
+            val (catalog, schemaPattern) = adapter.routeSchemaFilter(schemaFilter?.toExactMatch(meta.searchStringEscape))
+            meta.getColumns(catalog, schemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
                 buildList {
-                    while (rs.next()) {
-                        val sourceTypeName = rs.getString("TYPE_NAME") ?: ""
-                        val mapped =
-                            mapper.mapColumn(
-                                name = rs.getString("COLUMN_NAME"),
-                                sqlType = rs.getInt("DATA_TYPE"),
-                                precision = rs.getInt("COLUMN_SIZE"),
-                                scale = rs.getInt("DECIMAL_DIGITS"),
-                                typeName = sourceTypeName,
-                                nullable =
-                                    when (rs.getInt("NULLABLE")) {
-                                        DatabaseMetaData.columnNoNulls -> false
-                                        DatabaseMetaData.columnNullable -> true
-                                        else -> null
-                                    },
-                            )
-                        add(ColumnInfo(mapped.column, sourceTypeName, mapped.warnings))
-                    }
+                    while (rs.next()) add(mapColumnRow(rs, adapter.typeMapper))
                 }
             }
         }
@@ -81,21 +54,84 @@ class SchemaIntrospector(
      * §7A — the whole schema in one payload, capped at [maxTables] tables (each with its
      * columns). [SchemaSnapshot.truncated] is `true` when the cap dropped tables, so a caller
      * knows to fall back to `tables` + `columns` for the remainder.
+     *
+     * **One connection lease**: `getTables` plus a single bulk `getColumns(catalog, schema,
+     * "%", "%")` grouped by (schema, table) in memory. Leasing per table (up to 201 leases for
+     * a full snapshot) would starve the pool and read the schema across connections that can
+     * disagree mid-flight; one lease keeps the snapshot read-consistent.
      */
     fun snapshot(
         datasourceName: String,
         maxTables: Int = MAX_SNAPSHOT_TABLES,
-    ): SchemaSnapshot {
-        val datasource = registry.get(datasourceName) ?: throw notFound(datasourceName)
-        val all = tables(datasourceName)
-        val kept = all.take(maxTables)
-        return SchemaSnapshot(
-            datasource = datasourceName,
-            dialect = datasource.dialect.wire,
-            tables = kept.map { TableWithColumns(it, columns(datasourceName, it.name, it.schema)) },
-            truncated = all.size > kept.size,
-        )
+    ): SchemaSnapshot =
+        withMetaData(datasourceName) { meta, datasource ->
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val all = readTables(meta, adapter, null, null)
+            val kept = all.take(maxTables)
+            val columnsByTable = readAllColumns(meta, adapter)
+            SchemaSnapshot(
+                datasource = datasourceName,
+                dialect = datasource.dialect.wire,
+                tables = kept.map { TableWithColumns(it, columnsByTable[it.key()].orEmpty()) },
+                truncated = all.size > kept.size,
+            )
+        }
+
+    private fun readTables(
+        meta: DatabaseMetaData,
+        adapter: DialectAdapter,
+        catalog: String?,
+        schemaPattern: String?,
+    ): List<TableInfo> =
+        meta.getTables(catalog, schemaPattern, "%", adapter.introspectionTableTypes.toTypedArray()).use { rs ->
+            buildList {
+                while (rs.next()) {
+                    val schema = rs.getString(adapter.schemaResultColumn())
+                    if (adapter.isSystemSchema(schema)) continue
+                    add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE")))
+                }
+            }
+        }
+
+    /** The bulk column read behind [snapshot], grouped by the (schema, table) the tables listing reports. */
+    private fun readAllColumns(
+        meta: DatabaseMetaData,
+        adapter: DialectAdapter,
+    ): Map<Pair<String?, String>, List<ColumnInfo>> =
+        meta.getColumns(null, null, "%", "%").use { rs ->
+            buildList<Pair<Pair<String?, String>, ColumnInfo>> {
+                while (rs.next()) {
+                    val schema = rs.getString(adapter.schemaResultColumn())
+                    if (adapter.isSystemSchema(schema)) continue
+                    add(schema to rs.getString("TABLE_NAME") to mapColumnRow(rs, adapter.typeMapper))
+                }
+            }.groupBy({ it.first }, { it.second })
+        }
+
+    private fun mapColumnRow(
+        rs: java.sql.ResultSet,
+        mapper: IngressTypeMapper,
+    ): ColumnInfo {
+        val sourceTypeName = rs.getString("TYPE_NAME") ?: ""
+        val mapped =
+            mapper.mapColumn(
+                name = rs.getString("COLUMN_NAME"),
+                sqlType = rs.getInt("DATA_TYPE"),
+                precision = rs.getInt("COLUMN_SIZE"),
+                scale = rs.getInt("DECIMAL_DIGITS"),
+                typeName = sourceTypeName,
+                nullable =
+                    when (rs.getInt("NULLABLE")) {
+                        DatabaseMetaData.columnNoNulls -> false
+                        DatabaseMetaData.columnNullable -> true
+                        else -> null
+                    },
+            )
+        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
     }
+
+    /** The lookup key [snapshot] joins the tables listing and the bulk column read on. */
+    private fun TableInfo.key(): Pair<String?, String> = schema to name
 
     private fun <T> withMetaData(
         datasourceName: String,

@@ -155,6 +155,38 @@ class SchemaIntrospectorTest {
     }
 
     @Test
+    fun `snapshot leases ONE connection - tables and bulk columns on a single consistent lease`() {
+        // One lease per table (up to 201 for a full snapshot) starves the pool and reads the
+        // schema across connections that may disagree mid-flight. The snapshot must be one
+        // getTables + one bulk getColumns on a single connection.
+        h2.createStatement().use { st -> (1..3).forEach { st.execute("CREATE TABLE t$it (id INT, note VARCHAR(10))") } }
+        var leases = 0
+        val countingPool =
+            object : ConnectionPool {
+                override val name: String = "h2-test"
+
+                override fun leaseConnection(): Connection {
+                    leases++
+                    return DriverManager.getConnection("jdbc:h2:mem:introspect;DB_CLOSE_DELAY=-1")
+                }
+
+                override fun close() = Unit
+            }
+        val ds = datasource()
+        every { registry.get("h2-test") } returns ds
+        every { registry.poolFor(ds) } returns countingPool
+
+        val snapshot = introspector.snapshot("h2-test", maxTables = 2)
+
+        assertAll(
+            { leases shouldBe 1 },
+            { snapshot.tables.size shouldBe 2 },
+            { snapshot.truncated shouldBe true },
+            { snapshot.tables.all { it.columns.size == 2 } shouldBe true },
+        )
+    }
+
+    @Test
     fun `a table filter is exact-match - underscore is not a wildcard`() {
         // `ORDER_ITEMS` and `ORDER1ITEMS` are wildcard siblings: as a raw JDBC LIKE pattern,
         // "ORDER_ITEMS" also matches "ORDER1ITEMS" (`_` = any single character), merging the

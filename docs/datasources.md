@@ -401,7 +401,7 @@ Three read operations, all served by the module's `SchemaIntrospector` through t
 |---|---|---|
 | Tables | `[{schema, name, type}]` | Tables and views; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...). Optional schema filter. |
 | Columns (one table) | `[{name, type, precision, scale, nullable, source_type}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. |
-| Schema snapshot | `{datasource, dialect, truncated, tables:[{table, columns}]}` | Whole schema in one payload, capped at **200 tables**; `truncated: true` when the cap dropped tables. |
+| Schema snapshot | `{datasource, dialect, truncated, tables:[{table, columns}]}` | Whole schema in one payload, capped at **200 tables**; `truncated: true` when the cap dropped tables. Served by **one connection lease**: `getTables` plus a single bulk `getColumns` grouped in memory, so the snapshot is read-consistent and never leases a connection per table. |
 
 The table-type vocabulary and the system-schema exclusion are **per-dialect properties on the `DialectAdapter`** (next to the type mapper): every dialect lists at least `TABLE` and `VIEW` and excludes at least `information_schema` (case-insensitive); Postgres additionally lists `PARTITIONED TABLE`, `MATERIALIZED VIEW` and `FOREIGN TABLE`, and excludes `pg_catalog` as well. System catalogs that report under other JDBC types (`SYSTEM TABLE`, `SYSTEM VIEW`) are kept out by the type vocabulary itself.
 
