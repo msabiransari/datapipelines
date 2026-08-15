@@ -31,7 +31,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 18 tools, the two prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 18 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency

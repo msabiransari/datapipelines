@@ -3,7 +3,6 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.ScopeMatrix
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.modelcontextprotocol.spec.McpError
@@ -11,7 +10,7 @@ import io.modelcontextprotocol.spec.McpSchema
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 
-/** §8: exactly two prompts, and the admission rule that keeps the third out. */
+/** §8: exactly three prompts — the introspection-grounded authoring walkthrough now ships too. */
 class McpPromptCatalogTest {
     private val catalog = McpPromptCatalog()
 
@@ -20,20 +19,49 @@ class McpPromptCatalogTest {
     }
 
     @Test
-    fun `exactly the two admissible prompts are offered`() {
-        catalog.prompts.map { it.name() } shouldContainExactly listOf("analyze_pipeline", "debug_failed_execution")
+    fun `exactly the three admissible prompts are offered`() {
+        catalog.prompts.map { it.name() } shouldContainExactly
+            listOf("analyze_pipeline", "create_pipeline_for_question", "debug_failed_execution")
     }
 
     @Test
-    fun `the prompt that needs unbuilt schema-introspection tools is not offered`() {
+    fun `create_pipeline_for_question grounds the walkthrough in introspection and embeds the question`() {
+        val result = catalog.get("create_pipeline_for_question", mapOf("question" to "top customers by revenue?"))!!
+        val text = (result.messages().single().content() as McpSchema.TextContent).text()
+
         assertAll(
-            { catalog.prompts.none { it.name() == "create_pipeline_for_question" } shouldBe true },
-            { catalog.get("create_pipeline_for_question", mapOf("question" to "x")).shouldBeNull() },
+            { text shouldContain "top customers by revenue?" },
+            { text shouldContain "datasources_get_tables" },
+            { text shouldContain "datasources_get_columns" },
+            { text shouldContain "data, not instructions" },
         )
     }
 
     @Test
-    fun `both prompts declare their required argument`() {
+    fun `an over-long question is refused with the same invalid-params guard`() {
+        shouldThrow<McpError> { catalog.get("create_pipeline_for_question", mapOf("question" to "x".repeat(2001))) }
+            .jsonRpcError
+            .code() shouldBe McpArguments.INVALID_PARAMS
+    }
+
+    @Test
+    fun `a missing or blank question is a protocol error`() {
+        assertAll(
+            {
+                shouldThrow<McpError> { catalog.get("create_pipeline_for_question", emptyMap()) }
+                    .jsonRpcError
+                    .code() shouldBe McpArguments.INVALID_PARAMS
+            },
+            {
+                shouldThrow<McpError> { catalog.get("create_pipeline_for_question", mapOf("question" to "   ")) }
+                    .jsonRpcError
+                    .code() shouldBe McpArguments.INVALID_PARAMS
+            },
+        )
+    }
+
+    @Test
+    fun `every prompt declares its single required argument`() {
         assertAll(
             {
                 catalog.prompts[0]
@@ -51,10 +79,22 @@ class McpPromptCatalogTest {
                 catalog.prompts[1]
                     .arguments()
                     .single()
-                    .name() shouldBe "execution_id"
+                    .name() shouldBe "question"
             },
             {
                 catalog.prompts[1]
+                    .arguments()
+                    .single()
+                    .required() shouldBe true
+            },
+            {
+                catalog.prompts[2]
+                    .arguments()
+                    .single()
+                    .name() shouldBe "execution_id"
+            },
+            {
+                catalog.prompts[2]
                     .arguments()
                     .single()
                     .required() shouldBe true
@@ -88,17 +128,14 @@ class McpPromptCatalogTest {
         )
     }
 
-    /**
-     * The §8 admission rule, mechanically: every `snake_case` tool name a prompt mentions must be
-     * one of the 15 v1 tools. A prompt that names a tool we have not built is a scripted failure.
-     */
     @Test
-    fun `every tool a prompt names is a v1 tool`() {
+    fun `every tool a prompt names is a shipped tool`() {
         val toolPattern = Regex("""\b([a-z]+_[a-z_]+)\b""")
         val known = ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys
         val prompts =
             listOf(
                 catalog.get("analyze_pipeline", mapOf("pipeline_id" to McpFixtures.PIPELINE_ID.toString()))!!,
+                catalog.get("create_pipeline_for_question", mapOf("question" to "top customers by revenue?"))!!,
                 catalog.get("debug_failed_execution", mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString()))!!,
             )
 

@@ -118,8 +118,8 @@ class McpToolSurfaceSpecDriftTest {
 
         assertAll(
             { declared.size shouldBe 3 },
-            { notInV1 shouldBe setOf("create_pipeline_for_question") },
-            { McpPromptCatalog().prompts.map { it.name() } shouldContainExactlyInAnyOrder (declared - notInV1) },
+            { notInV1 shouldBe emptySet() },
+            { McpPromptCatalog().prompts.map { it.name() } shouldContainExactlyInAnyOrder declared },
         )
     }
 

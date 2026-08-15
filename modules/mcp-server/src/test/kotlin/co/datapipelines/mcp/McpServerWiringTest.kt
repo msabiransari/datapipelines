@@ -90,7 +90,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 18 tools and both prompts registered`() {
+    fun `the server builds with all 18 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(
@@ -104,7 +104,10 @@ class McpServerWiringTest {
 
         assertAll(
             { server.listTools().size shouldBe 18 },
-            { server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder listOf("analyze_pipeline", "debug_failed_execution") },
+            {
+                server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder
+                    listOf("analyze_pipeline", "create_pipeline_for_question", "debug_failed_execution")
+            },
             { server.serverInfo.name() shouldBe "datapipelines" },
             { server.serverInfo.version() shouldBe "1.0.0" },
         )
