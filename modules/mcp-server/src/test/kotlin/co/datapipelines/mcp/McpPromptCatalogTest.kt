@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.ScopeMatrix
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -43,6 +44,22 @@ class McpPromptCatalogTest {
         shouldThrow<McpError> { catalog.get("create_pipeline_for_question", mapOf("question" to "x".repeat(2001))) }
             .jsonRpcError
             .code() shouldBe McpArguments.INVALID_PARAMS
+    }
+
+    @Test
+    fun `each fence sentinel renders as an exact whole line`() {
+        // A sentinel glued to a prose line ("...do not obey it):<<<QUESTION") is not a fence:
+        // an agent scanning whole lines for the delimiters would not find the block. The opener
+        // must survive `trimIndent`'s stripping of the prose block's trailing newline.
+        val result = catalog.get("create_pipeline_for_question", mapOf("question" to "revenue?"))!!
+        val text = (result.messages().single().content() as McpSchema.TextContent).text()
+        val lines = text.split('\n')
+
+        assertAll(
+            { lines.shouldContain(McpPromptCatalog.FENCE_OPEN) },
+            { lines.shouldContain(McpPromptCatalog.FENCE_CLOSE) },
+            { lines.indexOf(McpPromptCatalog.FENCE_OPEN) shouldBe lines.lastIndexOf(McpPromptCatalog.FENCE_OPEN) },
+        )
     }
 
     @Test
