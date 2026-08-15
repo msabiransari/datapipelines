@@ -429,6 +429,20 @@ regressions, not to force new tests: raise a floor only when a module's
 coverage has genuinely improved, and never lower one to make a build pass.
 `tests/integration-tests` has no floor (no main sources of its own).
 
+#### Dependency vulnerabilities (OSV-Scanner)
+
+```bash
+./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
+```
+
+osv-scanner (pinned in the script, downloaded into the git-ignored
+`build/tools/` and SHA256-verified against the release manifest) checks the
+resolved dependency set — the lockfiles, direct and transitive — against the
+OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
+date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
+stage; when the machine is offline the stage warns and does NOT fail (the scan
+is meaningless without osv.dev — the skip is printed, never silent).
+
 ---
 
 ## 11. Project Structure

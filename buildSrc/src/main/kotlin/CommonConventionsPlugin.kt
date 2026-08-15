@@ -110,6 +110,14 @@ class CommonConventionsPlugin : Plugin<Project> {
             add("implementation", platform(lib("jackson-bom")))
             add("testImplementation", platform(lib("jackson-bom")))
 
+            // SECURITY OVERRIDE (2026-08-15, GHSA-558v-64gr-wgg4): netty-bom 4.1.136.Final
+            // applied after the jackson override, same non-enforced-platform mechanism.
+            // Netty comes in via Lettuce (spring-boot-starter-data-redis) and sits on
+            // the production runtime classpath. Retirement condition is documented on
+            // the `netty` entry in libs.versions.toml.
+            add("implementation", platform(lib("netty-bom")))
+            add("testImplementation", platform(lib("netty-bom")))
+
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))

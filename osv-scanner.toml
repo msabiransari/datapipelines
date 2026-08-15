@@ -1,0 +1,75 @@
+# osv-scanner.toml — vulnerability ignore list for scripts/vuln-scan.sh.
+#
+# RULE: every [[IgnoredVulns]] entry carries a reason + date comment, and an
+# ignoreUntil so it expires loudly instead of rotting. The security override
+# pins (postgresql 42.7.13, jackson 2.21.5, netty 4.1.136.Final — see
+# gradle/libs.versions.toml) exist BECAUSE of past advisories; a finding here
+# means a NEW advisory against the pinned version, not a re-report of the
+# fixed one.
+#
+# Triage of the first scan (2026-08-15), every entry verified against the
+# GitHub Advisory API and the module lockfiles:
+#
+#  * logback-core 1.3.16 (3 LOWs) — appears ONLY in the `ktlint` configuration
+#    (the linter's own runtime), never on a compile/runtime/test classpath;
+#    the shipped logback is 1.5.34, already >= every first-patched version
+#    below. Not fixable from here: the version is baked into the ktlint
+#    distribution. Retire/revisit when the ktlint plugin ships logback 1.5.x.
+
+[[IgnoredVulns]]
+id = "GHSA-jhq6-gfmj-v8fx"   # logback 1.3.16 — ktlint tool classpath only, not shipped (triaged 2026-08-15)
+reason = "logback-core 1.3.16 resolves only in the ktlint linter's own configuration; production/test classpaths carry 1.5.34 (patched)"
+ignoreUntil = 2027-02-15
+
+[[IgnoredVulns]]
+id = "GHSA-p47f-322f-whfh" # logback 1.3.16 — ktlint tool classpath only, not shipped (triaged 2026-08-15)
+reason = "logback-core 1.3.16 resolves only in the ktlint linter's own configuration; production/test classpaths carry 1.5.34 (patched)"
+ignoreUntil = 2027-02-15
+
+[[IgnoredVulns]]
+id = "GHSA-qqpg-mvqg-649v" # logback 1.3.16 — ktlint tool classpath only, not shipped (triaged 2026-08-15)
+reason = "logback-core 1.3.16 resolves only in the ktlint linter's own configuration; production/test classpaths carry 1.5.34 (patched)"
+ignoreUntil = 2027-02-15
+
+#  * commons-compress 1.24.0 (2 MEDIUMs) — testCompile/testRuntime classpaths
+#    only, via testcontainers 1.21.4 (BOM-managed). Never shipped; the
+#    vulnerable code paths (Pack200 / DUMP unpacking) run only on archives a
+#    test itself feeds in. Retire when the testcontainers BOM line upgrades
+#    commons-compress to >= 1.26.0.
+
+[[IgnoredVulns]]
+id = "GHSA-4265-ccf5-phj5" # commons-compress 1.24.0 — test-only via testcontainers, not shipped (triaged 2026-08-15)
+reason = "commons-compress resolves on test classpaths only (testcontainers 1.21.4); never packaged into the application"
+ignoreUntil = 2027-02-15
+
+[[IgnoredVulns]]
+id = "GHSA-4g9r-vxhx-9pgx" # commons-compress 1.24.0 — test-only via testcontainers, not shipped (triaged 2026-08-15)
+reason = "commons-compress resolves on test classpaths only (testcontainers 1.21.4); never packaged into the application"
+ignoreUntil = 2027-02-15
+
+#  * log4j-api 2.24.3 (MEDIUM) — on the runtime classpath, but only as the
+#    API facade pulled by log4j-to-slf4j (Spring Boot logging bridges INTO
+#    slf4j/logback); log4j-core is absent and nothing logs through
+#    MapMessage, the vulnerable path (improper encoding of non-finite
+#    floating-point values). Smallest fix (2.25.5) is a minor-line bump
+#    against the BOM — disproportionate for a facade-only exposure; flagged
+#    in the handback as a candidate override if reviewers prefer.
+#    Retire when the Spring Boot BOM ships log4j2 >= 2.25.5.
+
+[[IgnoredVulns]]
+id = "GHSA-qv9r-c865-cp47" # log4j-api 2.24.3 — facade only via log4j-to-slf4j, MapMessage path unused (triaged 2026-08-15)
+reason = "log4j-api is present only as the log4j-to-slf4j facade (no log4j-core); the vulnerable MapMessage encoding path is never exercised"
+ignoreUntil = 2027-02-15
+
+#  * kotlin-gradle-plugin 2.4.10 (MEDIUM, build cache unsafe deserialization)
+#    — BUILD tooling only (buildSrc classpath), never shipped. The vulnerable
+#    path is the Gradle BUILD CACHE, which this repo does not enable (no
+#    org.gradle.caching property anywhere; Gradle default is off), so a
+#    poisoned cache entry can never be deserialized here. The only fix is
+#    2.4.20-Beta1 — a pre-release, which the house version policy forbids.
+#    Retire when Kotlin 2.4.20 STABLE ships: bump `kotlin` in the catalog.
+
+[[IgnoredVulns]]
+id = "GHSA-r937-wjx7-w2jp" # kotlin-gradle-plugin 2.4.10 — build tooling only, build cache disabled (triaged 2026-08-15)
+reason = "kotlin-gradle-plugin is build-only tooling; the vulnerable build-cache deserialization path is unused (Gradle build cache not enabled); only fix is a pre-release"
+ignoreUntil = 2027-02-15

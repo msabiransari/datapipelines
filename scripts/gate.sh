@@ -11,6 +11,10 @@
 #     ./gradlew build      → must exit 0   (clean-state build)
 #     ./gradlew build      → must exit 0   (incremental build)
 #
+# After the cycles, one non-gradle stage: scripts/vuln-scan.sh (OSV-Scanner
+# over the committed lockfiles). It fails the gate on real findings and warns
+# without failing when the network is unreachable (fail-soft by design).
+#
 # The incremental pass is deliberate: it has its own failure history, and a gate
 # that only ever runs from clean never exercises the path developers use most.
 #
@@ -105,6 +109,22 @@ for i in $(seq 1 "$CYCLES"); do
   tests=$(find . -path '*/build/test-results/test/TEST-*.xml' 2>/dev/null | wc -l | tr -d ' ')
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
+
+# ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
+# Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
+# osv.dev is unreachable the script warns and exits 0 — fail-soft BY DESIGN, an
+# offline laptop must not fail the gate. Real findings exit 1 and fail it.
+echo
+scan=0
+./scripts/vuln-scan.sh > "$LOGDIR/vuln-scan.log" 2>&1 || scan=$?
+if grep -q "SKIPPED (fail-soft)" "$LOGDIR/vuln-scan.log"; then
+  echo "  vuln-scan  SKIPPED — offline (fail-soft by design; log: $LOGDIR/vuln-scan.log)"
+elif [ "$scan" -ne 0 ]; then
+  fails=$((fails + 1))
+  echo "  vuln-scan  EXIT=$scan  (known vulnerabilities or scan error — log: $LOGDIR/vuln-scan.log)"
+else
+  echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
+fi
 
 echo "--------------------------------------------------------------"
 if [ "$fails" -eq 0 ]; then
