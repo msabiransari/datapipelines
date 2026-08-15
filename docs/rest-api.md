@@ -768,6 +768,9 @@ Content-Type: application/json
   "jdbc_url": "jdbc:postgresql://host:5432/db",
   "username": "readonly_user",
   "password": "...",                // write-only; never returned in GET
+  "introspection_include_schemas": ["apex_reporting"],  // OPTIONAL — §9.7 escape hatch for the
+                                                        // system-schema exclusion (exact names,
+                                                        // no patterns; lowercased at bind)
   "properties": {
     "hikari": {
       "maximumPoolSize": 10,
@@ -781,6 +784,8 @@ Content-Type: application/json
 ```
 
 `properties` has exactly two reserved namespaces — `hikari` (HikariCP's own camelCase property names, durations in milliseconds) and `jdbc` (driver connection properties) — validated by a test pool build at save time. See [Datasources §5](datasources.md#5-connection-pool-configuration).
+
+`introspection_include_schemas` (optional, [Datasources §3.3](datasources.md#33-field-reference)) exempts exact schema names from the §9.7 system-schema exclusion; entries must be non-blank names without wildcard patterns (`400 datasource.validation.properties_invalid` otherwise), and are lowercased on save. Omitted from the response when empty.
 
 Response: `201 Created` with the datasource entity (excluding password).
 
@@ -806,7 +811,7 @@ Returns everything except `password`.
 PUT /datasources/{name}
 ```
 
-Updates connection details. Password is optional — omit to keep existing.
+Updates connection details. Password is optional — omit to keep existing. The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent.
 
 ### 9.5 Delete datasource
 

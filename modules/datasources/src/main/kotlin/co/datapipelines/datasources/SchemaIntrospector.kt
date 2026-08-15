@@ -46,6 +46,7 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
+            val exempt = datasource.introspectionIncludeSchemas.toSet()
             rs.use {
                 val out = mutableListOf<String>()
                 var truncated = false
@@ -55,7 +56,7 @@ class SchemaIntrospector(
                     // The JDBC "" sentinel ("objects without a catalog") is not a schema
                     // an agent can pass to get_tables — skip it rather than list it.
                     val schema = it.getString(adapter.schemaResultColumn()).asNonBlankOrNull() ?: continue
-                    if (adapter.isSystemSchema(schema)) continue
+                    if (adapter.isSystemSchema(schema, exempt)) continue
                     if (out.size == maxSchemas) {
                         truncated = true
                         break
@@ -94,7 +95,11 @@ class SchemaIntrospector(
             // value there matches nothing — any MySQL database named with '_'/'%'. Only true
             // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
             val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(filter)
-            readTables(meta, adapter, catalog, rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables)
+            readTables(
+                meta, adapter, catalog,
+                rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables,
+                datasource.introspectionIncludeSchemas.toSet(),
+            )
         }
 
     /**
@@ -117,6 +122,7 @@ class SchemaIntrospector(
     ): List<ColumnInfo> =
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val exempt = datasource.introspectionIncludeSchemas.toSet()
             // A blank caller filter is absent (the same blank-sentinel rule tables() applies),
             // so the current-schema default — never the JDBC '' sentinel — takes over.
             val effectiveFilter = schemaFilter.asNonBlankOrNull() ?: connection.currentSchema(adapter)
@@ -132,7 +138,7 @@ class SchemaIntrospector(
                 buildList {
                     while (rs.next()) {
                         val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
-                        if (adapter.isSystemSchema(schema)) continue
+                        if (adapter.isSystemSchema(schema, exempt)) continue
                         add(mapColumnRow(rs, adapter.typeMapper))
                     }
                 }
@@ -149,6 +155,7 @@ class SchemaIntrospector(
         catalog: String?,
         schemaPattern: String?,
         maxRows: Int? = null,
+        exemptSchemas: Set<String> = emptySet(),
     ): TablesPage {
         val out = mutableListOf<TableInfo>()
         var truncated = false
@@ -159,7 +166,7 @@ class SchemaIntrospector(
             @Suppress("LoopWithTooManyJumpStatements")
             while (rs.next()) {
                 val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
-                if (adapter.isSystemSchema(schema)) continue
+                if (adapter.isSystemSchema(schema, exemptSchemas)) continue
                 if (maxRows != null && out.size == maxRows) {
                     truncated = true
                     break
@@ -256,10 +263,19 @@ class SchemaIntrospector(
      * [DialectAdapter.introspectionSystemSchemas]: exact names match case-insensitively; an
      * entry ending in `*` matches by case-insensitive PREFIX (Oracle's versioned `apex_*`
      * schemas). Null is never a system schema.
+     *
+     * [exemptSchemas] is the datasource's `introspection_include_schemas` allowlist (§3.3):
+     * a name listed there is NOT a system schema for this datasource, whatever the floor says —
+     * the escape hatch for the floors' one blind spot (a prefix entry like `apex_*` hides a
+     * customer's own APEX_REPORTING schema). Lowercase-exact, like the stored allowlist.
      */
-    private fun DialectAdapter.isSystemSchema(schema: String?): Boolean {
+    private fun DialectAdapter.isSystemSchema(
+        schema: String?,
+        exemptSchemas: Set<String> = emptySet(),
+    ): Boolean {
         if (schema == null) return false
         val lower = schema.lowercase()
+        if (exemptSchemas.isNotEmpty() && lower in exemptSchemas) return false
         return introspectionSystemSchemas.any { entry ->
             if (entry.endsWith("*")) lower.startsWith(entry.dropLast(1)) else lower == entry
         }

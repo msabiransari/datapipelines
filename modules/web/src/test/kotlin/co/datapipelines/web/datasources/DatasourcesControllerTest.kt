@@ -90,6 +90,42 @@ class DatasourcesControllerTest {
     }
 
     @Test
+    fun `create binds the include-schemas allowlist lowercase-normalized and projects it`() {
+        // §3.3/§7A: the allowlist is optional, exact-name, stored lowercase — the bind
+        // normalizes `Apex_Reporting` to `apex_reporting` so the case-insensitive exemption
+        // and the stored row agree. The response carries the field when non-empty.
+        authenticate()
+        every { registry.exists("pg-prod") } returns false
+        every {
+            registry.save(match { it.introspectionIncludeSchemas == listOf("apex_reporting") }, userId)
+        } returns datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting"))
+        val body =
+            mapper.readTree(
+                """{"name":"pg-prod","display_name":"Production Postgres","dialect":"POSTGRES",
+                   "jdbc_url":"jdbc:postgresql://db:5432/app","username":"readonly","password":"s3cret",
+                   "introspection_include_schemas":["Apex_Reporting"]}""",
+            )
+
+        val data = controller.create(body).data
+
+        data["introspection_include_schemas"] shouldBe listOf("apex_reporting")
+    }
+
+    @Test
+    fun `a non-string include-schemas entry is properties_invalid`() {
+        authenticate()
+        every { registry.exists("pg-prod") } returns false
+        val body =
+            mapper.readTree(
+                """{"name":"pg-prod","dialect":"POSTGRES","jdbc_url":"jdbc:postgresql://db:5432/app",
+                   "username":"readonly","password":"s3cret","introspection_include_schemas":[42]}""",
+            )
+
+        shouldThrow<ApiException> { controller.create(body) }
+            .code shouldBe PipelineErrorCodes.Datasource.PROPERTIES_INVALID
+    }
+
+    @Test
     fun `list paginates with an exact total and projects the two property namespaces`() {
         every { registry.list(null) } returns (1..3).map { datasource().copy(name = "ds-$it") }
 

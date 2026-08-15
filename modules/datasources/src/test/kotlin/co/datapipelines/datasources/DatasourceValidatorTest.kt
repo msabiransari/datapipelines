@@ -29,6 +29,23 @@ class DatasourceValidatorTest {
     }
 
     @Test
+    fun `introspection include-schemas entries are plain names - patterns and blanks are rejected`() {
+        // §3.3/§7A: the allowlist is exact names, no patterns — an `apex_*` entry here would
+        // LOOK like it exempts a family while exemptting nothing (the prefix language belongs
+        // to the exclusion floors, not the allowlist), and a blank entry exempts nobody.
+        val pattern = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf("apex_*")), isCreate = true)
+        val blank = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf("   ")), isCreate = true)
+        val clean = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf("apex_reporting")), isCreate = true)
+
+        pattern.valid shouldBe false
+        pattern.errors.map { it.code } shouldContain DatasourceErrorCodes.PROPERTIES_INVALID
+        (pattern.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field ?: "") shouldContain
+            "introspection_include_schemas"
+        blank.valid shouldBe false
+        clean.valid shouldBe true
+    }
+
+    @Test
     fun `an invalid name is rejected`() {
         codes(Fixtures.h2(name = "Bad Name!")) shouldContain DatasourceErrorCodes.NAME_INVALID
     }

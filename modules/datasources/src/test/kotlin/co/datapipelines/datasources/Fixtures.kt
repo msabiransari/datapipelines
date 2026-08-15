@@ -18,6 +18,7 @@ internal object Fixtures {
         password: String? = "secret",
         queryTimeoutSeconds: Int? = null,
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -29,12 +30,14 @@ internal object Fixtures {
             password = password,
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     fun postgres(
         name: String = "pg_test",
         jdbcUrl: String = "jdbc:postgresql://db.internal:5432/app",
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -44,6 +47,7 @@ internal object Fixtures {
             username = "app",
             password = "secret",
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     /**
@@ -55,6 +59,7 @@ internal object Fixtures {
         dialect: Dialect,
         name: String = "ds_${dialect.wire.lowercase()}",
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -64,6 +69,7 @@ internal object Fixtures {
             username = "app",
             password = "secret",
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     fun urlFor(
@@ -127,9 +133,10 @@ internal class JdbcUrlPool(
 internal fun introspectorOver(
     dialect: Dialect,
     meta: DatabaseMetaData,
+    introspectionIncludeSchemas: List<String> = emptyList(),
     connectionSetup: (Connection) -> Unit = {},
 ): Pair<SchemaIntrospector, String> {
-    val ds = Fixtures.forDialect(dialect)
+    val ds = Fixtures.forDialect(dialect, introspectionIncludeSchemas = introspectionIncludeSchemas)
     val connection = mockk<Connection>()
     every { connection.metaData } returns meta
     every { connection.close() } returns Unit

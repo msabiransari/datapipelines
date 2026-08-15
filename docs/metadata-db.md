@@ -350,6 +350,7 @@ CREATE TABLE datasources (
     password_encrypted      BYTEA       NOT NULL,           -- AES-256-GCM: nonce ‖ ciphertext ‖ tag
     properties_json         JSONB       NOT NULL DEFAULT '{}',  -- {"hikari": {...}, "jdbc": {...}}
     query_timeout_seconds   INTEGER,                        -- NULL = fall back to the global executor default
+    introspection_include_schemas JSONB NOT NULL DEFAULT '[]', -- §7A allowlist: schemas exempt from the system-schema exclusion (V2)
     is_deleted              BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),

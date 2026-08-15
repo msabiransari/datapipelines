@@ -482,6 +482,64 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `the include-schemas allowlist exempts a named schema in all three operations - the floor still hides the rest`() {
+        // §7A F5: Oracle's `apex_*` prefix entry hides a customer's OWN APEX_REPORTING schema
+        // just like the engine's versioned ones, silently — the agent is then told data that
+        // exists does not. A datasource registered with introspection_include_schemas:
+        // ["apex_reporting"] sees that schema in get_schemas/get_tables/get_columns while
+        // every other floor entry (dbsnmp, ordsys, apex_240100...) stays hidden.
+        val include = listOf("apex_reporting")
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val schemasRs = mockk<ResultSet>(relaxed = true)
+                every { meta.schemas } returns schemasRs
+                every { schemasRs.next() } returns true andThen true andThen true andThen true andThen false
+                every { schemasRs.getString("TABLE_SCHEM") } returns
+                    "APEX_REPORTING" andThen "DBSNMP" andThen "APEX_240100" andThen "SALES"
+                val (introspector, name) = introspectorOver(Dialect.ORACLE, meta, introspectionIncludeSchemas = include)
+
+                introspector.schemas(name).schemas shouldBe listOf("APEX_REPORTING", "SALES")
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val tablesRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+                every { tablesRs.next() } returns true andThen true andThen false
+                every { tablesRs.getString("TABLE_SCHEM") } returns "APEX_REPORTING" andThen "ORDSYS"
+                every { tablesRs.getString("TABLE_NAME") } returns "reports"
+                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+                val (introspector, name) = introspectorOver(Dialect.ORACLE, meta, introspectionIncludeSchemas = include)
+
+                introspector.tables(name).tables.single().schema shouldBe "APEX_REPORTING"
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                // schemaPattern is a true pattern argument — the underscore in the schema name
+                // arrives ESCAPED (the exact-match rule), hence APEX\_REPORTING.
+                every { meta.getColumns(null, "APEX\\_REPORTING", "REPORTS", "%") } returns columnsRs
+                every { columnsRs.next() } returns true andThen false
+                every { columnsRs.getString("TABLE_SCHEM") } returns "APEX_REPORTING"
+                every { columnsRs.getString("TYPE_NAME") } returns "NUMBER"
+                every { columnsRs.getInt("DATA_TYPE") } returns java.sql.Types.NUMERIC
+                every { columnsRs.getInt("COLUMN_SIZE") } returns 38
+                every { columnsRs.getInt("DECIMAL_DIGITS") } returns 0
+                every { columnsRs.getInt("NULLABLE") } returns 1
+                every { columnsRs.getString("COLUMN_NAME") } returns "AMOUNT"
+                val (introspector, name) =
+                    introspectorOver(Dialect.ORACLE, meta, introspectionIncludeSchemas = include) { connection ->
+                        every { connection.schema } returns "APEX_REPORTING"
+                    }
+
+                introspector.columns(name, "REPORTS").map { it.column.name } shouldBe listOf("AMOUNT")
+            },
+        )
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.
