@@ -1,112 +1,66 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.datasources.TablesPage
+import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
-import co.datapipelines.typesystem.TypeMappingWarning
-import com.fasterxml.jackson.databind.json.JsonMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import java.sql.SQLException
 
 /**
- * §7A over a mocked introspector — the endpoints are a pure snake_case projection of the
- * introspector's payloads; every field name is asserted on the **serialized** JSON, not the
- * Kotlin map, so a renamed key cannot slip through.
+ * §7A endpoint DELEGATION over a mocked introspector: the controller binds paths, threads the
+ * query/table/schema arguments through, and serves the shared wire projections (`toWireMap`)
+ * unchanged — the field-by-field shape of those projections is owned ONCE by `SchemaWireTest`
+ * in `modules/datasources`, not re-asserted here per surface. Error paths (not-found,
+ * unreachable) are this layer's own behavior and stay fully asserted.
  */
 class DatasourceSchemaControllerTest {
     private val introspector = mockk<SchemaIntrospector>()
     private val controller = DatasourceSchemaController(introspector)
-    private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     @Test
-    fun `tables returns snake_case table descriptors`() {
-        every { introspector.tables("pg-prod", null) } returns TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = false)
+    fun `tables delegates to the introspector and serves the shared wire projection`() {
+        val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
+        every { introspector.tables("pg-prod", "sales") } returns page
 
-        val data = controller.tables("pg-prod", schema = null).data
+        val data = controller.tables("pg-prod", schema = "sales").data
 
-        val node = mapper.readTree(mapper.writeValueAsString(data))
-        assertAll(
-            { node["truncated"].asBoolean() shouldBe false },
-            { node["tables"][0]["schema"].asText() shouldBe "public" },
-            { node["tables"][0]["name"].asText() shouldBe "orders" },
-            { node["tables"][0]["type"].asText() shouldBe "TABLE" },
-        )
+        data shouldBe page.toWireMap()
+        verify(exactly = 1) { introspector.tables("pg-prod", "sales") }
     }
 
     @Test
-    fun `tables flags truncation when the cap dropped tables`() {
-        every { introspector.tables("pg-prod", null) } returns TablesPage(emptyList(), truncated = true)
-
-        val node = mapper.readTree(mapper.writeValueAsString(controller.tables("pg-prod", schema = null).data))
-
-        assertAll(
-            { node["truncated"].asBoolean() shouldBe true },
-            { node["tables"].size() shouldBe 0 },
-        )
-    }
-
-    @Test
-    fun `tables passes the schema filter through`() {
-        every { introspector.tables("pg-prod", "sales") } returns TablesPage(emptyList(), truncated = false)
-
-        controller.tables("pg-prod", schema = "sales").data["tables"] shouldBe emptyList<Any?>()
-    }
-
-    @Test
-    fun `columns returns canonical and source types snake_case`() {
-        every { introspector.columns("pg-prod", "orders", null) } returns
+    fun `columns delegates to the introspector and serves the shared wire projection`() {
+        val columns =
             listOf(
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
                 ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
             )
+        every { introspector.columns("pg-prod", "orders", null) } returns columns
 
-        val node = mapper.readTree(mapper.writeValueAsString(controller.columns("pg-prod", "orders", schema = null).data))
+        val data = controller.columns("pg-prod", "orders", schema = null).data
 
-        assertAll(
-            { node.size() shouldBe 2 },
-            { node[0]["name"].asText() shouldBe "id" },
-            { node[0]["type"].asText() shouldBe "INTEGER" },
-            { node[0]["nullable"].asBoolean() shouldBe false },
-            { node[0]["source_type"].asText() shouldBe "int4" },
-            { node[0]["warnings"].size() shouldBe 0 },
-            { node[1]["precision"].asInt() shouldBe 10 },
-            { node[1]["scale"].asInt() shouldBe 2 },
-        )
+        data shouldBe columns.map { it.toWireMap() }
+        verify(exactly = 1) { introspector.columns("pg-prod", "orders", null) }
     }
 
     @Test
-    fun `columns carries the mapper's warning messages`() {
-        every { introspector.columns("pg-prod", "wide", null) } returns
-            listOf(
-                ColumnInfo(
-                    ColumnSchema("mystery", LogicalType.STRING),
-                    "sql_variant",
-                    listOf(TypeMappingWarning.sqlVariant("mystery")),
-                ),
-            )
-
-        val node = mapper.readTree(mapper.writeValueAsString(controller.columns("pg-prod", "wide", schema = null).data))
-
-        node[0]["warnings"][0].asText() shouldBe TypeMappingWarning.sqlVariant("mystery").message
-    }
-
-    @Test
-    fun `schema returns the snapshot payload snake_case`() {
-        every { introspector.snapshot("pg-prod") } returns
+    fun `schema delegates to the introspector and serves the shared wire projection`() {
+        val snapshot =
             SchemaSnapshot(
                 datasource = "pg-prod",
                 dialect = "POSTGRES",
@@ -119,18 +73,12 @@ class DatasourceSchemaControllerTest {
                         ),
                     ),
             )
+        every { introspector.snapshot("pg-prod") } returns snapshot
 
-        val node = mapper.readTree(mapper.writeValueAsString(controller.schema("pg-prod").data))
+        val data = controller.schema("pg-prod").data
 
-        assertAll(
-            { node["datasource"].asText() shouldBe "pg-prod" },
-            { node["dialect"].asText() shouldBe "POSTGRES" },
-            { node["truncated"].asBoolean() shouldBe false },
-            { node["tables"][0]["table"]["name"].asText() shouldBe "orders" },
-            { node["tables"][0]["table"]["schema"].asText() shouldBe "public" },
-            { node["tables"][0]["columns"][0]["name"].asText() shouldBe "id" },
-            { node["tables"][0]["columns"][0]["source_type"].asText() shouldBe "int4" },
-        )
+        data shouldBe snapshot.toWireMap()
+        verify(exactly = 1) { introspector.snapshot("pg-prod") }
     }
 
     @Test
@@ -148,9 +96,13 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `a connection failure during introspection is the catalogued datasource_unreachable`() {
-        // A customer DB being down is not a server error: the raw SQLException must surface as
-        // the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
-        every { introspector.tables("pg-prod", null) } throws SQLException("Connection refused")
+        // A customer DB being down is not a server error: the introspector's
+        // DatasourceUnreachableException (its lease boundary wraps BOTH the SQLException lease
+        // family and the RuntimeException pool-build family — PoolInitializationException on a
+        // down database, which round 1 missed; that path is pinned by the introspector tests)
+        // must surface as the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
+        every { introspector.tables("pg-prod", null) } throws
+            DatasourceUnreachableException("pg-prod", RuntimeException("Connection refused"))
 
         val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
 

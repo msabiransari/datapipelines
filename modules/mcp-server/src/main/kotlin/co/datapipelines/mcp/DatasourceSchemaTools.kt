@@ -1,10 +1,10 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
-import java.sql.SQLException
 
 /*
  * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
@@ -16,10 +16,15 @@ import java.sql.SQLException
  * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
  * at all, and the field-by-field maps keep it that way by construction.
  *
- * A connection failure while leasing is translated here to the catalogued
- * `pipeline.execution.datasource_unreachable` and thrown as a [DatapipelinesException] — the
- * dispatcher envelopes it as an `isError` tool result (§9.2), never a JSON-RPC -32603. The
- * driver's message stays off the wire (§13 forbids internal topology in error messages).
+ * A connection failure arrives as the introspector's [DatasourceUnreachableException] — its
+ * lease boundary translates BOTH the SQLException family and the RuntimeException pool-build
+ * family (`HikariPool.PoolInitializationException` on a down database) — and is mapped here to
+ * the catalogued `pipeline.execution.datasource_unreachable` and thrown as a
+ * [DatapipelinesException], so the dispatcher envelopes it as an `isError` tool result (§9.2),
+ * never a JSON-RPC -32603. The driver's message stays off the wire (§13 forbids internal
+ * topology in error messages). The catch cannot live in a shared home: the code belongs to
+ * `pipeline-contract`, a sibling of `datasources`, so each surface keeps its own three-line
+ * translation (accepted in the round-2 hardening review).
  */
 
 /** `datasources_get_schema` (mcp-server.md §6.2.16). Scope: `author`. */
@@ -120,10 +125,11 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
- * The §7A connection-failure boundary shared by the three tools: an [SQLException] from the
- * lease is the catalogued `pipeline.execution.datasource_unreachable` thrown as a
- * [DatapipelinesException], so the dispatcher envelopes it (§9.2) instead of mapping it to
- * JSON-RPC -32603. Message is static — driver text stays off the wire.
+ * The §7A connection-failure boundary shared by the three tools: the introspector's
+ * [DatasourceUnreachableException] is the catalogued
+ * `pipeline.execution.datasource_unreachable` thrown as a [DatapipelinesException], so the
+ * dispatcher envelopes it (§9.2) instead of mapping it to JSON-RPC -32603. Message is static —
+ * driver text stays off the wire.
  */
 private fun <T> introspecting(
     name: String,
@@ -131,7 +137,7 @@ private fun <T> introspecting(
 ): T =
     try {
         block()
-    } catch (e: SQLException) {
+    } catch (e: DatasourceUnreachableException) {
         throw DatapipelinesException(
             code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
             message = "Datasource '$name' could not be reached for schema introspection.",

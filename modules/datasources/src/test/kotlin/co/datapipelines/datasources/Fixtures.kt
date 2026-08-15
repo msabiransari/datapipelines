@@ -1,6 +1,12 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.Dialect
+import io.mockk.every
+import io.mockk.mockk
+import java.sql.Connection
+import java.sql.DatabaseMetaData
+import java.sql.DriverManager
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** Shared datasource builders for the module's unit tests. */
@@ -91,4 +97,65 @@ internal class RecordingAuditSink : DatasourceAuditSink {
     fun eventNames(): List<String> = events.map { it.event }
 
     fun countOf(event: String): Int = events.count { it.event == event }
+}
+
+/**
+ * A [ConnectionPool] that hands out fresh connections to [url] — the shared fake behind the
+ * introspection tests' "same named in-memory DB" leases (SchemaIntrospectorTest's seams).
+ */
+internal class JdbcUrlPool(
+    url: String,
+    override val name: String = "pooled",
+) : ConnectionPool {
+    private val connect: () -> Connection = { DriverManager.getConnection(url) }
+
+    override fun leaseConnection(): Connection = connect()
+
+    override fun close() = Unit
+}
+
+/** [JdbcUrlPool] plus a lease counter — proves the one-lease snapshot protocol. */
+internal class CountingPool(
+    url: String,
+    override val name: String = "counted",
+) : ConnectionPool {
+    private val delegate = JdbcUrlPool(url)
+
+    var leases = 0
+        private set
+
+    override fun leaseConnection(): Connection {
+        leases++
+        return delegate.leaseConnection()
+    }
+
+    override fun close() = Unit
+}
+
+/**
+ * An [SchemaIntrospector] whose registry hands out ONE connection carrying the given mocked
+ * [DatabaseMetaData]. Returns (introspector, datasource name). [connectionSetup] stubs
+ * connection-level reads the operation under test consults (getSchema/getCatalog).
+ */
+internal fun introspectorOver(
+    dialect: Dialect,
+    meta: DatabaseMetaData,
+    connectionSetup: (Connection) -> Unit = {},
+): Pair<SchemaIntrospector, String> {
+    val ds = Fixtures.forDialect(dialect)
+    val connection = mockk<Connection>()
+    every { connection.metaData } returns meta
+    every { connection.close() } returns Unit
+    connectionSetup(connection)
+    val registry = mockk<DatasourceRegistry>()
+    every { registry.get(ds.name) } returns ds
+    every { registry.poolFor(ds) } returns
+        object : ConnectionPool {
+            override val name: String = ds.name
+
+            override fun leaseConnection(): Connection = connection
+
+            override fun close() = Unit
+        }
+    return SchemaIntrospector(registry) to ds.name
 }

@@ -49,6 +49,16 @@ class DialectAdaptersTest {
         Dialect.entries.filter { it != Dialect.POSTGRES }.forEach { dialect ->
             ("information_schema" in DialectAdapters.forDialect(dialect).introspectionSystemSchemas) shouldBe true
         }
+        // MySQL: Connector/J reports the sys/performance_schema/mysql schemas as plain TABLE/
+        // VIEW rows — the type vocabulary CANNOT catch them, only the schema list can.
+        DialectAdapters.forDialect(Dialect.MYSQL).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            listOf("information_schema", "mysql", "performance_schema", "sys")
+        // Oracle: the instance's administrative schemas.
+        DialectAdapters.forDialect(Dialect.ORACLE).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            listOf("information_schema", "sys", "system", "outln", "xdb")
+        // MSSQL: the hidden schemas beside INFORMATION_SCHEMA.
+        DialectAdapters.forDialect(Dialect.MSSQL).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            listOf("information_schema", "sys")
     }
 
     @Test

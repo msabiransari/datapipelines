@@ -95,18 +95,33 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
     override val introspectionSystemSchemas: Set<String> = setOf("pg_catalog", "information_schema")
 }
 
-class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle")
+class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
+    // The instance's administrative schemas ship as ordinary TABLE/VIEW rows in DBA_/ALL_
+    // listings; the type vocabulary cannot keep them out of a user's listing.
+    override val introspectionSystemSchemas: Set<String> =
+        setOf("information_schema", "sys", "system", "outln", "xdb")
+}
 
-class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver")
+class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
+    // SQL Server hides `sys` (the resource-DB views surface under it) beside INFORMATION_SCHEMA.
+    override val introspectionSystemSchemas: Set<String> = setOf("information_schema", "sys")
+}
 
 /**
  * MySQL — the catalog-routing dialect (datasources.md §7A): Connector/J defaults put the
  * database in TABLE_CAT and leave TABLE_SCHEM null, so introspection routes the schema filter
  * to the catalog argument and reads TABLE_CAT as the schema (see
  * [DialectAdapter.schemaArrivesInCatalog]).
+ *
+ * The `mysql`, `performance_schema` and `sys` schemas must be excluded **by name**: Connector/J
+ * reports their contents as ordinary TABLE/VIEW rows, so the table-type vocabulary — which the
+ * default exclusion story leans on for `SYSTEM TABLE`/`SYSTEM VIEW` types — cannot catch them.
  */
 class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql") {
     override val schemaArrivesInCatalog: Boolean = true
+
+    override val introspectionSystemSchemas: Set<String> =
+        setOf("information_schema", "mysql", "performance_schema", "sys")
 }
 
 class H2DialectAdapter : AbstractDialectAdapter(Dialect.H2, "h2")
