@@ -97,4 +97,57 @@ class DatasourceSchemaControllerTest {
             { thrown.message shouldNotContain "Connection refused" },
         )
     }
+
+    @Test
+    fun `a mid-walk connection loss through a real introspector is the catalogued 502 - not a raw 500`() {
+        // The round-3 widening, proven through the FULL web path: the controller delegates to
+        // a real SchemaIntrospector whose metadata walk dies with SQLTimeoutException (a
+        // connection-loss shape the old top-level-only classifier let escape as a raw 500).
+        // The introspector's lease boundary must translate it to DatasourceUnreachableException,
+        // which this controller maps to `pipeline.execution.datasource_unreachable` (HTTP 502
+        // via ApiErrorCatalog — pinned here so the status mapping cannot drift either).
+        val introspector = realIntrospectorThrowing(java.sql.SQLTimeoutException("timeout: network is dead"))
+        val controller = DatasourceSchemaController(introspector)
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE },
+            {
+                co.datapipelines.web.api.ApiErrorCatalog.statusFor(thrown.code) shouldBe
+                    org.springframework.http.HttpStatus.BAD_GATEWAY
+            },
+            { thrown.message shouldNotContain "network is dead" },
+        )
+    }
+
+    /** A real [SchemaIntrospector] over one connection whose metadata walk throws [failure]. */
+    private fun realIntrospectorThrowing(failure: java.sql.SQLException): SchemaIntrospector {
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        io.mockk.every { meta.searchStringEscape } returns "\\"
+        io.mockk.every { meta.getTables(null, null, "%", any<Array<String>>()) } throws failure
+        val connection = mockk<java.sql.Connection>()
+        io.mockk.every { connection.metaData } returns meta
+        io.mockk.every { connection.close() } returns Unit
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "pg-prod",
+                displayName = "PG",
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
+        io.mockk.every { registry.get("pg-prod") } returns datasource
+        io.mockk.every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "pg-prod"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        return SchemaIntrospector(registry)
+    }
 }

@@ -100,6 +100,53 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
+    fun `a mid-walk connection loss through a real introspector is the isError code - never -32603`() {
+        // The round-3 widening, proven through the FULL MCP path: the tool delegates to a
+        // real SchemaIntrospector whose metadata walk dies with SQLTimeoutException (a
+        // connection-loss shape the old top-level-only classifier let escape as -32603).
+        // The introspector translates at its lease boundary; the tool's own translation then
+        // yields the catalogued DatapipelinesException the dispatcher envelopes as isError.
+        val real = realIntrospectorThrowing(java.sql.SQLTimeoutException("timeout: network is dead"))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    /** A real [SchemaIntrospector] over one connection whose metadata walk throws [failure]. */
+    private fun realIntrospectorThrowing(failure: java.sql.SQLException): SchemaIntrospector {
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } throws failure
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "Down",
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get("down") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "down"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        return SchemaIntrospector(registry)
+    }
+
+    @Test
     fun `a connection failure is the catalogued datasource_unreachable on every introspection tool`() {
         // A customer DB being down must reach the dispatcher as a catalogued
         // DatapipelinesException (isError envelope), never as -32603. The introspector's

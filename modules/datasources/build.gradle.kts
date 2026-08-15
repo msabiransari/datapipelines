@@ -38,6 +38,10 @@ dependencies {
     testImplementation(libs.testcontainers.mysql)
     testImplementation(libs.testcontainers.mssqlserver)
     testImplementation(libs.postgresql)
+    // The SQLite connection-loss tests construct org.sqlite.SQLiteException by type (the
+    // production classifier is name-based precisely because main never compiles against a
+    // driver); the test runtime already carries the jar via `runtimeOnly` above.
+    testImplementation(libs.sqlite.jdbc)
     testRuntimeOnly(libs.mysql.connector.j)
 }
 

@@ -171,8 +171,11 @@ class SchemaIntrospector(
      * metadata walk itself is a defect in this module or a driver bug, and masking it as "the
      * caller's database is unreachable" would hide it. Post-lease, the SQLException catch
      * narrows to the CONNECTION family only (SQLState class 08, the connection-exception
-     * subclasses, [java.sql.SQLRecoverableException]) — any other SQLException from a metadata
-     * read is likewise a defect and propagates. `Error` is never caught.
+     * subclasses, [java.sql.SQLRecoverableException], [java.sql.SQLTimeoutException], and the
+     * SQLite connection-loss result codes — checked on the exception itself and along its
+     * cause/nextException chains, see [SQLException.isConnectionFailure]) — any other
+     * SQLException from a metadata read is likewise a defect and propagates. `Error` is never
+     * caught.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun <T> withMetaData(
@@ -219,15 +222,57 @@ class SchemaIntrospector(
 
     /**
      * The connection-failure family of a post-lease [SQLException]: SQLState class `08`
-     * (connection exception), the JDBC connection-exception subclasses, or
+     * (connection exception), the JDBC connection-exception subclasses,
      * [java.sql.SQLRecoverableException] (whose subclasses include the connection-died-mid-read
-     * family some drivers raise). Everything else is NOT a connection failure.
+     * family some drivers raise), [java.sql.SQLTimeoutException] (extends SQLTransientException,
+     * not the connection family — but a dead network surfaces as exactly this shape), and the
+     * SQLite connection-loss result codes (the vendored driver reports SQLiteException with a
+     * NULL SQLState, so the state-based branches cannot see it — see
+     * [SQLITE_CONNECTION_LOSS_PRIMARY_CODES]). Everything else is NOT a connection failure.
+     *
+     * A driver may carry the state on a **wrapped** exception rather than the one it throws, so
+     * the check walks the `cause` and `nextException` chains ([CHAIN_WALK_LIMIT] nodes,
+     * cycle-safe) instead of inspecting the top-level exception alone.
      */
-    private fun SQLException.isConnectionFailure(): Boolean =
+    private fun SQLException.isConnectionFailure(): Boolean {
+        val seen = java.util.IdentityHashMap<Throwable, Boolean>()
+        var queue = ArrayDeque<Throwable>()
+        queue.add(this)
+        while (queue.isNotEmpty() && seen.size < CHAIN_WALK_LIMIT) {
+            val current = queue.removeFirst()
+            if (seen.put(current, true) != null) continue
+            if (current is SQLException && current.directlyIsConnectionFailure()) return true
+            (current as? SQLException)?.nextException?.let { queue.add(it) }
+            current.cause?.let { queue.add(it) }
+        }
+        return false
+    }
+
+    /** The connection-family test for ONE exception, without chain inspection. */
+    private fun SQLException.directlyIsConnectionFailure(): Boolean =
         sqlState?.startsWith("08") == true ||
             this is java.sql.SQLTransientConnectionException ||
             this is java.sql.SQLNonTransientConnectionException ||
-            this is java.sql.SQLRecoverableException
+            this is java.sql.SQLRecoverableException ||
+            this is java.sql.SQLTimeoutException ||
+            isSqliteConnectionLoss()
+
+    /**
+     * The vendored sqlite-jdbc's `SQLiteException` extends plain `SQLException` with a **null
+     * SQLState** (its sole constructor passes null for the state and `code & 0xFF` for the
+     * vendor code — verified in the 3.49.1.0 bytecode), so a deleted or locked db file
+     * mid-metadata-walk fails every state-based branch. Classified instead by SQLite's own
+     * primary result codes on the standard [SQLException.getErrorCode] — deliberately NOT a
+     * blanket "null SQLState means down": a null-state SQLiteException with any other code
+     * stays a defect and propagates (round 2's R5 narrowing).
+     *
+     * Name-based, never a compiled reference: `datasources` does not compile against any
+     * driver (§10.3) — the class is matched through its hierarchy so a driver-side subclass
+     * still classifies.
+     */
+    private fun SQLException.isSqliteConnectionLoss(): Boolean =
+        generateSequence(javaClass as Class<*>?) { it.superclass }.any { it.name == SQLITE_EXCEPTION_CLASS } &&
+            errorCode in SQLITE_CONNECTION_LOSS_PRIMARY_CODES
 
     /**
      * Where the escaped schema filter goes: the catalog argument for drivers that carry the
@@ -284,5 +329,19 @@ class SchemaIntrospector(
     private companion object {
         /** The §7A tables-listing cap — bounds one `datasources_get_tables` call's payload. */
         const val MAX_TABLES = 2000
+
+        /** The vendored sqlite-jdbc's exception class (never compiled against — §10.3). */
+        const val SQLITE_EXCEPTION_CLASS = "org.sqlite.SQLiteException"
+
+        /**
+         * SQLite primary result codes that mean "the database could not be reached": BUSY(5),
+         * IOERR(10), CANTOPEN(14), NOTADB(26). The driver's own constructor masks extended
+         * codes with `& 0xFF`, so every SQLITE_IOERR_* / SQLITE_CANTOPEN_* / SQLITE_BUSY_*
+         * folds onto its primary member here.
+         */
+        val SQLITE_CONNECTION_LOSS_PRIMARY_CODES = setOf(5, 10, 14, 26)
+
+        /** Bound on the cause/nextException chain walk — a driver bug must not loop us. */
+        const val CHAIN_WALK_LIMIT = 16
     }
 }

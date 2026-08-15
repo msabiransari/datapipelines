@@ -196,6 +196,6 @@ org.testcontainers:mssqlserver:1.21.4=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:mysql:1.21.4=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:postgresql:1.21.4=testCompileClasspath,testRuntimeClasspath
 org.testcontainers:testcontainers:1.21.4=testCompileClasspath,testRuntimeClasspath
-org.xerial:sqlite-jdbc:3.49.1.0=runtimeClasspath,testRuntimeClasspath
+org.xerial:sqlite-jdbc:3.49.1.0=runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 org.yaml:snakeyaml:2.4=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 empty=annotationProcessor,detektPlugins,implementationDependenciesMetadata,kotlinCompilerPluginClasspath,kotlinNativeCompilerPluginClasspath,kotlinScriptDefExtensions,testAnnotationProcessor,testImplementationDependenciesMetadata,testKotlinScriptDefExtensions
