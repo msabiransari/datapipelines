@@ -426,6 +426,30 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `blank REMARKS are absent - a driver reporting empty-string comments omits the key`() {
+        // Connector/J reports REMARKS as "" for uncommented tables/columns (non-nullable
+        // information_schema columns defaulting to ''); the wire contract is
+        // omitted-when-none, and the introspector's ResultSet boundary is where "" -> null.
+        val meta = mockk<DatabaseMetaData>()
+        val tablesRs = mockk<ResultSet>(relaxed = true)
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        every { tablesRs.next() } returns true andThen false
+        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
+        every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        every { tablesRs.getString("REMARKS") } returns ""
+        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+        val table = introspector.tables(name).tables.single()
+
+        assertAll(
+            { table.remarks shouldBe null },
+            { table.toWireMap().containsKey("remarks") shouldBe false },
+        )
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

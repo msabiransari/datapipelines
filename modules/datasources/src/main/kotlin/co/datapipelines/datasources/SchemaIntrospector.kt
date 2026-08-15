@@ -164,7 +164,16 @@ class SchemaIntrospector(
                     truncated = true
                     break
                 }
-                out.add(TableInfo(schema, rs.getString("TABLE_NAME"), rs.getString("TABLE_TYPE"), rs.getString("REMARKS")))
+                out.add(
+                    TableInfo(
+                        schema,
+                        rs.getString("TABLE_NAME"),
+                        rs.getString("TABLE_TYPE"),
+                        // Blank remarks are absent (F8's rule): Connector/J reports REMARKS as
+                        // "" for every uncommented table — the wire contract is omitted-when-none.
+                        rs.getString("REMARKS").asNonBlankOrNull(),
+                    ),
+                )
             }
         }
         return TablesPage(out, truncated)
@@ -189,7 +198,7 @@ class SchemaIntrospector(
                         else -> null
                     },
             )
-        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings, rs.getString("REMARKS"))
+        return ColumnInfo(mapped.column, sourceTypeName, mapped.warnings, rs.getString("REMARKS").asNonBlankOrNull())
     }
 
     /**

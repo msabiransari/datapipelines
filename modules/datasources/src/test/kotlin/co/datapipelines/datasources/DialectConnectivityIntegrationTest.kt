@@ -77,7 +77,17 @@ class DialectConnectivityIntegrationTest {
     @Test
     fun `mysql introspection routes an underscore-named database through the literal catalog`() {
         DriverManager.getConnection(mysql.jdbcUrl, mysql.username, mysql.password).use { connection ->
-            connection.createStatement().use { it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)") }
+            connection.createStatement().use {
+                it.execute("CREATE TABLE routed_orders (id INT PRIMARY KEY)")
+                // The remarks pair: a table AND a column carrying a real COMMENT beside an
+                // uncommented sibling — Connector/J reports REMARKS as "" for the uncommented
+                // ones (non-nullable information_schema columns defaulting to ''), and the
+                // wire contract is omitted-when-none, not "" (F4).
+                it.execute(
+                    "CREATE TABLE annotated_orders (id INT COMMENT 'surrogate primary key', note VARCHAR(30)) " +
+                        "COMMENT='customer orders'",
+                )
+            }
         }
 
         val ds =
@@ -113,6 +123,21 @@ class DialectConnectivityIntegrationTest {
             { routed.schema shouldBe mysql.databaseName },
             { columns.map { it.column.name.lowercase() } shouldContain "id" },
             { tables.none { it.schema.equals("information_schema", ignoreCase = true) } shouldBe true },
+            // F4 against the dialect that produces "": an UNCOMMENTED table/column row carries
+            // NO remarks key on the wire, and a COMMENT-ed table/column round-trips its text.
+            {
+                val annotated = tables.first { it.name.equals("annotated_orders", ignoreCase = true) }
+                val annotatedWire = annotated.toWireMap()
+                annotatedWire["remarks"] shouldBe "customer orders"
+                routed.toWireMap().containsKey("remarks") shouldBe false
+            },
+            {
+                val annotatedColumns = introspector.columns("mysql_intro", "annotated_orders", schemaFilter = mysql.databaseName)
+                val idWire = annotatedColumns.first { it.column.name.equals("id", ignoreCase = true) }.toWireMap()
+                val noteWire = annotatedColumns.first { it.column.name.equals("note", ignoreCase = true) }.toWireMap()
+                idWire["remarks"] shouldBe "surrogate primary key"
+                noteWire.containsKey("remarks") shouldBe false
+            },
         )
 
         // The unfiltered listing must not leak the engine's own schemas — sys views arrive as
