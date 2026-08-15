@@ -40,7 +40,6 @@ Small, additive, likely to land soon after v1 ship. Rough priority order.
 
 | Feature | Source spec | Notes |
 |---|---|---|
-| **Schema introspection tools** (`datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns`) | mcp-server §12, datasources §14 | Needed for LLM-assisted pipeline authoring. Without these, agents can't author SQL templates — they don't know source schemas. High leverage. |
 | **Parameterized SQL output** (templates emit `{sql, params}` for prepared statements) | templates §13 | Closes the SQL injection gap. Templates currently render to raw SQL strings; parameterized output is safer for user-controlled values. |
 | **Auto-create target table for write-back** (`output.auto_create: true`) | pipeline-contract §18 | For `output.target: "datasource"`: emit `CREATE TABLE IF NOT EXISTS` from ResultSet metadata before INSERT. Saves a preceding DDL node in the common case. |
 | **DuckDB as staging engine** (`settings.tempdb.engine: "DUCKDB"`) | pipeline-contract §18, staging §14 | Better for analytical workloads (large joins, wide aggregations). DuckDB is internally parallel, sidesteps the single-connection serialization concern. |
