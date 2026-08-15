@@ -45,10 +45,10 @@ class SchemaIntrospector(
             rs.use {
                 buildList {
                     while (it.next()) {
-                        val schema = it.getString(adapter.schemaResultColumn())
                         // The JDBC "" sentinel ("objects without a catalog") is not a schema
                         // an agent can pass to get_tables — skip it rather than list it.
-                        if (schema.isNullOrBlank() || adapter.isSystemSchema(schema)) continue
+                        val schema = it.getString(adapter.schemaResultColumn()).asNonBlankOrNull() ?: continue
+                        if (adapter.isSystemSchema(schema)) continue
                         add(schema)
                     }
                 }
@@ -95,7 +95,7 @@ class SchemaIntrospector(
             meta.getColumns(catalog, rawSchemaPattern?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
-                        val schema = rs.getString(adapter.schemaResultColumn())
+                        val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
                         if (adapter.isSystemSchema(schema)) continue
                         add(mapColumnRow(rs, adapter.typeMapper))
                     }
@@ -122,7 +122,7 @@ class SchemaIntrospector(
             // before the system-row test would flag truncation on a trailing system row.
             @Suppress("LoopWithTooManyJumpStatements")
             while (rs.next()) {
-                val schema = rs.getString(adapter.schemaResultColumn())
+                val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
                 if (adapter.isSystemSchema(schema)) continue
                 if (maxRows != null && out.size == maxRows) {
                     truncated = true
@@ -297,7 +297,16 @@ class SchemaIntrospector(
             if (adapter.schemaArrivesInCatalog) catalog else schema
         } catch (_: SQLException) {
             null
-        }?.takeUnless { it.isNullOrEmpty() }
+        }?.asNonBlankOrNull()
+
+    /**
+     * The ONE blank-sentinel rule at the ResultSet boundary: a value that is null, empty, or
+     * whitespace-only means "absent", never a name — drivers report the JDBC `""` sentinel
+     * ("objects without a catalog/schema") and some report `" "` just as vacuously. Every
+     * site that reads a schema or remark (driver-reported or caller-supplied) routes through
+     * this rule so the boundary cannot spell it differently per site.
+     */
+    private fun String?.asNonBlankOrNull(): String? = this?.takeUnless { it.isBlank() }
 
     private fun notFound(name: String): DatapipelinesException =
         DatapipelinesException(

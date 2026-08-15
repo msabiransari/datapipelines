@@ -265,6 +265,52 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `whitespace-only names are the blank sentinel everywhere - not names`() {
+        // The blank-sentinel rule is ONE rule at the ResultSet boundary: blank or
+        // whitespace-only → none. A driver reporting " " (not "") must not sneak a
+        // whitespace "schema" into a listing, a table row, or the current-schema default.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val schemasRs = mockk<ResultSet>(relaxed = true)
+                every { meta.schemas } returns schemasRs
+                every { schemasRs.next() } returns true andThen true andThen false
+                every { schemasRs.getString("TABLE_SCHEM") } returns "   " andThen "public"
+                val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+                introspector.schemas(name) shouldBe listOf("public")
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val tablesRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+                every { tablesRs.next() } returns true andThen false
+                every { tablesRs.getString("TABLE_SCHEM") } returns "   "
+                every { tablesRs.getString("TABLE_NAME") } returns "orders"
+                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+                val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+                introspector.tables(name).tables.single().schema shouldBe null
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "deals", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } returns "   "
+                    }
+
+                introspector.columns(name, "deals") shouldBe emptyList()
+                verify(exactly = 1) { meta.getColumns(null, null, "deals", "%") }
+            },
+        )
+    }
+
+    @Test
     fun `columns treats the blank current-schema sentinel like none - unfiltered minus system`() {
         // JDBC's "" sentinel means "objects without a catalog/schema" — a driver reporting it
         // must get the unfiltered-minus-system fallback, NOT a match-nothing "" filter.
