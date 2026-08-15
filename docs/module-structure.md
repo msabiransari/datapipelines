@@ -672,6 +672,22 @@ rounded down. Floors are a regression tripwire, not a coverage target — raise
 one only when coverage genuinely improved; never lower one to force a build
 green. `tests/integration-tests` has no floor (no main sources).
 
+### 7.8 Architecture-as-tests (Konsist)
+
+House layering rules that previously existed only as prose are encoded as
+Konsist tests (pinned in the catalog, TEST dependency only):
+
+- `modules/web` — `RequiredScopeKonsistTest`: every HTTP handler on a
+  `@RestController` declares `@RequiredScope`. Deliberately redundant with the
+  reflection-based `RequiredScopeCoverageTest`: one proves it on the live
+  classpath, the other statically from sources.
+- `tests/integration-tests` — `ArchitectureGuardTest`, scanning every module's
+  production sources from the cross-module suite: no field injection
+  (`@Autowired` on properties/fields), and `@Transactional` only on
+  `*Service` classes (the house service-layer naming).
+
+Konsist lives in existing test source sets only — no dedicated Gradle module.
+
 ---
 
 ## 8. Spring Boot Conventions

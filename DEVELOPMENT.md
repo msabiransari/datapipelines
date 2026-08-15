@@ -500,6 +500,14 @@ or an obvious Dockerfile change resolves cheaply. trivy 0.74 has no
 docker-compose scanner, so `deploy/*.yml` is not covered. First run needs
 network (vulnerability DB download); the image scan needs a Docker daemon.
 
+#### Architecture guards (Konsist)
+
+Layering rules as ordinary unit tests (module-structure.md §7.8):
+`RequiredScopeKonsistTest` in `modules/web` and `ArchitectureGuardTest` in
+`tests/integration-tests` (no field injection; `@Transactional` only on
+`*Service` classes). They run with the normal `test` task — no separate
+command.
+
 ---
 
 ## 11. Project Structure

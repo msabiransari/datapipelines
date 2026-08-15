@@ -99,6 +99,9 @@ argon2-jvm = "2.12"
 jjwt = "0.13.0"
 mockk = "1.14.11"
 kotest = "6.2.3"
+# Konsist: latest stable on Maven Central (verified 2026-08-15; the project's
+# last release is 2024-12 but it remains the current stable line).
+konsist = "0.17.3"
 webjars-bootstrap = "5.3.8"
 # htmx: 4.0.0-beta6 is the newest artifact and is rejected as pre-release.
 htmx = "2.0.10"
@@ -208,6 +211,9 @@ mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 # Kotest SPEC classes can add it to its own build file with its own Test task.
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+# Architecture-as-tests (module-structure.md §7.8). TEST dependency only, in
+# modules/web (web rules) and tests/integration-tests (cross-module rules).
+konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
