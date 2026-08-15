@@ -6,10 +6,10 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
-import java.sql.DriverManager
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.sql.DriverManager
 
 /**
  * §7A introspection behavior over a **real** in-memory H2 — the metadata comes from a live JDBC

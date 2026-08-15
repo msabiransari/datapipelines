@@ -33,6 +33,8 @@ class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
     private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
 
+    private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
+
     @Test
     fun `get_tables threads its arguments and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
@@ -119,9 +121,9 @@ class DatasourceSchemaToolsTest {
         // DatasourceUnreachableException wraps both failure families (SQLException at the
         // lease, RuntimeException at pool build — the Hikari path is pinned by the
         // introspector tests); the tools translate the one type.
-        every { introspector.tables("down", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
-        every { introspector.columns("down", "orders", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
-        every { introspector.snapshot("down") } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
+        every { introspector.tables("down", null) } throws unreachable("down")
+        every { introspector.columns("down", "orders", null) } throws unreachable("down")
+        every { introspector.snapshot("down") } throws unreachable("down")
 
         assertAll(
             {

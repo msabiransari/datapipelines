@@ -6,11 +6,11 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.sql.DatabaseMetaData
 import java.sql.ResultSet
 import java.sql.SQLFeatureNotSupportedException
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertAll
 
 /**
  * §7A identifier ROUTING over mocked `DatabaseMetaData` — which argument of `getTables` /

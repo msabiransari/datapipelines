@@ -6,12 +6,12 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import java.sql.DatabaseMetaData
-import java.sql.ResultSet
-import java.sql.SQLException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.sql.DatabaseMetaData
+import java.sql.ResultSet
+import java.sql.SQLException
 
 /**
  * §7A's work-protocol seam: the cap+1 early-exit (a huge catalog costs cap+1 rows, not a walk),

@@ -196,16 +196,22 @@ class SchemaIntrospector(
             try {
                 registry.poolFor(datasource).leaseConnection()
             } catch (e: SQLException) {
-                throw DatasourceUnreachableException(datasourceName, e)
+                unreachable(datasourceName, e)
             } catch (e: RuntimeException) {
-                throw DatasourceUnreachableException(datasourceName, e)
+                unreachable(datasourceName, e)
             }
         return try {
             connection.use { block(it, it.metaData, datasource) }
         } catch (e: SQLException) {
-            throw DatasourceUnreachableException(datasourceName, e)
+            unreachable(datasourceName, e)
         }
     }
+
+    /** The single throw point of the lease boundary's translation (keeps [withMetaData] under ThrowsCount). */
+    private fun unreachable(
+        datasourceName: String,
+        cause: Throwable,
+    ): Nothing = throw DatasourceUnreachableException(datasourceName, cause)
 
     /** [DialectAdapter.introspectionSystemSchemas], matched case-insensitively (null = not a system schema). */
     private fun DialectAdapter.isSystemSchema(schema: String?): Boolean = schema != null && schema.lowercase() in introspectionSystemSchemas

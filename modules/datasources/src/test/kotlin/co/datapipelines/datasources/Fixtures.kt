@@ -85,7 +85,8 @@ internal object Fixtures {
  * A [DatasourceAuditSink] that keeps what it was given, so a test can assert the §7.4 contract —
  * *which* events fire, how many times, and with what actor — instead of only that the code ran.
  */
-internal class RecordingAuditSink : DatasourceAuditSink {    private val recorded = CopyOnWriteArrayList<DatasourceAuditEvent>()
+internal class RecordingAuditSink : DatasourceAuditSink {
+    private val recorded = CopyOnWriteArrayList<DatasourceAuditEvent>()
 
     override fun record(event: DatasourceAuditEvent) {
         recorded += event
