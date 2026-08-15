@@ -9,11 +9,11 @@ import co.datapipelines.datasources.SchemaSnapshot
 import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.TableWithColumns
 import co.datapipelines.datasources.TablesPage
+import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
-import co.datapipelines.typesystem.TypeMappingWarning
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -22,101 +22,44 @@ import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 
+/**
+ * §7A tool DELEGATION over a mocked introspector: each tool parses its arguments, threads them
+ * to [SchemaIntrospector], and serves the shared wire projections (`toWireMap`) unchanged —
+ * the field-by-field shape of those projections is owned ONCE by `SchemaWireTest` in
+ * `modules/datasources`, not re-asserted here per surface. Error paths (not-found, unreachable,
+ * invalid params) are this layer's own behavior and stay fully asserted.
+ */
 class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
     private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
 
     @Test
-    fun `get_tables returns the tables-plus-truncated payload`() {
-        every { introspector.tables("pg-prod", null) } returns TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = false)
+    fun `get_tables threads its arguments and serves the shared wire projection`() {
+        val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
+        every { introspector.tables("pg-prod", "sales") } returns page
 
-        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<*, *>
+        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx)
 
-        @Suppress("UNCHECKED_CAST")
-        val tables = payload["tables"] as List<Map<String, Any?>>
-        assertAll(
-            { payload["truncated"] shouldBe false },
-            { tables.size shouldBe 1 },
-            { tables[0]["schema"] shouldBe "public" },
-            { tables[0]["name"] shouldBe "orders" },
-            { tables[0]["type"] shouldBe "TABLE" },
-        )
+        payload shouldBe page.toWireMap()
     }
 
     @Test
-    fun `get_tables flags truncation when the cap dropped tables`() {
-        every { introspector.tables("pg-prod", null) } returns TablesPage(emptyList(), truncated = true)
-
-        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<*, *>
-
-        payload["truncated"] shouldBe true
-    }
-
-    @Test
-    fun `get_tables pushes the schema filter through`() {
-        every { introspector.tables("pg-prod", "sales") } returns TablesPage(emptyList(), truncated = false)
-
-        val payload =
-            DatasourcesGetTablesTool(introspector)
-                .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx) as Map<*, *>
-
-        (payload["tables"] as List<*>).size shouldBe 0
-    }
-
-    @Test
-    fun `get_columns returns canonical and source types snake_case`() {
-        every { introspector.columns("pg-prod", "orders", null) } returns
+    fun `get_columns threads its arguments and serves the shared wire projection`() {
+        val columns =
             listOf(
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
                 ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
             )
+        every { introspector.columns("pg-prod", "orders", null) } returns columns
 
-        @Suppress("UNCHECKED_CAST")
-        val payload =
-            DatasourcesGetColumnsTool(introspector)
-                .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx) as List<Map<String, Any?>>
+        val payload = DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
 
-        assertAll(
-            { payload.size shouldBe 2 },
-            { payload[0]["name"] shouldBe "id" },
-            { payload[0]["type"] shouldBe "INTEGER" },
-            { payload[0]["nullable"] shouldBe false },
-            { payload[0]["source_type"] shouldBe "int4" },
-            { payload[0]["warnings"] shouldBe emptyList<String>() },
-            { payload[1]["precision"] shouldBe 10 },
-            { payload[1]["scale"] shouldBe 2 },
-        )
+        payload shouldBe columns.map { it.toWireMap() }
     }
 
     @Test
-    fun `get_columns carries the mapper's warning messages`() {
-        every { introspector.columns("pg-prod", "wide", null) } returns
-            listOf(
-                ColumnInfo(
-                    ColumnSchema("mystery", LogicalType.STRING),
-                    "sql_variant",
-                    listOf(TypeMappingWarning.sqlVariant("mystery")),
-                ),
-            )
-
-        @Suppress("UNCHECKED_CAST")
-        val payload =
-            DatasourcesGetColumnsTool(introspector)
-                .call(McpArguments(mapOf("name" to "pg-prod", "table" to "wide")), authorCtx) as List<Map<String, Any?>>
-
-        payload[0]["warnings"] shouldBe listOf(TypeMappingWarning.sqlVariant("mystery").message)
-    }
-
-    @Test
-    fun `get_columns without a table argument is invalid params`() {
-        shouldThrow<McpError> {
-            DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
-        }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
-    }
-
-    @Test
-    fun `get_schema returns the snapshot payload`() {
-        every { introspector.snapshot("pg-prod") } returns
+    fun `get_schema threads its arguments and serves the shared wire projection`() {
+        val snapshot =
             SchemaSnapshot(
                 datasource = "pg-prod",
                 dialect = "POSTGRES",
@@ -129,19 +72,18 @@ class DatasourceSchemaToolsTest {
                         ),
                     ),
             )
+        every { introspector.snapshot("pg-prod") } returns snapshot
 
-        @Suppress("UNCHECKED_CAST")
-        val payload = DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx) as Map<String, Any?>
+        val payload = DatasourcesGetSchemaTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
 
-        @Suppress("UNCHECKED_CAST")
-        val firstTable = (payload["tables"] as List<Map<String, Any?>>)[0]
-        assertAll(
-            { payload["datasource"] shouldBe "pg-prod" },
-            { payload["dialect"] shouldBe "POSTGRES" },
-            { payload["truncated"] shouldBe false },
-            { (firstTable["table"] as Map<*, *>)["name"] shouldBe "orders" },
-            { ((firstTable["columns"] as List<*>)[0] as Map<*, *>)["source_type"] shouldBe "int4" },
-        )
+        payload shouldBe snapshot.toWireMap()
+    }
+
+    @Test
+    fun `get_columns without a table argument is invalid params`() {
+        shouldThrow<McpError> {
+            DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+        }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
     @Test
@@ -175,8 +117,8 @@ class DatasourceSchemaToolsTest {
         // A customer DB being down must reach the dispatcher as a catalogued
         // DatapipelinesException (isError envelope), never as -32603. The introspector's
         // DatasourceUnreachableException wraps both failure families (SQLException at the
-        // lease, RuntimeException at pool build — the Hikari path is pinned by
-        // SchemaIntrospectorTest); the tools translate the one type.
+        // lease, RuntimeException at pool build — the Hikari path is pinned by the
+        // introspector tests); the tools translate the one type.
         every { introspector.tables("down", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
         every { introspector.columns("down", "orders", null) } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
         every { introspector.snapshot("down") } throws DatasourceUnreachableException("down", RuntimeException("Connection refused"))
