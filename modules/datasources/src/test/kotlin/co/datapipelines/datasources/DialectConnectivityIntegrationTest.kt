@@ -65,7 +65,9 @@ class DialectConnectivityIntegrationTest {
     /**
      * §7A against the real Connector/J: the database arrives in TABLE_CAT (TABLE_SCHEM is
      * null), so introspection must route through the catalog — the schema filter selects the
-     * database and each table reports the database as its schema.
+     * database and each table reports the database as its schema. And an UNFILTERED listing
+     * must drop MySQL's system schemas: Connector/J reports `sys` / `performance_schema`
+     * views as plain `VIEW`/`TABLE` rows, so only the system-schema list can keep them out.
      */
     @Test
     fun `mysql introspection reads the database from the catalog as the schema`() {
@@ -94,13 +96,21 @@ class DialectConnectivityIntegrationTest {
                 override fun close() = Unit
             }
 
-        val tables = SchemaIntrospector(registry).tables("mysql_intro", schemaFilter = mysql.databaseName).tables
+        val introspector = SchemaIntrospector(registry)
+        val tables = introspector.tables("mysql_intro", schemaFilter = mysql.databaseName).tables
 
         val routed = tables.first { it.name.equals("routed_orders", ignoreCase = true) }
         assertAll(
             { routed.schema shouldBe mysql.databaseName },
             { tables.none { it.schema.equals("information_schema", ignoreCase = true) } shouldBe true },
         )
+
+        // The unfiltered listing must not leak the engine's own schemas — sys views arrive as
+        // plain VIEWs, invisible to the table-type vocabulary.
+        val unfilteredSchemas = introspector.tables("mysql_intro").tables.mapNotNull { it.schema?.lowercase() }
+        unfilteredSchemas.forEach { schema ->
+            (schema in setOf("mysql", "performance_schema", "sys", "information_schema")) shouldBe false
+        }
     }
 
     private companion object {
