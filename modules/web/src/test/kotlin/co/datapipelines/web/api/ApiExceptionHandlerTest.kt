@@ -1,9 +1,13 @@
 package co.datapipelines.web.api
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -34,6 +38,14 @@ class ApiExceptionHandlerTest {
                 message = "Datasource 'pg-prod' could not be reached for schema introspection.",
                 details = mapOf("datasource" to "pg-prod"),
             )
+
+        @GetMapping("/probe/query-failed")
+        fun queryFailed(): Nothing =
+            throw co.datapipelines.typesystem.DatapipelinesException(
+                code = PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                message = "Syntax error in the rendered SQL.",
+                details = mapOf("node_id" to "n1"),
+            )
     }
 
     private val mvc: MockMvc =
@@ -63,8 +75,9 @@ class ApiExceptionHandlerTest {
 
     @Test
     fun `a customer database being down is 502 logged at WARN - not a 5xx ERROR stack`() {
-        // 502 means the DOWNSTREAM is broken (the caller's own database, typically) — an ERROR
-        // with a stack per request would bury the operator's real incidents.
+        // The demotion keys on the ERROR CODE, not the status: only the codes meaning "the
+        // caller's own downstream is down" (datasource_unreachable,
+        // datasource_connection_failed) earn WARN — a 502 status alone proves nothing.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
         val appender =
             ch.qos.logback.core.read
@@ -75,8 +88,36 @@ class ApiExceptionHandlerTest {
             mvc.perform(get("/probe/unreachable")).andExpect(status().isBadGateway)
 
             val levels = appender.list.map { it.level.toString() }
-            assert(levels.contains("WARN")) { "expected a WARN event for 502, got $levels" }
-            assert(!levels.contains("ERROR")) { "a customer DB being down must not log ERROR, got $levels" }
+            assertAll(
+                { levels shouldContain "WARN" },
+                { levels shouldNotContain "ERROR" },
+                { appender.list.single().throwableProxy shouldBe null },
+            )
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    @Test
+    fun `a 502 status outside the allowlist logs ERROR with the stack`() {
+        // query_execution_failed also maps to 502, but it can be OUR bug (the rendered SQL we
+        // produced) — keying the demotion on the status would bury it. It must log ERROR with
+        // the throwable attached.
+        val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            mvc.perform(get("/probe/query-failed")).andExpect(status().isBadGateway)
+
+            val levels = appender.list.map { it.level.toString() }
+            assertAll(
+                { levels shouldContain "ERROR" },
+                { levels shouldNotContain "WARN" },
+                { appender.list.single().throwableProxy shouldNotBe null },
+            )
         } finally {
             logger.detachAppender(appender)
         }
