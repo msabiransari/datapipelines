@@ -343,7 +343,7 @@ Example client configuration (OpenCode — `~/.config/opencode/opencode.jsonc`, 
 
 For clients that can only set the standard Authorization header, `"Authorization": "Bearer dpk_<id>.<secret>"` is equivalent ([MCP §3.2](docs/mcp-server.md#32-auth-headers)). Keep the key out of version control — global config or an untracked file.
 
-Restart your agent client after adding the config (MCP servers are discovered at startup). Once connected, the agent sees 17 tools (`pipelines_create`, `pipelines_execute`, `templates_render`, `datasources_get_tables`, `executions_get_result`, …) plus 3 prompts (`analyze_pipeline`, `create_pipeline_for_question`, `debug_failed_execution`) — the full surface is in [MCP spec §6](docs/mcp-server.md#6-tools).
+Restart your agent client after adding the config (MCP servers are discovered at startup). Once connected, the agent sees 18 tools (`pipelines_create`, `pipelines_execute`, `templates_render`, `datasources_get_schemas`, `datasources_get_tables`, `executions_get_result`, …) plus 3 prompts (`analyze_pipeline`, `create_pipeline_for_question`, `debug_failed_execution`) — the full surface is in [MCP spec §6](docs/mcp-server.md#6-tools).
 
 Notes for agent users:
 

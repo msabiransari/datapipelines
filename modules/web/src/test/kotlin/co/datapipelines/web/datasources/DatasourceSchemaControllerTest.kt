@@ -31,6 +31,16 @@ class DatasourceSchemaControllerTest {
     private val controller = DatasourceSchemaController(introspector)
 
     @Test
+    fun `schemas delegates to the introspector and serves the plain name list`() {
+        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+
+        val data = controller.schemas("pg-prod").data
+
+        data shouldBe listOf("public", "sales")
+        verify(exactly = 1) { introspector.schemas("pg-prod") }
+    }
+
+    @Test
     fun `tables delegates to the introspector and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page

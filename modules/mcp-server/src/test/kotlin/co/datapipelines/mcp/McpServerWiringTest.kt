@@ -65,6 +65,7 @@ class McpServerWiringTest {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
+            DatasourcesGetSchemasTool(introspector),
             DatasourcesGetTablesTool(introspector),
             DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),
@@ -74,22 +75,22 @@ class McpServerWiringTest {
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 17 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 18 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist.
      */
     @Test
-    fun `the tool surface is exactly the 17 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 18 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
-            { dispatcher.toolNames().size shouldBe 17 },
+            { dispatcher.toolNames().size shouldBe 18 },
             { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys },
         )
     }
 
     @Test
-    fun `the server builds with all 17 tools and all three prompts registered`() {
+    fun `the server builds with all 18 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(
@@ -102,7 +103,7 @@ class McpServerWiringTest {
             )
 
         assertAll(
-            { server.listTools().size shouldBe 17 },
+            { server.listTools().size shouldBe 18 },
             {
                 server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder
                     listOf("analyze_pipeline", "create_pipeline_for_question", "debug_failed_execution")

@@ -34,6 +34,15 @@ class DatasourceSchemaToolsTest {
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
     @Test
+    fun `get_schemas threads its arguments and serves the plain name list`() {
+        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+
+        val payload = DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+
+        payload shouldBe listOf("public", "sales")
+    }
+
+    @Test
     fun `get_tables threads its arguments and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page
@@ -74,6 +83,11 @@ class DatasourceSchemaToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemasTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+            {
+                shouldThrow<DatapipelinesException> {
                     DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
@@ -92,10 +106,16 @@ class DatasourceSchemaToolsTest {
         // DatasourceUnreachableException wraps both failure families (SQLException at the
         // lease, RuntimeException at pool build — the Hikari path is pinned by the
         // introspector tests); the tools translate the one type.
+        every { introspector.schemas("down") } throws unreachable("down")
         every { introspector.tables("down", null) } throws unreachable("down")
         every { introspector.columns("down", "orders", null) } throws unreachable("down")
 
         assertAll(
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+            },
             {
                 shouldThrow<DatapipelinesException> {
                     DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)

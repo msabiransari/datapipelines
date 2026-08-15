@@ -44,7 +44,7 @@ class McpToolSurfaceSpecDriftTest {
     /**
      * The one tool §6.2 documents in prose instead of a JSON block ("Same input as
      * `pipelines_create` plus required `id`"), so it has no block to compare against. Named here so
-     * the count guard below still covers all 17.
+     * the count guard below still covers all 18.
      */
     private val documentedInProse = setOf("pipelines_update")
 
@@ -57,7 +57,7 @@ class McpToolSurfaceSpecDriftTest {
                 .toList()
 
         assertAll(
-            { listed.size shouldBe 17 },
+            { listed.size shouldBe 18 },
             { tools.keys shouldContainExactlyInAnyOrder listed },
         )
     }
@@ -165,6 +165,7 @@ class McpToolSurfaceSpecDriftTest {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
+            DatasourcesGetSchemasTool(introspector),
             DatasourcesGetTablesTool(introspector),
             DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),

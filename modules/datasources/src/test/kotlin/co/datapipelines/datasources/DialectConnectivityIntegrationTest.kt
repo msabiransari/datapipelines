@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.typesystem.Dialect
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -68,6 +69,11 @@ class DialectConnectivityIntegrationTest {
      * database and each table reports the database as its schema. And an UNFILTERED listing
      * must drop MySQL's system schemas: Connector/J reports `sys` / `performance_schema`
      * views as plain `VIEW`/`TABLE` rows, so only the system-schema list can keep them out.
+     *
+     * The schemas listing routes through the SAME vocabulary: under Connector/J defaults
+     * (`databaseTerm=CATALOG`) `getSchemas()` reports a single blank schema and the databases
+     * arrive as catalogs — so `schemas()` must read `getCatalogs()`/TABLE_CAT, minus the
+     * system schemas.
      */
     @Test
     fun `mysql introspection reads the database from the catalog as the schema`() {
@@ -111,6 +117,16 @@ class DialectConnectivityIntegrationTest {
         unfilteredSchemas.forEach { schema ->
             (schema in setOf("mysql", "performance_schema", "sys", "information_schema")) shouldBe false
         }
+
+        // The schemas listing reads the DATABASES (catalogs) under Connector/J defaults, with
+        // the engine's own databases excluded the same way.
+        val schemas = introspector.schemas("mysql_intro")
+        assertAll(
+            { schemas.map { it.lowercase() } shouldContain mysql.databaseName.lowercase() },
+            {
+                schemas.none { it.lowercase() in setOf("mysql", "performance_schema", "sys", "information_schema") } shouldBe true
+            },
+        )
     }
 
     private companion object {

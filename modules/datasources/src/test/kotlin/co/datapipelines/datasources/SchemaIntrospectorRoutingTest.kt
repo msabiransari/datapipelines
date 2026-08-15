@@ -145,6 +145,49 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `schemas reads TABLE_SCHEM from getSchemas for schema-filtered dialects`() {
+        // Postgres-family: the schema vocabulary IS the JDBC schema — getSchemas()/TABLE_SCHEM.
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true andThen true andThen false
+        every { schemasRs.getString("TABLE_SCHEM") } returns "public" andThen "pg_catalog"
+
+        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+        introspector.schemas(name) shouldBe listOf("public")
+    }
+
+    @Test
+    fun `schemas reads TABLE_CAT from getCatalogs for catalog-routing dialects`() {
+        // Connector/J defaults (databaseTerm=CATALOG): getSchemas() reports a single blank
+        // schema and the databases arrive as CATALOGS — the listing must read TABLE_CAT from
+        // getCatalogs(), exactly the vocabulary the tables/columns routing already uses.
+        val meta = mockk<DatabaseMetaData>()
+        val catalogsRs = mockk<ResultSet>(relaxed = true)
+        every { meta.catalogs } returns catalogsRs
+        every { catalogsRs.next() } returns true andThen true andThen false
+        every { catalogsRs.getString("TABLE_CAT") } returns "my_app" andThen "sys"
+
+        val (introspector, name) = introspectorOver(Dialect.MYSQL, meta)
+
+        introspector.schemas(name) shouldBe listOf("my_app")
+    }
+
+    @Test
+    fun `schemas skips blank names - the JDBC no-catalog sentinel is not a schema`() {
+        val meta = mockk<DatabaseMetaData>()
+        val schemasRs = mockk<ResultSet>(relaxed = true)
+        every { meta.schemas } returns schemasRs
+        every { schemasRs.next() } returns true andThen true andThen false
+        every { schemasRs.getString("TABLE_SCHEM") } returns "" andThen "public"
+
+        val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
+
+        introspector.schemas(name) shouldBe listOf("public")
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

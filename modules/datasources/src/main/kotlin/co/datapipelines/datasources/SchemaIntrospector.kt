@@ -11,7 +11,8 @@ import java.sql.SQLException
 /**
  * Reads live schema metadata from a registered datasource (datasources.md §7A) via JDBC
  * [DatabaseMetaData], mapping column types through the dialect's IngressTypeMapper so agents see
- * canonical types, not driver-specific names.
+ * canonical types, not driver-specific names. The introspection flow is
+ * [schemas] → [tables] → [columns]: nothing bundles columns into a table listing.
  *
  * Read-only by construction: only `metaData` calls, no statements. An unknown datasource is the
  * catalogued `datasource.not_found` ([DatasourceErrorCodes.NOT_FOUND]); an unknown table/schema
@@ -25,6 +26,34 @@ import java.sql.SQLException
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
 ) {
+    /**
+     * §7A — the schema listing, the entry point of the introspection flow (schemas → tables →
+     * columns). A plain list of schema names as the driver reported them, with the dialect's
+     * system schemas excluded.
+     *
+     * The vocabulary follows [DialectAdapter.schemaArrivesInCatalog]: for catalog-routing
+     * drivers (Connector/J defaults) the databases ARE the JDBC catalogs, so the listing reads
+     * `getCatalogs()`/TABLE_CAT — `getSchemas()` there reports a single blank schema. An EMPTY
+     * list is a valid result, not an error: a schemaless dialect (SQLite, single-db DuckDB)
+     * genuinely has no schemas to list.
+     */
+    fun schemas(datasourceName: String): List<String> =
+        withMetaData(datasourceName) { _, meta, datasource ->
+            val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
+            rs.use {
+                buildList {
+                    while (it.next()) {
+                        val schema = it.getString(adapter.schemaResultColumn())
+                        // The JDBC "" sentinel ("objects without a catalog") is not a schema
+                        // an agent can pass to get_tables — skip it rather than list it.
+                        if (schema.isNullOrBlank() || adapter.isSystemSchema(schema)) continue
+                        add(schema)
+                    }
+                }
+            }
+        }
+
     /** §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables]. */
     fun tables(
         datasourceName: String,

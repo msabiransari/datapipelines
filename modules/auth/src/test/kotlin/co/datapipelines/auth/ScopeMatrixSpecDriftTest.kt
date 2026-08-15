@@ -41,8 +41,8 @@ class ScopeMatrixSpecDriftTest {
     fun `every MCP tool minimum scope matches auth-md §7-6`() {
         val fromDoc = parseMcpTable(RepoFiles.read(RepoFiles.AUTH_SPEC_PATH))
 
-        // All 17 tools present (auth.md §7.6 / mcp-server §6.2).
-        fromDoc.size shouldBe 17
+        // All 18 tools present (auth.md §7.6 / mcp-server §6.2).
+        fromDoc.size shouldBe 18
         ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
     }
 

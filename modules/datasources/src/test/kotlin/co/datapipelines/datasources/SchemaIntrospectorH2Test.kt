@@ -190,10 +190,44 @@ class SchemaIntrospectorH2Test {
     }
 
     @Test
+    fun `schemas lists user schemas and excludes the driver's system schemas`() {
+        h2.createStatement().use { st ->
+            st.execute("CREATE SCHEMA sales")
+            st.execute("CREATE TABLE sales.deals (id INT)")
+        }
+        wireDatasource()
+
+        val schemas = introspector.schemas("h2-test")
+
+        // H2 reports INFORMATION_SCHEMA beside every user schema; PUBLIC is the default
+        // schema a fresh database carries. System schemas stay out, user schemas stay in —
+        // case preserved as the driver reported it (§7A: pass-through, no normalization).
+        assertAll(
+            { schemas.map { it.uppercase() } shouldContainExactly listOf("PUBLIC", "SALES") },
+            { schemas.none { it.equals("INFORMATION_SCHEMA", ignoreCase = true) } shouldBe true },
+        )
+    }
+
+    @Test
+    fun `an empty schemas listing is a result, not an error`() {
+        // A schemaless dialect (SQLite, single-db DuckDB) legitimately reports no schemas:
+        // the empty list is the answer, and the operation must not invent an error for it.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        val emptyRs = mockk<java.sql.ResultSet>(relaxed = true)
+        every { meta.schemas } returns emptyRs
+        every { emptyRs.next() } returns false
+        val (mockedIntrospector, name) = introspectorOver(co.datapipelines.typesystem.Dialect.SQLITE, meta)
+
+        mockedIntrospector.schemas(name) shouldBe emptyList()
+    }
+
+    @Test
     fun `an unknown datasource is the catalogued not-found`() {
         every { registry.get("nope") } returns null
 
         shouldThrow<DatapipelinesException> { introspector.tables("nope") }
+            .code shouldBe DatasourceErrorCodes.NOT_FOUND
+        shouldThrow<DatapipelinesException> { introspector.schemas("nope") }
             .code shouldBe DatasourceErrorCodes.NOT_FOUND
     }
 }

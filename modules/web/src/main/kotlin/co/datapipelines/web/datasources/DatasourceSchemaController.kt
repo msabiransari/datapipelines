@@ -34,16 +34,26 @@ import org.springframework.web.bind.annotation.RestController
  * the code belongs to `pipeline-contract`, a sibling of `datasources`, so each surface keeps
  * its own three-line translation (accepted in the round-2 hardening review).
  *
- * Both endpoints are `author`-scoped (§7A, the §8.1 connection-test precedent): each opens a
+ * All three endpoints are `author`-scoped (§7A, the §8.1 connection-test precedent): each opens a
  * live connection against the datasource, and the stated consumer is pipeline authoring. No
  * pagination — the tables listing is capped at 2000 (`truncated: true` when the cap dropped
- * any) and the per-table listings are naturally bounded.
+ * any), the schemas and per-table listings are naturally bounded.
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
 class DatasourceSchemaController(
     private val introspector: SchemaIntrospector,
 ) {
+    /**
+     * §7A — the schema listing, the introspection flow's entry point (schemas → tables →
+     * columns). A plain list of names; empty is a valid answer on schemaless dialects.
+     */
+    @GetMapping("/{name}/schemas")
+    @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
+    fun schemas(
+        @PathVariable name: String,
+    ): ApiResponse<List<String>> = ApiResponse.of(introspecting(name) { introspector.schemas(name) })
+
     /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)

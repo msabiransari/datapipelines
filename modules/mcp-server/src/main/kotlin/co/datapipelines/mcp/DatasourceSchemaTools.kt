@@ -7,10 +7,12 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 
 /*
- * The schema-introspection tools (mcp-server.md §6.2.17–18, datasources.md §7A) — thin adapters
- * over [SchemaIntrospector], the same service the REST endpoints use.
+ * The schema-introspection tools (mcp-server.md §6.2.16–18, datasources.md §7A) — thin adapters
+ * over [SchemaIntrospector], the same service the REST endpoints use. Together they form the
+ * ONE introspection flow: get_schemas → get_tables(schema) → get_columns for only the tables
+ * the SQL needs.
  *
- * Scope: `author` on both (auth.md §7.6) — each opens a live connection against the
+ * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
  * datasource, matching the `datasources_test` precedent. Payloads are the shared §7A wire maps
  * (`toWireMap`, in `modules/datasources` beside the data classes — the same projections the REST
  * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
@@ -27,6 +29,41 @@ import co.datapipelines.typesystem.DatapipelinesException
  * translation (accepted in the round-2 hardening review).
  */
 
+/**
+ * `datasources_get_schemas` (mcp-server.md §6.2.16) — the flow's entry point. Scope: `author`.
+ */
+class DatasourcesGetSchemasTool(
+    private val introspector: SchemaIntrospector,
+) : McpTool {
+    override val definition =
+        McpTools.tool(
+            name = "datasources_get_schemas",
+            description =
+                "List the schemas of a registered datasource by reading its live JDBC metadata, excluding the " +
+                    "engine's own system schemas. The entry point of schema discovery: call this first, then " +
+                    "get_tables(schema), then get_columns for only the tables the SQL needs. An empty list on a " +
+                    "schemaless datasource is a valid answer. Read-only, for pipeline authoring.",
+            schema =
+                """
+                {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": {"type": "string", "description": "Datasource name."}
+                  }
+                }
+                """.trimIndent(),
+        )
+
+    override fun call(
+        args: McpArguments,
+        ctx: McpToolContext,
+    ): Any {
+        val name = args.requiredString("name")
+        return introspecting(name) { introspector.schemas(name) }
+    }
+}
+
 /** `datasources_get_tables` (mcp-server.md §6.2.17). Scope: `author`. */
 class DatasourcesGetTablesTool(
     private val introspector: SchemaIntrospector,
@@ -36,6 +73,7 @@ class DatasourcesGetTablesTool(
             name = "datasources_get_tables",
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
+                    "The listing spans schemas — pass each table's reported schema to datasources_get_columns. " +
                     "Read-only, for pipeline authoring.",
             schema =
                 """
@@ -68,7 +106,8 @@ class DatasourcesGetColumnsTool(
             name = "datasources_get_columns",
             description =
                 "List one table's columns with canonical types, read from the datasource's live JDBC metadata. " +
-                    "Pass the table name exactly as datasources_get_tables returned it. Read-only, for pipeline authoring.",
+                    "Pass the table name exactly as datasources_get_tables returned it. Without a schema argument " +
+                    "only the connection's current schema is read. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -94,7 +133,7 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
- * The §7A connection-failure boundary shared by the tools: the introspector's
+ * The §7A connection-failure boundary shared by the three tools: the introspector's
  * [DatasourceUnreachableException] is the catalogued
  * `pipeline.execution.datasource_unreachable` thrown as a [DatapipelinesException], so the
  * dispatcher envelopes it (§9.2) instead of mapping it to JSON-RPC -32603. Message is static —

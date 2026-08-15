@@ -520,20 +520,20 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Cancel an execution | `DELETE /api/v1/executions/{id}` (+ ownership check; `admin` may cancel any) | `execute` |
 | Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` |
 | Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` |
-| Introspect a datasource schema | `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` |
+| Introspect a datasource schema | `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` |
 | Create / update / delete datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` | `admin` |
 | Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
 | Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
 
-**MCP tools** (all 17 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
 | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
-| `datasources_test`, `datasources_get_tables`, `datasources_get_columns` | `author` |
+| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` | `author` |
 
 (MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only, `admin`.)
 
