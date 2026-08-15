@@ -59,3 +59,8 @@ secrets.*
 .claude/worktrees/
 .gate-logs/
 gate-logs/
+
+# --- Agent worktrees checked out INSIDE the repo ---
+# A `git add -A` from the main checkout must never stage another lane's
+# in-progress tree.
+.worktrees/
