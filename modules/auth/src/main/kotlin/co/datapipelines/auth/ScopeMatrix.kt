@@ -58,7 +58,7 @@ object ScopeMatrix {
     }
 
     /**
-     * All 15 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 18 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      */
     val MCP_TOOL_MIN_SCOPE: Map<String, Scope> =
@@ -78,6 +78,9 @@ object ScopeMatrix {
             "templates_create" to Scope.AUTHOR,
             "templates_render" to Scope.AUTHOR,
             "datasources_test" to Scope.AUTHOR,
+            "datasources_get_schema" to Scope.AUTHOR,
+            "datasources_get_tables" to Scope.AUTHOR,
+            "datasources_get_columns" to Scope.AUTHOR,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

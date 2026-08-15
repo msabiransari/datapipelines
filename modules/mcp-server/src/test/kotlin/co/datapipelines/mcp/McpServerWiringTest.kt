@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.PipelineExecutor
@@ -50,6 +51,7 @@ class McpServerWiringTest {
         val validator = mockk<PipelineValidator>()
         val templateValidator = mockk<TemplateValidator>()
         val engine = mockk<TemplateEngine>()
+        val introspector = mockk<SchemaIntrospector>()
         return listOf(
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
@@ -63,6 +65,9 @@ class McpServerWiringTest {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
+            DatasourcesGetSchemaTool(introspector),
+            DatasourcesGetTablesTool(introspector),
+            DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
@@ -70,22 +75,22 @@ class McpServerWiringTest {
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 15 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 18 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist.
      */
     @Test
-    fun `the tool surface is exactly the 15 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 18 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
-            { dispatcher.toolNames().size shouldBe 15 },
+            { dispatcher.toolNames().size shouldBe 18 },
             { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys },
         )
     }
 
     @Test
-    fun `the server builds with all 15 tools and both prompts registered`() {
+    fun `the server builds with all 18 tools and both prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(
@@ -98,7 +103,7 @@ class McpServerWiringTest {
             )
 
         assertAll(
-            { server.listTools().size shouldBe 15 },
+            { server.listTools().size shouldBe 18 },
             { server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder listOf("analyze_pipeline", "debug_failed_execution") },
             { server.serverInfo.name() shouldBe "datapipelines" },
             { server.serverInfo.version() shouldBe "1.0.0" },

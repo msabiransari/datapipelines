@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
@@ -69,8 +70,8 @@ class McpServerAutoConfigurationTest {
 
             assertAll(
                 { servlet.urlMappings shouldContainExactly listOf(McpServerFactory.ENDPOINT) },
-                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 15 },
-                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 15 },
+                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 18 },
+                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 18 },
             )
         }
     }
@@ -92,6 +93,8 @@ class McpServerAutoConfigurationTest {
         @Bean fun templates(): TemplateRepository = mockk()
 
         @Bean fun datasources(): DatasourceRegistry = mockk()
+
+        @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()
 

@@ -145,7 +145,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 }
 ```
 
-- `tools.listChanged: false` — the v1 tool surface is **static**: the same 15 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 18 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -173,6 +173,9 @@ Tools are named `{domain}_{action}`:
 - `datasources_list`
 - `datasources_get`
 - `datasources_test`
+- `datasources_get_schema`
+- `datasources_get_tables`
+- `datasources_get_columns`
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
@@ -579,6 +582,75 @@ This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-r
 
 **Scope:** `read` (+ ownership).
 
+#### 6.2.16 `datasources_get_schema`
+
+Read a datasource's whole schema in one payload.
+
+```json
+{
+  "name": "datasources_get_schema",
+  "description": "Read a datasource's whole schema — its tables with their columns — in one payload, capped at 200 tables (truncated: true when tables were dropped). Read-only, for pipeline authoring.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name."}
+    }
+  }
+}
+```
+
+Returns: `{"datasource", "dialect", "truncated", "tables": [{"table": {"schema","name","type"}, "columns": [...]}]}` — column descriptors shaped exactly like `datasources_get_columns`'s. `truncated: true` means tables were dropped by the 200-table cap; page the rest with `datasources_get_tables` + `datasources_get_columns`. Column types are the canonical Type System types; see [Datasources §7A](datasources.md#7a-schema-introspection).
+
+**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
+
+#### 6.2.17 `datasources_get_tables`
+
+List a datasource's tables and views.
+
+```json
+{
+  "name": "datasources_get_tables",
+  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. Read-only, for pipeline authoring.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name."},
+      "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+    }
+  }
+}
+```
+
+Returns: array of `{"schema", "name", "type"}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
+
+**Scope:** `author` — same rationale as `datasources_get_schema`.
+
+#### 6.2.18 `datasources_get_columns`
+
+List one table's columns with canonical types.
+
+```json
+{
+  "name": "datasources_get_columns",
+  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it. Read-only, for pipeline authoring.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name", "table"],
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name."},
+      "table": {"type": "string", "description": "Table name as returned by datasources_get_tables."},
+      "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+    }
+  }
+}
+```
+
+Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type"}` — `type` is the canonical Type System type, `source_type` the driver's own type name; `precision`/`scale`/`nullable` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. JDBC metadata name matching is case-sensitive — pass the name `datasources_get_tables` returned.
+
+**Scope:** `author` — same rationale as `datasources_get_schema`.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -830,7 +902,6 @@ Agents discover the server's capabilities via the standard MCP `initialize` hand
 
 Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritative queue):
 
-- **Schema introspection tools**: `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` — for agents that need to author SQL templates. **v1.1 candidate** ([ROADMAP §2](ROADMAP.md#2-v11-candidates)); the `create_pipeline_for_question` prompt (§8.2) returns with them.
 - **Dynamic per-pipeline tools**: register `pipeline_execute_{name}` tools for pipelines flagged as "agent-exposed," so an agent sees them by name rather than discovering them by listing. Flips `tools.listChanged` to `true` (§5.1). v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **Result streaming / progress notifications via MCP**: stream execution events through the MCP transport instead of returning them only in the final tool result — removes the blocking-call experience of §6.2.3. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **Resource subscriptions**: `resources/subscribe` for live updates when pipelines/templates change. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
@@ -870,3 +941,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-05 | v1.1 | propagation | Updated `pipelines_create` tool to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`; nodes carry `type`, `output`, `settings`). |
 | 2026-08-10 | v1.3 | P6b build (Gate C) | Aligned the frozen spec with the merged `mcp-server` module. Additive/corrective only. **§3.1 implementation-gate RESOLVED**: protocol version pinned `2025-06-18` (negotiate-down), the v1 transport is **stateless** — `GET /mcp` optional and NOT served (405), no session ids, no resumability; SDK `mcp-sdk 2.0.0`. **§5.1**: `logging` capability **removed** — a stateless transport has no stream to deliver `notifications/message`, so advertising it promised notifications no client can receive. **§10**: marked not-delivered-in-v1 (defines the v2 shape only); `node_stats` in a tool's final result is the authoritative per-node record. **§6.2.3**: corrected the abandoned-call paragraph — a blocking `POST /mcp` has no disconnect callback, so `disconnect-grace` cancellation does **not** apply to an abandoned MCP tool call (only out-of-band `DELETE /executions/{id}` + the execution timeout do); result-shape enumeration now lists `ttl_seconds` (mirrors REST `data_ready`). §6.2.9 (bare rendered-SQL string) and §6.2.10 (`dialect` free `{"type":"string"}`, no enum) unchanged — the code was aligned to them. Rate limiting on `/mcp` (§13), repository limit/offset push-down, execution-record persistence and the admin all-executions listing are cross-surface carry-forwards to `web`/`app` (P6a/P7), not defects in this module. |
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.11. **[D11]** §3.2/§4.1 auth rewritten: `DP-API-Key` **or** `Authorization: Bearer dpk_...` through one validation path; session JWTs explicitly rejected; security-chain note added (auth §8.5). **[D15]** Scope row on all 15 tools sourced from the auth §7.6 matrix; `read-only` → `read`; `admin` acknowledged as required by no v1 tool. **[D9]** §6.2.15 rewritten to the uniform REST §7 cursor (offset/limit/format, fixed TTL, stable order, ownership check), 1 MB inline cap with cursor-URL fallback, `result.*` error table; §6.2.3 returns first page + `result_url` (claim-check language gone). **[D3/D12]** `templates_create` drops `params_schema`, gains `imports [{id,version,alias}]`, `is_library`, `engine`; `templates_render` context is a free-form parameter map. **[D1]** `pipelines_create` node description: omitted `output` → `caller`, at most one caller node, zero legal. **[D7]** §6.2.3 documents blocking-call semantics, execution timeout, abandoned-call cancellation after grace, and deferral of MCP progress notifications. **[D10]** `X-API-Key` → `DP-API-Key`. **[M]** §5.1 `listChanged: false` across capabilities; §6.2.1 drops `datasources_used`; §7.3 `resources/list` pagination specified (opaque cursor, page size 100, 24h execution window, scope filtering); §8.2 `create_pipeline_for_question` removed from the v1 surface (ROADMAP §2); §3.1 verification marker reframed as an implementation-gate checklist; §12 futures re-tiered against ROADMAP; §13 checklist expanded. |
+| 2026-08-14 | v1.4 | v1.1 introspection build | Tool surface 15 → **18**: new §6.2.16 `datasources_get_schema`, §6.2.17 `datasources_get_tables`, §6.2.18 `datasources_get_columns` — read-only JDBC metadata introspection (`author` scope, the `datasources_test` precedent), sourced from datasources §7A with canonical type mapping, 200-table snapshot cap, empty-list-for-unknown-filter. §6.1 lists the three; §5.1 static-surface count updated; §12 future-work bullet removed (shipped). |

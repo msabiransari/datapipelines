@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
@@ -30,7 +31,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 15 tools, the two prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 18 tools, the two prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -43,7 +44,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 15 tools of §6.1, in `tools/list` order. */
+    /** The 18 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -51,6 +52,7 @@ class McpServerAutoConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         datasources: DatasourceRegistry,
+        introspector: SchemaIntrospector,
         executions: ExecutionRepository,
         executor: PipelineExecutor,
         resultStore: ResultStore,
@@ -88,6 +90,9 @@ class McpServerAutoConfiguration {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
+            DatasourcesGetSchemaTool(introspector),
+            DatasourcesGetTablesTool(introspector),
+            DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),

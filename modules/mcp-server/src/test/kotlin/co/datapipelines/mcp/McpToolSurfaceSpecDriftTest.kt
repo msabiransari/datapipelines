@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
@@ -43,7 +44,7 @@ class McpToolSurfaceSpecDriftTest {
     /**
      * The one tool §6.2 documents in prose instead of a JSON block ("Same input as
      * `pipelines_create` plus required `id`"), so it has no block to compare against. Named here so
-     * the count guard below still covers all 15.
+     * the count guard below still covers all 18.
      */
     private val documentedInProse = setOf("pipelines_update")
 
@@ -56,7 +57,7 @@ class McpToolSurfaceSpecDriftTest {
                 .toList()
 
         assertAll(
-            { listed.size shouldBe 15 },
+            { listed.size shouldBe 18 },
             { tools.keys shouldContainExactlyInAnyOrder listed },
         )
     }
@@ -150,6 +151,7 @@ class McpToolSurfaceSpecDriftTest {
         val resultStore = mockk<ResultStore>()
         val urls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
         val deserializer = PipelineDeserializer()
+        val introspector = mockk<SchemaIntrospector>()
         return listOf(
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
@@ -163,6 +165,9 @@ class McpToolSurfaceSpecDriftTest {
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
+            DatasourcesGetSchemaTool(introspector),
+            DatasourcesGetTablesTool(introspector),
+            DatasourcesGetColumnsTool(introspector),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, urls),

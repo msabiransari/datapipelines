@@ -526,14 +526,14 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
 
-**MCP tools** (all 15 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
 | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
-| `datasources_test` | `author` |
+| `datasources_test`, `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` | `author` |
 
 (MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only, `admin`.)
 

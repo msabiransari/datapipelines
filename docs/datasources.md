@@ -411,7 +411,7 @@ Rules:
 - **An unknown datasource name is `datasource.not_found`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)).
 - Credentials are never part of any introspection payload — the operations read schema metadata only.
 
-Surfaces: REST `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{table}/columns` ([REST API §9.7](rest-api.md#97-schema-introspection)); MCP `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` (mcp-server.md §6.2.16–18 — link lands with that doc's amendment).
+Surfaces: REST `GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{table}/columns` ([REST API §9.7](rest-api.md#97-schema-introspection)); MCP `datasources_get_schema`, `datasources_get_tables`, `datasources_get_columns` ([MCP §6.2.16–18](mcp-server.md#6216-datasources_get_schema)).
 
 ---
 
