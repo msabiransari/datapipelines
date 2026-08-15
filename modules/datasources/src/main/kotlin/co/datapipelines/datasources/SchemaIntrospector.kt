@@ -90,14 +90,9 @@ class SchemaIntrospector(
             if (filter == null && !adapter.introspectionSchemaless && connection.currentSchema(adapter) == null) {
                 throw CurrentSchemaUnknownException(datasourceName)
             }
-            // Then route FIRST, and escape only the schemaPattern side: the catalog argument
-            // is a LITERAL ("must match the catalog name as it is stored"), so an escaped
-            // value there matches nothing — any MySQL database named with '_'/'%'. Only true
-            // pattern arguments (schemaPattern, tableNamePattern) get [toExactMatch].
-            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(filter)
+            val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(filter, meta)
             readTables(
-                meta, adapter, catalog,
-                rawSchemaPattern?.toExactMatch(meta.searchStringEscape), maxTables,
+                meta, adapter, catalog, escapedSchemaPattern, maxTables,
                 datasource.introspectionIncludeSchemas.toSet(),
             )
         }
@@ -129,12 +124,8 @@ class SchemaIntrospector(
             if (effectiveFilter == null && !adapter.introspectionSchemaless) {
                 throw CurrentSchemaUnknownException(datasourceName)
             }
-            // Same rule as tables(): the catalog argument is a literal (never escaped — an
-            // escaped `my_app` catalog matches nothing on MySQL), schemaPattern is a pattern
-            // (always escaped).
-            val (catalog, rawSchemaPattern) = adapter.routeSchemaFilter(effectiveFilter)
-            val escape = meta.searchStringEscape
-            meta.getColumns(catalog, rawSchemaPattern?.toExactMatch(escape), table.toExactMatch(escape), "%").use { rs ->
+            val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(effectiveFilter, meta)
+            meta.getColumns(catalog, escapedSchemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
                         val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
@@ -341,6 +332,24 @@ class SchemaIntrospector(
      */
     private fun DialectAdapter.routeSchemaFilter(filter: String?): Pair<String?, String?> =
         if (schemaArrivesInCatalog) filter to null else null to filter
+
+    /**
+     * The shared route-FIRST, escape-only-the-pattern dance of tables() and columns():
+     * returns `(catalog, escapedSchemaPattern)`. The JDBC **catalog argument is a LITERAL**
+     * ("must match the catalog name as it is stored"), so an escaped value there matches
+     * nothing — any MySQL database named with `_`/`%`. Only true pattern arguments
+     * (`schemaPattern`, `tableNamePattern`) get [toExactMatch] — and `getSearchStringEscape`
+     * is read only when a pattern actually needs escaping. One home for the rule, so an
+     * escaping fix can never land in one call site and miss the other.
+     */
+    private fun DialectAdapter.routeAndEscape(
+        filter: String?,
+        meta: DatabaseMetaData,
+    ): Pair<String?, String?> {
+        val (catalog, schemaPattern) = routeSchemaFilter(filter)
+        val escaped = if (schemaPattern == null) null else schemaPattern.toExactMatch(meta.searchStringEscape)
+        return catalog to escaped
+    }
 
     /** The result column that carries the schema: TABLE_CAT for catalog-routing drivers, TABLE_SCHEM otherwise. */
     private fun DialectAdapter.schemaResultColumn(): String = if (schemaArrivesInCatalog) "TABLE_CAT" else "TABLE_SCHEM"
