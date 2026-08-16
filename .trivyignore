@@ -1,6 +1,9 @@
 # .trivyignore — baseline for scripts/container-scan.sh (trivy 0.74.0).
-# RULE: every entry carries a reason + date comment (project rule). Anything
-# NOT listed here fails the scan — that is the guard.
+# RULE: every entry carries a reason + date comment (project rule), and an
+# `exp:` date so it EXPIRES LOUDLY instead of rotting — an expired entry makes
+# the scan fail again (verified 2026-08-16 on trivy 0.74.0: future date
+# suppresses, past date fires). Same expiry discipline as osv-scanner.toml's
+# ignoreUntil. Anything NOT listed here fails the scan — that is the guard.
 
 # --- Alpine base image baseline (2026-08-15) --------------------------------
 # eclipse-temurin:21-jre-alpine (alpine 3.23.5, re-pulled and rescanned
@@ -9,28 +12,30 @@
 # brief). REVISIT on every base-image refresh: libexpat's HIGH is fixed in
 # 2.8.2-r0, so a future image build may clear several of these — shrink the
 # list when they do.
-CVE-2026-2100
-CVE-2026-50219
-CVE-2026-56131
-CVE-2026-56132
-CVE-2026-56403
-CVE-2026-56404
-CVE-2026-56405
-CVE-2026-56406
-CVE-2026-56407
-CVE-2026-56408
-CVE-2026-56409
-CVE-2026-56410
-CVE-2026-56411
-CVE-2026-56412
+CVE-2026-2100 exp:2027-02-15
+CVE-2026-50219 exp:2027-02-15
+CVE-2026-56131 exp:2027-02-15
+CVE-2026-56132 exp:2027-02-15
+CVE-2026-56403 exp:2027-02-15
+CVE-2026-56404 exp:2027-02-15
+CVE-2026-56405 exp:2027-02-15
+CVE-2026-56406 exp:2027-02-15
+CVE-2026-56407 exp:2027-02-15
+CVE-2026-56408 exp:2027-02-15
+CVE-2026-56409 exp:2027-02-15
+CVE-2026-56410 exp:2027-02-15
+CVE-2026-56411 exp:2027-02-15
+CVE-2026-56412 exp:2027-02-15
 
 # --- JAR findings (2026-08-15) -----------------------------------------------
 # FALSE POSITIVE: the lockfiles pin mssql-jdbc 12.10.2.jre11, which trivy's own
 # fixed-version list for this CVE contains; trivy string-matches "12.10.2"
 # without the .jre11 classifier. Nothing to fix. (2026-08-15)
-CVE-2025-59250
+CVE-2025-59250 exp:2027-02-15
 # log4j-api 2.24.3 — present only as the log4j-to-slf4j facade (no log4j-core;
-# the vulnerable MapMessage encoding path is never exercised). Same triage as
-# osv-scanner.toml's GHSA-qv9r-c865-cp47 entry. Retire when the Spring Boot BOM
-# ships log4j2 >= 2.25.5. (2026-08-15)
-CVE-2026-49844
+# the vulnerable MapMessage encoding path is never exercised). NOTE: the safety
+# argument is CONDITIONAL on log4j-core staying absent — the exp date forces a
+# re-triage rather than encoding that condition into a permanent ignore. Same
+# triage as osv-scanner.toml's GHSA-qv9r-c865-cp47 entry. Retire when the
+# Spring Boot BOM ships log4j2 >= 2.25.5. (2026-08-15)
+CVE-2026-49844 exp:2027-02-15
