@@ -58,4 +58,6 @@ dependencies {
     // The integration test drives dag's @Repository classes against a Postgres container
     // directly; spring-jdbc is their implementation detail, so tests need it explicitly.
     testImplementation(libs.spring.boot.starter.jdbc)
+    // Konsist architecture guard for the web layer (module-structure.md §7.8).
+    testImplementation(libs.konsist)
 }

@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.dsl.LockMode
+
 // Root build — module-structure.md §7.
 // Conventions are applied per-module via the `datapipelines.common-conventions`
 // plugin from buildSrc; this file carries only project coordinates and the
@@ -5,11 +7,58 @@
 
 plugins {
     base
+    // Aggregated coverage report across all modules (module-structure.md §7.7).
+    // The plugin is applied per-module by CommonConventionsPlugin; here it only
+    // merges every module's measurements into the root `koverHtmlReport` /
+    // `koverXmlReport` tasks via the `kover` dependency configuration below.
+    // No version: the plugin jar is already on the build-script classpath via
+    // buildSrc, so a versioned alias would be rejected as a duplicate.
+    id("org.jetbrains.kotlinx.kover")
 }
 
 allprojects {
     group = "co.datapipelines"
     version = providers.gradleProperty("datapipelines.version").getOrElse("1.0.0-SNAPSHOT")
+}
+
+dependencies {
+    kover(project(":modules:typesystem"))
+    kover(project(":modules:pipeline-contract"))
+    kover(project(":modules:templates"))
+    kover(project(":modules:datasources"))
+    kover(project(":modules:staging"))
+    kover(project(":modules:auth"))
+    kover(project(":modules:dag"))
+    kover(project(":modules:mcp-server"))
+    kover(project(":modules:web"))
+    kover(project(":modules:app"))
+}
+
+// The root project resolves the `kover` aggregation configuration, so it locks
+// like every module does (module-structure.md §7.6) — same STRICT mode, same
+// regenerate-with-resolveAndLockAll flow (DEVELOPMENT.md §6.2).
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
+}
+
+// Same "lock all configurations in a single build execution" pattern the
+// convention plugin registers per module — the root has no convention plugin,
+// so it registers its own copy.
+tasks.register("resolveAndLockAll") {
+    group = "verification"
+    description = "Resolves every resolvable configuration; run with --write-locks to (re)generate gradle.lockfile."
+    notCompatibleWithConfigurationCache("Resolves configurations eagerly at execution time")
+    doFirst {
+        require(gradle.startParameter.isWriteDependencyLocks) {
+            "$path must be run with --write-locks; its only purpose is regenerating gradle.lockfile"
+        }
+    }
+    doLast {
+        configurations
+            .filter { it.isCanBeResolved }
+            .forEach { it.resolve() }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +117,9 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
             sub.path to sub.configurations
                 .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
                 .map { it.path }
+                // Kover wires a self-edge per module (its kover/koverExternalArtifacts
+                // bucket configurations) — plugin plumbing, not a §4.2 declaration.
+                .filter { it != sub.path }
                 .toSet()
         }
     val allowed = allowedInternalDependencies

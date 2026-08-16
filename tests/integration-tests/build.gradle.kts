@@ -29,4 +29,7 @@ dependencies {
     // dependencies as `implementation`, so jackson is declared explicitly here (same
     // catalog alias app's tests already use).
     testImplementation(libs.jackson.module.kotlin)
+    // Konsist cross-module architecture guards (module-structure.md §7.8): they scan
+    // every module's sources, so they live in the cross-module test suite.
+    testImplementation(libs.konsist)
 }

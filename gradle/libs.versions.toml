@@ -53,6 +53,9 @@ spring-boot = "3.5.16"
 foojay-resolver = "1.0.0"
 ktlint-plugin = "14.2.0"
 detekt = "1.23.8"
+# Kover: latest stable on Maven Central (verified 2026-08-15 against
+# repo1.maven.org maven-metadata.xml; no RC/beta newer than it).
+kover = "0.9.9"
 
 # --- SECURITY OVERRIDES (see the clause above) -------------------------------
 # postgresql — GHSA-j92g-9f8w-j867 (HIGH, silent channel-binding authentication
@@ -79,12 +82,26 @@ postgresql = "42.7.13"
 # RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.5.
 jackson = "2.21.5"
 
+# netty — GHSA-558v-64gr-wgg4 (HIGH 8.7, Bzip2Decoder infinite loop hangs the
+# event-loop thread). Advisory API, verified 2026-08-15:
+#   vulnerable = "< 4.1.136.Final" (4.1 line)   first_patched_version = "4.1.136.Final"
+# The Spring Boot 3.5.16 BOM imports netty-bom 4.1.135.Final — vulnerable.
+# Pinned to 4.1.136.Final: the patch release on the BOM's own line (smallest
+# step). Netty arrives via Lettuce (spring-boot-starter-data-redis) and is on
+# the production runtime classpath, so this one is fixed, not ignored.
+# Applied as a BOM, same mechanism as the jackson override.
+# RETIRE when the Spring Boot BOM imports netty-bom >= 4.1.136.Final.
+netty = "4.1.136.Final"
+
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
 duckdb-jdbc = "1.5.5.1"
 argon2-jvm = "2.12"
 jjwt = "0.13.0"
 mockk = "1.14.11"
 kotest = "6.2.3"
+# Konsist: latest stable on Maven Central (verified 2026-08-15; the project's
+# last release is 2024-12 but it remains the current stable line).
+konsist = "0.17.3"
 webjars-bootstrap = "5.3.8"
 # htmx: 4.0.0-beta6 is the newest artifact and is rejected as pre-release.
 htmx = "2.0.10"
@@ -119,6 +136,11 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 # the `jackson` entry under [versions].
 jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+
+# SECURITY OVERRIDE: netty-bom applied as a third Gradle platform by
+# CommonConventionsPlugin, after jackson-bom. Rationale + retirement condition
+# are in the `netty` entry under [versions] (GHSA-558v-64gr-wgg4).
+netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
 
 # --- Flyway — `app` module ONLY (module-structure §3.1 rule 2) ---------------
 # BOM-managed (11.7.2). Since Flyway 10 the Postgres support is a separate
@@ -189,6 +211,9 @@ mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 # Kotest SPEC classes can add it to its own build file with its own Test task.
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+# Architecture-as-tests (module-structure.md §7.8). TEST dependency only, in
+# modules/web (web rules) and tests/integration-tests (cross-module rules).
+konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }

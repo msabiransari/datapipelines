@@ -1,5 +1,6 @@
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import kotlinx.kover.gradle.plugin.dsl.KoverProjectExtension
 import org.gradle.api.GradleException
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
@@ -26,7 +27,8 @@ import java.util.zip.ZipFile
  *
  * Configures: the JDK 21 toolchain (§7.2), strict Kotlin compilation, the
  * Spring Boot BOM as a dependency platform, the JUnit 5 + MockK + Kotest test
- * stack (§7.4), ktlint + detekt (§7.3), and STRICT dependency locking (§7.6).
+ * stack (§7.4), ktlint + detekt (§7.3), Kover coverage verification (§7.7),
+ * and STRICT dependency locking (§7.6).
  *
  * ## Rule: ONE JUnit Platform TestEngine per Test task
  *
@@ -73,6 +75,7 @@ class CommonConventionsPlugin : Plugin<Project> {
         project.plugins.apply("java-library")
         project.plugins.apply("org.jlleitschuh.gradle.ktlint")
         project.plugins.apply("io.gitlab.arturbosch.detekt")
+        project.plugins.apply("org.jetbrains.kotlinx.kover")
 
         val libs = project.extensions.getByType<VersionCatalogsExtension>().named("libs")
         fun lib(alias: String) = libs.findLibrary(alias).orElseThrow {
@@ -106,6 +109,15 @@ class CommonConventionsPlugin : Plugin<Project> {
             // condition is documented on the `jackson` entry in libs.versions.toml.
             add("implementation", platform(lib("jackson-bom")))
             add("testImplementation", platform(lib("jackson-bom")))
+
+            // SECURITY OVERRIDE (2026-08-15, GHSA-558v-64gr-wgg4): netty-bom 4.1.136.Final
+            // applied after the jackson override, same non-enforced-platform mechanism.
+            // Netty comes in via Lettuce (spring-boot-starter-data-redis) and sits on
+            // the production runtime classpath. Retirement condition is documented on
+            // the `netty` entry in libs.versions.toml.
+            add("implementation", platform(lib("netty-bom")))
+            add("testImplementation", platform(lib("netty-bom")))
+
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))
@@ -179,6 +191,41 @@ class CommonConventionsPlugin : Plugin<Project> {
                 exceptionFormat = TestExceptionFormat.FULL
             }
         }
+
+        // Kover — per-module coverage verification (module-structure.md §7.7).
+        // Floors live in COVERAGE_FLOORS below: each is the module's measured
+        // baseline minus 2 points, rounded down — a regression tripwire, not a
+        // demand for new tests. A module absent from the map has no floor (only
+        // tests/integration-tests, which has no main sources to measure).
+        project.extensions.configure<KoverProjectExtension> {
+            currentProject.instrumentation.apply {
+                // CRITICAL: restrict instrumentation to OUR classes. Unrestricted,
+                // the agent probes every loaded class — including H2's SQL engine,
+                // whose ~10^7-visit query loops make ConcurrencyTest's parallel
+                // fan-out collapse (24s vs 1.5s uninstrumented, measured 2026-08-15
+                // with BOTH the intellij and JaCoCo engines). Coverage is about our
+                // code; third-party bytecode gains us nothing.
+                includedClasses.add("co.datapipelines.*")
+            }
+        }
+
+        // Escape hatch for timing-sensitive diagnosis: -Pkover.off runs the
+        // tests WITHOUT the coverage agent attached.
+        if (project.hasProperty("kover.off")) {
+            project.extensions.configure<KoverProjectExtension> {
+                currentProject.instrumentation.disabledForAll.set(true)
+            }
+        }
+        COVERAGE_FLOORS[project.path]?.let { floor ->
+            project.extensions.configure<KoverProjectExtension> {
+                reports.verify {
+                    rule("line coverage must not drop below the measured baseline minus 2% (§7.7)") {
+                        minBound(floor)
+                    }
+                }
+            }
+        }
+        project.tasks.named("check").configure { dependsOn("koverVerify") }
 
         // Dependency locking — STRICT, every configuration (module-structure.md §7.6).
         // Resolution is validated against the committed gradle.lockfile: any drift from
@@ -280,6 +327,28 @@ class CommonConventionsPlugin : Plugin<Project> {
     private companion object {
         const val JDK_VERSION = 21
         const val KTLINT_VERSION = "1.8.0"
+
+        /**
+         * Per-module minimum line-coverage floors (percent), wired into `koverVerify`
+         * (module-structure.md §7.7). Each value is the module's measured baseline
+         * (first Kover run, 2026-08-15: typesystem 98.5, pipeline-contract 96.9,
+         * templates 93.6, datasources 96.6, staging 95.9, auth 97.3, dag 92.2,
+         * mcp-server 96.1, web 74.1, app 92.2) minus 2 points, rounded down — floors
+         * catch regressions; they do not demand new tests. Raise a floor only when
+         * the module's coverage has genuinely improved.
+         */
+        val COVERAGE_FLOORS: Map<String, Int> = mapOf(
+            ":modules:typesystem" to 96,
+            ":modules:pipeline-contract" to 94,
+            ":modules:templates" to 91,
+            ":modules:datasources" to 94,
+            ":modules:staging" to 93,
+            ":modules:auth" to 95,
+            ":modules:dag" to 90,
+            ":modules:mcp-server" to 94,
+            ":modules:web" to 72,
+            ":modules:app" to 90,
+        )
     }
 }
 

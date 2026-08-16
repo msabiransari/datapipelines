@@ -233,6 +233,31 @@ that you did not intend; investigate, don't commit.
   adding a new resolvable configuration (e.g. a new plugin) requires a
   `--write-locks` run before the build goes green again.
 
+### 6.3 Dependency verification (checksums)
+
+Every artifact the build downloads — dependencies AND plugins, for every module
+and buildSrc — is verified against a committed SHA-256 checksum in
+`gradle/verification-metadata.xml` (Gradle's dependency verification, strict
+mode). A download whose checksum differs from the committed one fails the
+build naming the artifact: this is the supply-chain twin of the lockfiles
+(locks pin WHICH version; verification pins WHAT BYTES).
+
+PGP/signature verification is deliberately NOT enabled (deferred — key
+management for ~500 artifacts is its own project; checksums already close the
+"artifact changed upstream / MITM mirror" hole against a trusted first
+download).
+
+**Updating the metadata** — required whenever a dependency change is
+deliberate, in the same commit as the lockfile update:
+
+```bash
+./gradlew --write-verification-metadata sha256 --write-locks resolveAndLockAll
+```
+
+This resolves every configuration (the point of `resolveAndLockAll`) and
+records each artifact's checksum. Review the diff like the lockfile diff:
+new entries must be exactly the artifacts your change introduced.
+
 ---
 
 ## 7. Verify
@@ -402,6 +427,86 @@ It mechanically checks cross-document links and anchors, error codes against the
 against [configuration.md](docs/configuration.md), and forbidden legacy spellings (superseded header
 names, removed entity fields). CI runs it alongside the Kotlin checks — **exit 0 is required before
 merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
+
+### 10.2 Quality tooling
+
+Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
+guard has been proven able to fail (see the handback docs under
+`orchestration/handbacks/`).
+
+#### Coverage (Kover)
+
+```bash
+./gradlew koverHtmlReport   # per-module reports + aggregated root report
+./gradlew koverXmlReport    # XML (Cobertura) equivalents, for tooling
+```
+
+Kover is applied to every module by `CommonConventionsPlugin`; the root project
+additionally aggregates all modules into one report
+(`build/reports/kover/index.html`). `check` depends on `koverVerify`, so a
+coverage regression fails the build.
+
+Each module has a minimum **line coverage** floor — the module's measured
+baseline from the first Kover run (2026-08-15) minus 2 points, rounded down.
+The floors live in `COVERAGE_FLOORS` in
+`buildSrc/src/main/kotlin/CommonConventionsPlugin.kt`. They exist to catch
+regressions, not to force new tests: raise a floor only when a module's
+coverage has genuinely improved, and never lower one to make a build pass.
+`tests/integration-tests` has no floor (no main sources of its own).
+
+#### Dependency vulnerabilities (OSV-Scanner)
+
+```bash
+./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
+```
+
+osv-scanner (pinned in the script, downloaded into the git-ignored
+`build/tools/` and SHA256-verified against the release manifest) checks the
+resolved dependency set — the lockfiles, direct and transitive — against the
+OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
+date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
+stage; when the machine is offline the stage warns and does NOT fail (the scan
+is meaningless without osv.dev — the skip is printed, never silent).
+
+#### Secret scanning (gitleaks)
+
+```bash
+./scripts/secret-scan.sh            # full-history scan
+./scripts/secret-scan.sh --staged   # staged changes only (what the hook runs)
+./scripts/install-hooks.sh          # one-time: point git at .githooks/
+```
+
+gitleaks (pinned in the script, same verified-download pattern) scans the full
+history or just staged changes. `install-hooks.sh` sets plain git
+`core.hooksPath` to the committed `.githooks/` directory — no hooks framework —
+so the pre-commit hook blocks staged secrets. The allowlist is `.gitleaks.toml`;
+entries are line-targeted (never whole files) with a reason + date comment, and
+the config EXTENDS the gitleaks default ruleset (a bare custom config silently
+replaces it — that mistake was made and caught here).
+
+#### Container scanning (trivy)
+
+```bash
+./scripts/container-scan.sh                  # Dockerfile config scan + production image scan
+./scripts/container-scan.sh --config-only    # Dockerfile config scan only
+```
+
+trivy (pinned in the script, same verified-download pattern) scans the
+Dockerfile for misconfigurations and the locally-built production image for
+package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
+comment per entry; anything NOT ignored exits 1, so new findings fail. We do
+not chase base-image CVE zero — record the count, fix what a base-image bump
+or an obvious Dockerfile change resolves cheaply. trivy 0.74 has no
+docker-compose scanner, so `deploy/*.yml` is not covered. First run needs
+network (vulnerability DB download); the image scan needs a Docker daemon.
+
+#### Architecture guards (Konsist)
+
+Layering rules as ordinary unit tests (module-structure.md §7.8):
+`RequiredScopeKonsistTest` in `modules/web` and `ArchitectureGuardTest` in
+`tests/integration-tests` (no field injection; `@Transactional` only on
+`*Service` classes). They run with the normal `test` task — no separate
+command.
 
 ---
 

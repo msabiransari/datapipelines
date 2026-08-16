@@ -14,6 +14,7 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-allopen:${libs.versions.kotlin.get()}")
     implementation("org.jlleitschuh.gradle:ktlint-gradle:${libs.versions.ktlint.plugin.get()}")
     implementation("io.gitlab.arturbosch.detekt:detekt-gradle-plugin:${libs.versions.detekt.get()}")
+    implementation("org.jetbrains.kotlinx:kover-gradle-plugin:${libs.versions.kover.get()}")
 }
 
 gradlePlugin {

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# container-scan.sh — Trivy scan of the container surface (DEVELOPMENT.md §10.2).
+#
+#   ./scripts/container-scan.sh           # config scan + image scan (builds the image)
+#   ./scripts/container-scan.sh --config-only
+#
+# Tool: trivy, PINNED. Version verified 2026-08-15 against the GitHub releases
+# API (aquasecurity/trivy, latest release). Install method: release tarball
+# downloaded into build/tools/ (git-ignored), SHA256-checked against the
+# release's own checksums file, reused on later runs. Bump by editing
+# TRIVY_VERSION after verifying the new release the same way.
+#
+# Two scans:
+#   1. CONFIG — Dockerfile misconfigurations. Exit 1 on any finding not
+#      allowlisted in .trivyignore. NOTE: trivy 0.74 has no docker-compose
+#      scanner (deploy/ yields "0 config files"), so compose files are not
+#      covered — recorded in the 006 handback.
+#   2. IMAGE — `docker build` the production image (needs only the bootJar,
+#      built locally — no secrets/infra) and scan its packages. Known baseline
+#      CVEs live in .trivyignore, each with a reason + date comment; anything
+#      NOT ignored exits 1. We do not chase base-image CVE zero: a baseline
+#      entry is added only with its triage reason.
+#
+# Needs network on first run (trivy downloads its vulnerability DB to
+# ~/.cache/trivy) and a running Docker daemon for the image scan.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+
+TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
+TOOL_DIR="$ROOT/build/tools/trivy"
+
+os=$(uname -s); arch=$(uname -m)
+case "$os-$arch" in
+  Darwin-arm64)  asset="trivy_${TRIVY_VERSION}_macOS-ARM64.tar.gz" ;;
+  Darwin-x86_64) asset="trivy_${TRIVY_VERSION}_macOS-64bit.tar.gz" ;;
+  Linux-x86_64)  asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" ;;
+  Linux-aarch64) asset="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz" ;;
+  *) echo "container-scan: unsupported platform $os-$arch" >&2; exit 1 ;;
+esac
+BIN="$TOOL_DIR/trivy-${TRIVY_VERSION}-${os}-${arch}"
+
+install_trivy() {
+  mkdir -p "$TOOL_DIR"
+  local base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+  echo "container-scan: installing trivy ${TRIVY_VERSION} (${asset})"
+  curl -sfL "$base/$asset" -o "$TOOL_DIR/$asset"
+  curl -sfL "$base/trivy_${TRIVY_VERSION}_checksums.txt" -o "$TOOL_DIR/checksums.txt"
+  local want got
+  want=$(grep "  $asset\$" "$TOOL_DIR/checksums.txt" | awk '{print $1}')
+  got=$(shasum -a 256 "$TOOL_DIR/$asset" | awk '{print $1}')
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    echo "container-scan: SHA256 mismatch for $asset (want=$want got=$got)" >&2
+    rm -f "$TOOL_DIR/$asset"
+    exit 1
+  fi
+  tar -xzf "$TOOL_DIR/$asset" -C "$TOOL_DIR" trivy
+  mv "$TOOL_DIR/trivy" "$BIN"
+  chmod +x "$BIN"
+  rm -f "$TOOL_DIR/$asset"
+}
+
+[ -x "$BIN" ] || install_trivy
+
+IGNORE_ARGS=()
+[ -f "$ROOT/.trivyignore" ] && IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore")
+
+echo "== trivy $TRIVY_VERSION — config scan (Dockerfile, deploy/) =="
+"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/Dockerfile"
+"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/deploy"
+
+if [ "${1:-}" = "--config-only" ]; then
+  echo "container-scan: --config-only given; image scan skipped."
+  exit 0
+fi
+
+if ! docker info > /dev/null 2>&1; then
+  echo "container-scan: WARNING — Docker daemon unavailable; image scan SKIPPED." >&2
+  exit 0
+fi
+
+echo "== building production image (bootJar + docker build) =="
+./gradlew -q :modules:app:bootJar > /dev/null
+docker build -q -t datapipelines:trivy-scan "$ROOT" > /dev/null
+
+echo "== trivy $TRIVY_VERSION — image scan (datapipelines:trivy-scan) =="
+"$BIN" image --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} datapipelines:trivy-scan

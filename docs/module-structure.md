@@ -653,8 +653,40 @@ configuration cannot escape silently.
   their reason in `modules/datasources/build.gradle.kts`: the §5.4.1
   flag-gated drivers `ojdbc11` and `mysql-connector-j`. One committed lockfile
   cannot validate both the default build and `-Poracle` / `-Pmysql` builds.
-- The root project has no lockfile: it applies no conventions plugin, declares
-  no dependencies, and nothing ever resolves there.
+- The root project locks too (STRICT, same `resolveAndLockAll` flow, declared
+  directly in the root `build.gradle.kts`): it resolves the `kover` aggregation
+  configuration for the cross-module coverage report (§7.7).
+
+### 7.7 Coverage (Kover)
+
+Every module gets the Kover plugin (`org.jetbrains.kotlinx.kover`, pinned in
+the catalog) from `CommonConventionsPlugin`. The root project applies it too
+and merges all modules into an aggregated report via `kover(project(...))`
+dependencies; `./gradlew koverHtmlReport` produces per-module reports plus the
+aggregate.
+
+`check` depends on `koverVerify`. Each module carries a minimum **line
+coverage** floor in `COVERAGE_FLOORS` (CommonConventionsPlugin): the module's
+measured baseline from the first Kover run (2026-08-15) minus 2 points,
+rounded down. Floors are a regression tripwire, not a coverage target — raise
+one only when coverage genuinely improved; never lower one to force a build
+green. `tests/integration-tests` has no floor (no main sources).
+
+### 7.8 Architecture-as-tests (Konsist)
+
+House layering rules that previously existed only as prose are encoded as
+Konsist tests (pinned in the catalog, TEST dependency only):
+
+- `modules/web` — `RequiredScopeKonsistTest`: every HTTP handler on a
+  `@RestController` declares `@RequiredScope`. Deliberately redundant with the
+  reflection-based `RequiredScopeCoverageTest`: one proves it on the live
+  classpath, the other statically from sources.
+- `tests/integration-tests` — `ArchitectureGuardTest`, scanning every module's
+  production sources from the cross-module suite: no field injection
+  (`@Autowired` on properties/fields), and `@Transactional` only on
+  `*Service` classes (the house service-layer naming).
+
+Konsist lives in existing test source sets only — no dedicated Gradle module.
 
 ---
 
