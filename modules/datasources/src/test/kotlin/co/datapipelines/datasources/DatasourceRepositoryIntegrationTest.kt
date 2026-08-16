@@ -37,9 +37,9 @@ class DatasourceRepositoryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        // The shipped migrations in version order — Flyway and the scripts live in `app` alone
-        // (module-structure §3.1 rule 2), so the test applies them through plain JDBC.
-        MIGRATION_PATHS.forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
+        // The shipped migrations in version order — the ONE shared list (ShippedMigrations),
+        // so a new migration lands in every suite that applies them, never a stale copy.
+        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -239,12 +239,6 @@ class DatasourceRepositoryIntegrationTest {
         }
 
     private companion object {
-        val MIGRATION_PATHS =
-            listOf(
-                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-            )
-
         @Container
         @JvmStatic
         val postgres: PostgreSQLContainer<*> =

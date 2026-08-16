@@ -36,11 +36,9 @@ class DatasourceRegistryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        // The shipped migrations in version order (V2 added the introspection allowlist column).
-        listOf(
-            "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-            "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-        ).forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
+        // The shipped migrations in version order — the ONE shared list (ShippedMigrations),
+        // so a new migration lands in every suite that applies them, never a stale copy.
+        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
