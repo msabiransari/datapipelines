@@ -210,22 +210,29 @@ class CommonConventionsPlugin : Plugin<Project> {
         }
 
         // Escape hatch for timing-sensitive diagnosis: -Pkover.off runs the
-        // tests WITHOUT the coverage agent attached.
-        if (project.hasProperty("kover.off")) {
+        // tests WITHOUT the coverage agent attached — and skips the floor
+        // rules and the check→koverVerify wiring too (009/F5): with
+        // instrumentation off there is no coverage data, so a registered
+        // floor rule fails on ABSENT data. The flag previously only worked
+        // for bare `test`; lifecycle builds (build/check) failed every floor.
+        val koverOff = project.hasProperty("kover.off")
+        if (koverOff) {
             project.extensions.configure<KoverProjectExtension> {
                 currentProject.instrumentation.disabledForAll.set(true)
             }
         }
-        COVERAGE_FLOORS[project.path]?.let { floor ->
-            project.extensions.configure<KoverProjectExtension> {
-                reports.verify {
-                    rule("line coverage must not drop below the measured baseline minus 2% (§7.7)") {
-                        minBound(floor)
+        if (!koverOff) {
+            COVERAGE_FLOORS[project.path]?.let { floor ->
+                project.extensions.configure<KoverProjectExtension> {
+                    reports.verify {
+                        rule("line coverage must not drop below the measured baseline minus 2% (§7.7)") {
+                            minBound(floor)
+                        }
                     }
                 }
             }
+            project.tasks.named("check").configure { dependsOn("koverVerify") }
         }
-        project.tasks.named("check").configure { dependsOn("koverVerify") }
 
         // Dependency locking — STRICT, every configuration (module-structure.md §7.6).
         // Resolution is validated against the committed gradle.lockfile: any drift from

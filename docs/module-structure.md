@@ -672,6 +672,13 @@ rounded down. Floors are a regression tripwire, not a coverage target — raise
 one only when coverage genuinely improved; never lower one to force a build
 green. `tests/integration-tests` has no floor (no main sources).
 
+Escape hatch: `-Pkover.off` runs tests without the coverage agent attached
+(for timing-sensitive diagnosis). The flag also skips the floor rules and the
+`check`→`koverVerify` wiring — with instrumentation off there is no coverage
+data, so a registered floor would fail on absent data. It is for targeted
+diagnosis, not for making a red build green: the floors still enforce on
+every normal build.
+
 ### 7.8 Architecture-as-tests (Konsist)
 
 House layering rules that previously existed only as prose are encoded as
