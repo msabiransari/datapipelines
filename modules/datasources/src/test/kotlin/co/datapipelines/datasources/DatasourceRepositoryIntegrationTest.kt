@@ -201,6 +201,25 @@ class DatasourceRepositoryIntegrationTest {
         checkNotNull(repository.findByName("with_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
     }
 
+    @Test
+    fun `a row whose allowlist landed mixed-case by a non-programmatic path reads back normalized`() {
+        // R4 F3: a restore or a manual JSONB edit writes rows without crossing
+        // registry.save — the read boundary normalizes too, so such an entry can never sit
+        // inert (an unnormalized entry would silently match nothing, because matching
+        // compares lowercase reported schemas against stored strings verbatim).
+        jdbc.update(
+            """
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+                                     introspection_include_schemas_json, created_by)
+            VALUES ('restored', 'Restored', 'H2', 'jdbc:h2:mem:restored', 'sa', :pw,
+                    CAST('["APEX_REPORTING"]' AS jsonb), :owner)
+            """.trimIndent(),
+            mapOf("pw" to encryptor.encrypt("p", "restored"), "owner" to owner),
+        )
+
+        checkNotNull(repository.findByName("restored")).introspectionIncludeSchemas shouldBe listOf("apex_reporting")
+    }
+
     private fun insertUser(): UUID =
         checkNotNull(
             jdbc.queryForObject(

@@ -131,8 +131,8 @@ class DatasourceValidator(
      * prevent. `_` is deliberately NOT rejected: it is an ordinary character in real schema
      * names on every supported dialect (the documented use case is exempting Oracle's
      * `APEX_REPORTING` via `apex_reporting`), and an underscore entry exempts the
-     * exactly-named schema. Lowercase normalization happens at the registration bind, before
-     * this rule runs.
+     * exactly-named schema. Lowercase normalization happens at the registry's save boundary
+     * (and the repository's read boundary), before this rule's outcome is persisted.
      */
     private fun validateIntrospectionIncludeSchemas(
         datasource: Datasource,

@@ -365,6 +365,23 @@ class DatasourceRegistryIntegrationTest {
         sink.eventNames() shouldBe listOf(DatasourceAuditEvents.POOL_BUILD)
     }
 
+    @Test
+    fun `a mixed-case allowlist saved through the registry lands normalized - never silently inert`() {
+        // R4 F3: lowercase normalization used to live ONLY in the REST bind, so any
+        // non-controller write path (a future MCP create tool, restore tooling) stored mixed
+        // case — and matching lowercases the driver-reported schema but compares stored
+        // entries verbatim, so such an allowlist silently exempted nothing. The registry's
+        // save is the single boundary every write path crosses: the stored and returned
+        // entries are normalized, and the exemption matches the driver-reported spelling.
+        val registry = registry()
+        registry.save(
+            Fixtures.h2(name = "mixed", password = "pw", introspectionIncludeSchemas = listOf(" APEX_Reporting ", "Sales")),
+            owner,
+        )
+
+        checkNotNull(registry.get("mixed")).introspectionIncludeSchemas shouldBe listOf("apex_reporting", "sales")
+    }
+
     private fun insertUser(): UUID =
         checkNotNull(
             jdbc.queryForObject(

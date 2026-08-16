@@ -196,9 +196,11 @@ class DatasourcesController(
                     ?: throw invalid("username", "a username is required"),
             password = password,
             queryTimeoutSeconds = body.get("query_timeout_seconds")?.takeIf { it.isInt }?.asInt(),
-            // §3.3: the introspection allowlist — exact names, stored lowercase (matching is
-            // case-insensitive everywhere else; storing the normalized form keeps the row and
-            // the exemption honest). Non-string entries are payload-shape 400s like the rest.
+            // §3.3: the introspection allowlist — exact names. Normalized here as defense in
+            // depth; the LOAD-BEARING normalization is the registry's save boundary (the
+            // single place every write path crosses — non-REST writers cannot store a
+            // mixed-case entry that would silently never match). Non-string entries are
+            // payload-shape 400s like the rest.
             introspectionIncludeSchemas = includeSchemasOf(body),
             properties =
                 body.get("properties")?.takeIf { it.isObject }?.let { node ->
@@ -218,10 +220,11 @@ class DatasourcesController(
         )
 
     /**
-     * §3.3: `introspection_include_schemas` — an array of exact schema names, lowercased at
-     * bind (matching is case-insensitive everywhere else; storing the normalized form keeps
-     * the row and the exemption honest). Absent = empty list (today's behavior). A non-array
-     * value or a non-string entry is a payload-shape 400 like every other bind problem.
+     * §3.3: `introspection_include_schemas` — an array of exact schema names, normalized here
+     * as DEFENSE IN DEPTH (the load-bearing normalization is the registry's save boundary, so
+     * non-REST write paths are covered too). Absent = empty list (today's behavior). A
+     * non-array value or a non-string entry is a payload-shape 400 like every other bind
+     * problem.
      */
     private fun includeSchemasOf(body: JsonNode): List<String> {
         val node = body.get("introspection_include_schemas") ?: return emptyList()

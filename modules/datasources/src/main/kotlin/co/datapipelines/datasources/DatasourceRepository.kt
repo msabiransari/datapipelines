@@ -196,14 +196,17 @@ class DatasourceRepository(
     /**
      * The §7A allowlist as stored: the `[]` column default (metadata-db §4.10) reads as the
      * empty list — absent and empty are the same behavior. Entries arrive already
-     * lowercase-normalized from the registration bind; the save-time validator has already
+     * normalized from the registry's save boundary; the save-time validator has already
      * rejected pattern entries.
      */
     private fun includeSchemasJson(datasource: Datasource): String = objectMapper.writeValueAsString(datasource.introspectionIncludeSchemas)
 
     private fun readIncludeSchemas(json: String?): List<String> {
         if (json.isNullOrBlank()) return emptyList()
-        return objectMapper.readValue(json, List::class.java).filterIsInstance<String>()
+        // The read-boundary normalization (§3.3): restore and manual JSONB edits write rows
+        // without crossing the registry's save boundary, and an unnormalized entry silently
+        // exempts nothing — normalize here so no row can sit inert.
+        return Datasource.normalizeIncludeSchemas(objectMapper.readValue(json, List::class.java).filterIsInstance<String>())
     }
 
     private fun readProperties(json: String?): DatasourceProperties {
