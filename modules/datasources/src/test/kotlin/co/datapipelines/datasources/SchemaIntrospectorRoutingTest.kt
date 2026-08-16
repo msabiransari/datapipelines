@@ -548,6 +548,50 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `connection loss DURING the current-schema read is unreachable - not a silent no-current-schema`() {
+        // F1: a connection that dies exactly during getSchema()/getCatalog() (SQLState 08S01
+        // mid-lease) used to be swallowed by currentSchema()'s blanket SQLException catch and
+        // reported as "no current schema" — the 400 parameter_required path, whose recommended
+        // recovery (list schemas) would fail on the same dead connection. Only
+        // SQLFeatureNotSupportedException (a driver legitimately reporting "none") may read as
+        // "no current schema"; every other SQLException must reach the lease boundary's
+        // connection-family classification as the catalogued 502 datasource_unreachable.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws
+                            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } throws
+                            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "orders") }
+            },
+            {
+                // The legitimate "driver reports none" keeps the no-current-schema meaning —
+                // the 400 path stays reserved for it.
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws SQLFeatureNotSupportedException("getSchema unsupported")
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+            },
+        )
+    }
+
+    @Test
     fun `a RuntimeException from the metadata walk itself is NOT translated to unreachable`() {
         // The lease boundary translates; a defect in the walk (or a driver bug) stays what it
         // is — masking it as "datasource unreachable" would hide our own bugs.

@@ -196,6 +196,36 @@ class DatasourceSchemaControllerTest {
         )
     }
 
+    @Test
+    fun `connection loss during the current-schema read is the catalogued 502 - not parameter_required`() {
+        // F1: currentSchema() used to swallow ALL SQLException, so a connection that died
+        // exactly during getCatalog()/getSchema() surfaced as "no current schema" — 400
+        // parameter_required — and the recommended recovery (GET .../schemas) would fail on
+        // the same dead connection. Proven through the FULL web path: the lease boundary
+        // must classify the loss (502), keeping the 400 for a driver that legitimately
+        // reports none.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val introspector =
+            realIntrospectorOver(meta) { connection ->
+                every { connection.catalog } throws
+                    java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+            }
+        val controller = DatasourceSchemaController(introspector)
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.columns("pg-prod", "orders", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE },
+            {
+                co.datapipelines.web.api.ApiErrorCatalog
+                    .statusFor(thrown.code) shouldBe
+                    org.springframework.http.HttpStatus.BAD_GATEWAY
+            },
+            { thrown.message shouldNotContain "connection exception" },
+        )
+    }
+
     /** A real [SchemaIntrospector] over one mock connection carrying [meta] (MySQL routing). */
     private fun realIntrospectorOver(
         meta: java.sql.DatabaseMetaData,

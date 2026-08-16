@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.IngressTypeMapper
 import java.sql.Connection
 import java.sql.DatabaseMetaData
 import java.sql.SQLException
+import java.sql.SQLFeatureNotSupportedException
 
 /**
  * Reads live schema metadata from a registered datasource (datasources.md §7A) via JDBC
@@ -367,11 +368,19 @@ class SchemaIntrospector(
      * — and the JDBC blank sentinel counts as none: `""` means "objects without a
      * catalog/schema", not a schema named `""`, so the caller reads unfiltered rather than
      * filtering on a name that matches nothing.
+     *
+     * Only [java.sql.SQLFeatureNotSupportedException] reads as "the driver reports none" —
+     * a legitimate capability statement. Any OTHER [SQLException] (a connection that died
+     * mid-lease during `getSchema()`/`getCatalog()`, SQLState 08S01) must PROPAGATE to
+     * [withMetaData]'s post-lease classification instead of being swallowed here: swallowing
+     * it once surfaced connection loss as "no current schema" — the 400 `parameter_required`
+     * path — with a recommended recovery (the schemas listing) that would fail on the same
+     * dead connection (round-4 F1).
      */
     private fun Connection.currentSchema(adapter: DialectAdapter): String? =
         try {
             if (adapter.schemaArrivesInCatalog) catalog else schema
-        } catch (_: SQLException) {
+        } catch (_: SQLFeatureNotSupportedException) {
             null
         }?.asNonBlankOrNull()
 

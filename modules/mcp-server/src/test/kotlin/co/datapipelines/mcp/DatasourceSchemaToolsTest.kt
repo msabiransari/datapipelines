@@ -195,6 +195,50 @@ class DatasourceSchemaToolsTest {
     }
 
     @Test
+    fun `connection loss during the current-schema read is the catalogued unreachable - not parameter_required`() {
+        // F1: currentSchema() used to swallow ALL SQLException, so a connection that died
+        // exactly during getSchema()/getCatalog() surfaced as "no current schema" — the 400
+        // parameter_required path — and the recommended recovery (datasources_get_schemas)
+        // would fail on the same dead connection. Through a REAL introspector the tool must
+        // surface the catalogued datasource_unreachable (isError envelope), keeping
+        // parameter_required for a driver that legitimately reports none.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        every { connection.schema } throws
+            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "dying",
+                displayName = "Dying",
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get("dying") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "dying"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        val real = SchemaIntrospector(registry)
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "dying", "table" to "orders")), authorCtx)
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    @Test
     fun `a connection failure is the catalogued datasource_unreachable on every introspection tool`() {
         // A customer DB being down must reach the dispatcher as a catalogued
         // DatapipelinesException (isError envelope), never as -32603. The introspector's
