@@ -6,10 +6,11 @@
 #
 # Tool: osv-scanner, PINNED. Version verified 2026-08-15 against the GitHub
 # releases API (google/osv-scanner, latest release). Install method: the
-# release binary is downloaded from the release page into build/tools/
-# (git-ignored), SHA256-checked against the release's own osv-scanner_SHA256SUMS
-# manifest, and reused on later runs. Bump by editing OSV_SCANNER_VERSION after
-# verifying the new release the same way.
+# release binary is downloaded from the release page into .tools/ (git-ignored,
+# OUTSIDE build/ so `gradlew clean` does not force a re-download),
+# SHA256-checked against the release's own osv-scanner_SHA256SUMS manifest, and
+# reused on later runs. Bump by editing OSV_SCANNER_VERSION after verifying the
+# new release the same way.
 #
 # Scope: every committed gradle.lockfile (root, modules, tests, buildSrc). The
 # lockfiles ARE the resolved dependency set — scanning them covers direct and
@@ -23,18 +24,19 @@
 # OFFLINE BEHAVIOUR: the scan needs network access to osv.dev. When the network
 # is unreachable this script WARNS and exits 0 (fail-soft) so an offline laptop
 # is not a broken gate — the warning is printed in both modes so the skip is
-# never silent.
+# never silent. The preflight runs BEFORE any install attempt: a missing binary
+# plus no network must still skip, not die on the install's curl.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+source "$ROOT/scripts/lib/scan-tools.sh"
 
 OSV_SCANNER_VERSION="v2.5.0"   # verified latest release, 2026-08-15
-TOOL_DIR="$ROOT/build/tools/osv-scanner"
+TOOL_DIR="$(scan_tools_dir osv-scanner)"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
-arch=$(uname -m)
-[ "$arch" = "x86_64" ] && arch="amd64"
+arch=$(scan_tools_arch amd64) || { echo "vuln-scan: unsupported architecture $(uname -m)" >&2; exit 1; }
 BIN="$TOOL_DIR/osv-scanner-${OSV_SCANNER_VERSION}-${os}-${arch}"
 
 install_osv_scanner() {
@@ -42,29 +44,22 @@ install_osv_scanner() {
   local base="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
   local asset="osv-scanner_${os}_${arch}"
   echo "vuln-scan: installing osv-scanner ${OSV_SCANNER_VERSION} (${asset})"
-  curl -sfL "$base/$asset" -o "$BIN"
-  curl -sfL "$base/osv-scanner_SHA256SUMS" -o "$TOOL_DIR/SHA256SUMS"
-  # Verify against the release manifest; refuse to run an unverified binary.
-  local want got
-  want=$(grep "  $asset\$" "$TOOL_DIR/SHA256SUMS" | awk '{print $1}')
-  got=$(shasum -a 256 "$BIN" | awk '{print $1}')
-  if [ -z "$want" ] || [ "$want" != "$got" ]; then
-    echo "vuln-scan: SHA256 mismatch for $asset (want=$want got=$got)" >&2
-    rm -f "$BIN"
-    exit 1
-  fi
+  scan_tools_download vuln-scan "$base/$asset" "$BIN"
+  scan_tools_download vuln-scan "$base/osv-scanner_SHA256SUMS" "$TOOL_DIR/SHA256SUMS"
+  scan_tools_verify_sha256 vuln-scan "$BIN" "$TOOL_DIR/SHA256SUMS" "$asset"
   chmod +x "$BIN"
 }
-
-[ -x "$BIN" ] || install_osv_scanner
 
 # Fail-soft offline preflight: osv-scanner is useless without osv.dev.
 # Any HTTP response counts as online (the root path answers 404 — that is fine);
 # only a connection-level failure (curl exit != 0) means offline.
+# Runs BEFORE the install: offline + no cached binary must skip, not fail.
 if ! curl -s --max-time 5 -o /dev/null https://api.osv.dev/; then
   echo "vuln-scan: WARNING — osv.dev unreachable (offline?); vulnerability scan SKIPPED (fail-soft)." >&2
   exit 0
 fi
+
+[ -x "$BIN" ] || install_osv_scanner
 
 lockfiles=()
 while IFS= read -r f; do lockfiles+=("$f"); done < <(git ls-files -- 'gradle.lockfile' '**/gradle.lockfile')

@@ -6,9 +6,10 @@
 #
 # Tool: trivy, PINNED. Version verified 2026-08-15 against the GitHub releases
 # API (aquasecurity/trivy, latest release). Install method: release tarball
-# downloaded into build/tools/ (git-ignored), SHA256-checked against the
-# release's own checksums file, reused on later runs. Bump by editing
-# TRIVY_VERSION after verifying the new release the same way.
+# downloaded into .tools/ (git-ignored, OUTSIDE build/ so `gradlew clean` does
+# not force a re-download), SHA256-checked against the release's own checksums
+# file, reused on later runs. Bump by editing TRIVY_VERSION after verifying the
+# new release the same way.
 #
 # Two scans:
 #   1. CONFIG — Dockerfile misconfigurations. Exit 1 on any finding not
@@ -27,9 +28,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+source "$ROOT/scripts/lib/scan-tools.sh"
 
 TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
-TOOL_DIR="$ROOT/build/tools/trivy"
+TOOL_DIR="$(scan_tools_dir trivy)"
 
 os=$(uname -s); arch=$(uname -m)
 case "$os-$arch" in
@@ -45,16 +47,9 @@ install_trivy() {
   mkdir -p "$TOOL_DIR"
   local base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
   echo "container-scan: installing trivy ${TRIVY_VERSION} (${asset})"
-  curl -sfL "$base/$asset" -o "$TOOL_DIR/$asset"
-  curl -sfL "$base/trivy_${TRIVY_VERSION}_checksums.txt" -o "$TOOL_DIR/checksums.txt"
-  local want got
-  want=$(grep "  $asset\$" "$TOOL_DIR/checksums.txt" | awk '{print $1}')
-  got=$(shasum -a 256 "$TOOL_DIR/$asset" | awk '{print $1}')
-  if [ -z "$want" ] || [ "$want" != "$got" ]; then
-    echo "container-scan: SHA256 mismatch for $asset (want=$want got=$got)" >&2
-    rm -f "$TOOL_DIR/$asset"
-    exit 1
-  fi
+  scan_tools_download container-scan "$base/$asset" "$TOOL_DIR/$asset"
+  scan_tools_download container-scan "$base/trivy_${TRIVY_VERSION}_checksums.txt" "$TOOL_DIR/checksums.txt"
+  scan_tools_verify_sha256 container-scan "$TOOL_DIR/$asset" "$TOOL_DIR/checksums.txt" "$asset"
   tar -xzf "$TOOL_DIR/$asset" -C "$TOOL_DIR" trivy
   mv "$TOOL_DIR/trivy" "$BIN"
   chmod +x "$BIN"

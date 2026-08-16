@@ -460,8 +460,9 @@ coverage has genuinely improved, and never lower one to make a build pass.
 ./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
 ```
 
-osv-scanner (pinned in the script, downloaded into the git-ignored
-`build/tools/` and SHA256-verified against the release manifest) checks the
+osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
+outside `build/`, so `gradlew clean` does not force a re-download — and
+SHA256-verified against the release manifest) checks the
 resolved dependency set — the lockfiles, direct and transitive — against the
 OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
