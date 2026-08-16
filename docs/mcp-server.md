@@ -600,7 +600,7 @@ List a datasource's schemas — the entry point of the introspection flow.
 }
 ```
 
-Returns: array of schema names, exactly as the driver reported them. On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads them from `getCatalogs()` — the same vocabulary `datasources_get_tables` routes through; system schemas/databases (`information_schema`, `mysql`, `performance_schema`, `sys` on MySQL) are excluded on every dialect. **An empty list is a valid result** — a schemaless datasource (SQLite, single-db DuckDB) has no schemas to list. See [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
+Returns: `{"schemas": ["name", ...], "truncated": bool}` — the schema names exactly as the driver reported them, as a page; `truncated: true` means the 2000-schema cap dropped some (on MySQL catalog routing the walk would otherwise span every database the server grants). On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads them from `getCatalogs()` — the same vocabulary `datasources_get_tables` routes through; system schemas/databases (`information_schema`, `mysql`, `performance_schema`, `sys` on MySQL) are excluded on every dialect. **An empty list is a valid result** — a schemaless datasource (SQLite, single-db DuckDB) has no schemas to list. See [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -611,7 +611,7 @@ List a datasource's tables and views.
 ```json
 {
   "name": "datasources_get_tables",
-  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans schemas — pass each table's reported schema to datasources_get_columns. Read-only, for pipeline authoring.",
+  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans schemas — pass each table's reported schema to datasources_get_columns. Without a schema argument the listing fails on a datasource that reports no current schema (call datasources_get_schemas and pass one). Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -623,7 +623,7 @@ List a datasource's tables and views.
 }
 ```
 
-Returns: `{"tables": [{"schema", "name", "type", "remarks"?}], "truncated": bool}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `schema` filter is exact-match, not a LIKE pattern. Without a `schema` argument the listing **spans schemas** — pass each table's reported `schema` to `datasources_get_columns` (there, no schema argument means the connection's current schema only).
+Returns: `{"tables": [{"schema", "name", "type", "remarks"?}], "truncated": bool}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `schema` filter is exact-match, not a LIKE pattern. Without a `schema` argument the listing **spans schemas** — pass each table's reported `schema` to `datasources_get_columns` (there, no schema argument means the connection's current schema only); the one exception is a datasource that reports **no current schema** (e.g. a database-less MySQL URL, where unfiltered would span every database the server grants): that call fails with the catalogued `pipeline.execution.parameter_required` and the caller passes an explicit schema from `datasources_get_schemas` instead.
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -634,7 +634,7 @@ List one table's columns with canonical types.
 ```json
 {
   "name": "datasources_get_columns",
-  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it. Without a schema argument only the connection's current schema is read. Read-only, for pipeline authoring.",
+  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it. Without a schema argument only the connection's current schema is read; if the datasource reports no current schema, an explicit schema is required (list them with datasources_get_schemas). Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "table"],
@@ -647,7 +647,7 @@ List one table's columns with canonical types.
 }
 ```
 
-Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings", "remarks"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean), `remarks` the engine-stored column comment (omitted when there is none); `precision`/`scale`/`nullable`/`remarks` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns.
+Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings", "remarks"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean), `remarks` the engine-stored column comment (omitted when there is none); `precision`/`scale`/`nullable`/`remarks` are omitted when the metadata does not report them. An unknown table matches nothing and returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns — and a datasource that reports **no current schema** makes that default impossible, so the call fails with the catalogued `pipeline.execution.parameter_required` instead of silently merging (`datasources_get_schemas` lists the schemas to pass; schemaless datasources such as SQLite are the exception — there is nothing to merge).
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -967,3 +967,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-15 | v1.7 | surface restructure (part 2) | New §6.2.16 `datasources_get_schemas` — the introspection flow's entry point (schemas → tables → columns). Tool surface 17 → **18**; §6.1, §5.1, §8 counts updated. §6.2.17 `datasources_get_tables` description + Returns now state the flow contract: the unfiltered listing spans schemas — pass each table's schema to `datasources_get_columns`; §6.2.18's description now states that without a schema argument only the connection's current schema is read. MySQL databases arrive as JDBC catalogs, so the schemas listing reads `getCatalogs()`; an empty list is valid on schemaless dialects. |
 | 2026-08-15 | v1.8 | semantics via remarks | §6.2.17/§6.2.18: table and column descriptors gain `remarks` — the engine-stored comment from JDBC REMARKS, omitted when the driver/database has none. |
 | 2026-08-15 | v1.9 | surface restructure (part 3) | §8.2 `create_pipeline_for_question` walkthrough rewritten to the three-step grounding flow: `datasources_get_schemas` → `datasources_get_tables(schema)` → `datasources_get_columns` for only the tables the SQL needs. The never-reference-unreturned-tables rule and the sentinel fence are unchanged. |
+| 2026-08-15 | v1.10 | hardening round 3 (005 review fix-cycle) | §6.2.16: `datasources_get_schemas` returns a page `{\"schemas\": [...], \"truncated\": bool}` capped at 2000 (was a bare array). §6.2.17/§6.2.18: without a `schema` argument, a datasource reporting no current schema (database-less MySQL URL) fails with the catalogued `pipeline.execution.parameter_required` (recovered via `datasources_get_schemas`) instead of a merged/spanning answer — descriptions and Returns updated; blank remarks are omitted, never `\"\"`. Input schemas unchanged (output-shape and error-behavior changes only). |

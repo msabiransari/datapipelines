@@ -18,6 +18,7 @@ internal object Fixtures {
         password: String? = "secret",
         queryTimeoutSeconds: Int? = null,
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -29,12 +30,14 @@ internal object Fixtures {
             password = password,
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     fun postgres(
         name: String = "pg_test",
         jdbcUrl: String = "jdbc:postgresql://db.internal:5432/app",
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -44,6 +47,7 @@ internal object Fixtures {
             username = "app",
             password = "secret",
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     /**
@@ -55,6 +59,7 @@ internal object Fixtures {
         dialect: Dialect,
         name: String = "ds_${dialect.wire.lowercase()}",
         properties: DatasourceProperties = DatasourceProperties(),
+        introspectionIncludeSchemas: List<String> = emptyList(),
     ): Datasource =
         Datasource(
             name = name,
@@ -64,6 +69,7 @@ internal object Fixtures {
             username = "app",
             password = "secret",
             properties = properties,
+            introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
 
     fun urlFor(
@@ -118,16 +124,24 @@ internal class JdbcUrlPool(
  * An [SchemaIntrospector] whose registry hands out ONE connection carrying the given mocked
  * [DatabaseMetaData]. Returns (introspector, datasource name). [connectionSetup] stubs
  * connection-level reads the operation under test consults (getSchema/getCatalog).
+ *
+ * The connection defaults to a KNOWN current schema (`getSchema()` → "public",
+ * `getCatalog()` → "app") so unfiltered tables()/columns() reads take the current-schema
+ * default like a healthy datasource — a test exercising the unknown-current-schema guard
+ * overrides either stub via [connectionSetup] (the later recording wins).
  */
 internal fun introspectorOver(
     dialect: Dialect,
     meta: DatabaseMetaData,
+    introspectionIncludeSchemas: List<String> = emptyList(),
     connectionSetup: (Connection) -> Unit = {},
 ): Pair<SchemaIntrospector, String> {
-    val ds = Fixtures.forDialect(dialect)
+    val ds = Fixtures.forDialect(dialect, introspectionIncludeSchemas = introspectionIncludeSchemas)
     val connection = mockk<Connection>()
     every { connection.metaData } returns meta
     every { connection.close() } returns Unit
+    every { connection.schema } returns "public"
+    every { connection.catalog } returns "app"
     connectionSetup(connection)
     val registry = mockk<DatasourceRegistry>()
     every { registry.get(ds.name) } returns ds

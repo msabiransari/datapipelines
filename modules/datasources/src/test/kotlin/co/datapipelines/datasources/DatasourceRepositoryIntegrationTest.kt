@@ -37,7 +37,9 @@ class DatasourceRepositoryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(TestFiles.repoFile(MIGRATION_PATH).readText())
+        // The shipped migrations in version order — Flyway and the scripts live in `app` alone
+        // (module-structure §3.1 rule 2), so the test applies them through plain JDBC.
+        MIGRATION_PATHS.forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -179,6 +181,26 @@ class DatasourceRepositoryIntegrationTest {
         row.properties.jdbc shouldBe mapOf("sslmode" to "verify-full")
     }
 
+    @Test
+    fun `the introspection include-schemas allowlist round-trips - and the column default reads as empty`() {
+        // §3.3/§7A (V2): the allowlist persists as a JSONB array and comes back verbatim; a
+        // datasource saved without one reads the '[]' column default as the empty list —
+        // absent and empty are the same behavior.
+        repository.create(
+            Fixtures.postgres(name = "with_allowlist", introspectionIncludeSchemas = listOf("apex_reporting")),
+            encryptor.encrypt("p", "with_allowlist"),
+            owner,
+        )
+        repository.create(Fixtures.postgres(name = "without_allowlist"), encryptor.encrypt("p", "without_allowlist"), owner)
+
+        checkNotNull(repository.findByName("with_allowlist")).introspectionIncludeSchemas shouldBe listOf("apex_reporting")
+        checkNotNull(repository.findByName("without_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
+
+        // And an update that drops the allowlist persists the drop.
+        repository.update(Fixtures.postgres(name = "with_allowlist"), passwordEncrypted = null)
+        checkNotNull(repository.findByName("with_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
+    }
+
     private fun insertUser(): UUID =
         checkNotNull(
             jdbc.queryForObject(
@@ -198,7 +220,11 @@ class DatasourceRepositoryIntegrationTest {
         }
 
     private companion object {
-        const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
+        val MIGRATION_PATHS =
+            listOf(
+                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
+                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
+            )
 
         @Container
         @JvmStatic

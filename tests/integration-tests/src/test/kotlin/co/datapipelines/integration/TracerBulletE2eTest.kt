@@ -284,7 +284,8 @@ class TracerBulletE2eTest {
     @Order(4)
     fun `schema introspection endpoints serve metadata, not-found, and scope denial`() {
         // Happy path — schemas: the flow's entry point; user schemas listed, system schemas out.
-        val schemaNames: List<String> =
+        // The payload is a page (v1.9): {"schemas": [...], "truncated": false}.
+        val schemasJson =
             given()
                 .port(port)
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
@@ -292,9 +293,10 @@ class TracerBulletE2eTest {
                 .get("/api/v1/datasources/pg-local/schemas")
                 .then()
                 .statusCode(200)
+                .body("data.truncated", org.hamcrest.Matchers.equalTo(false))
                 .extract()
                 .jsonPath()
-                .get("data")
+        val schemaNames: List<String> = schemasJson.get("data.schemas")
         schemaNames shouldContainExactly listOf("public")
 
         // Happy path — tables: the seeded users table, no system catalogs, not truncated.

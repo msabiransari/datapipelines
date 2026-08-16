@@ -34,12 +34,13 @@ class DatasourceSchemaToolsTest {
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
     @Test
-    fun `get_schemas threads its arguments and serves the plain name list`() {
-        every { introspector.schemas("pg-prod") } returns listOf("public", "sales")
+    fun `get_schemas threads its arguments and serves the shared wire projection`() {
+        val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
+        every { introspector.schemas("pg-prod") } returns page
 
         val payload = DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
 
-        payload shouldBe listOf("public", "sales")
+        payload shouldBe page.toWireMap()
     }
 
     @Test
@@ -96,6 +97,100 @@ class DatasourceSchemaToolsTest {
                     DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
+        )
+    }
+
+    @Test
+    fun `a mid-walk connection loss through a real introspector is the isError code - never -32603`() {
+        // The round-3 widening, proven through the FULL MCP path: the tool delegates to a
+        // real SchemaIntrospector whose metadata walk dies with SQLTimeoutException (a
+        // connection-loss shape the old top-level-only classifier let escape as -32603).
+        // The introspector translates at its lease boundary; the tool's own translation then
+        // yields the catalogued DatapipelinesException the dispatcher envelopes as isError.
+        val real = realIntrospectorThrowing(java.sql.SQLTimeoutException("timeout: network is dead"))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+    }
+
+    /** A real [SchemaIntrospector] over one connection whose metadata walk throws [failure]. */
+    private fun realIntrospectorThrowing(failure: java.sql.SQLException): SchemaIntrospector {
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        every { meta.getTables(null, null, "%", any<Array<String>>()) } throws failure
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        every { connection.schema } returns "public"
+        every { connection.catalog } returns "app"
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "Down",
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get("down") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "down"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        return SchemaIntrospector(registry)
+    }
+
+    @Test
+    fun `a no-schema read on a datasource with no current schema is the catalogued invalid-argument code`() {
+        // The cannot-merge promise (mcp-server §6.2.17/§6.2.18) made mechanical: a database-less
+        // MySQL registration yields no current schema and the unqualified read would merge
+        // same-named tables across every visible database. Through a REAL introspector the
+        // tool must surface the catalogued code (isError envelope via the dispatcher), never
+        // a merged answer — with the message pointing at datasources_get_schemas.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val connection = mockk<java.sql.Connection>()
+        every { connection.metaData } returns meta
+        every { connection.close() } returns Unit
+        every { connection.catalog } returns null
+        val datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "Down",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            )
+        val registry = mockk<DatasourceRegistry>()
+        every { registry.get("down") } returns datasource
+        every { registry.poolFor(datasource) } returns
+            object : co.datapipelines.datasources.pooling.ConnectionPool {
+                override val name: String = "down"
+
+                override fun leaseConnection(): java.sql.Connection = connection
+
+                override fun close() = Unit
+            }
+        val real = SchemaIntrospector(registry)
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.PARAMETER_REQUIRED },
+            { thrown.message?.contains("datasources_get_schemas", ignoreCase = true) shouldBe true },
         )
     }
 

@@ -55,6 +55,21 @@ interface DialectAdapter {
         get() = setOf("information_schema")
 
     /**
+     * §7A introspection: true when this dialect has **no JDBC schema dimension at all** —
+     * `getSchemas()` is empty and every object reports a null schema. Verified for the
+     * vendored SQLite driver (xerial 3.49.1.0: `getSchema()` is hardcoded null,
+     * `getSchemas()` reports no rows); DuckDB reports a real current schema (`main`), so it
+     * is NOT schemaless despite the single-database framing of the schemas listing.
+     *
+     * The one behavioral consequence: a no-schema `tables()`/`columns()` read needs no
+     * current-schema default — same-named tables in different schemas cannot exist, so the
+     * unqualified read cannot merge and the §7A unknown-current-schema guard does not apply
+     * (the caller has no schema to pass; the schemas listing is empty).
+     */
+    val introspectionSchemaless: Boolean
+        get() = false
+
+    /**
      * This dialect's **refusal set** (§5.6): property keys the pinned driver would read as a class
      * name to instantiate, a file path, connect-time SQL, or a TLS-verification switch. Lowercase;
      * matching is case-insensitive.

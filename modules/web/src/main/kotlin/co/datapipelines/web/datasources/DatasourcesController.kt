@@ -196,6 +196,10 @@ class DatasourcesController(
                     ?: throw invalid("username", "a username is required"),
             password = password,
             queryTimeoutSeconds = body.get("query_timeout_seconds")?.takeIf { it.isInt }?.asInt(),
+            // §3.3: the introspection allowlist — exact names, stored lowercase (matching is
+            // case-insensitive everywhere else; storing the normalized form keeps the row and
+            // the exemption honest). Non-string entries are payload-shape 400s like the rest.
+            introspectionIncludeSchemas = includeSchemasOf(body),
             properties =
                 body.get("properties")?.takeIf { it.isObject }?.let { node ->
                     DatasourceProperties.fromRaw(node.properties().associate { (k, v) -> k to MAPPER.convertValue(v, Any::class.java) })
@@ -213,19 +217,41 @@ class DatasourcesController(
             mapOf("field" to field),
         )
 
+    /**
+     * §3.3: `introspection_include_schemas` — an array of exact schema names, lowercased at
+     * bind (matching is case-insensitive everywhere else; storing the normalized form keeps
+     * the row and the exemption honest). Absent = empty list (today's behavior). A non-array
+     * value or a non-string entry is a payload-shape 400 like every other bind problem.
+     */
+    private fun includeSchemasOf(body: JsonNode): List<String> {
+        val node = body.get("introspection_include_schemas") ?: return emptyList()
+        if (!node.isArray) {
+            throw invalid("introspection_include_schemas", "introspection_include_schemas must be an array of schema names")
+        }
+        return node.map { element ->
+            if (!element.isTextual) {
+                throw invalid("introspection_include_schemas", "introspection_include_schemas entries must be strings")
+            }
+            element.asText().trim().lowercase()
+        }
+    }
+
     /** The outbound shape — every field a reader is entitled to, `password_set` derived. */
     private fun Datasource.toResponse(): Map<String, Any?> =
-        mapOf(
-            "name" to name,
-            "display_name" to displayName,
-            "description" to description,
-            "dialect" to dialect.wire,
-            "jdbc_url" to jdbcUrl,
-            "username" to username,
-            "password_set" to true,
-            "query_timeout_seconds" to queryTimeoutSeconds,
-            "properties" to mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc),
-        )
+        buildMap {
+            put("name", name)
+            put("display_name", displayName)
+            put("description", description)
+            put("dialect", dialect.wire)
+            put("jdbc_url", jdbcUrl)
+            put("username", username)
+            put("password_set", true)
+            put("query_timeout_seconds", queryTimeoutSeconds)
+            // The envelope convention: absent (not null) when the allowlist is empty — which
+            // is also today's default behavior for every pre-existing datasource.
+            if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
+            put("properties", mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc))
+        }
 
     private companion object {
         val MAPPER =

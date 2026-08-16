@@ -44,3 +44,10 @@ fun TablesPage.toWireMap(): Map<String, Any?> =
         "tables" to tables.map { it.toWireMap() },
         "truncated" to truncated,
     )
+
+/** The §7A schemas listing (`datasources_get_schemas` / `GET .../schemas`). */
+fun SchemasPage.toWireMap(): Map<String, Any?> =
+    mapOf(
+        "schemas" to schemas,
+        "truncated" to truncated,
+    )

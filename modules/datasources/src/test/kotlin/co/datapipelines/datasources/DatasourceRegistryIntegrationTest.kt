@@ -36,7 +36,11 @@ class DatasourceRegistryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(TestFiles.repoFile(MIGRATION_PATH).readText())
+        // The shipped migrations in version order (V2 added the introspection allowlist column).
+        listOf(
+            "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
+            "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
+        ).forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -380,8 +384,6 @@ class DatasourceRegistryIntegrationTest {
         }
 
     private companion object {
-        const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
-
         @Container
         @JvmStatic
         val postgres: PostgreSQLContainer<*> =

@@ -30,6 +30,19 @@ data class Datasource(
     val password: String? = null,
     val queryTimeoutSeconds: Int? = null,
     val properties: DatasourceProperties = DatasourceProperties(),
+    /**
+     * §7A introspection include-schemas allowlist (§3.3): schema names exempt from the
+     * dialect's system-schema exclusion in ALL THREE introspection operations. The escape
+     * hatch for the exclusion floors' one known blind spot — a prefix entry like Oracle's
+     * `apex_*` hides a customer's own `APEX_REPORTING` schema just like the engine's versioned
+     * ones, with no warning; naming it here makes it visible again.
+     *
+     * **Lowercase, exact names, no patterns** (an entry carrying `*` is rejected at save — a
+     * pattern here would look like it exempts a family while exempting nothing); normalization
+     * to lowercase happens at the registration bind. Absent/empty = today's behavior: the
+     * dialect floor applies unchanged. Matching is case-insensitive, like the exclusion itself.
+     */
+    val introspectionIncludeSchemas: List<String> = emptyList(),
 ) {
     /**
      * Overridden because the generated `data class` [toString] prints **every** property,

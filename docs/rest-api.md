@@ -768,6 +768,9 @@ Content-Type: application/json
   "jdbc_url": "jdbc:postgresql://host:5432/db",
   "username": "readonly_user",
   "password": "...",                // write-only; never returned in GET
+  "introspection_include_schemas": ["apex_reporting"],  // OPTIONAL — §9.7 escape hatch for the
+                                                        // system-schema exclusion (exact names,
+                                                        // no patterns; lowercased at bind)
   "properties": {
     "hikari": {
       "maximumPoolSize": 10,
@@ -781,6 +784,8 @@ Content-Type: application/json
 ```
 
 `properties` has exactly two reserved namespaces — `hikari` (HikariCP's own camelCase property names, durations in milliseconds) and `jdbc` (driver connection properties) — validated by a test pool build at save time. See [Datasources §5](datasources.md#5-connection-pool-configuration).
+
+`introspection_include_schemas` (optional, [Datasources §3.3](datasources.md#33-field-reference)) exempts exact schema names from the §9.7 system-schema exclusion; entries must be non-blank names without wildcard patterns (`400 datasource.validation.properties_invalid` otherwise), and are lowercased on save. Omitted from the response when empty.
 
 Response: `201 Created` with the datasource entity (excluding password).
 
@@ -806,7 +811,7 @@ Returns everything except `password`.
 PUT /datasources/{name}
 ```
 
-Updates connection details. Password is optional — omit to keep existing.
+Updates connection details. Password is optional — omit to keep existing. The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent.
 
 ### 9.5 Delete datasource
 
@@ -838,7 +843,7 @@ Responses (the §4.1 envelope around `data`):
 
 ```json
 // GET /datasources/{name}/schemas
-{ "data": ["public", "sales"] }
+{ "data": { "schemas": ["public", "sales"], "truncated": false } }
 
 // GET /datasources/{name}/tables
 { "data": { "tables": [ {"schema": "public", "name": "orders", "type": "TABLE", "remarks": "customer orders"} ], "truncated": false } }
@@ -852,13 +857,13 @@ Responses (the §4.1 envelope around `data`):
 
 Notes:
 
-- `GET /schemas` returns the driver-reported schema names with the engine's system schemas excluded; on MySQL the databases arrive as JDBC catalogs, so the listing reads them from `getCatalogs()`. An empty list is a valid result on schemaless datasources (SQLite, single-db DuckDB).
+- `GET /schemas` returns the driver-reported schema names with the engine's system schemas excluded, as a page (`{"schemas": [...], "truncated": bool}`); on MySQL the databases arrive as JDBC catalogs, so the listing reads them from `getCatalogs()`. An empty list is a valid result on schemaless datasources (SQLite, single-db DuckDB). The listing is capped at 2000 schemas; `truncated: true` means the cap dropped some (on MySQL catalog routing the walk would otherwise span every database the server grants).
 - `type` in a column descriptor is the canonical wire type; `source_type` is the driver's own type name. `precision`/`scale`/`nullable` are omitted when the metadata does not report them (the envelope convention — omitted is not null). `warnings` carries the ingress type mapper's warning messages, empty when the mapping was clean. `remarks` in a table or column descriptor is the engine-stored comment (JDBC REMARKS), omitted when the driver/database has none; the schemas listing carries no remarks (`getSchemas()` has none).
 - `type` in a table descriptor is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...).
 - The tables listing is capped at 2000 tables; `truncated: true` means tables were dropped. Without a `schema` parameter the tables listing spans schemas — pass each table's reported `schema` to `/columns`.
-- Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped). System schemas are excluded everywhere; `/columns` without a `schema` parameter defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns.
+- Pass the table name exactly as `/tables` returned it — JDBC metadata name matching is case-sensitive. `table` and `schema` filters are exact-match identifiers, not LIKE patterns (`_`/`%` are escaped); a present-but-empty `?schema=` binds to `""` and is treated as absent, so the default applies rather than a match-nothing empty filter. System schemas are excluded everywhere; `/columns` without a `schema` parameter defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns — and when the datasource reports **no current schema** (e.g. a database-less MySQL URL), that default is impossible, so `/columns` and an unfiltered `/tables` fail with `400 pipeline.execution.parameter_required` instead of returning a merged answer; list `/schemas` and pass one explicitly.
 - An unknown `schema`/table filter matches nothing and returns an empty list. An unknown datasource name is `404 datasource.not_found`. A connection failure against the datasource is `502 pipeline.execution.datasource_unreachable` (the customer's database being down is not a server error).
-- No pagination: the tables listing is bounded by its 2000-table cap (`truncated` flags the drop), and per-table listings are naturally bounded.
+- No pagination: the tables and schemas listings are bounded by their 2000-row cap (`truncated` flags the drop), and per-table listings are naturally bounded.
 
 ---
 
@@ -1107,3 +1112,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-15 | v1.6 | surface restructure (part 1) | §9.7: `GET /datasources/{name}/schema` removed (bundled whole-schema snapshot deleted; table listings stay lightweight so more tables fit in one response). Snapshot example and cap notes dropped. |
 | 2026-08-15 | v1.7 | surface restructure (part 2) | §9.7: new `GET /datasources/{name}/schemas` — the flow's entry point; system schemas excluded, `getCatalogs()` on MySQL, empty list valid on schemaless datasources. Tables note now states the unfiltered listing spans schemas and each table's schema belongs in `/columns`. |
 | 2026-08-15 | v1.8 | semantics via remarks | §9.7: table and column descriptors gain `remarks` (JDBC REMARKS, omitted when none); schemas listing carries none by construction. |
+| 2026-08-15 | v1.9 | hardening round 3 (005 review fix-cycle) | §9.7: a present-but-empty `?schema=` binds to \"\" and is treated as absent (the default applies, not a match-nothing empty filter); a datasource reporting **no current schema** (e.g. database-less MySQL URL) makes `/columns` and an unfiltered `/tables` fail with `400 pipeline.execution.parameter_required` instead of a merged answer (list `/schemas`, pass one); the `/schemas` response becomes a page `{\"schemas\": [...], \"truncated\": bool}` capped at 2000 (was a bare array); blank remarks are omitted, never `\"\"`. §9.1/§9.4: optional `introspection_include_schemas` array (exact lowercase names, no patterns — `400 properties_invalid` otherwise; projected when non-empty; PUT replaces it wholesale). |

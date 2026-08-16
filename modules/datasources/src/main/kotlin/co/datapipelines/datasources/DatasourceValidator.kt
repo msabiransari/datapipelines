@@ -40,6 +40,7 @@ class DatasourceValidator(
             errors += error(DatasourceErrorCodes.PASSWORD_MISSING, "password", "A password is required on create.")
         }
         validateQueryTimeout(datasource.queryTimeoutSeconds, errors)
+        validateIntrospectionIncludeSchemas(datasource, errors)
         validateJdbcUrl(datasource, errors)
         validateProperties(datasource, errors)
 
@@ -118,6 +119,29 @@ class DatasourceValidator(
                     "query_timeout_seconds",
                     "query_timeout_seconds, when set, must be an integer >= 1.",
                 )
+        }
+    }
+
+    /**
+     * §3.3/§7A: `introspection_include_schemas` entries are exact schema names — non-blank,
+     * no wildcard patterns. The prefix language (`apex_*`) belongs to the exclusion floors
+     * alone; an allowlist pattern would look like it exempts a family while exempting nothing,
+     * so it is rejected here rather than silently ignored. Lowercase normalization happens at
+     * the registration bind, before this rule runs.
+     */
+    private fun validateIntrospectionIncludeSchemas(
+        datasource: Datasource,
+        errors: MutableList<ValidationError>,
+    ) {
+        datasource.introspectionIncludeSchemas.forEach { entry ->
+            if (entry.isBlank() || entry.contains('*')) {
+                errors +=
+                    propertiesError(
+                        "introspection_include_schemas",
+                        "introspection_include_schemas entries must be non-blank schema names without wildcard " +
+                            "patterns; '${entry.truncateForError()}' is not.",
+                    )
+            }
         }
     }
 

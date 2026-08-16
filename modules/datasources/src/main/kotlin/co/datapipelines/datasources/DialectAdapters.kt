@@ -122,8 +122,29 @@ class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
 }
 
 class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
-    // SQL Server hides `sys` (the resource-DB views surface under it) beside INFORMATION_SCHEMA.
-    override val introspectionSystemSchemas: Set<String> = setOf("information_schema", "sys")
+    // SQL Server hides `sys` (the resource-DB views surface under it) beside INFORMATION_SCHEMA,
+    // and every database carries the built-in fixed-role/special schemas (db_owner,
+    // db_accessadmin, db_securityadmin, db_ddladmin, db_backupoperator, db_datareader,
+    // db_datawriter, db_denydatareader, db_denydatawriter, guest) — they list as ordinary
+    // schemas an agent would then walk. A FLOOR, deliberately known-incomplete like Oracle's:
+    // these are the schemas every SQL Server database maintains; site-specific server-level
+    // schemas are additions, not omissions. `dbo` is deliberately ABSENT — it is the
+    // database's default USER schema, not an engine schema.
+    override val introspectionSystemSchemas: Set<String> =
+        setOf(
+            "information_schema",
+            "sys",
+            "db_owner",
+            "db_accessadmin",
+            "db_securityadmin",
+            "db_ddladmin",
+            "db_backupoperator",
+            "db_datareader",
+            "db_datawriter",
+            "db_denydatareader",
+            "db_denydatawriter",
+            "guest",
+        )
 }
 
 /**
@@ -185,6 +206,12 @@ class H2DialectAdapter : AbstractDialectAdapter(Dialect.H2, "h2")
  * hand author SQL — or an operator's `properties.jdbc` — a code-execution primitive.
  */
 class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
+    // DuckDB is Postgres-lineage: the pinned driver reports `information_schema` AND
+    // `pg_catalog` as plain getSchemas() rows beside the user's `main` (verified against
+    // duckdb_jdbc 1.5.5.1) — the bare {information_schema} default leaked pg_catalog into the
+    // schemas listing. A FLOOR, deliberately known-incomplete like Oracle's.
+    override val introspectionSystemSchemas: Set<String> = setOf("information_schema", "pg_catalog")
+
     override val defaultProperties: Map<String, String> =
         mapOf(
             // Never load an unsigned or community extension. Both are runtime-locked once set.
@@ -224,6 +251,14 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
  * hand author SQL a filesystem-access primitive.
  */
 class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
+    /**
+     * §7A: SQLite has no JDBC schema dimension at all — `getSchemas()` reports no rows and
+     * `getSchema()` is hardcoded null in the vendored driver — so an unqualified
+     * tables()/columns() read cannot merge same-named tables and is exempt from the
+     * unknown-current-schema guard (see [DialectAdapter.introspectionSchemaless]).
+     */
+    override val introspectionSchemaless: Boolean = true
+
     override val defaultProperties: Map<String, String> =
         mapOf(
             "enable_load_extension" to "false",

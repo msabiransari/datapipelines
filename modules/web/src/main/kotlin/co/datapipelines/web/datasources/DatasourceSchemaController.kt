@@ -36,8 +36,8 @@ import org.springframework.web.bind.annotation.RestController
  *
  * All three endpoints are `author`-scoped (§7A, the §8.1 connection-test precedent): each opens a
  * live connection against the datasource, and the stated consumer is pipeline authoring. No
- * pagination — the tables listing is capped at 2000 (`truncated: true` when the cap dropped
- * any), the schemas and per-table listings are naturally bounded.
+ * pagination — the tables and schemas listings are each capped at 2000 (`truncated: true` when
+ * the cap dropped any); per-table column listings are naturally bounded.
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
@@ -46,13 +46,14 @@ class DatasourceSchemaController(
 ) {
     /**
      * §7A — the schema listing, the introspection flow's entry point (schemas → tables →
-     * columns). A plain list of names; empty is a valid answer on schemaless dialects.
+     * columns). The shared wire projection (`{"schemas": [...], "truncated": bool}`); empty is
+     * a valid answer on schemaless dialects.
      */
     @GetMapping("/{name}/schemas")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun schemas(
         @PathVariable name: String,
-    ): ApiResponse<List<String>> = ApiResponse.of(introspecting(name) { introspector.schemas(name) })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.schemas(name).toWireMap() })
 
     /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")
@@ -73,11 +74,15 @@ class DatasourceSchemaController(
         ApiResponse.of(introspecting(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
 
     /**
-     * The §7A connection-failure boundary: the introspector's [DatasourceUnreachableException]
-     * (both the SQLException lease family and the RuntimeException pool-build family, translated
-     * at its lease boundary) is the catalogued
-     * `pipeline.execution.datasource_unreachable`, never a raw 500. Message is static — driver
-     * text stays off the wire (§13 forbids internal topology in error messages).
+     * The §7A error boundaries shared by the three endpoints. The introspector's
+     * [DatasourceUnreachableException] (both the SQLException lease family and the
+     * RuntimeException pool-build family, translated at its lease boundary) is the catalogued
+     * `pipeline.execution.datasource_unreachable`, never a raw 500; its
+     * [co.datapipelines.datasources.CurrentSchemaUnknownException] is the catalogued
+     * `pipeline.execution.parameter_required` — the closest §13.3 invalid-argument code,
+     * reused per the additive-catalog rule — with a message that names the recovery (list
+     * schemas, then pass one). Messages are static — driver text stays off the wire (§13
+     * forbids internal topology in error messages).
      */
     private fun <T> introspecting(
         name: String,
@@ -89,6 +94,16 @@ class DatasourceSchemaController(
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                 message = "Datasource '$name' could not be reached for schema introspection.",
+                details = mapOf("datasource" to name),
+                cause = e,
+            )
+        } catch (e: co.datapipelines.datasources.CurrentSchemaUnknownException) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
+                message =
+                    "Datasource '$name' reports no current schema, so an unqualified read could merge " +
+                        "same-named tables across schemas. Pass an explicit schema (list them with " +
+                        "GET /api/v1/datasources/$name/schemas).",
                 details = mapOf("datasource" to name),
                 cause = e,
             )
