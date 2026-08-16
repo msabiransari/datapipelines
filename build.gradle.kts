@@ -115,11 +115,16 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
         .filter { it.buildFile.exists() }
         .associate { sub ->
             sub.path to sub.configurations
-                .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
-                .map { it.path }
                 // Kover wires a self-edge per module (its kover/koverExternalArtifacts
                 // bucket configurations) — plugin plumbing, not a §4.2 declaration.
-                .filter { it != sub.path }
+                // Filter at the CONFIGURATION level (009/F7): the previous
+                // `.filter { it != sub.path }` dropped self-edges from ALL
+                // configurations, so a genuinely declared
+                // `implementation(project(":modules:x"))` inside x itself
+                // passed silently.
+                .filterNot { it.name.startsWith("kover") }
+                .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
+                .map { it.path }
                 .toSet()
         }
     val allowed = allowedInternalDependencies
