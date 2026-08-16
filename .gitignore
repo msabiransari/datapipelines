@@ -15,6 +15,9 @@ out/
 # Gate run logs — scripts/gate.sh writes .gate-logs/, agent worktrees write gate-logs/
 .gate-logs/
 gate-logs/
+# Scanner binaries installed by the scan scripts (DEVELOPMENT.md §10.2). Lives
+# OUTSIDE build/ so `gradlew clean` does not force a re-download.
+.tools/
 
 # The wrapper JAR and scripts ARE committed (they are how the build is reproducible);
 # only local Gradle state is ignored.

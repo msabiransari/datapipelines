@@ -1,11 +1,34 @@
 # .gitleaks.toml — allowlist for scripts/secret-scan.sh (gitleaks 8.30.1).
 #
 # RULE: every entry carries a reason + date comment (project rule). Entries are
-# LINE-targeted (regexTarget = "line") so a future REAL secret on a different
-# line of the same file still fires — never allowlist a whole path here.
+# SECRET-targeted (regexTarget = "secret") AND path-scoped (paths = [...]) with
+# condition = "AND": suppression requires BOTH the triaged file AND the
+# extracted secret itself, so a real secret co-located with an allowlisted
+# token — same file, same line — still fires.
+#
+# Why so defensive (009/F2, both halves verified against the 8.30.1 source):
+#  - The pre-009 config used unanchored LINE-target regexes with no path
+#    scoping: any line containing an allowlisted token had ALL its secrets
+#    suppressed, anywhere in the repo (proven with a co-located real-format
+#    GitHub PAT that sailed through).
+#  - Path scoping ALONE is also a trap: with the DEFAULT condition ("OR") a
+#    path match skips the whole file before scanning (detect.go
+#    checkCommitOrPathAllowed), and --no-git/directory scans skip
+#    path-matched files unconditionally (sources/common.go shouldSkipPath).
+#    condition = "AND" + a secret regex keeps the check at finding level:
+#    path AND extracted secret must both match to suppress.
 #
 # Baseline: full-history scan on 2026-08-15 found 5 hits, all rule
-# `generic-api-key`, all triaged as false positives below.
+# `generic-api-key`, all triaged as false positives below. For every hit the
+# extracted secret IS the token below (verified 2026-08-16 against the report's
+# Secret field), which is what makes regexTarget = "secret" possible.
+#
+# NOTE: the old entry for `${DATAPIPELINES_DB_ENCRYPTION_KEY}` was dropped on
+# 2026-08-16: no finding in the full history extracts that string as its
+# secret, so the entry suppressed nothing real and existed only as co-location
+# cover. If a future scan flags a docs/configuration.md reference line, re-add
+# a scoped AND-entry for the ACTUAL extracted secret, not the placeholder
+# syntax.
 
 title = "datapipelines gitleaks config"
 
@@ -15,28 +38,46 @@ title = "datapipelines gitleaks config"
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Triaged false positives — see per-entry comments (2026-08-15)"
-regexTarget = "line"
+# deploy/.env.example HISTORY (values placeholdered at d8bc67c) — two working
+# base64 values for the LOCAL dev compose stack. They secure nothing
+# (localhost-only services; DEVELOPMENT.md tells every developer to generate
+# their own), but they are high-entropy strings, so gitleaks flags them.
+# (2026-08-15)
+[[allowlists]]
+description = "deploy/.env.example history: local dev-compose base64 values (2026-08-15)"
+condition = "AND"
+paths = ['''deploy/\.env\.example$''']
+regexTarget = "secret"
 regexes = [
-  # docs/configuration.md — `${DATAPIPELINES_DB_ENCRYPTION_KEY}` is an env-var
-  # REFERENCE in a YAML example, not a literal key. (2026-08-15)
-  '''\$\{DATAPIPELINES_DB_ENCRYPTION_KEY\}''',
-  # docs/rest-api.md — `dpk_ab12cd34ef56.9f8e7d6c...` is a truncated EXAMPLE
-  # API key in the docs, not a credential. (2026-08-15)
-  '''dpk_ab12cd34ef56''',
-  # modules/app ConfigValidatorTest.kt — `oidc-secret-456` is a deliberate
-  # fixture value for OIDC config validation tests. (2026-08-15)
-  '''oidc-secret-456''',
-  # deploy/.env.example — two working base64 values for the LOCAL dev compose
-  # stack. They secure nothing (localhost-only services; DEVELOPMENT.md tells
-  # every developer to generate their own), but they are high-entropy strings,
-  # so gitleaks flags them. (2026-08-15)
-  '''JWT_SECRET=cSZIW7DsvYRYUZWghr3t1mG2qGfGOMBRBcqNMiWSpX8=''',
-  '''ENCRYPTION_KEY=0mzTN2khjqIJ/vBX59Y79xmOrNNrceuNkMo0H5xE\+yQ=''',
-  # docs/configuration.md HISTORY (removed before this scan; commit c105d58) —
-  # the old dev-only value is base64 of the literal string
-  # "dev-encryption-key-32-bytes!", a placeholder, never a real key. Kept so
-  # full-history scans stay clean. (2026-08-15)
-  '''ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==''',
+  '''^cSZIW7DsvYRYUZWghr3t1mG2qGfGOMBRBcqNMiWSpX8=$''',
+  '''^0mzTN2khjqIJ/vBX59Y79xmOrNNrceuNkMo0H5xE\+yQ=$''',
 ]
+
+# modules/app ConfigValidatorTest.kt — `oidc-secret-456` is a deliberate
+# fixture value for OIDC config validation tests. (2026-08-15)
+[[allowlists]]
+description = "ConfigValidatorTest.kt: OIDC fixture value (2026-08-15)"
+condition = "AND"
+paths = ['''modules/app/src/test/kotlin/co/datapipelines/config/ConfigValidatorTest\.kt$''']
+regexTarget = "secret"
+regexes = ['''^oidc-secret-456$''']
+
+# docs/rest-api.md — `dpk_ab12cd34ef56.9f8e7d6c...` is a truncated EXAMPLE
+# API key in the docs, not a credential. (2026-08-15)
+[[allowlists]]
+description = "rest-api.md: truncated example API key (2026-08-15)"
+condition = "AND"
+paths = ['''docs/rest-api\.md$''']
+regexTarget = "secret"
+regexes = ['''^dpk_ab12cd34ef56\.9f8e7d6c\.\.\.$''']
+
+# docs/configuration.md HISTORY (removed before the 2026-08-15 scan; commit
+# c105d58) — the old dev-only value is base64 of the literal string
+# "dev-encryption-key-32-bytes!", a placeholder, never a real key. Kept so
+# full-history scans stay clean. (2026-08-15)
+[[allowlists]]
+description = "configuration.md history: base64 of a placeholder string (2026-08-15)"
+condition = "AND"
+paths = ['''docs/configuration\.md$''']
+regexTarget = "secret"
+regexes = ['''^ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==$''']

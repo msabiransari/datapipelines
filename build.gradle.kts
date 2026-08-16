@@ -22,16 +22,15 @@ allprojects {
 }
 
 dependencies {
-    kover(project(":modules:typesystem"))
-    kover(project(":modules:pipeline-contract"))
-    kover(project(":modules:templates"))
-    kover(project(":modules:datasources"))
-    kover(project(":modules:staging"))
-    kover(project(":modules:auth"))
-    kover(project(":modules:dag"))
-    kover(project(":modules:mcp-server"))
-    kover(project(":modules:web"))
-    kover(project(":modules:app"))
+    // Derived from subprojects (009/F9): the hand-enumerated list let a NEW
+    // module silently escape the aggregate report. The buildFile filter drops
+    // Gradle's intermediate path projects (:modules, :tests carry no build
+    // file and no Kover plugin). Every real module applies
+    // CommonConventionsPlugin, which applies the Kover plugin — and a module
+    // with no main sources is carried by NO_COVERAGE_FLOOR_ALLOWLIST there.
+    subprojects
+        .filter { it.buildFile.exists() }
+        .forEach { kover(project(it.path)) }
 }
 
 // The root project resolves the `kover` aggregation configuration, so it locks
@@ -115,11 +114,16 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
         .filter { it.buildFile.exists() }
         .associate { sub ->
             sub.path to sub.configurations
-                .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
-                .map { it.path }
                 // Kover wires a self-edge per module (its kover/koverExternalArtifacts
                 // bucket configurations) — plugin plumbing, not a §4.2 declaration.
-                .filter { it != sub.path }
+                // Filter at the CONFIGURATION level (009/F7): the previous
+                // `.filter { it != sub.path }` dropped self-edges from ALL
+                // configurations, so a genuinely declared
+                // `implementation(project(":modules:x"))` inside x itself
+                // passed silently.
+                .filterNot { it.name.startsWith("kover") }
+                .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
+                .map { it.path }
                 .toSet()
         }
     val allowed = allowedInternalDependencies

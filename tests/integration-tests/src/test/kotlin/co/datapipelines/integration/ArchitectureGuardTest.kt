@@ -31,23 +31,26 @@ class ArchitectureGuardTest {
     }
 
     /**
-     * `@Transactional` belongs to the service layer only. The house layering names
-     * service classes `*Service` (JwtService, UserService, ApiKeyService — the only
-     * three at adoption time); repositories and controllers never transact. The rule
-     * is encoded exactly as that naming convention, not as an assumed package.
+     * `@Transactional` belongs to the service layer only. The layer is identified by
+     * the `@Service` STEREOTYPE, not the `*Service` name suffix (009/F8: a
+     * `@Repository class ExecutionCleanupService` passed the old name check), and the
+     * scan covers INTERFACES as well as classes (Konsist `.classes()` misses
+     * interfaces, so a `@Transactional interface` passed silently). All three service
+     * classes at adoption time (JwtService, UserService, ApiKeyService) carry
+     * `@Service` — verified by grep, not recall.
      */
     @Test
-    fun `transactional only on service-layer classes`() {
+    fun `transactional only on service-layer types`() {
         val transacting =
             productionScope()
-                .classes()
-                .filter { clazz ->
-                    clazz.hasAnnotationWithName("Transactional") ||
-                        clazz.functions().any { it.hasAnnotationWithName("Transactional") }
+                .classesAndInterfaces()
+                .filter { decl ->
+                    decl.hasAnnotationWithName("Transactional") ||
+                        decl.functions().any { it.hasAnnotationWithName("Transactional") }
                 }
 
         transacting
-            .filterNot { it.name.endsWith("Service") }
+            .filterNot { it.hasAnnotationWithName("Service") }
             .assertEmpty()
     }
 

@@ -195,8 +195,10 @@ class CommonConventionsPlugin : Plugin<Project> {
         // Kover — per-module coverage verification (module-structure.md §7.7).
         // Floors live in COVERAGE_FLOORS below: each is the module's measured
         // baseline minus 2 points, rounded down — a regression tripwire, not a
-        // demand for new tests. A module absent from the map has no floor (only
-        // tests/integration-tests, which has no main sources to measure).
+        // demand for new tests. A module absent from the map FAILS
+        // configuration unless it carries an explicit, intent-carrying entry
+        // in NO_COVERAGE_FLOOR_ALLOWLIST (009/F9) — a new module must not
+        // silently escape the floors and the aggregate report.
         project.extensions.configure<KoverProjectExtension> {
             currentProject.instrumentation.apply {
                 // CRITICAL: restrict instrumentation to OUR classes. Unrestricted,
@@ -210,22 +212,38 @@ class CommonConventionsPlugin : Plugin<Project> {
         }
 
         // Escape hatch for timing-sensitive diagnosis: -Pkover.off runs the
-        // tests WITHOUT the coverage agent attached.
-        if (project.hasProperty("kover.off")) {
+        // tests WITHOUT the coverage agent attached — and skips the floor
+        // rules and the check→koverVerify wiring too (009/F5): with
+        // instrumentation off there is no coverage data, so a registered
+        // floor rule fails on ABSENT data. The flag previously only worked
+        // for bare `test`; lifecycle builds (build/check) failed every floor.
+        val koverOff = project.hasProperty("kover.off")
+        if (koverOff) {
             project.extensions.configure<KoverProjectExtension> {
                 currentProject.instrumentation.disabledForAll.set(true)
             }
         }
-        COVERAGE_FLOORS[project.path]?.let { floor ->
-            project.extensions.configure<KoverProjectExtension> {
-                reports.verify {
-                    rule("line coverage must not drop below the measured baseline minus 2% (§7.7)") {
-                        minBound(floor)
+        val coverageFloor = COVERAGE_FLOORS[project.path]
+        if (coverageFloor == null && project.path !in NO_COVERAGE_FLOOR_ALLOWLIST) {
+            throw GradleException(
+                "${project.path} has no entry in COVERAGE_FLOORS (CommonConventionsPlugin): every module " +
+                    "gets a line-coverage floor (module-structure.md §7.7). Add the module's measured " +
+                    "baseline minus 2% to COVERAGE_FLOORS, or — only if it has no main sources to " +
+                    "measure — an intent-carrying entry in NO_COVERAGE_FLOOR_ALLOWLIST.",
+            )
+        }
+        if (!koverOff) {
+            coverageFloor?.let { floor ->
+                project.extensions.configure<KoverProjectExtension> {
+                    reports.verify {
+                        rule("line coverage must not drop below the measured baseline minus 2% (§7.7)") {
+                            minBound(floor)
+                        }
                     }
                 }
             }
+            project.tasks.named("check").configure { dependsOn("koverVerify") }
         }
-        project.tasks.named("check").configure { dependsOn("koverVerify") }
 
         // Dependency locking — STRICT, every configuration (module-structure.md §7.6).
         // Resolution is validated against the committed gradle.lockfile: any drift from
@@ -348,6 +366,18 @@ class CommonConventionsPlugin : Plugin<Project> {
             ":modules:mcp-server" to 94,
             ":modules:web" to 72,
             ":modules:app" to 90,
+        )
+
+        /**
+         * Modules with NO line-coverage floor, each with its reason — the same
+         * intent-carrying allowlist pattern as `.trivyignore` / `osv-scanner.toml`
+         * (009/F9). A module absent from [COVERAGE_FLOORS] that is not listed here
+         * fails configuration, so the next module (or a renamed one) can never
+         * silently escape the floors and the aggregate report.
+         */
+        val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> = setOf(
+            // No main sources of its own — nothing to measure. (2026-08-15)
+            ":tests:integration-tests",
         )
     }
 }

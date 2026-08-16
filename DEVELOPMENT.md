@@ -460,8 +460,9 @@ coverage has genuinely improved, and never lower one to make a build pass.
 ./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
 ```
 
-osv-scanner (pinned in the script, downloaded into the git-ignored
-`build/tools/` and SHA256-verified against the release manifest) checks the
+osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
+outside `build/`, so `gradlew clean` does not force a re-download — and
+SHA256-verified against the release manifest) checks the
 resolved dependency set — the lockfiles, direct and transitive — against the
 OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
@@ -480,9 +481,11 @@ gitleaks (pinned in the script, same verified-download pattern) scans the full
 history or just staged changes. `install-hooks.sh` sets plain git
 `core.hooksPath` to the committed `.githooks/` directory — no hooks framework —
 so the pre-commit hook blocks staged secrets. The allowlist is `.gitleaks.toml`;
-entries are line-targeted (never whole files) with a reason + date comment, and
-the config EXTENDS the gitleaks default ruleset (a bare custom config silently
-replaces it — that mistake was made and caught here).
+entries are SECRET-targeted and path-scoped with `condition = "AND"`
+(suppression requires the triaged file AND the extracted secret, so a real
+secret co-located with an allowlisted token still fires), each with a reason +
+date comment, and the config EXTENDS the gitleaks default ruleset (a bare
+custom config silently replaces it — that mistake was made and caught here).
 
 #### Container scanning (trivy)
 
@@ -494,19 +497,22 @@ replaces it — that mistake was made and caught here).
 trivy (pinned in the script, same verified-download pattern) scans the
 Dockerfile for misconfigurations and the locally-built production image for
 package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
-comment per entry; anything NOT ignored exits 1, so new findings fail. We do
-not chase base-image CVE zero — record the count, fix what a base-image bump
-or an obvious Dockerfile change resolves cheaply. trivy 0.74 has no
-docker-compose scanner, so `deploy/*.yml` is not covered. First run needs
-network (vulnerability DB download); the image scan needs a Docker daemon.
+comment AND an `exp:` expiry per entry — an expired entry fails the scan
+again, so baselines get re-triaged instead of rotting (same discipline as
+`osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new
+findings fail. We do not chase base-image CVE zero — record the count, fix
+what a base-image bump or an obvious Dockerfile change resolves cheaply.
+trivy 0.74 has no docker-compose scanner, so `deploy/*.yml` is not covered.
+First run needs network (vulnerability DB download); the image scan needs a
+Docker daemon.
 
 #### Architecture guards (Konsist)
 
 Layering rules as ordinary unit tests (module-structure.md §7.8):
 `RequiredScopeKonsistTest` in `modules/web` and `ArchitectureGuardTest` in
 `tests/integration-tests` (no field injection; `@Transactional` only on
-`*Service` classes). They run with the normal `test` task — no separate
-command.
+`@Service`-stereotyped types, interfaces included). They run with the normal
+`test` task — no separate command.
 
 ---
 
