@@ -73,6 +73,37 @@ class DatasourceToolsTest {
     }
 
     @Test
+    fun `get projects the introspection allowlist when one is active - non-empty only, like REST`() {
+        // R4 F4: MCP agents (the primary introspection consumers) could not see that an
+        // allowlist was active when debugging why a schema is or isn't visible — REST
+        // returned the field, MCP didn't. Same omitted-when-empty envelope semantics as
+        // REST §3.2, on both surfaces that share toMcpMetadata.
+        every { registry.get("pg-prod") } returns
+            McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting"))
+        every { registry.list(null) } returns
+            listOf(McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting")))
+
+        @Suppress("UNCHECKED_CAST")
+        val single = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+        val listed = DatasourcesListTool(registry).call(McpArguments(emptyMap()), readCtx) as List<*>
+
+        assertAll(
+            { single["introspection_include_schemas"] shouldBe listOf("apex_reporting") },
+            { (listed.first() as Map<*, *>)["introspection_include_schemas"] shouldBe listOf("apex_reporting") },
+        )
+    }
+
+    @Test
+    fun `get omits the introspection allowlist when it is empty - the envelope convention`() {
+        every { registry.get("pg-prod") } returns McpFixtures.datasource()
+
+        @Suppress("UNCHECKED_CAST")
+        val payload = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+
+        payload.containsKey("introspection_include_schemas") shouldBe false
+    }
+
+    @Test
     fun `an unknown datasource is a catalogued not-found`() {
         every { registry.get("nope") } returns null
 

@@ -474,6 +474,8 @@ Fetch a single datasource (without password).
 
 **Scope:** `read`.
 
+**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
+
 #### 6.2.12 `datasources_test`
 
 Test that a datasource connection can be established.
@@ -968,3 +970,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-15 | v1.8 | semantics via remarks | §6.2.17/§6.2.18: table and column descriptors gain `remarks` — the engine-stored comment from JDBC REMARKS, omitted when the driver/database has none. |
 | 2026-08-15 | v1.9 | surface restructure (part 3) | §8.2 `create_pipeline_for_question` walkthrough rewritten to the three-step grounding flow: `datasources_get_schemas` → `datasources_get_tables(schema)` → `datasources_get_columns` for only the tables the SQL needs. The never-reference-unreturned-tables rule and the sentinel fence are unchanged. |
 | 2026-08-15 | v1.10 | hardening round 3 (005 review fix-cycle) | §6.2.16: `datasources_get_schemas` returns a page `{\"schemas\": [...], \"truncated\": bool}` capped at 2000 (was a bare array). §6.2.17/§6.2.18: without a `schema` argument, a datasource reporting no current schema (database-less MySQL URL) fails with the catalogued `pipeline.execution.parameter_required` (recovered via `datasources_get_schemas`) instead of a merged/spanning answer — descriptions and Returns updated; blank remarks are omitted, never `\"\"`. Input schemas unchanged (output-shape and error-behavior changes only). |
+| 2026-08-16 | v1.11 | hardening round 4 (007 review fix-cycle) | §6.2.11: `datasources_get` (and `datasources_list`, which shares the projection) now returns `introspection_include_schemas` when the allowlist is non-empty — omitted when empty, the same envelope as REST §3.2 — so an agent debugging schema visibility can see an allowlist is active. Output-shape change only; inputSchema untouched. |

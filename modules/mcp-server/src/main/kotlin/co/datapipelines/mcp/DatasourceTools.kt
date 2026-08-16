@@ -13,16 +13,19 @@ import io.modelcontextprotocol.spec.McpSchema
  * checklist) must be a property of the code, not of whichever mapper happens to serialize it.
  */
 internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
-    mapOf(
-        "name" to name,
-        "display_name" to displayName,
-        "description" to description,
-        "dialect" to dialect.wire,
-        "jdbc_url" to jdbcUrl,
-        "username" to username,
-        "query_timeout_seconds" to queryTimeoutSeconds,
-        "pool" to properties.hikari,
-    )
+    buildMap {
+        put("name", name)
+        put("display_name", displayName)
+        put("description", description)
+        put("dialect", dialect.wire)
+        put("jdbc_url", jdbcUrl)
+        put("username", username)
+        put("query_timeout_seconds", queryTimeoutSeconds)
+        // The §3.3 allowlist, so an agent debugging why a schema is or isn't visible can see
+        // that one is active — omitted when empty, the same envelope convention as REST §3.2.
+        if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
+        put("pool", properties.hikari)
+    }
 
 /** `datasources_list` (mcp-server.md §6.2.10). Scope: `read`. */
 class DatasourcesListTool(
