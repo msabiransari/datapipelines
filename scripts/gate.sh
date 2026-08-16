@@ -112,18 +112,21 @@ done
 
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
-# osv.dev is unreachable the script warns and exits 0 — fail-soft BY DESIGN, an
-# offline laptop must not fail the gate. Real findings exit 1 and fail it.
+# osv.dev is unreachable the script exits 3 — the DEDICATED "skipped offline"
+# code, branched on AFTER the exit-code check. Fail-soft BY DESIGN: an offline
+# laptop must not fail the gate. Real findings exit 1 and fail it. The pre-009
+# grep for a magic log string is gone: wording drift would have converted an
+# offline skip into an affirmative PASS.
 echo
 scan=0
 ./scripts/vuln-scan.sh > "$LOGDIR/vuln-scan.log" 2>&1 || scan=$?
-if grep -q "SKIPPED (fail-soft)" "$LOGDIR/vuln-scan.log"; then
+if [ "$scan" -eq 0 ]; then
+  echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
+elif [ "$scan" -eq 3 ]; then
   echo "  vuln-scan  SKIPPED — offline (fail-soft by design; log: $LOGDIR/vuln-scan.log)"
-elif [ "$scan" -ne 0 ]; then
+else
   fails=$((fails + 1))
   echo "  vuln-scan  EXIT=$scan  (known vulnerabilities or scan error — log: $LOGDIR/vuln-scan.log)"
-else
-  echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
 fi
 
 echo "--------------------------------------------------------------"

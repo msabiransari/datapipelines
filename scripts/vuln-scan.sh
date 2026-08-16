@@ -22,9 +22,11 @@
 # reason + date comment (project rule).
 #
 # OFFLINE BEHAVIOUR: the scan needs network access to osv.dev. When the network
-# is unreachable this script WARNS and exits 0 (fail-soft) so an offline laptop
-# is not a broken gate — the warning is printed in both modes so the skip is
-# never silent. The preflight runs BEFORE any install attempt: a missing binary
+# is unreachable this script WARNS and exits 3 — the dedicated "skipped
+# offline" code gate.sh branches on (never grep a log string: wording drift
+# would convert a skip into an affirmative PASS). Fail-soft so an offline
+# laptop is not a broken gate — the warning is printed so the skip is never
+# silent. The preflight runs BEFORE any install attempt: a missing binary
 # plus no network must still skip, not die on the install's curl.
 
 set -euo pipefail
@@ -54,9 +56,10 @@ install_osv_scanner() {
 # Any HTTP response counts as online (the root path answers 404 — that is fine);
 # only a connection-level failure (curl exit != 0) means offline.
 # Runs BEFORE the install: offline + no cached binary must skip, not fail.
+# Exit 3 is the dedicated "skipped offline" code gate.sh branches on.
 if ! curl -s --max-time 5 -o /dev/null https://api.osv.dev/; then
   echo "vuln-scan: WARNING — osv.dev unreachable (offline?); vulnerability scan SKIPPED (fail-soft)." >&2
-  exit 0
+  exit 3
 fi
 
 [ -x "$BIN" ] || install_osv_scanner
