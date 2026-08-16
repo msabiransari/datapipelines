@@ -50,10 +50,14 @@ internal object ShippedMigrations {
             .listFiles { f -> f.isFile }
             .orEmpty()
             .mapNotNull { file ->
-                val version = VERSION_PREFIX.find(file.name)?.groupValues?.get(1)?.toIntOrNull()
+                val version =
+                    VERSION_PREFIX
+                        .find(file.name)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.toIntOrNull()
                 version?.let { it to file }
-            }
-            .sortedBy { (version, _) -> version }
+            }.sortedBy { (version, _) -> version }
 }
 
 /** A base64-encoded 32-byte AES key usable across tests. */

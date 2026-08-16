@@ -189,9 +189,10 @@ class DatasourceSchemaToolsTest {
         every { tablesRs.getString("TABLE_CAT") } returns "db1"
         every { tablesRs.getString("TABLE_NAME") } returns "orders"
         every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
-        val real = realIntrospectorOver(meta) { connection ->
-            every { connection.catalog } returns null
-        }
+        val real =
+            realIntrospectorOver(meta) { connection ->
+                every { connection.catalog } returns null
+            }
 
         val payload = DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
 

@@ -249,7 +249,11 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.catalog } returns null
                     }
 
-                introspector.tables(name).tables.single().schema shouldBe "db1"
+                introspector
+                    .tables(name)
+                    .tables
+                    .single()
+                    .schema shouldBe "db1"
             },
             {
                 val meta = mockk<DatabaseMetaData>()
@@ -265,7 +269,11 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.catalog } throws SQLFeatureNotSupportedException("getCatalog unsupported")
                     }
 
-                introspector.tables(name).tables.single().schema shouldBe "db2"
+                introspector
+                    .tables(name)
+                    .tables
+                    .single()
+                    .schema shouldBe "db2"
             },
         )
     }
