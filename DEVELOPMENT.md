@@ -497,19 +497,22 @@ custom config silently replaces it — that mistake was made and caught here).
 trivy (pinned in the script, same verified-download pattern) scans the
 Dockerfile for misconfigurations and the locally-built production image for
 package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
-comment per entry; anything NOT ignored exits 1, so new findings fail. We do
-not chase base-image CVE zero — record the count, fix what a base-image bump
-or an obvious Dockerfile change resolves cheaply. trivy 0.74 has no
-docker-compose scanner, so `deploy/*.yml` is not covered. First run needs
-network (vulnerability DB download); the image scan needs a Docker daemon.
+comment AND an `exp:` expiry per entry — an expired entry fails the scan
+again, so baselines get re-triaged instead of rotting (same discipline as
+`osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new
+findings fail. We do not chase base-image CVE zero — record the count, fix
+what a base-image bump or an obvious Dockerfile change resolves cheaply.
+trivy 0.74 has no docker-compose scanner, so `deploy/*.yml` is not covered.
+First run needs network (vulnerability DB download); the image scan needs a
+Docker daemon.
 
 #### Architecture guards (Konsist)
 
 Layering rules as ordinary unit tests (module-structure.md §7.8):
 `RequiredScopeKonsistTest` in `modules/web` and `ArchitectureGuardTest` in
 `tests/integration-tests` (no field injection; `@Transactional` only on
-`*Service` classes). They run with the normal `test` task — no separate
-command.
+`@Service`-stereotyped types, interfaces included). They run with the normal
+`test` task — no separate command.
 
 ---
 
