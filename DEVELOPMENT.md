@@ -481,9 +481,11 @@ gitleaks (pinned in the script, same verified-download pattern) scans the full
 history or just staged changes. `install-hooks.sh` sets plain git
 `core.hooksPath` to the committed `.githooks/` directory — no hooks framework —
 so the pre-commit hook blocks staged secrets. The allowlist is `.gitleaks.toml`;
-entries are line-targeted (never whole files) with a reason + date comment, and
-the config EXTENDS the gitleaks default ruleset (a bare custom config silently
-replaces it — that mistake was made and caught here).
+entries are SECRET-targeted and path-scoped with `condition = "AND"`
+(suppression requires the triaged file AND the extracted secret, so a real
+secret co-located with an allowlisted token still fires), each with a reason +
+date comment, and the config EXTENDS the gitleaks default ruleset (a bare
+custom config silently replaces it — that mistake was made and caught here).
 
 #### Container scanning (trivy)
 
