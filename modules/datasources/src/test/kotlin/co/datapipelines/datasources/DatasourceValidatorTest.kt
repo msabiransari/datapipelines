@@ -46,6 +46,38 @@ class DatasourceValidatorTest {
     }
 
     @Test
+    fun `include-schemas entries carrying the SQL-LIKE wildcard percent are rejected per character`() {
+        // R4 F2: `*` is not the only pattern vocabulary — a DB operator naturally writes the
+        // SQL-LIKE `%` (`apex_%`, `apex%`). The allowlist matches EXACT stored names, so such
+        // an entry validates, stores, and never exempts anything — the exact "looks like it
+        // exempts a family while exempting nothing" failure the save-time rejection exists to
+        // prevent. One red case per wildcard character.
+        listOf("apex_*", "apex%", "apex_%").forEach { entry ->
+            val result = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf(entry)), isCreate = true)
+
+            withClue("entry '$entry' must be rejected as a wildcard pattern") {
+                result.valid shouldBe false
+                result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain
+                    "introspection_include_schemas"
+            }
+        }
+    }
+
+    @Test
+    fun `an underscore in an include-schemas entry is a literal name character - not SQL-LIKE's single-char wildcard`() {
+        // Deliberate contract pin (R4 F2 deviation): `_` is an ordinary character in real
+        // schema names on every supported dialect — the feature's own documented use case is
+        // exempting Oracle's `APEX_REPORTING` via `apex_reporting` (§3.3, §7A, rest-api §9.1
+        // all use that example) — and the allowlist matches exactly, so an underscore entry
+        // exempts the exactly-named schema. Rejecting `_` would break every snake_case schema
+        // name while catching only a rare LIKE-vocabulary misunderstanding; the wildcards that
+        // can NEVER match a real name (`*`, `%`) are the ones rejected.
+        val result = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf("apex_reporting", "my_app")), isCreate = true)
+
+        result.valid shouldBe true
+    }
+
+    @Test
     fun `an invalid name is rejected`() {
         codes(Fixtures.h2(name = "Bad Name!")) shouldContain DatasourceErrorCodes.NAME_INVALID
     }
