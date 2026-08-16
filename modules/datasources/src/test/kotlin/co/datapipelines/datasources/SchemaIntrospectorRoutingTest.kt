@@ -185,13 +185,14 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
-    fun `a no-schema read on a datasource with no current schema FAILS instead of merging`() {
-        // The cannot-merge theorem (§7A, rest-api §9.7, mcp-server §6.2.18): a driver that
-        // reports no current schema — null, or the blank sentinel — leaves an unqualified
-        // read UNFILTERED, which on a database-less MySQL registration merges db1.orders with
-        // db2.orders. The fallback used to be "read unfiltered anyway"; the theorem is now
-        // enforced by failing with a dedicated exception the surfaces translate to the
-        // catalogued invalid-argument code telling the caller to pass an explicit schema.
+    fun `a no-schema COLUMNS read on a datasource with no current schema FAILS instead of merging`() {
+        // The cannot-merge theorem (§7A, rest-api §9.7, mcp-server §6.2.18), scoped where the
+        // hazard is real: a driver that reports no current schema — null, or the blank
+        // sentinel — leaves an unqualified COLUMNS read UNFILTERED, which on a database-less
+        // MySQL registration merges db1.orders' columns with db2.orders' into one answer.
+        // The theorem is enforced by failing with a dedicated exception the surfaces
+        // translate to the catalogued invalid-argument code telling the caller to pass an
+        // explicit schema. (tables() deliberately has NO such guard — see the next test.)
         assertAll(
             {
                 val meta = mockk<DatabaseMetaData>()
@@ -219,21 +220,52 @@ class SchemaIntrospectorRoutingTest {
 
                 shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "orders") }
             },
+        )
+    }
+
+    @Test
+    fun `an unfiltered TABLES listing works on a datasource reporting no current schema`() {
+        // R4 F6: a tables listing CANNOT merge — every row carries its own schema — and when
+        // the current schema IS known the old guard passed while routeAndEscape(null) still
+        // spanned every schema/catalog the server grants, so the guard prevented nothing it
+        // claimed to prevent on tables() and regressed previously-working unfiltered
+        // listings (drivers that throw SQLFeatureNotSupportedException from
+        // getSchema()/getCatalog() tripped it through no fault of the listing). tables() no
+        // longer consults the current schema at all; the cannot-merge guard lives only in
+        // columns(). Both no-current-schema shapes must keep the listing working: null, and
+        // the unsupported-operation throw.
+        assertAll(
             {
-                // tables() shares the theorem: an unfiltered listing on such a datasource
-                // would span EVERY database the server grants (catalog routing), so it fails
-                // the same way — the caller recovers via schemas().
                 val meta = mockk<DatabaseMetaData>()
                 val tablesRs = mockk<ResultSet>(relaxed = true)
                 every { meta.searchStringEscape } returns "\\"
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns false
+                every { tablesRs.next() } returns true andThen false
+                every { tablesRs.getString("TABLE_CAT") } returns "db1"
+                every { tablesRs.getString("TABLE_NAME") } returns "orders"
+                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) =
                     introspectorOver(Dialect.MYSQL, meta) { connection ->
                         every { connection.catalog } returns null
                     }
 
-                shouldThrow<CurrentSchemaUnknownException> { introspector.tables(name) }
+                introspector.tables(name).tables.single().schema shouldBe "db1"
+            },
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val tablesRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+                every { tablesRs.next() } returns true andThen false
+                every { tablesRs.getString("TABLE_CAT") } returns "db2"
+                every { tablesRs.getString("TABLE_NAME") } returns "orders"
+                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+                val (introspector, name) =
+                    introspectorOver(Dialect.MYSQL, meta) { connection ->
+                        every { connection.catalog } throws SQLFeatureNotSupportedException("getCatalog unsupported")
+                    }
+
+                introspector.tables(name).tables.single().schema shouldBe "db2"
             },
         )
     }

@@ -74,8 +74,7 @@ class DatasourcesGetTablesTool(
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
                     "The listing spans schemas — pass each table's reported schema to datasources_get_columns. " +
-                    "Without a schema argument the listing fails on a datasource that reports no current schema " +
-                    "(call datasources_get_schemas and pass one). Read-only, for pipeline authoring.",
+                    "Read-only, for pipeline authoring.",
             schema =
                 """
                 {

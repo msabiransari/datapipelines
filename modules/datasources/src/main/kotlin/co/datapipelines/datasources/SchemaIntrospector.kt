@@ -73,26 +73,23 @@ class SchemaIntrospector(
     /**
      * §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables].
      *
-     * Without a schema filter the listing **spans schemas** (each row carries its own). The one
-     * exception is a datasource whose connection reports **no current schema** and whose
-     * dialect is not [DialectAdapter.introspectionSchemaless] — typically a database-less
-     * MySQL URL, where unfiltered means *every database the server grants*: that read fails
-     * with [CurrentSchemaUnknownException] instead, and the caller recovers via [schemas].
+     * Without a schema filter the listing **spans schemas** (each row carries its own) — a
+     * listing cannot merge anything, so there is no current-schema default and no
+     * unknown-current-schema guard here, unlike [columns] where an unfiltered read would
+     * merge same-named tables' columns across schemas (the hazard lives there). tables()
+     * never consults the connection's current schema at all.
      */
     fun tables(
         datasourceName: String,
         schemaFilter: String? = null,
         maxTables: Int = MAX_LISTING_ROWS,
     ): TablesPage =
-        withMetaData(datasourceName) { connection, meta, datasource ->
+        withMetaData(datasourceName) { _, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             // The caller's filter goes through the same blank-sentinel rule as driver-reported
             // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
             // schemas — never the JDBC '' sentinel, which matches nothing on any dialect.
             val filter = schemaFilter.asNonBlankOrNull()
-            if (filter == null && !adapter.introspectionSchemaless && connection.currentSchema(adapter) == null) {
-                throw CurrentSchemaUnknownException(datasourceName)
-            }
             val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(filter, meta)
             readTables(
                 meta,

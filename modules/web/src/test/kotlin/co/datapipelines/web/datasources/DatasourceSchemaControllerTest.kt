@@ -149,40 +149,24 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
-    fun `a no-schema read on a datasource with no current schema is the catalogued 400 - not a merged answer`() {
-        // The cannot-merge promise (§9.7) made mechanical: a MySQL registration with a
-        // database-less URL yields no current schema, and the unqualified read would merge
-        // same-named tables across every visible database. Through a REAL introspector the
-        // controller must surface the catalogued invalid-argument code (HTTP 400), with the
-        // message directing the caller to the schemas listing.
+    fun `a no-schema COLUMNS read on a datasource with no current schema is the catalogued 400 - not a merged answer`() {
+        // The cannot-merge promise (§9.7) made mechanical and scoped (R4 F6): a MySQL
+        // registration with a database-less URL yields no current schema, and an
+        // unqualified COLUMNS read would merge same-named tables' columns across every
+        // visible database. Through a REAL introspector the controller must surface the
+        // catalogued invalid-argument code (HTTP 400), with the message directing the caller
+        // to the schemas listing. (An unfiltered /tables carries each row's own schema and
+        // cannot merge — it keeps working; see the next test.)
         val meta = mockk<java.sql.DatabaseMetaData>()
         io.mockk.every { meta.searchStringEscape } returns "\\"
-        val connection = mockk<java.sql.Connection>()
-        io.mockk.every { connection.metaData } returns meta
-        io.mockk.every { connection.close() } returns Unit
-        io.mockk.every { connection.catalog } returns null
-        val datasource =
-            co.datapipelines.datasources.Datasource(
-                name = "pg-prod",
-                displayName = "PG",
-                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
-                jdbcUrl = "jdbc:mysql://db.internal:3306",
-                username = "app",
-                password = "secret",
+        val controller =
+            DatasourceSchemaController(
+                realIntrospectorOver(meta) { connection ->
+                    io.mockk.every { connection.catalog } returns null
+                },
             )
-        val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
-        io.mockk.every { registry.get("pg-prod") } returns datasource
-        io.mockk.every { registry.poolFor(datasource) } returns
-            object : co.datapipelines.datasources.pooling.ConnectionPool {
-                override val name: String = "pg-prod"
 
-                override fun leaseConnection(): java.sql.Connection = connection
-
-                override fun close() = Unit
-            }
-        val controller = DatasourceSchemaController(SchemaIntrospector(registry))
-
-        val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
+        val thrown = shouldThrow<DatapipelinesException> { controller.columns("pg-prod", "orders", schema = null) }
 
         assertAll(
             { thrown.code shouldBe PipelineErrorCodes.Execution.PARAMETER_REQUIRED },
@@ -194,6 +178,32 @@ class DatasourceSchemaControllerTest {
             { thrown.message?.contains("schema", ignoreCase = true) shouldBe true },
             { thrown.details["datasource"] shouldBe "pg-prod" },
         )
+    }
+
+    @Test
+    fun `an unfiltered TABLES listing on a datasource with no current schema spans schemas - not a 400`() {
+        // R4 F6: the unknown-current-schema guard is scoped to columns(), where unfiltered
+        // truly merges same-named tables' columns; a tables listing carries each row's own
+        // schema, cannot merge, and keeps working exactly as before the guard existed.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        io.mockk.every { meta.searchStringEscape } returns "\\"
+        val tablesRs = mockk<java.sql.ResultSet>(relaxed = true)
+        io.mockk.every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        io.mockk.every { tablesRs.next() } returns true andThen false
+        io.mockk.every { tablesRs.getString("TABLE_CAT") } returns "db1"
+        io.mockk.every { tablesRs.getString("TABLE_NAME") } returns "orders"
+        io.mockk.every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
+        val controller =
+            DatasourceSchemaController(
+                realIntrospectorOver(meta) { connection ->
+                    io.mockk.every { connection.catalog } returns null
+                },
+            )
+
+        val data = controller.tables("pg-prod", schema = null).data
+
+        (data as Map<*, *>)["tables"] shouldBe
+            listOf(mapOf("schema" to "db1", "name" to "orders", "type" to "TABLE"))
     }
 
     @Test
