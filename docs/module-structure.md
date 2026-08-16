@@ -662,15 +662,18 @@ configuration cannot escape silently.
 Every module gets the Kover plugin (`org.jetbrains.kotlinx.kover`, pinned in
 the catalog) from `CommonConventionsPlugin`. The root project applies it too
 and merges all modules into an aggregated report via `kover(project(...))`
-dependencies; `./gradlew koverHtmlReport` produces per-module reports plus the
-aggregate.
+dependencies — **derived from `subprojects`**, not hand-enumerated, so a new
+module joins the aggregate automatically; `./gradlew koverHtmlReport` produces
+per-module reports plus the aggregate.
 
 `check` depends on `koverVerify`. Each module carries a minimum **line
 coverage** floor in `COVERAGE_FLOORS` (CommonConventionsPlugin): the module's
 measured baseline from the first Kover run (2026-08-15) minus 2 points,
 rounded down. Floors are a regression tripwire, not a coverage target — raise
 one only when coverage genuinely improved; never lower one to force a build
-green. `tests/integration-tests` has no floor (no main sources).
+green. A module absent from `COVERAGE_FLOORS` **fails configuration** unless
+it is in `NO_COVERAGE_FLOOR_ALLOWLIST` with its reason — currently only
+`tests/integration-tests` (no main sources).
 
 Escape hatch: `-Pkover.off` runs tests without the coverage agent attached
 (for timing-sensitive diagnosis). The flag also skips the floor rules and the
