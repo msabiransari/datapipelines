@@ -60,30 +60,42 @@ class DefaultDatasourceRegistry(
     override fun validate(datasource: Datasource): ValidationResult =
         validator.validate(datasource, isCreate = !repository.exists(datasource.name))
 
+    /**
+     * §3.3: the allowlist's lowercase normalization happens HERE — the single write-path
+     * boundary every programmatic save crosses (REST create/update today, any future MCP
+     * create tool tomorrow), so no write path can store a mixed-case entry that would
+     * silently never match (matching lowercases the reported schema and compares stored
+     * entries verbatim). The REST bind still normalizes as defense in depth, but it is no
+     * longer load-bearing.
+     */
     override fun save(
         datasource: Datasource,
         actor: UUID,
     ): Datasource {
-        val isCreate = !repository.exists(datasource.name)
-        validator.validate(datasource, isCreate).orThrow()
-        cache.invalidate(datasource.name)
+        val toPersist =
+            datasource.copy(
+                introspectionIncludeSchemas = Datasource.normalizeIncludeSchemas(datasource.introspectionIncludeSchemas),
+            )
+        val isCreate = !repository.exists(toPersist.name)
+        validator.validate(toPersist, isCreate).orThrow()
+        cache.invalidate(toPersist.name)
         return if (isCreate) {
-            val password = requireNotNull(datasource.password) { "password required on create" }
-            repository.create(datasource, encryptor.encrypt(password, datasource.name), actor).toDatasource()
+            val password = requireNotNull(toPersist.password) { "password required on create" }
+            repository.create(toPersist, encryptor.encrypt(password, toPersist.name), actor).toDatasource()
         } else {
-            val encrypted = datasource.password?.let { encryptor.encrypt(it, datasource.name) }
+            val encrypted = toPersist.password?.let { encryptor.encrypt(it, toPersist.name) }
             val row =
-                repository.update(datasource, encrypted)
-                    ?: error("datasource '${datasource.name}' vanished during update")
+                repository.update(toPersist, encrypted)
+                    ?: error("datasource '${toPersist.name}' vanished during update")
             // Drain the old pool; it rebuilds lazily on the next lease under the new config
             // (§5.2). Deliberately not eager — a save must not require the database to be
             // reachable (§5.4). The audit event is conditional on a pool having existed: §7.4
             // audits credential *decryption*, and evicting nothing decrypted nothing (the
             // subsequent lazy build emits its own `pool_build`).
-            if (poolManager.evict(datasource.name)) {
-                audit(DatasourceAuditEvents.POOL_REBUILD, datasource.name, actor.toString())
+            if (poolManager.evict(toPersist.name)) {
+                audit(DatasourceAuditEvents.POOL_REBUILD, toPersist.name, actor.toString())
             }
-            cache.invalidate(datasource.name)
+            cache.invalidate(toPersist.name)
             row.toDatasource()
         }
     }

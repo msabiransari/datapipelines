@@ -37,9 +37,9 @@ class DatasourceRepositoryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        // The shipped migrations in version order — Flyway and the scripts live in `app` alone
-        // (module-structure §3.1 rule 2), so the test applies them through plain JDBC.
-        MIGRATION_PATHS.forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
+        // The shipped migrations in version order — the ONE shared list (ShippedMigrations),
+        // so a new migration lands in every suite that applies them, never a stale copy.
+        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -201,6 +201,25 @@ class DatasourceRepositoryIntegrationTest {
         checkNotNull(repository.findByName("with_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
     }
 
+    @Test
+    fun `a row whose allowlist landed mixed-case by a non-programmatic path reads back normalized`() {
+        // R4 F3: a restore or a manual JSONB edit writes rows without crossing
+        // registry.save — the read boundary normalizes too, so such an entry can never sit
+        // inert (an unnormalized entry would silently match nothing, because matching
+        // compares lowercase reported schemas against stored strings verbatim).
+        jdbc.update(
+            """
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+                                     introspection_include_schemas_json, created_by)
+            VALUES ('restored', 'Restored', 'H2', 'jdbc:h2:mem:restored', 'sa', :pw,
+                    CAST('["APEX_REPORTING"]' AS jsonb), :owner)
+            """.trimIndent(),
+            mapOf("pw" to encryptor.encrypt("p", "restored"), "owner" to owner),
+        )
+
+        checkNotNull(repository.findByName("restored")).introspectionIncludeSchemas shouldBe listOf("apex_reporting")
+    }
+
     private fun insertUser(): UUID =
         checkNotNull(
             jdbc.queryForObject(
@@ -220,12 +239,6 @@ class DatasourceRepositoryIntegrationTest {
         }
 
     private companion object {
-        val MIGRATION_PATHS =
-            listOf(
-                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-            )
-
         @Container
         @JvmStatic
         val postgres: PostgreSQLContainer<*> =

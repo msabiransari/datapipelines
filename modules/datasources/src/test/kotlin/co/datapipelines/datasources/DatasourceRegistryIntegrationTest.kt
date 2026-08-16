@@ -36,11 +36,9 @@ class DatasourceRegistryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        // The shipped migrations in version order (V2 added the introspection allowlist column).
-        listOf(
-            "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-            "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-        ).forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
+        // The shipped migrations in version order — the ONE shared list (ShippedMigrations),
+        // so a new migration lands in every suite that applies them, never a stale copy.
+        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -363,6 +361,23 @@ class DatasourceRegistryIntegrationTest {
         repeat(5) { pool.leaseConnection().use { } }
 
         sink.eventNames() shouldBe listOf(DatasourceAuditEvents.POOL_BUILD)
+    }
+
+    @Test
+    fun `a mixed-case allowlist saved through the registry lands normalized - never silently inert`() {
+        // R4 F3: lowercase normalization used to live ONLY in the REST bind, so any
+        // non-controller write path (a future MCP create tool, restore tooling) stored mixed
+        // case — and matching lowercases the driver-reported schema but compares stored
+        // entries verbatim, so such an allowlist silently exempted nothing. The registry's
+        // save is the single boundary every write path crosses: the stored and returned
+        // entries are normalized, and the exemption matches the driver-reported spelling.
+        val registry = registry()
+        registry.save(
+            Fixtures.h2(name = "mixed", password = "pw", introspectionIncludeSchemas = listOf(" APEX_Reporting ", "Sales")),
+            owner,
+        )
+
+        checkNotNull(registry.get("mixed")).introspectionIncludeSchemas shouldBe listOf("apex_reporting", "sales")
     }
 
     private fun insertUser(): UUID =

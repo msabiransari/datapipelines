@@ -37,13 +37,30 @@ data class Datasource(
      * `apex_*` hides a customer's own `APEX_REPORTING` schema just like the engine's versioned
      * ones, with no warning; naming it here makes it visible again.
      *
-     * **Lowercase, exact names, no patterns** (an entry carrying `*` is rejected at save — a
-     * pattern here would look like it exempts a family while exempting nothing); normalization
-     * to lowercase happens at the registration bind. Absent/empty = today's behavior: the
-     * dialect floor applies unchanged. Matching is case-insensitive, like the exclusion itself.
+     * **Lowercase, exact names, no patterns** (an entry carrying `*` or `%` is rejected at
+     * save — a pattern here would look like it exempts a family while exempting nothing);
+     * normalization to lowercase happens at the registry's save boundary — the single
+     * place every write path crosses — and again at the repository's read boundary, so a
+     * row whose allowlist landed by restore or a manual JSONB edit cannot sit silently
+     * inert. Absent/empty = today's behavior: the dialect floor applies unchanged. Matching
+     * is case-insensitive, like the exclusion itself.
      */
     val introspectionIncludeSchemas: List<String> = emptyList(),
 ) {
+    companion object {
+        /**
+         * The ONE normalization rule of the §7A include-schemas allowlist: entries are
+         * trimmed and lowercased. Matching lowercases the driver-reported schema before
+         * comparing against stored entries verbatim, so only the normalized form is live —
+         * applied at [DatasourceRegistry]'s save boundary (every programmatic write crosses
+         * it: REST create/update today, any future MCP create tool tomorrow) AND at the
+         * repository's row-read (restore and manual JSONB edits write rows without crossing
+         * save; an unnormalized entry there would silently exempt nothing — inert, not
+         * rejected).
+         */
+        fun normalizeIncludeSchemas(entries: List<String>): List<String> = entries.map { it.trim().lowercase() }
+    }
+
     /**
      * Overridden because the generated `data class` [toString] prints **every** property,
      * including the plaintext [password] — and a datasource lands in exception messages, debug

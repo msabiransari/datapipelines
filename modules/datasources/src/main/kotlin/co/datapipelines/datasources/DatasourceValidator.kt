@@ -124,22 +124,28 @@ class DatasourceValidator(
 
     /**
      * §3.3/§7A: `introspection_include_schemas` entries are exact schema names — non-blank,
-     * no wildcard patterns. The prefix language (`apex_*`) belongs to the exclusion floors
-     * alone; an allowlist pattern would look like it exempts a family while exempting nothing,
-     * so it is rejected here rather than silently ignored. Lowercase normalization happens at
-     * the registration bind, before this rule runs.
+     * no wildcard patterns. The pattern vocabularies a DB operator naturally writes are
+     * rejected per character: the floors' prefix language (`apex_*`) and SQL-LIKE's `%`
+     * (`apex_%`) — as exact-match entries they can only ever exempt nothing, exactly the
+     * "looks like it exempts a family while exempting nothing" failure this rule exists to
+     * prevent. `_` is deliberately NOT rejected: it is an ordinary character in real schema
+     * names on every supported dialect (the documented use case is exempting Oracle's
+     * `APEX_REPORTING` via `apex_reporting`), and an underscore entry exempts the
+     * exactly-named schema. Lowercase normalization happens at the registry's save boundary
+     * (and the repository's read boundary), before this rule's outcome is persisted.
      */
     private fun validateIntrospectionIncludeSchemas(
         datasource: Datasource,
         errors: MutableList<ValidationError>,
     ) {
         datasource.introspectionIncludeSchemas.forEach { entry ->
-            if (entry.isBlank() || entry.contains('*')) {
+            if (entry.isBlank() || entry.contains('*') || entry.contains('%')) {
                 errors +=
                     propertiesError(
                         "introspection_include_schemas",
-                        "introspection_include_schemas entries must be non-blank schema names without wildcard " +
-                            "patterns; '${entry.truncateForError()}' is not.",
+                        "introspection_include_schemas entries must be exact schema names — non-blank, no wildcard " +
+                            "patterns (`*`, `%`); '${entry.truncateForError()}' is not. The prefix language belongs to " +
+                            "the exclusion floors alone.",
                     )
             }
         }
