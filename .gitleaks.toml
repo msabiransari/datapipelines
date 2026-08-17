@@ -81,3 +81,16 @@ condition = "AND"
 paths = ['''docs/configuration\.md$''']
 regexTarget = "secret"
 regexes = ['''^ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==$''']
+
+# modules/web vendor-manifest.json — SHA-256 checksums of VENDORED, publicly
+# committed CSS assets (013/F7: sync-design-system.sh records one hash per
+# file). gitleaks' generic-api-key rule flags ONE of the fourteen (the
+# tokens.css hash, entropy 3.90); a checksum of a public file is not a
+# credential. Scoped to this exact hash string in this exact file — any other
+# secret in the manifest still fires. (2026-08-17)
+[[allowlists]]
+description = "vendor-manifest.json: SHA-256 of vendored public CSS (2026-08-17)"
+condition = "AND"
+paths = ['''modules/web/src/main/resources/static/vendor/design-system/vendor-manifest\.json$''']
+regexTarget = "secret"
+regexes = ['''^0d86fc432d63ebbf277d4645163e392c317da8f3cbdfcb4d7a51339fa7078250$''']
