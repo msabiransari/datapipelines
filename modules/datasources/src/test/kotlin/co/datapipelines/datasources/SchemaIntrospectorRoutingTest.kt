@@ -3,6 +3,7 @@ package co.datapipelines.datasources
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -24,13 +25,9 @@ class SchemaIntrospectorRoutingTest {
         // Connector/J defaults: the database arrives in TABLE_CAT, TABLE_SCHEM is null — a
         // schemaPattern selects nothing. The filter must land in the catalog argument.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("app", "orders", schemaColumn = "TABLE_CAT")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables("app", null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "app"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val columnsRs = mockk<ResultSet>(relaxed = true)
         every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false
@@ -57,13 +54,9 @@ class SchemaIntrospectorRoutingTest {
         // get_columns returns [] — the zero-columns defect. The stub answers ONLY the raw
         // "my_app", so an escaped call fails loudly.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("my_app", "orders", schemaColumn = "TABLE_CAT")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables("my_app", null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "my_app"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val columnsRs = mockk<ResultSet>(relaxed = true)
         every { meta.getColumns("my_app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false
@@ -131,13 +124,9 @@ class SchemaIntrospectorRoutingTest {
         // The non-MySQL world: TABLE_SCHEM carries the schema and the filter stays in the
         // schemaPattern argument — routing must not move it for them.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("public", "orders")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables(null, "public", "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
 
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
@@ -205,7 +194,13 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.schema } returns null
                     }
 
-                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+                // R5 F5: the runtime MESSAGE is columns-scoped — the exception is raised
+                // only by columns(), and agents read the message, not the KDoc. The old
+                // tables-flavored wording reinstated the tables/columns confusion F6 of
+                // round 4 spent its cycle removing.
+                val thrown = shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+                thrown.message shouldContain "columns read"
+                thrown.message shouldContain "merge the columns"
             },
             {
                 val meta = mockk<DatabaseMetaData>()
@@ -237,13 +232,8 @@ class SchemaIntrospectorRoutingTest {
         assertAll(
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("db1", "orders", schemaColumn = "TABLE_CAT")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_CAT") } returns "db1"
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) =
                     introspectorOver(Dialect.MYSQL, meta) { connection ->
                         every { connection.catalog } returns null
@@ -257,13 +247,8 @@ class SchemaIntrospectorRoutingTest {
             },
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("db2", "orders", schemaColumn = "TABLE_CAT")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_CAT") } returns "db2"
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) =
                     introspectorOver(Dialect.MYSQL, meta) { connection ->
                         every { connection.catalog } throws SQLFeatureNotSupportedException("getCatalog unsupported")
@@ -314,6 +299,47 @@ class SchemaIntrospectorRoutingTest {
             }
 
         introspector.columns(name, "t") shouldBe emptyList()
+    }
+
+    @Test
+    fun `a schemaless dialect NEVER consults the connection's current schema - even a throwing getSchema`() {
+        // R5 F3: the schemaless exemption was safe only by driver accident — the vendored
+        // sqlite-jdbc hardcodes getSchema() = null, so the current-schema consult could not
+        // throw TODAY. A future schemaless driver whose getSchema() throws (any of the
+        // classified shapes) would turn a working unfiltered columns read into a 502/400.
+        // The reorder makes the exemption structural: a schemaless dialect skips the
+        // current-schema consult entirely.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "t", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.SQLITE, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+                    }
+
+                introspector.columns(name, "t") shouldBe emptyList()
+            },
+            {
+                // The same structural guarantee for a throwing getCatalog() — the consult
+                // a catalog-routing schemaless dialect would make.
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "t", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.SQLITE, meta) { connection ->
+                        every { connection.catalog } throws
+                            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+                    }
+
+                introspector.columns(name, "t") shouldBe emptyList()
+            },
+        )
     }
 
     @Test
@@ -377,13 +403,8 @@ class SchemaIntrospectorRoutingTest {
             },
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("   ", "orders")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_SCHEM") } returns "   "
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
                 introspector
@@ -475,13 +496,8 @@ class SchemaIntrospectorRoutingTest {
         // information_schema columns defaulting to ''); the wire contract is
         // omitted-when-none, and the introspector's ResultSet boundary is where "" -> null.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
-        every { meta.searchStringEscape } returns "\\"
+        val tablesRs = tablesResultSet("public", "orders")
         every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         every { tablesRs.getString("REMARKS") } returns ""
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
@@ -640,5 +656,87 @@ class SchemaIntrospectorRoutingTest {
         val (introspector, name) = introspectorOver(Dialect.H2, meta)
 
         shouldThrow<IllegalStateException> { introspector.tables(name) }
+    }
+
+    @Test
+    fun `current-schema exception shapes OUTSIDE the 08 family are classified - never a raw escape`() {
+        // R5 F1: round 4's narrowed catch kept only SQLFeatureNotSupportedException as "none"
+        // and let everything else PROPAGATE RAW (the lease boundary's post-lease translation
+        // covers the connection family only, and the surfaces catch only the two module
+        // exceptions). Three shapes verified against the shipped drivers (see
+        // EmbeddedDialectBehaviorTest for the live reproducing cases):
+        // (a) connection loss with a NON-08 state — H2's closed-object 90007, DuckDB's
+        //     null-state plain SQLException "Connection was closed" — must be the catalogued
+        //     502 datasource_unreachable, not a raw 500;
+        // (b) a NON-connection failure from a QUERY-BACKED getSchema() — pgjdbc 42.7.13 runs
+        //     `select current_schema()` on the server (bytecode-verified), so a statement
+        //     cancel (57014) or permission error arrives as a PSQLException the 08 family
+        //     does not cover — must be the catalogued unknown-current-schema 400, not raw;
+        // (c) a driver signaling "unsupported" as a PLAIN SQLException SQLState 0A000 instead
+        //     of the typed exception — must read as "driver reports none" (the 400 path),
+        //     not raw.
+        assertAll(
+            {
+                // (a) H2 90007 — the exact class/state the pinned h2 2.3.232 throws from
+                // getSchema() on a closed connection (live-pinned in EmbeddedDialectBehaviorTest).
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.H2, meta) { connection ->
+                        every { connection.schema } throws
+                            org.h2.jdbc.JdbcSQLNonTransientException(
+                                // Constructor is (message, sql, SQLSTATE, errorCode, cause, stackTrace)
+                                // — bytecode-checked: only the third String reaches getSQLState().
+                                "The object is already closed",
+                                null,
+                                "90007",
+                                90007,
+                                null,
+                                null,
+                            )
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (a) DuckDB 1.5.5.x closed connection — plain java.sql.SQLException, NULL
+                // SQLState, vendor code 0, the JDBC layer's own "Connection was closed" text
+                // (native errors are ALSO plain null-state SQLExceptions with different
+                // messages, so the message is the only discriminator — live-pinned in
+                // EmbeddedDialectBehaviorTest).
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.DUCKDB, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (b) pgjdbc statement-cancel from the current_schema() query — the real
+                // PSQLException/PSQLState.QUERY_CANCELED shape, state 57014.
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws
+                            org.postgresql.util.PSQLException(
+                                "canceling statement due to user request",
+                                org.postgresql.util.PSQLState.QUERY_CANCELED,
+                            )
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (c) feature-unsupported as a plain SQLException, SQLState 0A000 — the
+                // documented "some drivers use the state, not the type" shape.
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("feature not supported", "0A000")
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+            },
+        )
     }
 }

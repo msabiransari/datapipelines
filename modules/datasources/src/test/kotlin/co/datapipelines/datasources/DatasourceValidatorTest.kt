@@ -78,6 +78,50 @@ class DatasourceValidatorTest {
     }
 
     @Test
+    fun `include-schemas entries over the legal-identifier alphabet are accepted`() {
+        // R5 F7: the alphabet is the union of legal UNQUOTED identifier characters across
+        // the supported dialects — letters, digits, `_` (ratified 008 deviation), `$`
+        // (Postgres, MySQL, H2, DuckDB), `#` (Oracle, SQL Server). Entries are lowercase
+        // post-normalization, so uppercase is outside the stored alphabet by construction.
+        listOf("apex_reporting", "my_app", "team\$data", "group#1", "s2024", "2024_reports", "apex_").forEach { entry ->
+            val result = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf(entry)), isCreate = true)
+
+            withClue("entry '$entry' is a legal schema name and must be accepted") { result.valid shouldBe true }
+        }
+    }
+
+    @Test
+    fun `include-schemas entries outside the legal-identifier alphabet are rejected and the entry is named`() {
+        // R5 F7: the wildcard DENYLIST grew one character per review round (`*` R3, `%` R4)
+        // while `?`, glob ranges `[a-z]`, pasted quoted identifiers `"apex_reporting"`, and
+        // qualified `db.schema` entries still stored and silently exempted nothing. The
+        // complement — "can match a real schema name on a supported dialect" — closes the
+        // whole class at once. One red case per family. Note `apex_` (trailing underscore,
+        // no wildcard) is ACCEPTED, not rejected: it is a legal real schema name and the
+        // allowlist matches exactly — same reasoning as the ratified 008 `_` deviation.
+        listOf(
+            "apex_*", // glob prefix (the R3 family)
+            "apex%", // SQL-LIKE (the R4 family)
+            "ap?x", // glob single-char
+            "ap_[a-z]", // glob range
+            "\"apex_reporting\"", // pasted quoted identifier
+            "`apex`", // pasted backtick-quoted identifier
+            "db.apex", // qualified db.schema
+            "my app", // interior whitespace
+            "schéma", // non-ASCII
+        ).forEach { entry ->
+            val result = validator.validate(Fixtures.h2(introspectionIncludeSchemas = listOf(entry)), isCreate = true)
+
+            withClue("entry '$entry' can never match a real schema name and must be rejected") {
+                result.valid shouldBe false
+                val error = result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }
+                error.field shouldContain "introspection_include_schemas"
+                error.message shouldContain entry.take(16)
+            }
+        }
+    }
+
+    @Test
     fun `an invalid name is rejected`() {
         codes(Fixtures.h2(name = "Bad Name!")) shouldContain DatasourceErrorCodes.NAME_INVALID
     }

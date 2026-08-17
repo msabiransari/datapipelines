@@ -30,8 +30,12 @@ package co.datapipelines.datasources
  */
 class CurrentSchemaUnknownException(
     val datasourceName: String,
+    cause: Throwable? = null,
 ) : RuntimeException(
+        // Columns-scoped, like the KDoc above: the merge hazard is merging the COLUMNS of
+        // same-named tables — agents and operators read the MESSAGE, not the KDoc (R5 F5).
         "Datasource '$datasourceName' reports no current schema; pass an explicit schema filter " +
-            "(list them with the schemas operation) — an unqualified read could merge same-named tables " +
-            "across schemas.",
+            "(list them with the schemas operation) — an unqualified columns read would merge the columns " +
+            "of same-named tables across schemas.",
+        cause,
     )

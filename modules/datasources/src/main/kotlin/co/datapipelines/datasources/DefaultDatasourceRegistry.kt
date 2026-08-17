@@ -57,8 +57,17 @@ class DefaultDatasourceRegistry(
 
     override fun exists(name: String): Boolean = repository.exists(name)
 
+    /**
+     * The dry-run path — validates exactly what [save] would persist: the NORMALIZED form
+     * (R5 F6; save validates the normalized copy, so a validate() that checked the raw
+     * caller-supplied input could disagree with save's verdict on the same entity — the
+     * asymmetry a dry-run endpoint would surface).
+     */
     override fun validate(datasource: Datasource): ValidationResult =
-        validator.validate(datasource, isCreate = !repository.exists(datasource.name))
+        validator.validate(
+            datasource.copy(introspectionIncludeSchemas = Datasource.normalizeIncludeSchemas(datasource.introspectionIncludeSchemas)),
+            isCreate = !repository.exists(datasource.name),
+        )
 
     /**
      * §3.3: the allowlist's lowercase normalization happens HERE — the single write-path

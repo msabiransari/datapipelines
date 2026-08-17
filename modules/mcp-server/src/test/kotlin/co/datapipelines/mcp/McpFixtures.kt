@@ -156,6 +156,27 @@ object McpFixtures {
             password = "super-secret-password",
         )
 
+    /**
+     * A one-row `getTables` [java.sql.ResultSet] — the single (schema, name, type) row the
+     * schema-tools tests' tables walk reports ([schemaColumn] selects the dialect's
+     * vocabulary; TABLE_CAT for catalog-routing drivers). This module's OWN copy of the
+     * small builder the datasources and web test sources also keep — no cross-module
+     * coupling (R5 F8).
+     */
+    fun tablesResultSet(
+        schema: String?,
+        name: String,
+        type: String = "TABLE",
+        schemaColumn: String = "TABLE_SCHEM",
+    ): java.sql.ResultSet {
+        val rs = io.mockk.mockk<java.sql.ResultSet>(relaxed = true)
+        io.mockk.every { rs.next() } returns true andThen false
+        io.mockk.every { rs.getString(schemaColumn) } returns schema
+        io.mockk.every { rs.getString("TABLE_NAME") } returns name
+        io.mockk.every { rs.getString("TABLE_TYPE") } returns type
+        return rs
+    }
+
     /** The single text block of a tool result, parsed back into JSON. */
     fun payloadOf(result: McpSchema.CallToolResult): JsonNode =
         ExecutorJson.mapper.readTree((result.content().first() as McpSchema.TextContent).text())

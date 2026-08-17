@@ -20,4 +20,14 @@ class DatasourceTest {
     fun `include-schemas normalization of an empty allowlist is the empty list`() {
         Datasource.normalizeIncludeSchemas(emptyList()) shouldBe emptyList()
     }
+
+    @Test
+    fun `include-schemas normalization drops blank-after-trim entries and duplicates - first-seen order`() {
+        // R5 F2: `[" "]` used to normalize to `[""]` — a non-empty allowlist projected to
+        // REST and MCP that still exempted nothing AND poisoned the GET->PUT round-trip
+        // (the validator rejects blank entries, so an unmodified re-save 400s). The ONE
+        // rule is trim -> lowercase -> drop blanks -> dedupe (first-seen order preserved).
+        Datasource.normalizeIncludeSchemas(listOf(" ", "APEX_Reporting ", "apex_reporting", "\t", " Sales ")) shouldBe
+            listOf("apex_reporting", "sales")
+    }
 }

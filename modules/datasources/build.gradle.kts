@@ -42,6 +42,10 @@ dependencies {
     // production classifier is name-based precisely because main never compiles against a
     // driver); the test runtime already carries the jar via `runtimeOnly` above.
     testImplementation(libs.sqlite.jdbc)
+    // Same rule for h2: the R5 F1 tests construct JdbcSQLNonTransientException by type to
+    // reproduce the exact closed-connection shape (state 90007) the classifier matches
+    // name-based; main never compiles against the driver.
+    testImplementation(libs.h2)
     testRuntimeOnly(libs.mysql.connector.j)
 }
 

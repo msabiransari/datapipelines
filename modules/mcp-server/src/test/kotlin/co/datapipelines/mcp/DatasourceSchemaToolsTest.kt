@@ -183,12 +183,8 @@ class DatasourceSchemaToolsTest {
         // working exactly as before the guard existed.
         val meta = mockk<java.sql.DatabaseMetaData>()
         every { meta.searchStringEscape } returns "\\"
-        val tablesRs = mockk<java.sql.ResultSet>(relaxed = true)
+        val tablesRs = McpFixtures.tablesResultSet("db1", "orders", schemaColumn = "TABLE_CAT")
         every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "db1"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val real =
             realIntrospectorOver(meta) { connection ->
                 every { connection.catalog } returns null
@@ -203,9 +199,25 @@ class DatasourceSchemaToolsTest {
             )
     }
 
-    /** A real [SchemaIntrospector] over one mock connection (MySQL routing) carrying [meta]. */
+    /**
+     * A real [SchemaIntrospector] over one mock connection carrying [meta]. Defaults build
+     * a MySQL-routed datasource (the historical shape); [datasource] overrides the whole
+     * entity (R5 F8: the connection-loss test builds its POSTGRES "dying" datasource with
+     * [McpFixtures.datasource] instead of re-inlining the stack). The connection defaults to
+     * a KNOWN current schema so unfiltered reads take the default; a test overrides via
+     * [connectionSetup] (later recording wins).
+     */
     private fun realIntrospectorOver(
         meta: java.sql.DatabaseMetaData,
+        datasource: co.datapipelines.datasources.Datasource =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "down",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            ),
         connectionSetup: (java.sql.Connection) -> Unit = {},
     ): SchemaIntrospector {
         val connection = mockk<java.sql.Connection>()
@@ -214,26 +226,51 @@ class DatasourceSchemaToolsTest {
         every { connection.schema } returns "public"
         every { connection.catalog } returns "app"
         connectionSetup(connection)
-        val datasource =
-            co.datapipelines.datasources.Datasource(
-                name = "down",
-                displayName = "Down",
-                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
-                jdbcUrl = "jdbc:mysql://db.internal:3306",
-                username = "app",
-                password = "secret",
-            )
         val registry = mockk<DatasourceRegistry>()
-        every { registry.get("down") } returns datasource
+        every { registry.get(datasource.name) } returns datasource
         every { registry.poolFor(datasource) } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {
-                override val name: String = "down"
+                override val name: String = datasource.name
 
                 override fun leaseConnection(): java.sql.Connection = connection
 
                 override fun close() = Unit
             }
         return SchemaIntrospector(registry)
+    }
+
+    @Test
+    fun `a closed duckdb connection during the current-schema read is the catalogued unreachable - never -32603`() {
+        // R5 F1 shape (a), DuckDB arm, through the FULL MCP path: duckdb_jdbc 1.5.5.1 reports
+        // a closed connection as a PLAIN SQLException — NULL SQLState, vendor code 0, message
+        // "Connection was closed" — invisible to every state/type branch. Round 4's narrowed
+        // catch let it escape RAW to the dispatcher (JSON-RPC -32603). The introspector must
+        // classify it; the tool's translation yields the catalogued code the dispatcher
+        // envelopes as isError.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val real =
+            realIntrospectorOver(
+                meta,
+                datasource =
+                    co.datapipelines.datasources.Datasource(
+                        name = "dw",
+                        displayName = "dw",
+                        dialect = co.datapipelines.typesystem.Dialect.DUCKDB,
+                        jdbcUrl = "jdbc:duckdb::memory:",
+                        username = "app",
+                        password = "secret",
+                    ),
+            ) { connection ->
+                every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+            }
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
     }
 
     @Test
@@ -246,31 +283,11 @@ class DatasourceSchemaToolsTest {
         // parameter_required for a driver that legitimately reports none.
         val meta = mockk<java.sql.DatabaseMetaData>()
         every { meta.searchStringEscape } returns "\\"
-        val connection = mockk<java.sql.Connection>()
-        every { connection.metaData } returns meta
-        every { connection.close() } returns Unit
-        every { connection.schema } throws
-            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
-        val datasource =
-            co.datapipelines.datasources.Datasource(
-                name = "dying",
-                displayName = "Dying",
-                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
-                jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
-                username = "app",
-                password = "secret",
-            )
-        val registry = mockk<DatasourceRegistry>()
-        every { registry.get("dying") } returns datasource
-        every { registry.poolFor(datasource) } returns
-            object : co.datapipelines.datasources.pooling.ConnectionPool {
-                override val name: String = "dying"
-
-                override fun leaseConnection(): java.sql.Connection = connection
-
-                override fun close() = Unit
+        val real =
+            realIntrospectorOver(meta, datasource = McpFixtures.datasource(name = "dying")) { connection ->
+                every { connection.schema } throws
+                    java.sql.SQLNonTransientConnectionException("connection exception", "08001")
             }
-        val real = SchemaIntrospector(registry)
 
         val thrown =
             shouldThrow<DatapipelinesException> {

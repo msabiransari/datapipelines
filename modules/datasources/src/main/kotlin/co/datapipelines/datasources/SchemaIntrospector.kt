@@ -122,9 +122,17 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val exempt = datasource.introspectionIncludeSchemas.toSet()
-            // A blank caller filter is absent (the same blank-sentinel rule tables() applies),
-            // so the current-schema default — never the JDBC '' sentinel — takes over.
-            val effectiveFilter = schemaFilter.asNonBlankOrNull() ?: connection.currentSchema(adapter)
+            // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
+            // The schemaless exemption is STRUCTURAL, not driver-dependent: a schemaless
+            // dialect never consults the connection's current schema at all (R5 F3 — the
+            // old order was safe only because the vendored sqlite-jdbc hardcodes
+            // getSchema() = null; a future schemaless driver whose getSchema()/getCatalog()
+            // throws would have turned a working unfiltered read into a classified failure),
+            // so the current-schema default — never the JDBC '' sentinel — applies only to
+            // schema-capable dialects.
+            val effectiveFilter =
+                schemaFilter.asNonBlankOrNull()
+                    ?: if (adapter.introspectionSchemaless) null else connection.currentSchema(adapter, datasourceName)
             if (effectiveFilter == null && !adapter.introspectionSchemaless) {
                 throw CurrentSchemaUnknownException(datasourceName)
             }
@@ -282,9 +290,10 @@ class SchemaIntrospector(
      * [java.sql.SQLRecoverableException] (whose subclasses include the connection-died-mid-read
      * family some drivers raise), [java.sql.SQLTimeoutException] (extends SQLTransientException,
      * not the connection family — but a dead network surfaces as exactly this shape), and the
-     * SQLite connection-loss result codes (the vendored driver reports SQLiteException with a
-     * NULL SQLState, so the state-based branches cannot see it — see
-     * [SQLITE_CONNECTION_LOSS_PRIMARY_CODES]). Everything else is NOT a connection failure.
+     * per-driver connection-loss knowledge — SQLite's null-state result codes, h2's 90xxx
+     * closed-connection codes, and the DuckDB/SQLite closed-connection lifecycle messages
+     * (see the per-predicate KDocs for each driver's evidence). Everything else is NOT a
+     * connection failure.
      *
      * A driver may carry the state on a **wrapped** exception rather than the one it throws, so
      * the check walks the `cause` and `nextException` chains ([CHAIN_WALK_LIMIT] nodes,
@@ -311,7 +320,9 @@ class SchemaIntrospector(
             this is java.sql.SQLNonTransientConnectionException ||
             this is java.sql.SQLRecoverableException ||
             this is java.sql.SQLTimeoutException ||
-            isSqliteConnectionLoss()
+            isSqliteConnectionLoss() ||
+            isH2ConnectionLoss() ||
+            isDriverClosedConnectionMessage()
 
     /**
      * The vendored sqlite-jdbc's `SQLiteException` extends plain `SQLException` with a **null
@@ -329,6 +340,53 @@ class SchemaIntrospector(
     private fun SQLException.isSqliteConnectionLoss(): Boolean =
         generateSequence(javaClass as Class<*>?) { it.superclass }.any { it.name == SQLITE_EXCEPTION_CLASS } &&
             errorCode in SQLITE_CONNECTION_LOSS_PRIMARY_CODES
+
+    /**
+     * h2's closed-connection family, same per-driver pattern as [isSqliteConnectionLoss] —
+     * but the name-based class match cannot work here: h2's typed carriers
+     * (`JdbcSQLNonTransientException`, …) extend the **java.sql** exception types directly
+     * and only IMPLEMENT h2's `JdbcException` interface, so no h2-named class walks up the
+     * superclass chain. The stable signature is the code's DOUBLE representation: h2 carries
+     * its engine error code both as the SQLState STRING and as the vendor code
+     * (`"90007"`/90007 — live-probed 2026-08-16), and the 90xxx class is outside the SQL
+     * standard's class range, so no standard-state driver collides. Codes, verified against
+     * the pinned h2 2.3.232 (live probe; `EmbeddedDialectBehaviorTest` re-pins the shape on
+     * every run):
+     * 90007 = "The object is already closed" (connection closed),
+     * 90098 = "Database is closed",
+     * 90121 = "Database is already closed" — this last one usually arrives TYPED
+     * (`JdbcSQLNonTransientConnectionException`), which the generic connection-exception
+     * branch already classifies; it is listed here so a plain-exception carrier classifies
+     * too.
+     */
+    private fun SQLException.isH2ConnectionLoss(): Boolean =
+        sqlState != null && sqlState.toIntOrNull() == errorCode && errorCode in H2_CONNECTION_LOSS_CODES
+
+    /**
+     * The closed-connection lifecycle messages of the drivers that report them as a **plain
+     * `java.sql.SQLException`** with NULL SQLState and vendor code 0 — leaving type, state,
+     * and code with nothing to say:
+     * - duckdb_jdbc 1.5.5.1: `getSchema()`/`getCatalog()` on a closed connection throw
+     *   exactly `"Connection was closed"`. Its NATIVE errors are ALSO plain null-state
+     *   `SQLException`s — with driver-specific text ("Invalid Input Error: …"), so the exact
+     *   message is the only discriminator, and the exact-class test (`java.sql.SQLException`
+     *   itself, not a subclass) keeps this from matching any driver's specific exception
+     *   type. Live-probed 2026-08-16; both arms re-pinned in `EmbeddedDialectBehaviorTest`.
+     * - sqlite-jdbc 3.49.1.0: a closed connection's `getCatalog()` throws exactly
+     *   `"database connection closed"`, the same null-state plain-`SQLException` shape (its
+     *   `getSchema()` returns hardcoded null instead of throwing — adapter KDoc).
+     *
+     * Deliberately NOT a blanket "null SQLState means down" (round 2's R5 narrowing): the
+     * exact message + exact plain class + null state + zero code is the drivers' JDBC-layer
+     * lifecycle text, not a server error echo. If a driver bump rewords the text, this rule
+     * stops matching and the shape degrades to the round-4 behavior (propagate) — the
+     * behavior pin fails and forces re-derivation.
+     */
+    private fun SQLException.isDriverClosedConnectionMessage(): Boolean =
+        sqlState == null &&
+            errorCode == 0 &&
+            javaClass == SQLException::class.java &&
+            message in CLOSED_CONNECTION_MESSAGES
 
     /**
      * Where the escaped schema filter goes: the catalog argument for drivers that carry the
@@ -366,19 +424,45 @@ class SchemaIntrospector(
      * catalog/schema", not a schema named `""`, so the caller reads unfiltered rather than
      * filtering on a name that matches nothing.
      *
-     * Only [java.sql.SQLFeatureNotSupportedException] reads as "the driver reports none" —
-     * a legitimate capability statement. Any OTHER [SQLException] (a connection that died
-     * mid-lease during `getSchema()`/`getCatalog()`, SQLState 08S01) must PROPAGATE to
-     * [withMetaData]'s post-lease classification instead of being swallowed here: swallowing
-     * it once surfaced connection loss as "no current schema" — the 400 `parameter_required`
-     * path — with a recommended recovery (the schemas listing) that would fail on the same
-     * dead connection (round-4 F1).
+     * Every [SQLException] this read can produce is classified HERE, in ONE place — extending
+     * the lease boundary's own [SQLException.isConnectionFailure] classification, never
+     * forking a second one. Three families (R5 F1; the shapes are live-pinned per driver in
+     * `EmbeddedDialectBehaviorTest`):
+     *
+     * 1. **Feature-unsupported** — [SQLFeatureNotSupportedException], or a driver signaling
+     *    the same via plain `SQLException` with SQLState `0A000` — reads as null: a legitimate
+     *    capability statement ("driver reports none").
+     * 2. **Connection loss** — the [SQLException.isConnectionFailure] family, INCLUDING the
+     *    per-driver knowledge the classifier carries (SQLState class 08 + the typed connection
+     *    exceptions + SQLite's null-state result codes + H2's closed-object codes + the
+     *    DuckDB/SQLite closed-connection lifecycle messages) — becomes
+     *    [DatasourceUnreachableException]: the catalogued 502 path, whose recommended
+     *    recovery fails honestly on the same dead connection.
+     * 3. **Anything left** — a NON-connection failure of the current-schema read itself
+     *    (pgjdbc's `getSchema()` executes `select current_schema()` on the server —
+     *    bytecode-verified for 42.7.13 — so a statement cancel 57014 or a permission error
+     *    arrives here) — is [CurrentSchemaUnknownException] with the driver exception
+     *    attached as cause: a catalogued failure whose recovery (pass an explicit schema
+     *    filter, which never consults the current schema) works on the live connection.
+     *    NEVER a raw rethrow to the surface: the surfaces catch only the two module
+     *    exceptions, and a raw driver exception is a 500 / JSON-RPC -32603.
      */
-    private fun Connection.currentSchema(adapter: DialectAdapter): String? =
+    private fun Connection.currentSchema(
+        adapter: DialectAdapter,
+        datasourceName: String,
+    ): String? =
         try {
             if (adapter.schemaArrivesInCatalog) catalog else schema
         } catch (_: SQLFeatureNotSupportedException) {
+            // The typed capability statement: the driver reports none. Deliberately
+            // discarded — the exception type itself is the entire signal.
             null
+        } catch (e: SQLException) {
+            when {
+                e.sqlState == FEATURE_UNSUPPORTED_STATE -> null
+                e.isConnectionFailure() -> unreachable(datasourceName, e)
+                else -> throw CurrentSchemaUnknownException(datasourceName, e)
+            }
         }?.asNonBlankOrNull()
 
     /**
@@ -427,6 +511,18 @@ class SchemaIntrospector(
 
         /** The vendored sqlite-jdbc's exception class (never compiled against — §10.3). */
         const val SQLITE_EXCEPTION_CLASS = "org.sqlite.SQLiteException"
+
+        /** h2's closed-connection error codes (see [isH2ConnectionLoss] for per-code evidence). */
+        val H2_CONNECTION_LOSS_CODES = setOf(90007, 90098, 90121)
+
+        /**
+         * The drivers' JDBC-layer closed-connection lifecycle texts (see
+         * [isDriverClosedConnectionMessage] for the per-driver evidence).
+         */
+        val CLOSED_CONNECTION_MESSAGES = setOf("Connection was closed", "database connection closed")
+
+        /** SQLState "feature not supported" — the untyped sibling of [SQLFeatureNotSupportedException]. */
+        const val FEATURE_UNSUPPORTED_STATE = "0A000"
 
         /**
          * SQLite primary result codes that mean "the database could not be reached": BUSY(5),

@@ -37,28 +37,52 @@ data class Datasource(
      * `apex_*` hides a customer's own `APEX_REPORTING` schema just like the engine's versioned
      * ones, with no warning; naming it here makes it visible again.
      *
-     * **Lowercase, exact names, no patterns** (an entry carrying `*` or `%` is rejected at
-     * save — a pattern here would look like it exempts a family while exempting nothing);
-     * normalization to lowercase happens at the registry's save boundary — the single
-     * place every write path crosses — and again at the repository's read boundary, so a
-     * row whose allowlist landed by restore or a manual JSONB edit cannot sit silently
-     * inert. Absent/empty = today's behavior: the dialect floor applies unchanged. Matching
-     * is case-insensitive, like the exclusion itself.
+     * **Lowercase, exact names, over the legal-identifier alphabet of the supported
+     * dialects** (letters, digits, `_`, `$`, `#` — anything else is rejected at save; an
+     * entry outside the alphabet can only ever look like it exempts something while
+     * exempting nothing); normalization — trim, lowercase, drop blanks, dedupe — happens at
+     * the registry's save boundary — the single place every write path crosses — and again
+     * at the repository's read boundary, so a row whose allowlist landed by restore or a
+     * manual JSONB edit cannot sit silently inert. Absent/empty = today's behavior: the
+     * dialect floor applies unchanged. Matching is case-insensitive, like the exclusion
+     * itself.
      */
     val introspectionIncludeSchemas: List<String> = emptyList(),
 ) {
     companion object {
         /**
          * The ONE normalization rule of the §7A include-schemas allowlist: entries are
-         * trimmed and lowercased. Matching lowercases the driver-reported schema before
-         * comparing against stored entries verbatim, so only the normalized form is live —
-         * applied at [DatasourceRegistry]'s save boundary (every programmatic write crosses
-         * it: REST create/update today, any future MCP create tool tomorrow) AND at the
-         * repository's row-read (restore and manual JSONB edits write rows without crossing
-         * save; an unnormalized entry there would silently exempt nothing — inert, not
-         * rejected).
+         * trimmed, lowercased, **blank-after-trim entries are dropped**, and duplicates
+         * collapse to the first occurrence (order preserved). Matching lowercases the
+         * driver-reported schema before comparing against stored entries verbatim, so only
+         * the normalized form is live — a blank or duplicated entry can match nothing and
+         * exists only to poison the GET→PUT round-trip (the validator rejects blanks), so
+         * normalization never keeps one — applied at [DatasourceRegistry]'s save boundary
+         * (every programmatic write crosses it: REST create/update today, any future MCP
+         * create tool tomorrow) AND at the repository's row-read (restore and manual JSONB
+         * edits write rows without crossing save; an unnormalized entry there would silently
+         * exempt nothing — inert, not rejected).
          */
-        fun normalizeIncludeSchemas(entries: List<String>): List<String> = entries.map { it.trim().lowercase() }
+        fun normalizeIncludeSchemas(entries: List<String>): List<String> {
+            // Fast path (R5 F6): this runs per row on the uncached list() read path, and the
+            // overwhelming case is "no allowlist" or "already normalized" — return the input
+            // as-is (no allocation) when the ONE rule would change nothing.
+            if (entries.isEmpty() || entries.isAlreadyNormalized()) return entries
+            return entries
+                .asSequence()
+                .map { it.trim().lowercase() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .toList()
+        }
+
+        /** [entries] already satisfies the ONE rule — non-blank, lowercase, no duplicates. */
+        private fun List<String>.isAlreadyNormalized(): Boolean {
+            val seen = HashSet<String>(size)
+            return all { entry ->
+                entry.isNotEmpty() && !entry.any { it.isWhitespace() || it.isUpperCase() } && seen.add(entry)
+            }
+        }
     }
 
     /**

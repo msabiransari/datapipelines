@@ -220,23 +220,26 @@ class DatasourcesController(
         )
 
     /**
-     * §3.3: `introspection_include_schemas` — an array of exact schema names, normalized here
-     * as DEFENSE IN DEPTH (the load-bearing normalization is the registry's save boundary, so
-     * non-REST write paths are covered too). Absent = empty list (today's behavior). A
-     * non-array value or a non-string entry is a payload-shape 400 like every other bind
-     * problem.
+     * §3.3: `introspection_include_schemas` — an array of exact schema names, normalized
+     * through the ONE shared rule (`Datasource.normalizeIncludeSchemas` — never a re-inlined
+     * trim+lowercase of this layer's own, R5 F6) as DEFENSE IN DEPTH; the load-bearing
+     * normalization is the registry's save boundary, so non-REST write paths are covered too.
+     * Absent = empty list (today's behavior). A non-array value or a non-string entry is a
+     * payload-shape 400 like every other bind problem.
      */
     private fun includeSchemasOf(body: JsonNode): List<String> {
         val node = body.get("introspection_include_schemas") ?: return emptyList()
         if (!node.isArray) {
             throw invalid("introspection_include_schemas", "introspection_include_schemas must be an array of schema names")
         }
-        return node.map { element ->
-            if (!element.isTextual) {
-                throw invalid("introspection_include_schemas", "introspection_include_schemas entries must be strings")
-            }
-            element.asText().trim().lowercase()
-        }
+        return Datasource.normalizeIncludeSchemas(
+            node.map { element ->
+                if (!element.isTextual) {
+                    throw invalid("introspection_include_schemas", "introspection_include_schemas entries must be strings")
+                }
+                element.asText()
+            },
+        )
     }
 
     /** The outbound shape — every field a reader is entitled to, `password_set` derived. */

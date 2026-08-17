@@ -71,6 +71,53 @@ class EmbeddedDialectBehaviorTest {
     }
 
     @Test
+    fun `R5 F1 driver pins - the closed-connection shapes the classifier's per-driver knowledge rests on`() {
+        // Reproducing cases for SchemaIntrospector's connection-loss classification, against
+        // the REAL pinned drivers — if a driver bump changes any shape below, the classifier's
+        // per-driver knowledge (H2 codes, DuckDB/SQLite closed-connection messages) goes stale
+        // and THIS test fails, forcing re-derivation instead of silent misclassification.
+        //
+        // h2 2.3.232: a closed connection OBJECT reports "The object is already closed" as
+        // org.h2.jdbc.JdbcSQLNonTransientException with SQLState "90007" (vendor code 90007) —
+        // NOT an SQLNonTransientConnectionException subclass, NOT an 08 state, so neither the
+        // type branch nor the state branch can see it. (A database SHUTDOWN under a live
+        // connection arrives as JdbcSQLNonTransientConnectionException state 90121, which the
+        // existing type branch already classifies — verified 2026-08-16.)
+        val h2 = java.sql.DriverManager.getConnection("jdbc:h2:mem:f1pin;DB_CLOSE_DELAY=-1", "sa", "")
+        h2.close()
+        val h2Thrown = shouldThrow<SQLException> { h2.schema }
+        (h2Thrown is org.h2.jdbc.JdbcSQLNonTransientException) shouldBe true
+        h2Thrown.sqlState shouldBe "90007"
+        h2Thrown.errorCode shouldBe 90007
+
+        // duckdb_jdbc 1.5.5.1: a closed connection reports getSchema() failure as a PLAIN
+        // java.sql.SQLException — NULL SQLState, vendor code 0, message exactly
+        // "Connection was closed" (the JDBC layer's own lifecycle text). Native errors are
+        // ALSO plain null-state SQLExceptions with DIFFERENT messages, so the message is the
+        // only discriminator — pinned by the query-error arm below.
+        val duck = java.sql.DriverManager.getConnection("jdbc:duckdb::memory:")
+        duck.close()
+        val duckClosed = shouldThrow<SQLException> { duck.schema }
+        duckClosed.javaClass shouldBe SQLException::class.java
+        duckClosed.sqlState shouldBe null
+        duckClosed.errorCode shouldBe 0
+        duckClosed.message shouldBe "Connection was closed"
+        val duckLive = java.sql.DriverManager.getConnection("jdbc:duckdb::memory:")
+        val duckQueryError =
+            shouldThrow<SQLException> {
+                duckLive.createStatement().use { it.executeQuery("SELECT * FROM no_such_table_f1pin") }
+            }
+        (duckQueryError.message == "Connection was closed") shouldBe false
+
+        // sqlite-jdbc 3.49.1.0: getSchema() is hardcoded null — even on a CLOSED connection
+        // it returns null rather than throwing, which is what makes the schemaless exemption
+        // in columns() safe today (R5 F3 makes it structural).
+        val lite = java.sql.DriverManager.getConnection("jdbc:sqlite::memory:")
+        lite.close()
+        lite.schema shouldBe null
+    }
+
+    @Test
     fun `a saved duckdb or sqlite datasource passes the full validator including the test pool build`() {
         val validator = DatasourceValidator()
 
