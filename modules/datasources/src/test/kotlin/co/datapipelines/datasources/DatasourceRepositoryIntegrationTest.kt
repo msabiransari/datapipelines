@@ -220,6 +220,25 @@ class DatasourceRepositoryIntegrationTest {
         checkNotNull(repository.findByName("restored")).introspectionIncludeSchemas shouldBe listOf("apex_reporting")
     }
 
+    @Test
+    fun `a row whose allowlist holds blanks and duplicates reads back as the clean list`() {
+        // R5 F2: the read-boundary normalization must drop blank-after-trim entries and
+        // duplicates, not just trim+lowercase — otherwise a restored `[" ", "apex", "APEX"]`
+        // row surfaces `["", "apex", "apex"]` to REST and MCP and 400s an unmodified PUT
+        // round-trip (the validator rejects blanks) while exempting nothing.
+        jdbc.update(
+            """
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+                                     introspection_include_schemas_json, created_by)
+            VALUES ('dirty', 'Dirty', 'H2', 'jdbc:h2:mem:dirty', 'sa', :pw,
+                    CAST('[" ", "apex", "APEX", " sales "]' AS jsonb), :owner)
+            """.trimIndent(),
+            mapOf("pw" to encryptor.encrypt("p", "dirty"), "owner" to owner),
+        )
+
+        checkNotNull(repository.findByName("dirty")).introspectionIncludeSchemas shouldBe listOf("apex", "sales")
+    }
+
     private fun insertUser(): UUID =
         checkNotNull(
             jdbc.queryForObject(

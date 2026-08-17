@@ -50,15 +50,24 @@ data class Datasource(
     companion object {
         /**
          * The ONE normalization rule of the §7A include-schemas allowlist: entries are
-         * trimmed and lowercased. Matching lowercases the driver-reported schema before
-         * comparing against stored entries verbatim, so only the normalized form is live —
-         * applied at [DatasourceRegistry]'s save boundary (every programmatic write crosses
-         * it: REST create/update today, any future MCP create tool tomorrow) AND at the
-         * repository's row-read (restore and manual JSONB edits write rows without crossing
-         * save; an unnormalized entry there would silently exempt nothing — inert, not
-         * rejected).
+         * trimmed, lowercased, **blank-after-trim entries are dropped**, and duplicates
+         * collapse to the first occurrence (order preserved). Matching lowercases the
+         * driver-reported schema before comparing against stored entries verbatim, so only
+         * the normalized form is live — a blank or duplicated entry can match nothing and
+         * exists only to poison the GET→PUT round-trip (the validator rejects blanks), so
+         * normalization never keeps one — applied at [DatasourceRegistry]'s save boundary
+         * (every programmatic write crosses it: REST create/update today, any future MCP
+         * create tool tomorrow) AND at the repository's row-read (restore and manual JSONB
+         * edits write rows without crossing save; an unnormalized entry there would silently
+         * exempt nothing — inert, not rejected).
          */
-        fun normalizeIncludeSchemas(entries: List<String>): List<String> = entries.map { it.trim().lowercase() }
+        fun normalizeIncludeSchemas(entries: List<String>): List<String> =
+            entries
+                .asSequence()
+                .map { it.trim().lowercase() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .toList()
     }
 
     /**
