@@ -45,7 +45,7 @@ import java.util.UUID
 
 /**
  * The web surface's persistence story against the real stores: a Postgres container running app's
- * shipped `V1__initial_schema.sql` and a Redis container — the same rig `dag`'s integration tests
+ * shipped migrations and a Redis container — the same rig `dag`'s integration tests
  * use. Covered end to end:
  *
  *  - [WebEventEmitter]: a full event sequence lands the `pipeline_executions` row (RUNNING →
@@ -76,7 +76,9 @@ class WebPersistenceIntegrationTest {
                     setDriverClassName(postgres.driverClassName)
                 },
             )
-        jdbc.jdbcTemplate.execute(TestRepoFiles.read(TestRepoFiles.MIGRATION_PATH))
+        // The shipped migrations in version order — V1 alone would miss the §4.6 lineage
+        // columns (V3) ExecutionRepository.create now writes.
+        TestRepoFiles.migrationPaths().forEach { path -> jdbc.jdbcTemplate.execute(TestRepoFiles.read(path)) }
     }
 
     @BeforeEach

@@ -26,13 +26,14 @@ import java.util.UUID
 
 /**
  * [ExecutionRepository] and [ExecutionEventRepository] against a real Postgres running the
- * **shipped** `V1__initial_schema.sql` (metadata-db §4.6/§4.7).
+ * **shipped** migrations (metadata-db §4.6/§4.7).
  *
- * The migration is executed off disk rather than through Flyway: domain modules carry no Flyway
+ * The migrations are executed off disk rather than through Flyway: domain modules carry no Flyway
  * dependency (module-structure §3.1 rule 2), the same discipline the sibling
  * `AuthRepositoriesIntegrationTest` and `PipelineRepositoryIntegrationTest` follow. Running the
  * real DDL is the point — the JSONB casts, the composite FK to `pipeline_versions`, the status
- * CHECK constraint and the `(execution_id, event_id)` UNIQUE are all things only Postgres enforces.
+ * CHECK constraint, the `(execution_id, event_id)` UNIQUE and the V3 lineage columns are all
+ * things only Postgres enforces.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -46,7 +47,9 @@ class ExecutionRepositoriesIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(RepoFiles.read(RepoFiles.MIGRATION_PATH))
+        // The shipped migrations in version order — V1 alone would miss the §4.6 lineage
+        // columns (V3) these tests exercise.
+        RepoFiles.migrationPaths().forEach { path -> jdbc.jdbcTemplate.execute(RepoFiles.read(path)) }
     }
 
     @BeforeEach
@@ -151,6 +154,58 @@ class ExecutionRepositoriesIntegrationTest {
         // NULL, not 0: "no caller node" is not "a result of zero rows" (metadata-db §4.6).
         found.resultRowCount.shouldBeNull()
         found.resultSizeBytes.shouldBeNull()
+    }
+
+    @Test
+    fun `a root record persists its own execution id as root, with null parent lineage`() {
+        // V3 backfill contract (metadata-db §4.6): root_execution_id is NOT NULL and equals the
+        // execution's own id for roots — family queries never special-case NULL.
+        val record = running().also(executions::create)
+
+        val found = executions.findById(record.executionId).shouldNotBeNull()
+        found.rootExecutionId shouldBe record.executionId
+        found.parentExecutionId.shouldBeNull()
+        found.parentNodeId.shouldBeNull()
+    }
+
+    @Test
+    fun `a child execution records its lineage and reads it back`() {
+        val parent = running().also(executions::create)
+        val child =
+            running()
+                .copy(
+                    triggeredVia = ExecutionTrigger.PIPELINE,
+                    parentExecutionId = parent.executionId,
+                    parentNodeId = "revenue",
+                    rootExecutionId = parent.executionId,
+                ).also(executions::create)
+
+        val found = executions.findById(child.executionId).shouldNotBeNull()
+        found.triggeredVia shouldBe ExecutionTrigger.PIPELINE
+        found.parentExecutionId shouldBe parent.executionId
+        found.parentNodeId shouldBe "revenue"
+        found.rootExecutionId shouldBe parent.executionId
+    }
+
+    @Test
+    fun `findByRoot returns the whole family, newest first, and nothing outside it`() {
+        val root = running().also(executions::create)
+        Thread.sleep(SPACING_MS)
+        val child =
+            running()
+                .copy(
+                    triggeredVia = ExecutionTrigger.PIPELINE,
+                    parentExecutionId = root.executionId,
+                    parentNodeId = "revenue",
+                    rootExecutionId = root.executionId,
+                ).also(executions::create)
+        val unrelated = running().also(executions::create)
+
+        executions.findByRoot(root.executionId).map { it.executionId } shouldContainExactly
+            listOf(child.executionId, root.executionId)
+        // A standalone execution is a family of one.
+        executions.findByRoot(unrelated.executionId).map { it.executionId } shouldContainExactly
+            listOf(unrelated.executionId)
     }
 
     @Test

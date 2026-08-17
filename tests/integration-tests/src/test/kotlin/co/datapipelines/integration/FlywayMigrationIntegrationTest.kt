@@ -1,8 +1,11 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -15,7 +18,9 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.util.Base64
+import java.util.UUID
 import javax.sql.DataSource
 
 /**
@@ -51,6 +56,7 @@ class FlywayMigrationIntegrationTest {
             listOf(
                 "1|initial schema|true",
                 "2|datasource introspection include schemas|true",
+                "3|execution lineage|true",
             )
     }
 
@@ -112,6 +118,7 @@ class FlywayMigrationIntegrationTest {
                 "execution_events.uq_events_execution_event",
                 "pipeline_executions.idx_executions_correlation",
                 "pipeline_executions.idx_executions_pipeline",
+                "pipeline_executions.idx_executions_root",
                 "pipeline_executions.idx_executions_status_running",
                 "pipeline_executions.idx_executions_user",
                 "pipeline_executions.pipeline_executions_pkey",
@@ -227,6 +234,77 @@ class FlywayMigrationIntegrationTest {
 
         jsonbWithoutSuffix shouldBe emptyList()
         suffixWithoutJsonb shouldBe emptyList()
+    }
+
+    @Test
+    fun `V3 creates the root_execution_id lineage index`() {
+        // metadata-db §4.6/§5: one indexed query returns the whole execution family;
+        // cancellation keys off root_execution_id. The exact-set test above pins the full
+        // index list — this names the one V3 adds.
+        val indexes =
+            query(
+                """
+                SELECT indexname FROM pg_indexes
+                WHERE schemaname = 'public' AND tablename = 'pipeline_executions'
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        indexes shouldContain "idx_executions_root"
+    }
+
+    @Test
+    fun `V3 refuses an execution row without root_execution_id`() {
+        // metadata-db §4.6: backfilled to execution_id, NOT NULL from V3 on — family queries
+        // and cancellation never special-case NULL. ExecutionRepository.create always binds it
+        // (record.rootExecutionId ?: record.executionId); this pins the database floor under that.
+        val userId = UUID.randomUUID()
+        val pipelineId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (?, ?, 'T', 'google', ?)",
+                ).use {
+                    it.setObject(1, userId)
+                    it.setString(2, "u$userId@example.com")
+                    it.setString(3, "sub-$userId")
+                    it.executeUpdate()
+                }
+            connection
+                .prepareStatement(
+                    "INSERT INTO pipelines (id, name, display_name, owner_id, current_version) VALUES (?, ?, 'T', ?, 1)",
+                ).use {
+                    it.setObject(1, pipelineId)
+                    it.setString(2, "p_" + pipelineId.toString().replace("-", ""))
+                    it.setObject(3, userId)
+                    it.executeUpdate()
+                }
+            connection
+                .prepareStatement(
+                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) VALUES (?, 1, CAST('{}' AS jsonb), ?)",
+                ).use {
+                    it.setObject(1, pipelineId)
+                    it.setObject(2, userId)
+                    it.executeUpdate()
+                }
+
+            val violation =
+                shouldThrow<SQLException> {
+                    connection
+                        .prepareStatement(
+                            """
+                            INSERT INTO pipeline_executions (
+                                execution_id, pipeline_id, pipeline_version, status, triggered_by, triggered_via
+                            ) VALUES (?, ?, 1, 'RUNNING', ?, 'REST')
+                            """.trimIndent(),
+                        ).use {
+                            it.setObject(1, UUID.randomUUID())
+                            it.setObject(2, pipelineId)
+                            it.setObject(3, userId)
+                            it.executeUpdate()
+                        }
+                }
+            violation.message shouldContain "root_execution_id"
+        }
     }
 
     private fun <T> query(

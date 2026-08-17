@@ -216,7 +216,7 @@ CREATE TABLE pipeline_executions (
     status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED'
     parameters_json     JSONB       NOT NULL DEFAULT '{}',
     triggered_by        UUID        NOT NULL REFERENCES users(id),
-    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP'
+    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE'
     correlation_id      UUID,
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at        TIMESTAMPTZ,
@@ -226,8 +226,11 @@ CREATE TABLE pipeline_executions (
     node_stats_json     JSONB,                       -- array of node stats
     result_row_count    BIGINT,                      -- rows in the caller result; NULL if the pipeline has no caller node
     result_size_bytes   BIGINT,                      -- materialized result size in Redis; NULL if no caller node
+    parent_execution_id UUID        REFERENCES pipeline_executions(execution_id), -- spawning execution; NULL for roots (V3)
+    parent_node_id      TEXT,                        -- PIPELINE node id in the parent that spawned this execution; NULL for roots (V3)
+    root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
-    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP')),
+    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE')),  -- 'PIPELINE' added by V3
     CONSTRAINT fk_executions_pipeline_version
         FOREIGN KEY (pipeline_id, pipeline_version)
         REFERENCES pipeline_versions (pipeline_id, version)
@@ -239,13 +242,15 @@ CREATE INDEX idx_executions_status_running ON pipeline_executions(started_at)
 CREATE INDEX idx_executions_user ON pipeline_executions(triggered_by, started_at DESC);
 CREATE INDEX idx_executions_correlation ON pipeline_executions(correlation_id)
     WHERE correlation_id IS NOT NULL;
+CREATE INDEX idx_executions_root ON pipeline_executions(root_execution_id);   -- family lookup / cancellation (V3)
 ```
 
 **Notes:**
 - **`fk_executions_pipeline_version` is the point of this table's integrity.** `pipeline_version` is a snapshot of the version executed, and without the composite FK it was a free-floating integer — nothing stopped an execution from recording a version that was never stored, and the "which JSON actually ran?" question had no reliable answer. The target is `pipeline_versions`' primary key `(pipeline_id, version)`.
 - The single-column `pipeline_id REFERENCES pipelines(id)` is retained alongside it. It is *implied* by the composite FK (every `pipeline_versions` row has a valid `pipeline_id`), and is kept for ERD clarity and because it is the constraint that survives if `pipeline_versions` is ever partitioned.
 - **Delete interaction:** `pipelines` uses soft delete, so this does not arise in normal operation — but a *hard* `DELETE FROM pipelines` now fails while any execution references one of its versions. The `ON DELETE CASCADE` from `pipelines` to `pipeline_versions` cannot fire, because the composite FK is `ON DELETE RESTRICT` (default). This is the correct outcome: execution history must not be silently erasable.
-- `status` values are [`ExecutionStatus`](enums.md#10-executionstatus--whole-pipeline-execution-outcome); `triggered_via` values are [`ExecutionTrigger`](enums.md#18-executiontrigger--how-execution-was-initiated). Both CHECK constraints list only the v1 values — adding `SCHEDULED`/`WEBHOOK` later is a migration, deliberately.
+- `status` values are [`ExecutionStatus`](enums.md#10-executionstatus--whole-pipeline-execution-outcome); `triggered_via` values are [`ExecutionTrigger`](enums.md#18-executiontrigger--how-execution-was-initiated). Both CHECK constraints list only the shipped values — adding `SCHEDULED`/`WEBHOOK` later is a migration, deliberately (V3 added `PIPELINE` exactly that way).
+- **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
 - Both result columns are NULL for pipelines with zero caller nodes (legal under D1 — pure write-back pipelines).
 - `updated_at` is absent by design: the row's lifecycle is INSERT-on-start then one terminal UPDATE, and `completed_at` already carries that timestamp.
@@ -410,6 +415,7 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 | `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions — the stale sweep's access path ([§8.3](#83-stale-execution-sweep)) |
 | `pipeline_executions` | `idx_executions_user` | explicit | List executions by user |
 | `pipeline_executions` | `idx_executions_correlation` | explicit (partial) | Trace lookup by correlation id |
+| `pipeline_executions` | `idx_executions_root` | explicit | The whole execution family (root + descendants) in one lookup — composition lineage and cancellation key off `root_execution_id` (V3) |
 | `execution_events` | `execution_events_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `execution_events` | `uq_events_execution_event` | via UNIQUE | Event replay ordered by `event_id`; enforces no duplicate sequence numbers |
 | `templates` | `templates_pkey` | via PK | Lookup by template id |
@@ -669,3 +675,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-08-05 | v1.0 | initial draft | Complete metadata DB schema: 10 tables (users, api_keys, audit_log, pipelines, pipeline_versions, pipeline_executions, execution_events, templates, template_versions, datasources), indexes, ERD, NamedParameterJdbcTemplate data access pattern, Flyway strategy, maintenance jobs |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.10](SPEC-REVIEW-2026-08.md#210-metadata-dbmd). Established as sole DDL authority (D4): `_json` suffix rule stated in §2 and applied (`audit_log.details` → `details_json`); `TIMESTAMPTZ` confirmed everywhere. `datasources` (§4.10) absorbed the datasources.md reconciliation — `description` nullable, `name` CHECK (63 chars + `^[a-z0-9_-]+$`), new `query_timeout_seconds` column with CHECK, soft-delete partial index, `properties_json` documented as the hikari/jdbc passthrough (D7). `params_schema` deleted from `template_versions` (D3); `is_library` moved from `templates` to `template_versions` (version-scoped per D12); `idx_templates_active` added. `users` gained `updated_at` + `theme_preference TEXT NULL` (NULL = follow the deployment default `datapipelines.ui.theme`; stored preference, not session state — ui-screens §2.12.4), with the per-request `is_active` cache note (D13); `templates` gained `updated_at`; `updated_at` maintenance rule stated (app-set, no triggers). `pipeline_executions` gained the composite FK to `pipeline_versions(pipeline_id, version)`, dropped `result_delivery` (D9), gained `result_row_count`. `execution_events`: redundant `idx_events_execution` dropped, UNIQUE constraint named. §5 regenerated from §4 with constraint-backed indexes under their real names (phantom `uq_users_email` / `uq_pipelines_name` removed) plus a deliberately-absent list. §6.1 `create()` rewritten as working single-CTE SQL + a real `RowMapper` whose result is returned; §6.2 conventions extended. §8 renamed "Operational Jobs" and fully parameterized from config keys (D8) — no interval literals. New §9 stating idempotency keys, results, the 1-hour event log, and cancel flags are Redis-only (D9/D7). Broken link `pipeline-contract §15.3` → §17.3 fixed; terminal-node language replaced by the caller-node model (D1) |
 | 2026-08-15 | v1.2 | V2 migration | §4.10 `datasources` gains `introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]'` (migration V2) — the §7A introspection allowlist of datasources.md §3.3; `[]` and absent are the same behavior. |
+| 2026-08-16 | v1.3 | V3 migration | §4.6 `pipeline_executions` gains the composition-lineage columns `parent_execution_id` (self-FK), `parent_node_id`, `root_execution_id` (migration V3, design doc 2026-08-13-pipeline-node-type §5) — `root_execution_id` backfilled to `execution_id` and NOT NULL going forward, so family queries and cancellation never special-case NULL; new explicit index `idx_executions_root`; `chk_triggered_via` widened with `'PIPELINE'`. |

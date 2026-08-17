@@ -13,6 +13,9 @@ enum class ExecutionTrigger {
     UI,
     REST,
     MCP,
+
+    /** Spawned by a parent execution's PIPELINE node (metadata-db §4.6 lineage columns). */
+    PIPELINE,
 }
 
 /**
@@ -22,6 +25,11 @@ enum class ExecutionTrigger {
  * `resultSizeBytes = 4200` says nothing about whether that result is still fetchable — that is a
  * Redis TTL question, and past the TTL the cursor returns `result.expired`. Both are null for a
  * pipeline with zero caller nodes (legal under D1).
+ *
+ * The lineage fields (V3) link a composition family: a PIPELINE node's child execution records
+ * [parentExecutionId]/[parentNodeId]; [rootExecutionId] is the top ancestor, equal to
+ * [executionId] for roots — a null [rootExecutionId] on the record means "I am the root" and the
+ * repository persists [executionId] itself (the column is NOT NULL since V3's backfill).
  */
 data class ExecutionRecord(
     val executionId: UUID,
@@ -40,6 +48,9 @@ data class ExecutionRecord(
     val nodeStatsJson: String? = null,
     val resultRowCount: Long? = null,
     val resultSizeBytes: Long? = null,
+    val parentExecutionId: UUID? = null,
+    val parentNodeId: String? = null,
+    val rootExecutionId: UUID? = null,
 )
 
 /**
@@ -62,10 +73,12 @@ class ExecutionRepository(
             """
             INSERT INTO pipeline_executions (
                 execution_id, pipeline_id, pipeline_version, status, parameters_json,
-                triggered_by, triggered_via, correlation_id, started_at
+                triggered_by, triggered_via, correlation_id, started_at,
+                parent_execution_id, parent_node_id, root_execution_id
             ) VALUES (
                 :executionId, :pipelineId, :pipelineVersion, :status, CAST(:parametersJson AS jsonb),
-                :triggeredBy, :triggeredVia, :correlationId, :startedAt
+                :triggeredBy, :triggeredVia, :correlationId, :startedAt,
+                :parentExecutionId, :parentNodeId, :rootExecutionId
             )
             """.trimIndent(),
             mapOf(
@@ -78,6 +91,10 @@ class ExecutionRepository(
                 "triggeredVia" to record.triggeredVia.name,
                 "correlationId" to record.correlationId,
                 "startedAt" to java.sql.Timestamp.from(record.startedAt),
+                "parentExecutionId" to record.parentExecutionId,
+                "parentNodeId" to record.parentNodeId,
+                // NOT NULL since V3: a null rootExecutionId on the record means "I am the root".
+                "rootExecutionId" to (record.rootExecutionId ?: record.executionId),
             ),
         )
         return record
@@ -173,6 +190,14 @@ class ExecutionRepository(
         jdbc.query(
             "$SELECT_COLUMNS WHERE pipeline_id = :pipelineId ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
             mapOf("pipelineId" to pipelineId, "limit" to limit, "offset" to offset),
+            MAPPER,
+        )
+
+    /** The whole execution family (root + descendants), newest first — the `idx_executions_root` access path. */
+    fun findByRoot(rootExecutionId: UUID): List<ExecutionRecord> =
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE root_execution_id = :root ORDER BY started_at DESC",
+            mapOf("root" to rootExecutionId),
             MAPPER,
         )
 
@@ -321,7 +346,8 @@ class ExecutionRepository(
             SELECT execution_id, pipeline_id, pipeline_version, status, parameters_json::TEXT AS parameters_json,
                    triggered_by, triggered_via, correlation_id, started_at, completed_at, duration_ms,
                    failed_node_id, error_json::TEXT AS error_json, node_stats_json::TEXT AS node_stats_json,
-                   result_row_count, result_size_bytes
+                   result_row_count, result_size_bytes,
+                   parent_execution_id, parent_node_id, root_execution_id
               FROM pipeline_executions
             """.trimIndent()
 
@@ -344,6 +370,9 @@ class ExecutionRepository(
                     nodeStatsJson = rs.getString("node_stats_json"),
                     resultRowCount = rs.getObject("result_row_count")?.let { (it as Number).toLong() },
                     resultSizeBytes = rs.getObject("result_size_bytes")?.let { (it as Number).toLong() },
+                    parentExecutionId = rs.getObject("parent_execution_id", UUID::class.java),
+                    parentNodeId = rs.getString("parent_node_id"),
+                    rootExecutionId = rs.getObject("root_execution_id", UUID::class.java),
                 )
             }
     }
