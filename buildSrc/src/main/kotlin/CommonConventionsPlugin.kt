@@ -212,11 +212,15 @@ class CommonConventionsPlugin : Plugin<Project> {
         }
 
         // Escape hatch for timing-sensitive diagnosis: -Pkover.off runs the
-        // tests WITHOUT the coverage agent attached — and skips the floor
-        // rules and the check→koverVerify wiring too (009/F5): with
+        // tests WITHOUT the coverage agent attached — and skips registering
+        // the floor rules and OUR check→koverVerify dependsOn (009/F5): with
         // instrumentation off there is no coverage data, so a registered
-        // floor rule fails on ABSENT data. The flag previously only worked
-        // for bare `test`; lifecycle builds (build/check) failed every floor.
+        // floor rule fails. The flag previously only worked for bare `test`;
+        // lifecycle builds (build/check) failed every floor. NOTE (012/F6,
+        // observed on Kover 0.9.9): the Kover plugin wires
+        // check→koverVerify ITSELF, so the task still appears in check's
+        // graph under the flag — what the flag removes is the floor RULE,
+        // which is what would fail. Proven in buildSrc/src/test.
         val koverOff = project.hasProperty("kover.off")
         if (koverOff) {
             project.extensions.configure<KoverProjectExtension> {

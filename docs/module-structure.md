@@ -661,10 +661,17 @@ configuration cannot escape silently.
 
 Every module gets the Kover plugin (`org.jetbrains.kotlinx.kover`, pinned in
 the catalog) from `CommonConventionsPlugin`. The root project applies it too
-and merges all modules into an aggregated report via `kover(project(...))`
-dependencies — **derived from `subprojects`**, not hand-enumerated, so a new
-module joins the aggregate automatically; `./gradlew koverHtmlReport` produces
-per-module reports plus the aggregate.
+and merges the modules into an aggregated report via `kover(project(...))`
+dependencies — wired **reactively** through
+`pluginManager.withPlugin("org.jetbrains.kotlinx.kover")` (012/F3), so a new
+module joins the aggregate automatically and a subproject without the Kover
+plugin cannot break root resolution. `tests/integration-tests` is
+deliberately excluded from the ROOT aggregate: pulling its Testcontainers
+tests into the report's task graph made `koverHtmlReport` need a Docker
+daemon, and its integration coverage would break comparability with the
+unit-only 2026-08-15 baseline the coverage floors derive from. Its own
+module-level report still exists; only the root aggregate excludes it.
+`./gradlew koverHtmlReport` produces per-module reports plus the aggregate.
 
 `check` depends on `koverVerify`. Each module carries a minimum **line
 coverage** floor in `COVERAGE_FLOORS` (CommonConventionsPlugin): the module's
@@ -693,8 +700,10 @@ Konsist tests (pinned in the catalog, TEST dependency only):
   classpath, the other statically from sources.
 - `tests/integration-tests` — `ArchitectureGuardTest`, scanning every module's
   production sources from the cross-module suite: no field injection
-  (`@Autowired` on properties/fields), and `@Transactional` only on
-  `*Service` classes (the house service-layer naming).
+  (`@Autowired` on properties/fields), and `@Transactional` only on types
+  carrying Spring's `@Service` stereotype, matched by its fully-qualified
+  name (a homegrown annotation named `Service` exempts nothing) — classes,
+  interfaces, and Kotlin `object` declarations all in scope.
 
 Konsist lives in existing test source sets only — no dedicated Gradle module.
 

@@ -11,9 +11,15 @@
 #     ./gradlew build      → must exit 0   (clean-state build)
 #     ./gradlew build      → must exit 0   (incremental build)
 #
-# After the cycles, one non-gradle stage: scripts/vuln-scan.sh (OSV-Scanner
-# over the committed lockfiles). It fails the gate on real findings and warns
-# without failing when the network is unreachable (fail-soft by design).
+# After the cycles, two extra stages:
+#   1. buildSrc guard tests (Gradle TestKit) — a consumer build only builds
+#      buildSrc through its JAR (verified: `build --dry-run` stops at
+#      :buildSrc:jar), so its test task NEVER runs automatically; the gate is
+#      what makes the COVERAGE_FLOORS / -Pkover.off guard falsifiable on
+#      every quality pass (012/F6).
+#   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
+#      fails the gate on real findings and warns without failing when the
+#      network is unreachable (fail-soft by design).
 #
 # The incremental pass is deliberate: it has its own failure history, and a gate
 # that only ever runs from clean never exercises the path developers use most.
@@ -110,19 +116,37 @@ for i in $(seq 1 "$CYCLES"); do
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
 
+# ---- buildSrc guard tests (012/F6) -------------------------------------------
+# The convention-plugin guards (COVERAGE_FLOORS fail-loud, -Pkover.off skip)
+# live in buildSrc, and a main build never executes buildSrc:test — only its
+# jar. Run them here so every gate pass exercises them. Same no-pipe rule.
+echo
+btest=0
+./gradlew -p buildSrc test > "$LOGDIR/buildsrc-test.log" 2>&1 || btest=$?
+if [ "$btest" -eq 0 ]; then
+  echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+else
+  fails=$((fails + 1))
+  echo "  buildSrc tests  EXIT=$btest  (log: $LOGDIR/buildsrc-test.log)"
+fi
+
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
-# osv.dev is unreachable the script exits 3 — the DEDICATED "skipped offline"
-# code, branched on AFTER the exit-code check. Fail-soft BY DESIGN: an offline
-# laptop must not fail the gate. Real findings exit 1 and fail it. The pre-009
-# grep for a magic log string is gone: wording drift would have converted an
-# offline skip into an affirmative PASS.
+# osv.dev is genuinely unreachable the script exits $SCAN_EXIT_OFFLINE (200,
+# defined once in scripts/lib/scan-tools.sh) — branched on AFTER the
+# exit-code check. Fail-soft BY DESIGN: an offline laptop must not fail the
+# gate. Findings exit 1 and scan errors / broken environments exit 2; both
+# fail the gate (012/F1: vuln-scan's exit codes are its OWN contract, never
+# osv-scanner's propagated raw). The pre-009 grep for a magic log string is
+# gone: wording drift would have converted an offline skip into an
+# affirmative PASS.
+source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 scan=0
 ./scripts/vuln-scan.sh > "$LOGDIR/vuln-scan.log" 2>&1 || scan=$?
 if [ "$scan" -eq 0 ]; then
   echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
-elif [ "$scan" -eq 3 ]; then
+elif [ "$scan" -eq "$SCAN_EXIT_OFFLINE" ]; then
   echo "  vuln-scan  SKIPPED — offline (fail-soft by design; log: $LOGDIR/vuln-scan.log)"
 else
   fails=$((fails + 1))

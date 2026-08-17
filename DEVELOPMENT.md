@@ -431,8 +431,10 @@ merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in e
 ### 10.2 Quality tooling
 
 Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
-guard has been proven able to fail (see the handback docs under
-`orchestration/handbacks/`).
+guard has been proven able to fail (see the run handbacks in the private
+orchestration store — a sibling repo outside this one, per the 2026-08-15
+convention that keeps orchestration material out of the product repo; the
+buildSrc guard tests in-tree are the live descendants of those proofs).
 
 #### Coverage (Kover)
 
@@ -454,11 +456,29 @@ regressions, not to force new tests: raise a floor only when a module's
 coverage has genuinely improved, and never lower one to make a build pass.
 `tests/integration-tests` has no floor (no main sources of its own).
 
+The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
+project missing from the maps fails configuration; `-Pkover.off` drops the
+floor rule). A main build only builds buildSrc through its jar, so its tests
+never run automatically: `./gradlew -p buildSrc test` runs them, and
+`scripts/gate.sh` runs that as a stage.
+
 #### Dependency vulnerabilities (OSV-Scanner)
 
 ```bash
-./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
+./scripts/vuln-scan.sh    # scans every committed gradle.lockfile
 ```
+
+Exit codes — the contract callers script from (the scanner's own codes are
+remapped INSIDE the script, never propagated raw; the offline sentinel is
+shared with `gate.sh` via `scripts/lib/scan-tools.sh`):
+
+- `0` — scan ran, no findings
+- `1` — scan ran, vulnerabilities found
+- `2` — scan did NOT reach a verdict: scanner error while online, or the
+  preflight classified the environment as broken (curl missing, TLS/CA
+  failure) — fails loudly with the cause named
+- `200` — skipped: offline (fail-soft; connection-level failures only —
+  connection refused, timeout, DNS)
 
 osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
 outside `build/`, so `gradlew clean` does not force a re-download — and
@@ -466,8 +486,8 @@ SHA256-verified against the release manifest) checks the
 resolved dependency set — the lockfiles, direct and transitive — against the
 OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
-stage; when the machine is offline the stage warns and does NOT fail (the scan
-is meaningless without osv.dev — the skip is printed, never silent).
+stage; exit 200 warns and does NOT fail the gate (the scan is meaningless
+without osv.dev — the skip is printed, never silent); exits 1 and 2 fail it.
 
 #### Secret scanning (gitleaks)
 
@@ -531,8 +551,15 @@ datapipelines/
 │   ├── docker-compose.dev.yml  ← local dev infra (Postgres + Redis)
 │   └── docker-compose.yml      ← reference production compose
 ├── scripts/
-│   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter
-│   └── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
+│   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
+│   ├── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
+│   ├── gate.sh                 ← Gate A: clean/build/build cycles + buildSrc guard tests + vuln-scan
+│   ├── install-hooks.sh        ← one-time: point git's core.hooksPath at .githooks/
+│   ├── secret-scan.sh          ← gitleaks secret scan (full history / --staged for the hook)
+│   ├── vuln-scan.sh            ← OSV-Scanner over the committed lockfiles (§10.2)
+│   ├── container-scan.sh       ← trivy config + image scan (§10.2)
+│   └── lib/
+│       └── scan-tools.sh       ← shared pinned-scanner install/verify machinery (sourced)
 ├── modules/
 │   ├── typesystem/             ← canonical types, per-dialect mappers
 │   ├── pipeline-contract/      ← pipeline model, validation
