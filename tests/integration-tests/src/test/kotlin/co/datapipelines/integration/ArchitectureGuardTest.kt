@@ -32,25 +32,33 @@ class ArchitectureGuardTest {
 
     /**
      * `@Transactional` belongs to the service layer only. The layer is identified by
-     * the `@Service` STEREOTYPE, not the `*Service` name suffix (009/F8: a
-     * `@Repository class ExecutionCleanupService` passed the old name check), and the
-     * scan covers INTERFACES as well as classes (Konsist `.classes()` misses
-     * interfaces, so a `@Transactional interface` passed silently). All three service
-     * classes at adoption time (JwtService, UserService, ApiKeyService) carry
-     * `@Service` — verified by grep, not recall.
+     * Spring's `@Service` STEREOTYPE pinned to its fully-qualified name, not the
+     * `*Service` name suffix (009/F8: a `@Repository class ExecutionCleanupService`
+     * passed the old name check). The FQN pin matters (012/F5): Konsist's
+     * `hasAnnotationWithName` matches its argument against BOTH the annotation's
+     * simple name and its fully-qualified name, so the old `"Service"` argument
+     * exempted ANY annotation named Service — a homegrown one from another package
+     * took @Transactional silently. Passing the FQN makes the exemption mean
+     * exactly `org.springframework.stereotype.Service`. The scan covers INTERFACES
+     * and Kotlin `object` declarations too (`classesAndInterfacesAndObjects()`,
+     * 009/F8 + 012/F5: `object ExecutionCleanup { @Transactional fun purge() }` is
+     * as much a transaction boundary as a class, and escaped
+     * `classesAndInterfaces()`). All three service classes at adoption time
+     * (JwtService, UserService, ApiKeyService) carry Spring's `@Service` —
+     * verified by grep, not recall.
      */
     @Test
     fun `transactional only on service-layer types`() {
         val transacting =
             productionScope()
-                .classesAndInterfaces()
+                .classesAndInterfacesAndObjects()
                 .filter { decl ->
                     decl.hasAnnotationWithName("Transactional") ||
                         decl.functions().any { it.hasAnnotationWithName("Transactional") }
                 }
 
         transacting
-            .filterNot { it.hasAnnotationWithName("Service") }
+            .filterNot { it.hasAnnotationWithName("org.springframework.stereotype.Service") }
             .assertEmpty()
     }
 

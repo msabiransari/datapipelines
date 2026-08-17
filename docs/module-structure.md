@@ -700,8 +700,10 @@ Konsist tests (pinned in the catalog, TEST dependency only):
   classpath, the other statically from sources.
 - `tests/integration-tests` — `ArchitectureGuardTest`, scanning every module's
   production sources from the cross-module suite: no field injection
-  (`@Autowired` on properties/fields), and `@Transactional` only on
-  `*Service` classes (the house service-layer naming).
+  (`@Autowired` on properties/fields), and `@Transactional` only on types
+  carrying Spring's `@Service` stereotype, matched by its fully-qualified
+  name (a homegrown annotation named `Service` exempts nothing) — classes,
+  interfaces, and Kotlin `object` declarations all in scope.
 
 Konsist lives in existing test source sets only — no dedicated Gradle module.
 
