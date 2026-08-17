@@ -203,9 +203,17 @@ class DatasourceSchemaToolsTest {
             )
     }
 
-    /** A real [SchemaIntrospector] over one mock connection (MySQL routing) carrying [meta]. */
+    /**
+     * A real [SchemaIntrospector] over one mock connection carrying [meta]. Name/dialect/URL
+     * parametrized (R5 F1/F8): the current-schema read routes per dialect and the red shapes
+     * are driver-specific. The connection defaults to a KNOWN current schema so unfiltered
+     * reads take the default; a test overrides via [connectionSetup] (later recording wins).
+     */
     private fun realIntrospectorOver(
         meta: java.sql.DatabaseMetaData,
+        name: String = "down",
+        dialect: co.datapipelines.typesystem.Dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+        jdbcUrl: String = "jdbc:mysql://db.internal:3306",
         connectionSetup: (java.sql.Connection) -> Unit = {},
     ): SchemaIntrospector {
         val connection = mockk<java.sql.Connection>()
@@ -216,24 +224,52 @@ class DatasourceSchemaToolsTest {
         connectionSetup(connection)
         val datasource =
             co.datapipelines.datasources.Datasource(
-                name = "down",
-                displayName = "Down",
-                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
-                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                name = name,
+                displayName = name,
+                dialect = dialect,
+                jdbcUrl = jdbcUrl,
                 username = "app",
                 password = "secret",
             )
         val registry = mockk<DatasourceRegistry>()
-        every { registry.get("down") } returns datasource
+        every { registry.get(name) } returns datasource
         every { registry.poolFor(datasource) } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {
-                override val name: String = "down"
+                override val name: String = name
 
                 override fun leaseConnection(): java.sql.Connection = connection
 
                 override fun close() = Unit
             }
         return SchemaIntrospector(registry)
+    }
+
+    @Test
+    fun `a closed duckdb connection during the current-schema read is the catalogued unreachable - never -32603`() {
+        // R5 F1 shape (a), DuckDB arm, through the FULL MCP path: duckdb_jdbc 1.5.5.1 reports
+        // a closed connection as a PLAIN SQLException — NULL SQLState, vendor code 0, message
+        // "Connection was closed" — invisible to every state/type branch. Round 4's narrowed
+        // catch let it escape RAW to the dispatcher (JSON-RPC -32603). The introspector must
+        // classify it; the tool's translation yields the catalogued code the dispatcher
+        // envelopes as isError.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val real =
+            realIntrospectorOver(
+                meta,
+                name = "dw",
+                dialect = co.datapipelines.typesystem.Dialect.DUCKDB,
+                jdbcUrl = "jdbc:duckdb::memory:",
+            ) { connection ->
+                every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+            }
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
     }
 
     @Test

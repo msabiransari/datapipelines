@@ -641,4 +641,86 @@ class SchemaIntrospectorRoutingTest {
 
         shouldThrow<IllegalStateException> { introspector.tables(name) }
     }
+
+    @Test
+    fun `current-schema exception shapes OUTSIDE the 08 family are classified - never a raw escape`() {
+        // R5 F1: round 4's narrowed catch kept only SQLFeatureNotSupportedException as "none"
+        // and let everything else PROPAGATE RAW (the lease boundary's post-lease translation
+        // covers the connection family only, and the surfaces catch only the two module
+        // exceptions). Three shapes verified against the shipped drivers (see
+        // EmbeddedDialectBehaviorTest for the live reproducing cases):
+        // (a) connection loss with a NON-08 state — H2's closed-object 90007, DuckDB's
+        //     null-state plain SQLException "Connection was closed" — must be the catalogued
+        //     502 datasource_unreachable, not a raw 500;
+        // (b) a NON-connection failure from a QUERY-BACKED getSchema() — pgjdbc 42.7.13 runs
+        //     `select current_schema()` on the server (bytecode-verified), so a statement
+        //     cancel (57014) or permission error arrives as a PSQLException the 08 family
+        //     does not cover — must be the catalogued unknown-current-schema 400, not raw;
+        // (c) a driver signaling "unsupported" as a PLAIN SQLException SQLState 0A000 instead
+        //     of the typed exception — must read as "driver reports none" (the 400 path),
+        //     not raw.
+        assertAll(
+            {
+                // (a) H2 90007 — the exact class/state the pinned h2 2.3.232 throws from
+                // getSchema() on a closed connection (live-pinned in EmbeddedDialectBehaviorTest).
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.H2, meta) { connection ->
+                        every { connection.schema } throws
+                            org.h2.jdbc.JdbcSQLNonTransientException(
+                                // Constructor is (message, sql, SQLSTATE, errorCode, cause, stackTrace)
+                                // — bytecode-checked: only the third String reaches getSQLState().
+                                "The object is already closed",
+                                null,
+                                "90007",
+                                90007,
+                                null,
+                                null,
+                            )
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (a) DuckDB 1.5.5.x closed connection — plain java.sql.SQLException, NULL
+                // SQLState, vendor code 0, the JDBC layer's own "Connection was closed" text
+                // (native errors are ALSO plain null-state SQLExceptions with different
+                // messages, so the message is the only discriminator — live-pinned in
+                // EmbeddedDialectBehaviorTest).
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.DUCKDB, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+                    }
+
+                shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (b) pgjdbc statement-cancel from the current_schema() query — the real
+                // PSQLException/PSQLState.QUERY_CANCELED shape, state 57014.
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws
+                            org.postgresql.util.PSQLException(
+                                "canceling statement due to user request",
+                                org.postgresql.util.PSQLState.QUERY_CANCELED,
+                            )
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+            },
+            {
+                // (c) feature-unsupported as a plain SQLException, SQLState 0A000 — the
+                // documented "some drivers use the state, not the type" shape.
+                val meta = mockk<DatabaseMetaData>()
+                val (introspector, name) =
+                    introspectorOver(Dialect.POSTGRES, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("feature not supported", "0A000")
+                    }
+
+                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+            },
+        )
+    }
 }

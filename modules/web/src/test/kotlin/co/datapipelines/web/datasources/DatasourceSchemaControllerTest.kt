@@ -236,9 +236,60 @@ class DatasourceSchemaControllerTest {
         )
     }
 
-    /** A real [SchemaIntrospector] over one mock connection carrying [meta] (MySQL routing). */
+    @Test
+    fun `connection loss with a NON-08 state during the current-schema read is the catalogued 502 - not a raw 500`() {
+        // R5 F1 shape (a) through the FULL web path: h2 2.3.232 reports a closed connection
+        // OBJECT as JdbcSQLNonTransientException state 90007 — neither an 08 state nor a
+        // connection-exception subclass, so the 08-family classifier cannot see it. Round 4's
+        // narrowed catch let it propagate RAW past every translator (raw 500). The
+        // introspector must classify it (502), with the driver's text staying off the wire.
+        val meta = mockk<java.sql.DatabaseMetaData>()
+        every { meta.searchStringEscape } returns "\\"
+        val controller =
+            DatasourceSchemaController(
+                realIntrospectorOver(
+                    meta,
+                    name = "h2-prod",
+                    dialect = co.datapipelines.typesystem.Dialect.H2,
+                    jdbcUrl = "jdbc:h2:mem:appprod",
+                ) { connection ->
+                    every { connection.schema } throws
+                        org.h2.jdbc.JdbcSQLNonTransientException(
+                            // Constructor is (message, sql, SQLSTATE, errorCode, cause, stackTrace).
+                            "The object is already closed",
+                            null,
+                            "90007",
+                            90007,
+                            null,
+                            null,
+                        )
+                },
+            )
+
+        val thrown = shouldThrow<DatapipelinesException> { controller.columns("h2-prod", "orders", schema = null) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE },
+            {
+                co.datapipelines.web.api.ApiErrorCatalog
+                    .statusFor(thrown.code) shouldBe
+                    org.springframework.http.HttpStatus.BAD_GATEWAY
+            },
+            { thrown.message shouldNotContain "already closed" },
+        )
+    }
+
+    /**
+     * A real [SchemaIntrospector] over one mock connection carrying [meta]. Name/dialect/URL
+     * are parametrized because the current-schema read routes per dialect (catalog vs schema)
+     * and the red shapes are driver-specific (R5 F1: an h2-closed connection on an H2
+     * datasource, a duckdb-closed connection on a DuckDB one).
+     */
     private fun realIntrospectorOver(
         meta: java.sql.DatabaseMetaData,
+        name: String = "pg-prod",
+        dialect: co.datapipelines.typesystem.Dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+        jdbcUrl: String = "jdbc:mysql://db.internal:3306/app",
         connectionSetup: (java.sql.Connection) -> Unit = {},
     ): SchemaIntrospector {
         val connection = mockk<java.sql.Connection>()
@@ -247,18 +298,18 @@ class DatasourceSchemaControllerTest {
         connectionSetup(connection)
         val datasource =
             co.datapipelines.datasources.Datasource(
-                name = "pg-prod",
-                displayName = "PG",
-                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
-                jdbcUrl = "jdbc:mysql://db.internal:3306/app",
+                name = name,
+                displayName = name,
+                dialect = dialect,
+                jdbcUrl = jdbcUrl,
                 username = "app",
                 password = "secret",
             )
         val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
-        every { registry.get("pg-prod") } returns datasource
+        every { registry.get(name) } returns datasource
         every { registry.poolFor(datasource) } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {
-                override val name: String = "pg-prod"
+                override val name: String = name
 
                 override fun leaseConnection(): java.sql.Connection = connection
 

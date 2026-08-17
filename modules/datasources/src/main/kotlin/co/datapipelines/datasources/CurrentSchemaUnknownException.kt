@@ -30,8 +30,10 @@ package co.datapipelines.datasources
  */
 class CurrentSchemaUnknownException(
     val datasourceName: String,
+    cause: Throwable? = null,
 ) : RuntimeException(
         "Datasource '$datasourceName' reports no current schema; pass an explicit schema filter " +
             "(list them with the schemas operation) — an unqualified read could merge same-named tables " +
             "across schemas.",
+        cause,
     )
