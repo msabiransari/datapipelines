@@ -5,24 +5,23 @@ import java.io.File
 /**
  * Locates a repository file by walking up from the working directory, so a test does not encode
  * how deep this module sits in the tree — the pattern `Fixtures.repoFile` established in
- * `pipeline-contract` and `ColumnSchemaSpecDriftTest` in `typesystem`.
+ * `pipeline-contract` and `ColumnSchemaSpecDriftTest` in `typesystem`. One shared walk
+ * ([locate]) serves both the file and directory flavors (R5 F8 — they were line-for-line
+ * duplicates).
  */
 internal object TestFiles {
-    fun repoFile(relativePath: String): File {
-        var dir: File? = File("").absoluteFile
-        while (dir != null) {
-            val candidate = File(dir, relativePath)
-            if (candidate.isFile) return candidate
-            dir = dir.parentFile
-        }
-        error("$relativePath not found walking up from ${File("").absolutePath}")
-    }
+    fun repoFile(relativePath: String): File = locate(relativePath) { it.isFile }
 
-    fun repoDirectory(relativePath: String): File {
+    fun repoDirectory(relativePath: String): File = locate(relativePath) { it.isDirectory }
+
+    private fun locate(
+        relativePath: String,
+        matches: (File) -> Boolean,
+    ): File {
         var dir: File? = File("").absoluteFile
         while (dir != null) {
             val candidate = File(dir, relativePath)
-            if (candidate.isDirectory) return candidate
+            if (matches(candidate)) return candidate
             dir = dir.parentFile
         }
         error("$relativePath not found walking up from ${File("").absolutePath}")

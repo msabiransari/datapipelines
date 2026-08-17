@@ -39,6 +39,27 @@ object TestRepoFiles {
 }
 
 /**
+ * A one-row `getTables` [java.sql.ResultSet] — the single (schema, name, type) row the
+ * schema-controller tests' tables walk reports ([schemaColumn] selects the dialect's
+ * vocabulary; TABLE_CAT for catalog-routing drivers). This module's OWN copy of the small
+ * builder the datasources and mcp-server test sources also keep — no cross-module coupling
+ * (R5 F8; the hand-copied stanza had 12+ copies across the three modules).
+ */
+fun tablesResultSet(
+    schema: String?,
+    name: String,
+    type: String = "TABLE",
+    schemaColumn: String = "TABLE_SCHEM",
+): java.sql.ResultSet {
+    val rs = io.mockk.mockk<java.sql.ResultSet>(relaxed = true)
+    io.mockk.every { rs.next() } returns true andThen false
+    io.mockk.every { rs.getString(schemaColumn) } returns schema
+    io.mockk.every { rs.getString("TABLE_NAME") } returns name
+    io.mockk.every { rs.getString("TABLE_TYPE") } returns type
+    return rs
+}
+
+/**
  * One Redis container shared by this module's integration tests — the singleton pattern
  * `dag`'s RedisSupport established (one image startup, Ryuk reaps it at JVM exit).
  */

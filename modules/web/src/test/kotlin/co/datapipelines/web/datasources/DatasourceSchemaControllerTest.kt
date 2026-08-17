@@ -187,12 +187,9 @@ class DatasourceSchemaControllerTest {
         // schema, cannot merge, and keeps working exactly as before the guard existed.
         val meta = mockk<java.sql.DatabaseMetaData>()
         io.mockk.every { meta.searchStringEscape } returns "\\"
-        val tablesRs = mockk<java.sql.ResultSet>(relaxed = true)
+        val tablesRs =
+            co.datapipelines.web.tablesResultSet("db1", "orders", schemaColumn = "TABLE_CAT")
         io.mockk.every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        io.mockk.every { tablesRs.next() } returns true andThen false
-        io.mockk.every { tablesRs.getString("TABLE_CAT") } returns "db1"
-        io.mockk.every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        io.mockk.every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val controller =
             DatasourceSchemaController(
                 realIntrospectorOver(meta) { connection ->

@@ -25,13 +25,9 @@ class SchemaIntrospectorRoutingTest {
         // Connector/J defaults: the database arrives in TABLE_CAT, TABLE_SCHEM is null — a
         // schemaPattern selects nothing. The filter must land in the catalog argument.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("app", "orders", schemaColumn = "TABLE_CAT")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables("app", null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "app"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val columnsRs = mockk<ResultSet>(relaxed = true)
         every { meta.getColumns("app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false
@@ -58,13 +54,9 @@ class SchemaIntrospectorRoutingTest {
         // get_columns returns [] — the zero-columns defect. The stub answers ONLY the raw
         // "my_app", so an escaped call fails loudly.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("my_app", "orders", schemaColumn = "TABLE_CAT")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables("my_app", null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_CAT") } returns "my_app"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         val columnsRs = mockk<ResultSet>(relaxed = true)
         every { meta.getColumns("my_app", null, "orders", "%") } returns columnsRs
         every { columnsRs.next() } returns false
@@ -132,13 +124,9 @@ class SchemaIntrospectorRoutingTest {
         // The non-MySQL world: TABLE_SCHEM carries the schema and the filter stays in the
         // schemaPattern argument — routing must not move it for them.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
+        val tablesRs = tablesResultSet("public", "orders")
         every { meta.searchStringEscape } returns "\\"
         every { meta.getTables(null, "public", "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
 
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
@@ -244,13 +232,8 @@ class SchemaIntrospectorRoutingTest {
         assertAll(
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("db1", "orders", schemaColumn = "TABLE_CAT")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_CAT") } returns "db1"
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) =
                     introspectorOver(Dialect.MYSQL, meta) { connection ->
                         every { connection.catalog } returns null
@@ -264,13 +247,8 @@ class SchemaIntrospectorRoutingTest {
             },
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("db2", "orders", schemaColumn = "TABLE_CAT")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_CAT") } returns "db2"
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) =
                     introspectorOver(Dialect.MYSQL, meta) { connection ->
                         every { connection.catalog } throws SQLFeatureNotSupportedException("getCatalog unsupported")
@@ -425,13 +403,8 @@ class SchemaIntrospectorRoutingTest {
             },
             {
                 val meta = mockk<DatabaseMetaData>()
-                val tablesRs = mockk<ResultSet>(relaxed = true)
-                every { meta.searchStringEscape } returns "\\"
+                val tablesRs = tablesResultSet("   ", "orders")
                 every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-                every { tablesRs.next() } returns true andThen false
-                every { tablesRs.getString("TABLE_SCHEM") } returns "   "
-                every { tablesRs.getString("TABLE_NAME") } returns "orders"
-                every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
                 val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 
                 introspector
@@ -523,13 +496,8 @@ class SchemaIntrospectorRoutingTest {
         // information_schema columns defaulting to ''); the wire contract is
         // omitted-when-none, and the introspector's ResultSet boundary is where "" -> null.
         val meta = mockk<DatabaseMetaData>()
-        val tablesRs = mockk<ResultSet>(relaxed = true)
-        every { meta.searchStringEscape } returns "\\"
+        val tablesRs = tablesResultSet("public", "orders")
         every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
-        every { tablesRs.next() } returns true andThen false
-        every { tablesRs.getString("TABLE_SCHEM") } returns "public"
-        every { tablesRs.getString("TABLE_NAME") } returns "orders"
-        every { tablesRs.getString("TABLE_TYPE") } returns "TABLE"
         every { tablesRs.getString("REMARKS") } returns ""
         val (introspector, name) = introspectorOver(Dialect.POSTGRES, meta)
 

@@ -121,7 +121,7 @@ internal class JdbcUrlPool(
 }
 
 /**
- * An [SchemaIntrospector] whose registry hands out ONE connection carrying the given mocked
+ * A [SchemaIntrospector] whose registry hands out ONE connection carrying the given mocked
  * [DatabaseMetaData]. Returns (introspector, datasource name). [connectionSetup] stubs
  * connection-level reads the operation under test consults (getSchema/getCatalog).
  *
@@ -154,4 +154,25 @@ internal fun introspectorOver(
             override fun close() = Unit
         }
     return SchemaIntrospector(registry) to ds.name
+}
+
+/**
+ * A one-row `getTables` [java.sql.ResultSet] — the single (schema, name, type) row the
+ * tables walk reports, with [schemaColumn] selecting the dialect's vocabulary
+ * (TABLE_SCHEM by default; TABLE_CAT for catalog-routing drivers). The hand-copied stanza
+ * this replaces had 12+ copies across three modules (R5 F8); each module keeps its OWN
+ * small builder — no cross-module coupling.
+ */
+internal fun tablesResultSet(
+    schema: String?,
+    name: String,
+    type: String = "TABLE",
+    schemaColumn: String = "TABLE_SCHEM",
+): java.sql.ResultSet {
+    val rs = mockk<java.sql.ResultSet>(relaxed = true)
+    every { rs.next() } returns true andThen false
+    every { rs.getString(schemaColumn) } returns schema
+    every { rs.getString("TABLE_NAME") } returns name
+    every { rs.getString("TABLE_TYPE") } returns type
+    return rs
 }
