@@ -70,5 +70,6 @@ gate-logs/
 
 # --- Local AI-assistant state (per-developer, never shared) ---
 .claude/
+.kimi-code/
 # Orchestration prompts/handbacks live in a private sibling repo, never here
 orchestration/
