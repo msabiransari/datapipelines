@@ -50,12 +50,31 @@ class RedisResultStore(
         sourceDialect: Dialect,
         ttlSeconds: Long,
     ): StoredResult {
-        val key = baseKey(executionId)
         val schema = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect)
-        val ttl = Duration.ofSeconds(ttlSeconds)
+        return storeRows(executionId, schema, resultSetRows(resultSet, schema.columns), Duration.ofSeconds(ttlSeconds))
+    }
+
+    override suspend fun materializeRows(
+        executionId: UUID,
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+        ttlSeconds: Long,
+    ): StoredResult = storeRows(executionId, ResultSchema(schema, warnings = emptyList()), rows.iterator(), Duration.ofSeconds(ttlSeconds))
+
+    /**
+     * The write path both entry points share: discard any previous result for the execution, drain
+     * [rows] into the pages list under the size cap, write the meta key, count the outcome.
+     */
+    private fun storeRows(
+        executionId: UUID,
+        schema: ResultSchema,
+        rows: Iterator<List<Any?>>,
+        ttl: Duration,
+    ): StoredResult {
+        val key = baseKey(executionId)
         discard(key)
         return try {
-            drain(key, resultSet, schema, ttl)
+            writePages(key, schema, rows, ttl)
                 .also { writeMeta(key, executionId, schema, it, ttl) }
                 .also { metrics.resultWritten(ExecutorMetrics.OUTCOME_STORED, it.bytes) }
         } catch (e: DataAccessException) {
@@ -164,23 +183,23 @@ class RedisResultStore(
     }
 
     /**
-     * Streams the cursor into the rows list, batching pushes and measuring encoded size as it
+     * Streams [rows] into the rows list, batching pushes and measuring encoded size as it
      * goes. The TTL is applied on the **first** batch as well as at the end, so an execution that
      * dies mid-drain leaves an expiring key rather than a permanent one.
      */
-    private fun drain(
+    private fun writePages(
         key: String,
-        resultSet: ResultSet,
         schema: ResultSchema,
+        rows: Iterator<List<Any?>>,
         ttl: Duration,
     ): StoredResult {
         val batch = ArrayList<String>(PUSH_BATCH_ROWS)
-        var rows = 0L
+        var rowCount = 0L
         var bytes = 0L
         var ttlApplied = false
 
-        while (resultSet.next()) {
-            val encoded = encodeRow(resultSet, schema.columns)
+        while (rows.hasNext()) {
+            val encoded = encodeRow(rows.next(), schema.columns)
             // F4: a CHARACTER-length gate before anything is measured in bytes. `toByteArray`
             // allocates a second full copy of the row, so the old order materialised a single
             // oversized LOB twice on the heap purely to discover it was over the cap — which is the
@@ -197,7 +216,7 @@ class RedisResultStore(
                 throw tooLarge(bytes)
             }
             batch += encoded
-            rows++
+            rowCount++
             if (batch.size >= PUSH_BATCH_ROWS) {
                 redis.opsForList().rightPushAll(rowsKey(key), batch)
                 if (!ttlApplied) ttlApplied = redis.expire(rowsKey(key), ttl) == true
@@ -207,19 +226,29 @@ class RedisResultStore(
         if (batch.isNotEmpty()) redis.opsForList().rightPushAll(rowsKey(key), batch)
         redis.expire(rowsKey(key), ttl)
 
-        return StoredResult(key, rows, bytes, Instant.now().plus(ttl), schema.warnings)
+        return StoredResult(key, rowCount, bytes, Instant.now().plus(ttl), schema.warnings)
     }
+
+    /**
+     * A lazy iterator over the cursor, decoding each row through [ResultRowReader] as it is
+     * pulled — lazily, so the size cap in [writePages] still aborts the drain mid-stream instead
+     * of after buffering the whole result.
+     */
+    private fun resultSetRows(
+        resultSet: ResultSet,
+        columns: List<ColumnSchema>,
+    ): Iterator<List<Any?>> =
+        iterator {
+            while (resultSet.next()) {
+                yield(columns.mapIndexed { index, column -> ResultRowReader.readValue(resultSet, index + 1, column) })
+            }
+        }
 
     /** One row as a JSON array, each value encoded by the type system's egress rules (§3.5). */
     private fun encodeRow(
-        resultSet: ResultSet,
+        row: List<Any?>,
         columns: List<ColumnSchema>,
-    ): String =
-        ExecutorJson.write(
-            columns.mapIndexed { index, column ->
-                JsonEncoder.encode(ResultRowReader.readValue(resultSet, index + 1, column), column)
-            },
-        )
+    ): String = ExecutorJson.write(row.mapIndexed { index, value -> JsonEncoder.encode(value, columns[index]) })
 
     private fun writeMeta(
         key: String,

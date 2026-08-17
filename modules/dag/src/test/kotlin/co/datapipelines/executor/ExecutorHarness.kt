@@ -22,10 +22,12 @@ class ExecutorHarness(
     val auditSink: ExecutionAwareAuditSink? = null,
     val cancellations: InMemoryCancellationRegistry = InMemoryCancellationRegistry(),
     val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+    /** Injected only by tests that must observe (or forbid) slot acquisition — normally real. */
+    executionSlots: ExecutionSlots? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
-    val slots = ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsGlobal)
+    val slots = executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsGlobal)
 
     /** Deliberately small: a bounded pool is what the deadlock test needs to be honest. */
     private val dispatcher = ExecutorDispatcher.forConfig(config, maxThreads = DISPATCHER_THREADS)

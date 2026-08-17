@@ -11,8 +11,10 @@ import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRenderException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -72,6 +74,52 @@ class NodeRunnerTest {
             val key = result.callerResultRef.shouldNotBeNull()
             result.rowsOut shouldBe 1
             store.describe(key).shouldNotBeNull().firstPage shouldBe listOf(listOf(7))
+        }
+
+    @Test
+    fun `a datasource caller node with a direct sink streams to it and never touches the result store`() =
+        runBlocking<Unit> {
+            // Design §4.2 `direct` delivery: the child execution's caller ResultSet goes straight
+            // to the parent's in-process consumer; nothing is materialized into Redis.
+            val source =
+                h2Datasource(
+                    "dsink",
+                    listOf("CREATE TABLE t (n INT, s VARCHAR)", "INSERT INTO t VALUES (1, 'a'), (2, 'b')"),
+                )
+            val store = mockk<ResultStore>()
+            val runner =
+                runner(
+                    sql = "SELECT n, s FROM t",
+                    registry = FakeDatasourceRegistry(mapOf("dsink" to source)),
+                    resultStore = store,
+                )
+            val sink = RecordingSink()
+
+            val result = runner.run(ExecutableNode.from(Fixtures.node("caller", source = "dsink")), context(directSink = sink))
+
+            result.callerResultRef.shouldBeNull()
+            result.rowsOut shouldBe 2
+            sink.schema.shouldNotBeNull().map { it.name } shouldBe listOf("n", "s")
+            sink.rows shouldBe listOf(listOf(1, "a"), listOf(2, "b"))
+            coVerify(exactly = 0) { store.materialize(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { store.materializeRows(any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `a tempdb caller node with a direct sink streams to it and never touches the result store`() =
+        runBlocking<Unit> {
+            staging.execute("""CREATE TABLE "seed" (n INT)""")
+            staging.execute("""INSERT INTO "seed" VALUES (1), (2), (3)""")
+            val store = mockk<ResultStore>()
+            val runner = runner(sql = """SELECT n FROM "seed" WHERE n > 1""", resultStore = store)
+            val sink = RecordingSink()
+
+            val result = runner.run(ExecutableNode.from(Fixtures.node("caller")), context(directSink = sink))
+
+            result.callerResultRef.shouldBeNull()
+            result.rowsOut shouldBe 2
+            sink.rows shouldBe listOf(listOf(2), listOf(3))
+            coVerify(exactly = 0) { store.materialize(any(), any(), any(), any()) }
         }
 
     @Test
@@ -234,7 +282,10 @@ class NodeRunnerTest {
         return NodeRunner(engine, registry, JdbcWritebackRunner(registry), resultStore, config)
     }
 
-    private fun context(renderBudget: Long = ExecutorConfig().renderOutputBudgetChars()): NodeExecutionContext =
+    private fun context(
+        renderBudget: Long = ExecutorConfig().renderOutputBudgetChars(),
+        directSink: DirectResultSink? = null,
+    ): NodeExecutionContext =
         NodeExecutionContext(
             executionId = executionId,
             staging = staging,
@@ -245,6 +296,7 @@ class NodeRunnerTest {
             renderBudgetChars = renderBudget,
             stagingMaxMemoryMb = 1024,
             tempdbDialect = Dialect.H2,
+            directSink = directSink,
         )
 
     private suspend fun failureOf(

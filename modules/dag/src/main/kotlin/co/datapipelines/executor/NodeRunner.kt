@@ -52,6 +52,12 @@ data class NodeExecutionContext(
     val stagingMaxMemoryMb: Long,
     /** The dialect of `source: "tempdb"` nodes, from `settings.tempdb.engine` (§12.6, D6). */
     val tempdbDialect: Dialect,
+    /**
+     * The `direct` delivery target for this execution's caller result (design §4.2) — set on a
+     * child execution spawned by a PIPELINE node, null on roots. When present, the caller node's
+     * result streams here and the [ResultStore] is never touched.
+     */
+    val directSink: DirectResultSink? = null,
 )
 
 /**
@@ -142,7 +148,7 @@ class NodeRunner(
 
             is NodeOutput.Caller -> {
                 phase(NodePhase.MATERIALIZE, node.id) {
-                    tempdbCursor(node, sql, ctx, timeout) { rs -> materialize(node, rs, ctx, startedAt, ctx.tempdbDialect) }
+                    tempdbCursor(node, sql, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
                 }
             }
 
@@ -385,7 +391,7 @@ class NodeRunner(
             }
 
             is NodeOutput.Caller -> {
-                phase(NodePhase.MATERIALIZE, node.id) { materialize(node, rs, ctx, startedAt, dialect) }
+                phase(NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
             }
 
             is NodeOutput.Datasource -> {
@@ -394,6 +400,54 @@ class NodeRunner(
                 }
             }
         }
+
+    /**
+     * The caller-output fork (design §4.2): with a [NodeExecutionContext.directSink] the result
+     * streams straight to the in-process consumer and the [ResultStore] is never touched; without
+     * one it materializes into the store as it always has.
+     */
+    private suspend fun deliverToCaller(
+        node: ExecutableNode,
+        rs: ResultSet,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        dialect: Dialect,
+    ): NodeResult =
+        ctx.directSink
+            ?.let { streamToSink(node, rs, ctx, startedAt, dialect, it) }
+            ?: materialize(node, rs, ctx, startedAt, dialect)
+
+    /**
+     * `direct` delivery: the caller result streams to the execution's [DirectResultSink] instead
+     * of the result store — nothing is written to Redis, there is no cursor, and the result is not
+     * re-fetchable afterwards; re-running the child is the recovery path.
+     *
+     * Schema and row decoding go through [ResultRowReader] — the exact path
+     * [ResultStore.materialize] uses — so `direct` and cursor deliveries see identical wire
+     * values. The sequence is lazy over the still-open cursor and is consumed inside
+     * [DirectResultSink.accept]; [NodeResult.rowsOut] counts the rows actually delivered.
+     */
+    private suspend fun streamToSink(
+        node: ExecutableNode,
+        rs: ResultSet,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        dialect: Dialect,
+        sink: DirectResultSink,
+    ): NodeResult {
+        val schema = ResultRowReader.schemaOf(rs.metaData, dialect)
+        var rowsOut = 0L
+        val rows =
+            sequence {
+                while (rs.next()) {
+                    yield(schema.columns.mapIndexed { index, column -> ResultRowReader.readValue(rs, index + 1, column) })
+                    rowsOut++
+                }
+            }
+        sink.accept(schema.columns, rows)
+        ctx.warnings.addAll(schema.warnings)
+        return NodeResult.of(nodeId = node.id, rowsOut = rowsOut, startedAt = startedAt, callerResultRef = null)
+    }
 
     private suspend fun materialize(
         node: ExecutableNode,
