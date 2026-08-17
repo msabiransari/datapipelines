@@ -109,18 +109,71 @@ scan_tools_download() {
   fi
 }
 
-# scan_tools_prune <script> <tool> <keep-binary> — TEMPORARILY REVERTED FOR
-# COMMIT SPLIT; real version returns in the F5 commit.
+# scan_tools_ver_lt <a> <b> — numeric dotted-version comparison, returns 0
+# if a < b, 1 if a >= b, 2 if either version is not numeric-dot-separated
+# (caller treats "incomparable" as "do not delete" — conservative).
+scan_tools_ver_lt() {
+  local a="${1#v}" b="${2#v}" i p q
+  local IFS=.
+  local -r xa=($a) xb=($b)
+  local n=$(( ${#xa[@]} > ${#xb[@]} ? ${#xa[@]} : ${#xb[@]} ))
+  for ((i = 0; i < n; i++)); do
+    p="${xa[i]:-0}"; q="${xb[i]:-0}"
+    [[ "$p" =~ ^[0-9]+$ && "$q" =~ ^[0-9]+$ ]] || return 2
+    (( p < q )) && return 0
+    (( p > q )) && return 1
+  done
+  return 1
+}
+
+# scan_tools_prune <script> <tool> <keep-binary>
+# Remove GENUINE SUPERSESSIONS of <tool>: same platform, strictly OLDER
+# version than the just-installed <keep-binary> (013/F5). The old form
+# globbed "<tool>-*" and deleted everything not string-equal to keep —
+# version- and platform-blind. Two failure shapes that made offline commits
+# impossible: (1) checking out a state pinning an OLDER version ran its
+# installer, which pruned the NEWER binary — switching back OFFLINE left
+# `[ -x "$BIN" ]` false and the install's curl dead (pre-commit hook blocks
+# every commit); (2) a shared checkout used from two platforms (Rosetta
+# x86_64 vs native arm64 — container-scan names its binaries with raw
+# `uname -m`) deleted the other platform's working binary. Pruning only
+# older same-platform versions keeps both safe: a temporary downgrade never
+# destroys the newer binary, and cross-platform binaries always coexist.
+# Still prunes only on install — a failed download/verify never deletes the
+# working binary it would fall back to.
+#
+# Name grammar: "<tool>-<version>-<os>-<arch>" (os/arch tokens are
+# tool-specific; the platform is taken as everything after the version, so
+# the function stays agnostic of each tool's token style). Versions with a
+# dash would break the parse — none of the three pins has one; a non-numeric
+# version token marks the file incomparable → KEPT, never deleted.
 scan_tools_prune() {
   local script="$1" tool="$2" keep="$3" removed=0 f
-  for f in "$(scan_tools_dir "$tool")"/"$tool"-*; do
+  # NB: one declaration per line — `local a=x b=$a` expands $a BEFORE a is
+  # assigned (all args of one local are expanded first), yielding "".
+  local base="${keep##*/}"
+  local rest="${base#"$tool"-}"
+  local keep_ver="${rest%%-*}"
+  local platform="${rest#*"-"}"
+  if [ -z "$keep_ver" ] || [ "$platform" = "$rest" ]; then
+    echo "$script: prune skipped — cannot parse platform from $base (name grammar changed?)" >&2
+    return 0
+  fi
+  for f in "$(scan_tools_dir "$tool")"/"$tool"-*-"$platform"; do
     [ -e "$f" ] || continue
     [ "$f" = "$keep" ] && continue
-    rm -f "$f"
-    removed=$((removed + 1))
+    local frec="${f##*/}"
+    local fver="${frec#"$tool"-}"
+    fver="${fver%%-*}"
+    if scan_tools_ver_lt "$fver" "$keep_ver"; then
+      rm -f "$f"
+      removed=$((removed + 1))
+    else
+      echo "$script: keeping $frec (same platform, not older than installed $keep_ver — or version not comparable)" >&2
+    fi
   done
   if [ "$removed" -gt 0 ]; then
-    echo "$script: pruned $removed superseded $tool binary(ies) from $(scan_tools_dir "$tool")"
+    echo "$script: pruned $removed superseded $tool binary(ies) for platform $platform from $(scan_tools_dir "$tool")"
   fi
   return 0
 }
