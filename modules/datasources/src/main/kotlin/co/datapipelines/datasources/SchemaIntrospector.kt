@@ -453,7 +453,9 @@ class SchemaIntrospector(
     ): String? =
         try {
             if (adapter.schemaArrivesInCatalog) catalog else schema
-        } catch (e: SQLFeatureNotSupportedException) {
+        } catch (_: SQLFeatureNotSupportedException) {
+            // The typed capability statement: the driver reports none. Deliberately
+            // discarded — the exception type itself is the entire signal.
             null
         } catch (e: SQLException) {
             when {
