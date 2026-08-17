@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.executor.AbortReason
+import co.datapipelines.executor.DirectResultSink
 import co.datapipelines.executor.ExecutableNode
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
@@ -132,6 +133,7 @@ class SubPipelineExecutionRunnerTest {
     private fun context(
         compositionDepth: Int = 0,
         values: Map<String, Any?> = emptyMap(),
+        directSink: DirectResultSink? = null,
     ): NodeExecutionContext =
         NodeExecutionContext(
             executionId = parentExecutionId,
@@ -146,6 +148,7 @@ class SubPipelineExecutionRunnerTest {
             userId = parentUserId,
             rootExecutionId = parentRootId,
             compositionDepth = compositionDepth,
+            directSink = directSink,
         )
 
     /**
@@ -346,6 +349,36 @@ class SubPipelineExecutionRunnerTest {
             result.bytesOutEstimate shouldBe 40
             // The result is keyed by the PARENT's execution, with the parent's TTL — never the child's.
             coVerifyStore(parentExecutionId, 300)
+        }
+
+    @Test
+    fun `a caller-target node inside a direct child execution streams the rows onward to its own invoker`() =
+        runTest {
+            stubRegistry()
+            // The PARENT execution is itself a child: its caller result must not materialize
+            // under its own id — it streams to the sink its invoker attached (design §4.2,
+            // identical post-node behavior to a DQL caller node under direct delivery).
+            val upstreamRows = mutableListOf<List<Any?>>()
+            var upstreamSchema: List<ColumnSchema>? = null
+            val upstream =
+                DirectResultSink { schema, rows ->
+                    upstreamSchema = schema
+                    rows.forEach { upstreamRows += it }
+                }
+            val stub = ExecutorStub()
+            stub.drive = { request ->
+                request.directSink?.accept(schema, sequenceOf(listOf("EU", 3), listOf("US", 4)))
+                stub.success(request)
+            }
+
+            val result =
+                runner(stub).run(pipelineNode(output = NodeOutput.Caller), context(directSink = upstream))
+
+            upstreamSchema shouldBe schema
+            upstreamRows shouldBe listOf(listOf("EU", 3), listOf("US", 4))
+            result.rowsOut shouldBe 2
+            result.callerResultRef shouldBe null
+            coVerify(exactly = 0) { resultStore.materializeRows(any(), any(), any(), any()) }
         }
 
     @Test

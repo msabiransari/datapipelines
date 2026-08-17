@@ -68,7 +68,8 @@ import java.util.UUID
  * - **`direct` delivery.** When the node declares an `output`, the child request carries a
  *   [DirectResultSink] that lands the child's caller rows exactly where a DQL node's own
  *   ResultSet would go (design §4.2): staged into the PARENT's tempdb, re-published as the
- *   parent's caller result, or written back to a datasource. A zero-output node sends no sink
+ *   parent's caller result — or streamed onward to the parent's own invoker when the parent
+     *   execution is itself a `direct` child — or written back to a datasource. A node that declares no `output` sends no sink
  *   and simply awaits the child's terminal state (D3's side-effect child).
  *
  * ## The runtime depth backstop
@@ -279,7 +280,7 @@ class SubPipelineExecutionRunner(
         childExecutionId: UUID?,
         outcome: SinkOutcome,
     ) {
-        if (node.output != NodeOutput.Caller || outcome.callerResultRef != null) return
+        if (node.output != NodeOutput.Caller || outcome.delivered) return
         throw childFailure(
             node,
             childExecutionId,
@@ -323,7 +324,8 @@ class SubPipelineExecutionRunner(
      *
      * Each branch routes the child's decoded schema+rows through the exact writer a DQL node's
      * own ResultSet would reach (`NodeRunner.dispatchOutput`'s three branches): the parent's
-     * staging, the result store, or the write-back runner. A sink failure fails the CHILD's
+     * staging, the result store — or the parent's own upstream sink, when this execution is
+     * itself a `direct` child — or the write-back runner. A sink failure fails the CHILD's
      * caller node, so the parent sees it as a child failure with the real code — and staging's
      * partial-table rollback means a child that dies mid-stream never leaves a half-written
      * tempdb table behind to be read as success.
@@ -348,12 +350,26 @@ class SubPipelineExecutionRunner(
             }
 
             NodeOutput.Caller -> {
-                DirectResultSink { schema, rows ->
-                    val stored = resultStore.materializeRows(ctx.executionId, schema, rows, ctx.resultTtlSeconds)
-                    ctx.warnings.addAll(stored.warnings)
-                    outcome.rowsOut = stored.totalRows
-                    outcome.callerResultRef = stored.key
-                    outcome.bytesOutEstimate = stored.bytes
+                val upstream = ctx.directSink
+                if (upstream != null) {
+                    // This execution is itself a child: the rows stream onward to its invoker,
+                    // exactly like a DQL caller node under `direct` delivery (design §4.2 —
+                    // identical post-node behavior). Nothing is stored under this execution.
+                    DirectResultSink { schema, rows ->
+                        var count = 0L
+                        upstream.accept(schema, rows.onEach { count++ })
+                        outcome.rowsOut = count
+                        outcome.delivered = true
+                    }
+                } else {
+                    DirectResultSink { schema, rows ->
+                        val stored = resultStore.materializeRows(ctx.executionId, schema, rows, ctx.resultTtlSeconds)
+                        ctx.warnings.addAll(stored.warnings)
+                        outcome.rowsOut = stored.totalRows
+                        outcome.callerResultRef = stored.key
+                        outcome.bytesOutEstimate = stored.bytes
+                        outcome.delivered = true
+                    }
                 }
             }
 
@@ -459,6 +475,9 @@ class SubPipelineExecutionRunner(
         var rowsOut: Long = 0
         var callerResultRef: String? = null
         var bytesOutEstimate: Long = NodeResult.NOT_MEASURED
+
+        /** Set by either `caller` delivery path (stored or streamed onward); guards a missing delivery. */
+        var delivered: Boolean = false
     }
 
     private companion object {
