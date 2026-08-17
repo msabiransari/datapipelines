@@ -87,7 +87,6 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | **MCP progress notifications + cancel tool** — richer long-execution UX over MCP | mcp-server §12 |
 | **Cycle support (iterative pipelines)** — bounded loops for ML convergence algorithms | dag-executor §13 |
 | **Async / scheduled execution** — trigger pipelines, return immediately, deliver via webhook later | dag-executor §13 |
-| **Cross-pipeline calls** — invoke pipeline A from pipeline B's node | (not yet in any spec) |
 
 ### 3.3 Templates
 
@@ -160,7 +159,7 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 
 | Feature | Source spec |
 |---|---|
-| Distributed tracing across pipeline-to-pipeline calls (depends on §3.2 cross-pipeline) | observability §10 |
+| Distributed tracing across pipeline-to-pipeline calls (unblocked: the PIPELINE node type shipped 2026-08-17) | observability §10 |
 | OpenTelemetry collector reference configs (Loki, Tempo, Prometheus, Grafana) | observability §10 |
 
 ### 3.11 Deployment
@@ -221,6 +220,7 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 | 2026-08-07 | **Cancel-on-disconnect** + explicit cancel (D7) | rest-api v1.3 §6.8/§10.4, dag-executor v1.2 §8.3 | Replaces "executions survive disconnect, poll to recover"; cross-instance cancel via Redis flag |
 | 2026-08-07 | Custom headers → **`DP-` prefix** (D10) | rest-api v1.3 §3.6 | `X-API-Key`/`X-Correlation-Id` renamed; `Idempotency-Key` kept (standard) |
 | 2026-08-07 | Encryption-key **fallback chain removed** (D8) | datasources v1.1 §7.1 | Key is required fail-fast; KMS sourcing stays a v1.1 candidate below — as an explicit alternative source, never an implicit fallback |
+| 2026-08-17 | **Cross-pipeline calls** (v2 §3.2) shipped as the `PIPELINE` node type | pipeline-contract §4.9/§8.5/§12.9, design 2026-08-13-pipeline-node-type | Composition by invocation: a node executes a version-pinned child pipeline as a real, linked child execution (`direct` delivery, lineage columns, family cancellation) |
 
 ---
 
@@ -230,3 +230,4 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial ROADMAP: consolidated future work from all 12 specs, organized by version (v1.1 / v2 / long-term), rejected items with reasoning, operator responsibilities |
 | 2026-08-07 | v1.1 | consistency campaign | Decision log seeded with D1–D15 outcomes (params_schema removal, unified result delivery, cancel-on-disconnect, DP- headers, no key fallback); v2 list gains UI edit mode, detached execution, pub/sub cancel fan-out, MCP progress/cancel. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
+| 2026-08-17 | v1.2 | pipeline composition | v2 §3.2 "Cross-pipeline calls" removed — shipped as the `PIPELINE` node type (design 2026-08-13-pipeline-node-type; pipeline-contract §4.9/§8.5/§12.9); decision-log row added; §3.10 distributed-tracing dependency note updated |
