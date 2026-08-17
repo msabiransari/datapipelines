@@ -17,6 +17,7 @@ import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.web.pipelines.PipelineBodies
+import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -98,19 +99,25 @@ class DomainConfiguration {
     @Bean
     fun schemaIntrospector(registry: DatasourceRegistry): SchemaIntrospector = SchemaIntrospector(registry)
 
+    /**
+     * The repository-backed [PipelineResolver] composition validation resolves pinned references
+     * through (design 2026-08-13-pipeline-node-type §3, D5). The resolution rules live in
+     * [repositoryPipelineResolver]; this bean is the assembly.
+     */
+    @Bean
+    fun pipelineResolver(repository: PipelineRepository): PipelineResolver = repositoryPipelineResolver(repository)
+
     @Bean
     fun pipelineValidator(
         datasources: ContractDatasourceRegistry,
         dryRenderer: TemplateDryRenderer,
+        pipelines: PipelineResolver,
         properties: PipelineProperties,
     ): PipelineValidator =
         PipelineValidator(
             datasources,
             dryRenderer,
-            // The repository-backed resolver is wired by the composition runtime change; until
-            // then every pinned reference resolves to null and a PIPELINE node is rejected at
-            // save time with `pipeline_not_found` — fail-closed, matching the unwired executor.
-            PipelineResolver { _, _ -> null },
+            pipelines,
             properties.maxCompositionDepth,
         )
 

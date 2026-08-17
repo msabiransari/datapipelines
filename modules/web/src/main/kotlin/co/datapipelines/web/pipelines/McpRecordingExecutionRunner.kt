@@ -16,6 +16,7 @@ import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.mcp.McpExecutionRunner
@@ -66,6 +67,12 @@ class McpRecordingExecutionRunner(
     private val eventLog: SseEventLog,
     private val eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
+    /**
+     * The composition port (design 2026-08-13-pipeline-node-type §4.1) an MCP-run pipeline's
+     * PIPELINE nodes dispatch to — passed through to the per-run executor, as in
+     * [ExecutionLauncher].
+     */
+    private val subPipelineRunner: SubPipelineRunner? = null,
 ) : McpExecutionRunner {
     private val log = LoggerFactory.getLogger(McpRecordingExecutionRunner::class.java)
 
@@ -122,5 +129,6 @@ class McpRecordingExecutionRunner(
             config = executorConfig,
             resultUrls = resultUrls,
             metrics = executorMetrics,
+            subPipelineRunner = subPipelineRunner,
         )
 }

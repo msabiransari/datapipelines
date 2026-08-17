@@ -547,6 +547,11 @@ class PipelineExecutor(
             renderBudgetChars = config.renderOutputBudgetChars(budgetMb),
             stagingMaxMemoryMb = budgetMb,
             tempdbDialect = request.pipeline.settings.tempdb.engine.dialect,
+            userId = request.userId,
+            // A null rootExecutionId on the request marks a ROOT execution — its own id is the
+            // family's root, exactly as the repository persists it (metadata-db §4.6).
+            rootExecutionId = request.rootExecutionId ?: run.executionId,
+            compositionDepth = request.compositionDepth,
             directSink = request.directSink,
         )
     }
@@ -643,9 +648,16 @@ fun pipelineExecutor(
     resultUrls: ResultUrlFactory,
     metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     auditSink: ExecutionAwareAuditSink? = null,
+    /**
+     * The composition port (design §4.1) every PIPELINE node of this executor dispatches to. The
+     * assembling layer (web) wires its `SubPipelineExecutionRunner`; left null, a PIPELINE node
+     * fails with `pipeline.node.child_execution_failed` ("not wired in this runtime").
+     */
+    subPipelineRunner: SubPipelineRunner? = null,
 ): PipelineExecutor =
     PipelineExecutor(
-        nodeRunner = NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics),
+        nodeRunner =
+            NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics, subPipelineRunner),
         stagingFactory = stagingFactory,
         resultStore = resultStore,
         eventEmitter = eventEmitter,

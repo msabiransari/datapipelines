@@ -86,6 +86,43 @@ class WebEventEmitterTest {
         }
 
     @Test
+    fun `a child execution's row carries the composition lineage (metadata-db §4-6)`() =
+        runTest {
+            val parentExecutionId = UUID.randomUUID()
+            val rootExecutionId = UUID.randomUUID()
+            val record = slot<ExecutionRecord>()
+            every { executionRepository.create(capture(record)) } answers { record.captured }
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+
+            WebEventEmitter(
+                context =
+                    ExecutionContext(
+                        pipelineId = pipelineId,
+                        pipelineVersion = 4,
+                        userId = userId,
+                        correlationId = correlationId,
+                        triggeredVia = ExecutionTrigger.PIPELINE,
+                        parametersJson = """{"region":"EU"}""",
+                        parentExecutionId = parentExecutionId,
+                        parentNodeId = "revenue",
+                        rootExecutionId = rootExecutionId,
+                    ),
+                stream = null,
+                streams = registry,
+                eventLog = eventLog,
+                eventRepository = eventRepository,
+                executionRepository = executionRepository,
+                persistenceDispatcher = Dispatchers.Default,
+            ).emit(ExecutionStarted(executionId, pipelineId, 4, emptyMap(), startedAt = NOW))
+
+            record.captured.triggeredVia shouldBe ExecutionTrigger.PIPELINE
+            record.captured.parentExecutionId shouldBe parentExecutionId
+            record.captured.parentNodeId shouldBe "revenue"
+            record.captured.rootExecutionId shouldBe rootExecutionId
+        }
+
+    @Test
     fun `event ids are monotonic per execution and the terminal event completes the row`() =
         runTest {
             every { executionRepository.create(any()) } answers { firstArg() }

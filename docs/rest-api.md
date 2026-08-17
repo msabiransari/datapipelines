@@ -403,6 +403,8 @@ Emitted when a node finishes successfully.
 }
 ```
 
+A `PIPELINE` node's `node_completed` additionally carries `"child_execution_id": "exec-uuid"` — the execution its child ran as — so a stream consumer can follow the link to the child's own stream and record (composition, [DAG Executor §6.6](dag-executor.md#66-pipeline-composition-direct-delivery-slots-and-cancellation)). The field is absent for every other node type. The same value appears in the node's `node_stats` entry on the terminal events.
+
 #### 6.4.4 `node_failed`
 
 Emitted when a node fails. Execution then halts (fail-fast); a `pipeline_failed` event follows.
@@ -1116,3 +1118,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-16 | v1.10 | hardening round 4 (007 review fix-cycle) | §9.1/§9.4: `introspection_include_schemas` entries carrying `*` or `%` are rejected as patterns at save (`400 properties_invalid`); `_` stays a legal name character. |
 | 2026-08-16 | v1.11 | hardening round 4 (007 review fix-cycle) | §9.7: an unfiltered `/tables` no longer fails on a datasource reporting no current schema — the 400 parameter_required is scoped to `/columns` alone (each tables row carries its own schema; a listing cannot merge). |
 | 2026-08-16 | v1.12 | pipeline composition | §10.2: `triggered_via` gains `"PIPELINE"` — a child execution spawned by a parent's PIPELINE node appears in execution history like any other row (enums §18, metadata-db §4.6 V3 lineage columns). |
+| 2026-08-17 | v1.13 | pipeline composition | §6.4.3: a PIPELINE node's `node_completed` carries `child_execution_id` (absent for all other node types); the same value appears in the terminal events' `node_stats` entries. §10.1's history surfaces render the lineage: a child row shows its `parent_execution_id` link. |

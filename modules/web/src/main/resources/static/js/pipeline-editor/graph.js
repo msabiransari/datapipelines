@@ -74,6 +74,14 @@
         },
       },
       {
+        // Composition (design §7): a PIPELINE node is a distinct kind — it runs another
+        // pipeline as a child execution. Shape only; state colors still apply on top.
+        selector: "node.pipeline-node",
+        style: {
+          shape: "hexagon",
+        },
+      },
+      {
         selector: "edge",
         style: {
           "line-color": tokens.edgeIdleStroke,
@@ -126,13 +134,14 @@
       var n = this.nodes[i];
       var label = (n.display_name || n.name || n.id);
       if (label.length > 20) label = label.substring(0, 18) + "...";
+      var isPipelineNode = n.type === "PIPELINE";
       elements.push({
         group: "nodes",
         data: {
           id: n.id,
           label: label,
         },
-        classes: "idle",
+        classes: isPipelineNode ? "idle pipeline-node" : "idle",
       });
       nodeIds.add(n.id);
     }

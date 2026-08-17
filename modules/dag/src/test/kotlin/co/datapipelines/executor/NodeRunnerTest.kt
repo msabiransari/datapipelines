@@ -337,6 +337,8 @@ class NodeRunnerTest {
             renderBudgetChars = renderBudget,
             stagingMaxMemoryMb = 1024,
             tempdbDialect = Dialect.H2,
+            userId = UUID.randomUUID(),
+            rootExecutionId = executionId,
             directSink = directSink,
         )
 

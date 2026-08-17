@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.LogicalTypeMapping
 import co.datapipelines.typesystem.MappedColumn
 import co.datapipelines.typesystem.TypeMappers
 import co.datapipelines.typesystem.TypeMappingWarning
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
@@ -95,6 +96,39 @@ class H2Staging internal constructor(
             stagedRowTotal += rowsStaged
 
             StageResult(tableName, rowsStaged, columns, warnings)
+        }
+
+    override suspend fun stageRows(
+        tableName: String,
+        columns: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+    ): StageResult =
+        mutex.withLock {
+            createTable(tableName, columns)
+            // Same partial-table rollback as stage(): a failure mid-stream leaves no table and
+            // no claimed name behind, so the parent node never treats a half-written tempdb
+            // table as success and a retry of the node starts clean.
+            val rowsStaged =
+                try {
+                    batchInsertRows(tableName, columns, rows).also { checkMemoryBudget() }
+                } catch (e: CancellationException) {
+                    // Cancellation is not a staging failure — but it must not strand a partial
+                    // table either; roll back, then let it propagate untouched.
+                    rollbackStagedTable(tableName)
+                    throw e
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    // Wider than stage()'s SQLException/DatapipelinesException pair on purpose:
+                    // the row sequence is lazy over the CHILD's cursor, so a child-side fault of
+                    // any shape surfaces here mid-insert — and a partial table must never survive
+                    // it (a half-written tempdb table read as success is the failure mode this
+                    // rollback exists to prevent).
+                    rollbackStagedTable(tableName)
+                    throw e
+                }
+            stagedRowTotal += rowsStaged
+            StageResult(tableName, rowsStaged, columns)
         }
 
     override suspend fun <T> withQuery(
@@ -258,6 +292,56 @@ class H2Staging internal constructor(
             if (++rowCount % batchSize == 0L) stmt.executeBatch()
         }
         // Flush the trailing partial batch — and always issue one executeBatch for an empty source.
+        if (rowCount == 0L || rowCount % batchSize != 0L) stmt.executeBatch()
+        return rowCount
+    }
+
+    /**
+     * The [batchInsert] twin for already-decoded canonical values (§10 `stageRows`): the values
+     * were read through the source dialect's mapper by the child's executor, so they bind
+     * directly — there is no ResultSet left and no second mapping to apply.
+     */
+    private fun batchInsertRows(
+        tableName: String,
+        columns: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+    ): Long {
+        val columnList = columns.joinToString(",") { StagingIdentifiers.quote(it.name) }
+        val placeholders = columns.joinToString(",") { "?" }
+        val sql = "INSERT INTO ${StagingIdentifiers.quote(tableName)} ($columnList) VALUES ($placeholders)"
+        val sqlTypes = columns.map { H2EgressMapper.h2SqlType(it) }
+
+        return try {
+            connection.prepareStatement(sql).use { stmt -> streamRowsInto(stmt, tableName, columns, sqlTypes, rows) }
+        } catch (e: SQLException) {
+            if (e.sqlState?.startsWith(DATA_EXCEPTION_CLASS) == true) {
+                throw StagingValueOverflowException(
+                    "A source value exceeds the staged column capacity in table '$tableName': ${e.message}",
+                    e,
+                )
+            }
+            throw e
+        }
+    }
+
+    /** Streams canonical [rows] into [stmt] in batches of `insert-batch-size`; returns the count. */
+    private fun streamRowsInto(
+        stmt: PreparedStatement,
+        tableName: String,
+        columns: List<ColumnSchema>,
+        sqlTypes: List<Int>,
+        rows: Sequence<List<Any?>>,
+    ): Long {
+        val batchSize = config.insertBatchSize
+        var rowCount = 0L
+        rows.forEach { row ->
+            require(row.size == columns.size) {
+                "Row has ${row.size} values for ${columns.size} columns of table '$tableName'"
+            }
+            row.forEachIndexed { i, value -> stmt.setObject(i + 1, value, sqlTypes[i]) }
+            stmt.addBatch()
+            if (++rowCount % batchSize == 0L) stmt.executeBatch()
+        }
         if (rowCount == 0L || rowCount % batchSize != 0L) stmt.executeBatch()
         return rowCount
     }

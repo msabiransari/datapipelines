@@ -75,6 +75,28 @@ interface Staging : AutoCloseable {
     ): StageResult
 
     /**
+     * The already-decoded half of [stage]: streams [rows] — canonical values under the canonical
+     * [columns] — into a new staged table named [tableName].
+     *
+     * This is the composition ingress path (design 2026-08-13-pipeline-node-type §4.2): a parent
+     * PIPELINE node's `direct`-delivered child rows arrive decoded, with the source-dialect mapping
+     * already applied by the child's executor, so there is no ResultSet and no dialect left to
+     * consult. Everything else is [stage]'s contract unchanged: the same duplicate-name guard and
+     * bare `CREATE TABLE` (§4.5), the same batched insert (§4.3), the same partial-table rollback —
+     * a failure mid-stream leaves **no** table behind — and the same post-write memory-budget check
+     * (§8.2). Because no source metadata is read, [StageResult.warnings] is always empty; the
+     * child's own warnings rode its execution.
+     *
+     * @throws StagingTableAlreadyExistsException [tableName] is already staged this execution.
+     * @throws StagingMemoryLimitException the staged footprint exceeds the budget (§8.2).
+     */
+    suspend fun stageRows(
+        tableName: String,
+        columns: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+    ): StageResult
+
+    /**
      * Runs a read query and hands its cursor to [block] with the serialization lock held for
      * the **whole** consumption — statement creation, execution, and the caller's row-by-row
      * drain (§3.3, §9.2). The statement times out per `query-timeout-seconds`, fetches per

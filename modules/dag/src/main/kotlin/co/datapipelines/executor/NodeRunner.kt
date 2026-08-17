@@ -53,6 +53,25 @@ data class NodeExecutionContext(
     /** The dialect of `source: "tempdb"` nodes, from `settings.tempdb.engine` (§12.6, D6). */
     val tempdbDialect: Dialect,
     /**
+     * The principal this execution runs as ([ExecuteRequest.userId]). A PIPELINE node's child
+     * inherits it (design D9): composition carries no new scopes, and authorization was checked
+     * on the parent's execute call.
+     */
+    val userId: UUID,
+    /**
+     * The execution family's top ancestor (metadata-db §4.6): [ExecuteRequest.rootExecutionId],
+     * or this execution's own id when it IS the root. A PIPELINE node's child request carries it
+     * verbatim, which is what makes family-wide cancellation (design §4.3, D8) reach every
+     * descendant.
+     */
+    val rootExecutionId: UUID,
+    /**
+     * How many PIPELINE-node hops sit above this execution ([ExecuteRequest.compositionDepth]) —
+     * 0 for a root. The sub-pipeline runner refuses a child whose depth would exceed
+     * `datapipelines.pipelines.max-composition-depth` (design §4.4's runtime backstop).
+     */
+    val compositionDepth: Int = 0,
+    /**
      * The `direct` delivery target for this execution's caller result (design §4.2) — set on a
      * child execution spawned by a PIPELINE node, null on roots. When present, the caller node's
      * result streams here and the [ResultStore] is never touched.

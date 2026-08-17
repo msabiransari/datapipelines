@@ -32,6 +32,23 @@ interface WritebackRunner {
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
     ): Long
+
+    /**
+     * The already-decoded twin of [writeback]: writes [rows] — canonical values under the
+     * canonical [schema] — into `output.table`, honouring `output.mode`, and returns the row
+     * count.
+     *
+     * This is the composition path (design 2026-08-13-pipeline-node-type §4.2): a parent PIPELINE
+     * node with `output.target: "datasource"` lands the child's `direct`-streamed rows here. No
+     * dialect parameter: decoding and source-dialect mapping happened in the child's executor, so
+     * there is no cursor and no metadata left to map — the same relationship
+     * `ResultStore.materializeRows` has to `materialize`.
+     */
+    fun writebackRows(
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+        output: NodeOutput.Datasource,
+    ): Long
 }
 
 /**
@@ -58,6 +75,26 @@ class JdbcWritebackRunner(
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
     ): Long {
+        val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
+        return writeAll(output, columns) { connection, table -> streamInsert(connection, table, columns, resultSet) }
+    }
+
+    override fun writebackRows(
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+        output: NodeOutput.Datasource,
+    ): Long = writeAll(output, schema) { connection, table -> insertRows(connection, table, schema, rows) }
+
+    /**
+     * The shared write-back shell (§6.4.3): datasource resolution, the identifier guards, and the
+     * single-transaction write (`REPLACE` truncates and inserts together, so a failure never
+     * leaves the target table empty) around whichever row source [insert] drains.
+     */
+    private fun writeAll(
+        output: NodeOutput.Datasource,
+        columns: List<ColumnSchema>,
+        insert: (Connection, String) -> Long,
+    ): Long {
         val datasource =
             registry.get(output.datasource)
                 ?: throw datasourceNotFound(output.datasource)
@@ -65,14 +102,13 @@ class JdbcWritebackRunner(
         // is a write-back failure, never the save-time `pipeline.validation.invalid_identifier`,
         // which is an HTTP-400 code and must not surface mid-execution (§8.2).
         val table = SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.WRITEBACK_FAILED)
-        val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
         SqlIdentifiers.validateColumnNames(columns.map { it.name }, PipelineErrorCodes.Node.WRITEBACK_FAILED)
 
         return registry.poolFor(datasource).leaseConnection().use { connection ->
             connection.autoCommit = false
             try {
                 if (output.mode == WriteMode.REPLACE) clearTarget(connection, table)
-                val written = streamInsert(connection, table, columns, resultSet)
+                val written = insert(connection, table)
                 connection.commit()
                 written
             } catch (e: SQLException) {
@@ -160,6 +196,42 @@ class JdbcWritebackRunner(
                 }.coerceAtMost(submitted.toLong() * MAX_ROWS_PER_STATEMENT)
         }
 
+    /**
+     * The [streamInsert] twin for already-decoded canonical rows (design §4.2's composition
+     * path): same statement shape, same batching, same per-statement-count summing — only the
+     * value source differs (a sequence, not a cursor).
+     */
+    private fun insertRows(
+        connection: Connection,
+        table: String,
+        columns: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+    ): Long {
+        val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
+        val placeholders = columns.joinToString(", ") { "?" }
+        val sql = "INSERT INTO ${SqlIdentifiers.quote(table)} ($quoted) VALUES ($placeholders)"
+        return connection.prepareStatement(sql).use { statement ->
+            var pending = 0
+            var written = 0L
+            rows.forEach { row ->
+                require(row.size == columns.size) {
+                    "Row has ${row.size} values for ${columns.size} columns of '$table'"
+                }
+                row.forEachIndexed { index, value ->
+                    if (value == null) statement.setNull(index + 1, Types.NULL) else statement.setObject(index + 1, value)
+                }
+                statement.addBatch()
+                pending++
+                if (pending >= batchSize) {
+                    written += rowsWritten(statement.executeBatch(), pending)
+                    pending = 0
+                }
+            }
+            if (pending > 0) written += rowsWritten(statement.executeBatch(), pending)
+            written
+        }
+    }
+
     private fun bindRow(
         statement: PreparedStatement,
         columns: List<ColumnSchema>,
@@ -234,6 +306,11 @@ class JdbcWritebackRunner(
      * pinned 2.3.232 driver, not recalled. Omitting it reported the single most likely write-back
      * misconfiguration as the generic `writeback_failed`, which tells the author nothing about the
      * one thing they can fix.
+     *
+     * `42S04` is H2's third spelling of the same condition — "table not found (**this database is
+     * empty**)", vendor code 42104: a target schema with no tables at all, the commonest first-run
+     * shape for a write-back target. Verified against the same pinned driver; the actionable code
+     * applies to it exactly as much.
      */
     private fun isMissingTable(e: SQLException): Boolean = e.sqlState in MISSING_TABLE_SQL_STATES
 
@@ -242,7 +319,7 @@ class JdbcWritebackRunner(
 
         /** Sanity bound on a driver's self-reported per-statement count. */
         const val MAX_ROWS_PER_STATEMENT = 1_000_000L
-        val MISSING_TABLE_SQL_STATES = setOf("42S02", "42S03", "42P01")
+        val MISSING_TABLE_SQL_STATES = setOf("42S02", "42S03", "42S04", "42P01")
         val LOG: Logger = LoggerFactory.getLogger(JdbcWritebackRunner::class.java)
     }
 }

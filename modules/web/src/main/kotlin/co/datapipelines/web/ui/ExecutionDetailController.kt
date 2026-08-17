@@ -54,6 +54,11 @@ class ExecutionDetailController(
         val nodeStats = record.nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("nodeStats", nodeStats)
 
+        // Design D6: children are ordinary execution rows, linked by the lineage columns — the
+        // detail page shows the whole family (root + descendants) via the root's index.
+        val family = executions.findByRoot(record.rootExecutionId ?: record.executionId)
+        model.addAttribute("family", family)
+
         val errorJson = record.errorJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("errorJson", errorJson)
         model.addAttribute("failedNodeId", record.failedNodeId)

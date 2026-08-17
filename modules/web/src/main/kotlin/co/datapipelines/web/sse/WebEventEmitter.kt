@@ -34,6 +34,13 @@ data class ExecutionContext(
     val correlationId: UUID,
     val triggeredVia: ExecutionTrigger,
     val parametersJson: String,
+    /**
+     * Composition lineage (metadata-db §4.6, V3): set only on a child execution spawned by a
+     * PIPELINE node — null on roots, which persist `root_execution_id = execution_id`.
+     */
+    val parentExecutionId: UUID? = null,
+    val parentNodeId: String? = null,
+    val rootExecutionId: UUID? = null,
 )
 
 /**
@@ -169,6 +176,9 @@ class WebEventEmitter(
                     triggeredVia = context.triggeredVia,
                     correlationId = context.correlationId,
                     startedAt = event.startedAt,
+                    parentExecutionId = context.parentExecutionId,
+                    parentNodeId = context.parentNodeId,
+                    rootExecutionId = context.rootExecutionId,
                 ),
             )
         }.onFailure { log.error("pipeline_executions row for execution {} not created.", event.executionId, it) }

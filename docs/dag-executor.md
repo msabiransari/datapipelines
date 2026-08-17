@@ -13,7 +13,7 @@ The Executor is the **runtime engine** that takes a validated Pipeline + input p
 
 - Constructing an in-memory DAG from the Pipeline's `nodes` + `depends_on` declarations.
 - Walking the DAG in dependency order, **parallelizing independent nodes** up to a configurable concurrency limit.
-- For each node: rendering the template, executing SQL against the source (datasource or tempdb), dispatching on `type` (DQL/DML/DDL) and `output.target` (tempdb/caller/datasource).
+- For each node: rendering the template, executing SQL against the source (datasource or tempdb), dispatching on `type` (DQL/DML/DDL/PIPELINE) and `output.target` (tempdb/caller/datasource).
 - Materializing the **caller node's** ResultSet into the Redis result store, and emitting `data_ready` from it ([REST API §7](rest-api.md#7-result-delivery)).
 - Propagating failures fail-fast (no partial results in v1).
 - Honouring cancellation — explicit `DELETE /executions/{id}`, client disconnect beyond grace, server shutdown (§8.3).
@@ -194,7 +194,7 @@ data class ExecutableNode(
     val dependsOn: Set<String>
 )
 
-enum class NodeType { DQL, DML, DDL }
+enum class NodeType { DQL, DML, DDL, PIPELINE }   // PIPELINE: runs a pinned child pipeline (§6.6)
 // future: EXPRESSION, HTTP
 
 sealed interface NodeSource {
@@ -773,6 +773,8 @@ A `PIPELINE` node runs its child as a real, separate execution through the inter
 
 **Family cancellation.** Cancellation flags stay keyed per execution id (`dp:cancel:{execution_id}`, §8.3.1). A child execution reads **two** flags on the poll tick and at every node boundary — its own and its root's. Cancelling any ancestor therefore stops every descendant (children are never left running after their parent stops), while a child's own flag still stops it alone.
 
+**The wiring (2026-08-17).** `web`'s `SubPipelineExecutionRunner` implements the `SubPipelineRunner` port: it loads the pinned child body by name+version (soft-deleted pipelines still resolve — D7), builds the child `ExecuteRequest` with the parent's principal (D9), the lineage fields, `triggeredVia = PIPELINE` and `compositionDepth = parent + 1` (refusing beyond `datapipelines.pipelines.max-composition-depth` with `pipeline.node.composition_depth_exceeded` — the runtime backstop to §12.9's static check), and a recording emitter so the child's rows land in execution history (D6). The `directSink` adapter per the node's own `output` target: `tempdb` stages the child's decoded rows into the PARENT's tempdb (`Staging.stageRows`, staging §10), `caller` re-publishes them under the parent's execution id (`ResultStore.materializeRows`), `datasource` writes them back (`WritebackRunner.writebackRows`). A failed child fails the parent node fail-fast with `pipeline.node.child_execution_failed`; the detail carries the child's error code, its failed node, and the child execution id. The node's `NodeResult`/`NodeStats` gain `childExecutionId` (serialized `child_execution_id`, omitted for every other node type), which is also how the parent's `node_completed` SSE event links to the child's stream ([REST API §6.4.3](rest-api.md#643-node_completed)).
+
 ---
 
 ## 7. Node Stats Collection
@@ -790,7 +792,8 @@ data class NodeResult(
     val startedAt: Instant,
     val completedAt: Instant,
     val durationMs: Long,
-    val callerResultRef: String?        // Redis KEY of the stored caller result — never a live ResultSet
+    val callerResultRef: String?,       // Redis KEY of the stored caller result — never a live ResultSet
+    val childExecutionId: UUID? = null  // PIPELINE nodes only: the spawned child execution (§6.6)
 ) {
     companion object {
         fun of(
@@ -832,7 +835,8 @@ data class NodeStats(
     val rowsOut: Long,                  // -1 for failed/aborted
     val bytesOut: Long,                 // -1 for failed/aborted; estimated
     val errorCode: String?,             // present on FAILED
-    val errorMessage: String?
+    val errorMessage: String?,
+    val childExecutionId: UUID? = null  // PIPELINE nodes only (§6.6); serialized child_execution_id, omitted otherwise
 )
 
 enum class NodeStatus { SUCCESS, FAILED, ABORTED }
@@ -1263,3 +1267,4 @@ See the [Observability spec](observability.md) for the full metric catalog, nami
 | 2026-08-10 | v1.3 | P4 Gate C doc-sync | Aligned the frozen spec with the merged `dag` module (P4 Gate C fix cycle). Additive/corrective only — no anchor renamed, no code changed. **§3.1**: shipped `Dag<T>` precomputes the reverse-edge index and detects cycles with an iterative three-colour DFS; `dependenciesOf` defaults to `emptySet()`; `DagBuilder.build()` runs the cycle check itself. **§5.1**: admission re-ordered — parameter binding stays pre-stream (400-class, no events), `execution_started` is emitted **before** staging creation and registry registration, so `pipeline.staging.creation_failed`/`engine_unavailable` surface as `execution_started` + `pipeline_failed` instead of zero events; step 13 added for catalogued setup failures; step 14 resolves the stored result before the terminal event. **§5.2**: collaborators grouped behind `NodeRunner` with a `pipelineExecutor(...)` factory preserving the spec's construction shape; `cancellationFlags`, `metrics` and `resultUrls` (required, no default) added. **§5.3**: the execution timeout now cancels registered statements, with the residual driver-`queryTimeout` overshoot stated. **§6.1**: `render(ref, context, maxOutputChars)` — the third argument is the per-execution output budget. **§6.4.1**: new `tempdb`→`tempdb` subsection (single `CREATE TABLE … AS` under `withConnection`, non-reentrant mutex, `SELECT COUNT(*)` row count, explicit budget re-check, five §8.2 rows unreachable on that shape). **§6.4.2**: `materialize(executionId, resultSet, sourceDialect, ttlSeconds)`; source-dialect column mapping; the stored result is read back **before** `pipeline_completed` and a vanished result fails with `result.storage_unavailable`. **§6.4.3**: `writeback(rs, output, sourceDialect)`; `REPLACE` truncate under a savepoint; target-missing by SQLState `42S02`/`42S03`/`42P01`; batch counts summed. **§7.1**: `completedAt` added; `rowsOut` for a CTAS node is a post-create `SELECT COUNT(*)`. **§7.2**: an `ABORTED` row may carry `error_code`/`error_message` when the executor stopped a mid-flight node, distinguishable by non-null `started_at`. **§8.1**: `PipelineException` extends the shared `DatapipelinesException` (module-structure §4.3); `PipelineConcurrencyLimitException(scope, limit)`. **§8.2**: `pipeline.staging.table_already_exists` row added; a collaborator's own catalog code always wins (the phase table covers raw driver/unknown exceptions only); runtime identifier refusals report phase codes, never `pipeline.validation.invalid_identifier`. **§8.3.1**: `withStatement` body is `suspend`; `abortReason` and `cancelStatements()` added to `CancellationHandle`; `CancellationFlags` and the `dp:cancel:{execution_id}` key documented. **§9**: the `Staging` interface block replaced by a pointer to [Staging §10](staging.md#10-the-staging-interface) (only `StagingFactory.create` stays canonical here), plus why tempdb reads run through `withConnection` + a registered statement rather than `withQuery`. **§10**: `correlation_id` is a wire guarantee met by the projecting layer; wire-projection note for `web`. **§15.3**: metric table aligned to [Observability §4.1](observability.md#41-metric-naming) as the tag authority (`nodes.rows_out` has no `source` tag; `staging.rows` covers both staging paths; `result.bytes_written`/`result.writes{outcome}` added). Throughout: `DROP ALL OBJECTS` corrected to the catalog-driven staged-table drop the shipped `close()` performs. |
 | 2026-08-05 | v1.1 | propagation | Aligned with v1.1 Pipeline Contract. `NodeType.SQL` → `NodeType.{DQL, DML, DDL}`. `NodeSource.Staging` → `NodeSource.Tempdb`. Replaced `outputTable: String?` with sealed `NodeOutput` (Tempdb/Caller/Datasource). `executeNode` now dispatches on `type` then `output.target`. Added DML/DDL execution paths. Added write-back execution path (WritebackRunner) for `output.target: "datasource"`. Terminal auto-detected via `detectTerminal(dag)` instead of read from `pipeline.terminalNodeId`. Renamed §9 from "H2 Lifecycle" to "Tempdb Lifecycle" (engine-agnostic). |
 | 2026-08-17 | v1.4 | pipeline composition substrate | New §6.6, executor-only (no wire or catalog change): `direct` result delivery — a child execution carries a `DirectResultSink` on its `ExecuteRequest` and its caller ResultSet streams to the parent executor, bypassing §6.4.2's store; `ResultStore.materializeRows` stores an already-decoded schema + rows under the §6.4.2 contract so a parent PIPELINE node can re-publish a child's result to its own caller; only ROOT executions take a concurrency slot (a child request carries `rootExecutionId` and skips §5.1 step 2); family cancellation — a child reads its root's `dp:cancel:` flag as well as its own. |
+| 2026-08-17 | v1.5 | pipeline composition wiring | The §6.6 runtime lands: `NodeExecutionContext` carries the principal, the family root and the depth counter; the `pipelineExecutor(...)` factory takes the `SubPipelineRunner` port (implemented by `web`'s `SubPipelineExecutionRunner` — child invocation, per-target `directSink` adapters, runtime depth backstop, child-failure mapping); `Staging.stageRows` / `WritebackRunner.writebackRows` are the already-decoded write paths the adapters reuse; `NodeResult`/`NodeStats` gain `child_execution_id` (§7.1/§7.2 sketches updated). Doc fixes: §1's dispatch enumeration and §4's `NodeType` sketch gained `PIPELINE`. |

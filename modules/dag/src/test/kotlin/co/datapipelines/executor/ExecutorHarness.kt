@@ -24,6 +24,8 @@ class ExecutorHarness(
     val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     /** Injected only by tests that must observe (or forbid) slot acquisition — normally real. */
     executionSlots: ExecutionSlots? = null,
+    /** The composition port (design §4.1) — wired by tests that exercise PIPELINE nodes. */
+    subPipelineRunner: SubPipelineRunner? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -49,6 +51,7 @@ class ExecutorHarness(
             resultUrls = ResultUrlFactory.RELATIVE,
             metrics = metrics,
             auditSink = auditSink,
+            subPipelineRunner = subPipelineRunner,
         )
 
     override fun close() {
