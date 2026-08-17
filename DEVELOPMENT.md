@@ -460,7 +460,12 @@ The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
 project missing from the maps fails configuration; `-Pkover.off` drops the
 floor rule). A main build only builds buildSrc through its jar, so its tests
 never run automatically: `./gradlew -p buildSrc test` runs them, and
-`scripts/gate.sh` runs that as a stage.
+`scripts/gate.sh` runs that as a stage — forced to execute (`cleanTest`;
+the catalog file's content is a declared test input, so a
+`gradle/libs.versions.toml` edit re-runs the guards even without the gate),
+and skipped fail-soft with the cause named when the network preflight says
+offline (the TestKit probes resolve their compile/test dependencies from
+Maven Central when their cache is cold).
 
 #### Dependency vulnerabilities (OSV-Scanner)
 
