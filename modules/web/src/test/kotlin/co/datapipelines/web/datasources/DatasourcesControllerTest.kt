@@ -112,6 +112,27 @@ class DatasourcesControllerTest {
     }
 
     @Test
+    fun `the bind normalizes through the ONE shared rule - blanks and duplicates never reach the registry`() {
+        // R5 F6: the bind must call Datasource.normalizeIncludeSchemas, not re-inline a
+        // trim+lowercase of its own — the entity handed to the registry is already the
+        // clean, deduplicated list, so every writer crosses the same ONE rule.
+        authenticate()
+        every { registry.exists("pg-prod") } returns false
+        every { registry.save(match { it.introspectionIncludeSchemas == listOf("apex") }, userId) } returns
+            datasource().copy(introspectionIncludeSchemas = listOf("apex"))
+        val body =
+            mapper.readTree(
+                """{"name":"pg-prod","display_name":"Production Postgres","dialect":"POSTGRES",
+                   "jdbc_url":"jdbc:postgresql://db:5432/app","username":"readonly","password":"s3cret",
+                   "introspection_include_schemas":[" ", "APEX", "apex"]}""",
+            )
+
+        val data = controller.create(body).data
+
+        data["introspection_include_schemas"] shouldBe listOf("apex")
+    }
+
+    @Test
     fun `a non-string include-schemas entry is properties_invalid`() {
         authenticate()
         every { registry.exists("pg-prod") } returns false

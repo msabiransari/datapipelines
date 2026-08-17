@@ -206,6 +206,21 @@ class DatasourceRegistryIntegrationTest {
     }
 
     @Test
+    fun `validate validates the normalized form - it agrees with save on unnormalized input`() {
+        // R5 F6: save() validates the NORMALIZED copy (blanks dropped per F2), so a [" "]
+        // allowlist saves successfully — but validate() checked the RAW input and called the
+        // same entry invalid. A dry-run endpoint built on validate() would diverge from what
+        // save actually persists. Both paths now normalize first: agreement by construction.
+        val registry = registry()
+        val raw = Fixtures.h2(name = "blank_entry", password = "pw").copy(introspectionIncludeSchemas = listOf(" ", "apex"))
+
+        registry.validate(raw).valid shouldBe true
+
+        registry.save(raw, owner)
+        checkNotNull(registry.get("blank_entry")).introspectionIncludeSchemas shouldBe listOf("apex")
+    }
+
+    @Test
     fun `a GET-PUT round-trip of a restored dirty-allowlist row succeeds - and stores the clean list`() {
         // R5 F2: a row whose allowlist landed by restore/manual edit used to read back with
         // blank entries (`[""]`), which the save-time validator REJECTS — so re-saving what

@@ -61,13 +61,26 @@ data class Datasource(
          * edits write rows without crossing save; an unnormalized entry there would silently
          * exempt nothing — inert, not rejected).
          */
-        fun normalizeIncludeSchemas(entries: List<String>): List<String> =
-            entries
+        fun normalizeIncludeSchemas(entries: List<String>): List<String> {
+            // Fast path (R5 F6): this runs per row on the uncached list() read path, and the
+            // overwhelming case is "no allowlist" or "already normalized" — return the input
+            // as-is (no allocation) when the ONE rule would change nothing.
+            if (entries.isEmpty() || entries.isAlreadyNormalized()) return entries
+            return entries
                 .asSequence()
                 .map { it.trim().lowercase() }
                 .filter { it.isNotEmpty() }
                 .distinct()
                 .toList()
+        }
+
+        /** [entries] already satisfies the ONE rule — non-blank, lowercase, no duplicates. */
+        private fun List<String>.isAlreadyNormalized(): Boolean {
+            val seen = HashSet<String>(size)
+            return all { entry ->
+                entry.isNotEmpty() && !entry.any { it.isWhitespace() || it.isUpperCase() } && seen.add(entry)
+            }
+        }
     }
 
     /**
