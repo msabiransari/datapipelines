@@ -105,25 +105,39 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":tests:integration-tests" to setOf(":modules:app"),
 )
 
+// Kover wires a per-module SELF-edge through its `kover` aggregation bucket —
+// plugin plumbing, not a §4.2 declaration. The names below are the exact
+// plumbing configurations of the PINNED plugin, probed 2026-08-16
+// (org.jetbrains.kotlinx.kover 0.9.9: every module's `kover` configuration
+// holds exactly one ProjectDependency — its own self-edge;
+// `koverExternalArtifacts` holds none). 009/F7 exempted ANY configuration
+// named kover* wholesale; 012/F4 narrows that to these exact names AND to
+// SELF-edges only, so that a module declaring `kover(project(":modules:x"))`
+// (a documented Kover API the root build itself uses) still fails the guard,
+// as does a self-edge declared through a non-plumbing configuration such as
+// `implementation(project(":modules:x"))` inside x itself.
+val koverPlumbingConfigurations = setOf("kover", "koverExternalArtifacts")
+
 val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
     group = "verification"
     description = "Fails if any module declares a project dependency outside its module-structure.md §4.2 row."
 
     // Snapshot at configuration time: Gradle 9 forbids cross-project state access from task actions.
+    // (The registration action itself runs at task realization — after all projects are
+    // evaluated — so the subproject configurations are fully populated here.)
     val declared: Map<String, Set<String>> = subprojects
         .filter { it.buildFile.exists() }
         .associate { sub ->
             sub.path to sub.configurations
-                // Kover wires a self-edge per module (its kover/koverExternalArtifacts
-                // bucket configurations) — plugin plumbing, not a §4.2 declaration.
-                // Filter at the CONFIGURATION level (009/F7): the previous
-                // `.filter { it != sub.path }` dropped self-edges from ALL
-                // configurations, so a genuinely declared
-                // `implementation(project(":modules:x"))` inside x itself
-                // passed silently.
-                .filterNot { it.name.startsWith("kover") }
-                .flatMap { cfg -> cfg.dependencies.withType(ProjectDependency::class.java) }
-                .map { it.path }
+                .flatMap { cfg ->
+                    val isKoverPlumbing = cfg.name in koverPlumbingConfigurations
+                    cfg.dependencies.withType(ProjectDependency::class.java)
+                        // Only the plugin's OWN self-edges are exempt (012/F4) —
+                        // see koverPlumbingConfigurations above for why the
+                        // 009/F7 name-prefix blocklist was too wide.
+                        .filterNot { isKoverPlumbing && it.path == sub.path }
+                        .map { it.path }
+                }
                 .toSet()
         }
     val allowed = allowedInternalDependencies
