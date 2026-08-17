@@ -11,9 +11,15 @@
 #     ./gradlew build      → must exit 0   (clean-state build)
 #     ./gradlew build      → must exit 0   (incremental build)
 #
-# After the cycles, one non-gradle stage: scripts/vuln-scan.sh (OSV-Scanner
-# over the committed lockfiles). It fails the gate on real findings and warns
-# without failing when the network is unreachable (fail-soft by design).
+# After the cycles, two extra stages:
+#   1. buildSrc guard tests (Gradle TestKit) — a consumer build only builds
+#      buildSrc through its JAR (verified: `build --dry-run` stops at
+#      :buildSrc:jar), so its test task NEVER runs automatically; the gate is
+#      what makes the COVERAGE_FLOORS / -Pkover.off guard falsifiable on
+#      every quality pass (012/F6).
+#   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
+#      fails the gate on real findings and warns without failing when the
+#      network is unreachable (fail-soft by design).
 #
 # The incremental pass is deliberate: it has its own failure history, and a gate
 # that only ever runs from clean never exercises the path developers use most.
@@ -109,6 +115,20 @@ for i in $(seq 1 "$CYCLES"); do
   tests=$(find . -path '*/build/test-results/test/TEST-*.xml' 2>/dev/null | wc -l | tr -d ' ')
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
+
+# ---- buildSrc guard tests (012/F6) -------------------------------------------
+# The convention-plugin guards (COVERAGE_FLOORS fail-loud, -Pkover.off skip)
+# live in buildSrc, and a main build never executes buildSrc:test — only its
+# jar. Run them here so every gate pass exercises them. Same no-pipe rule.
+echo
+btest=0
+./gradlew -p buildSrc test > "$LOGDIR/buildsrc-test.log" 2>&1 || btest=$?
+if [ "$btest" -eq 0 ]; then
+  echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+else
+  fails=$((fails + 1))
+  echo "  buildSrc tests  EXIT=$btest  (log: $LOGDIR/buildsrc-test.log)"
+fi
 
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when

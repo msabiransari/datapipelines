@@ -454,6 +454,12 @@ regressions, not to force new tests: raise a floor only when a module's
 coverage has genuinely improved, and never lower one to make a build pass.
 `tests/integration-tests` has no floor (no main sources of its own).
 
+The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
+project missing from the maps fails configuration; `-Pkover.off` drops the
+floor rule). A main build only builds buildSrc through its jar, so its tests
+never run automatically: `./gradlew -p buildSrc test` runs them, and
+`scripts/gate.sh` runs that as a stage.
+
 #### Dependency vulnerabilities (OSV-Scanner)
 
 ```bash

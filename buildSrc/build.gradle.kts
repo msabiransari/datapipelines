@@ -1,4 +1,6 @@
 import org.gradle.api.artifacts.dsl.LockMode
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
 
 plugins {
     `kotlin-dsl`
@@ -15,6 +17,41 @@ dependencies {
     implementation("org.jlleitschuh.gradle:ktlint-gradle:${libs.versions.ktlint.plugin.get()}")
     implementation("io.gitlab.arturbosch.detekt:detekt-gradle-plugin:${libs.versions.detekt.get()}")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:${libs.versions.kover.get()}")
+
+    // Guard tests (012/F6) — the COVERAGE_FLOORS / -Pkover.off configuration-time
+    // behaviour is proven with Gradle TestKit (see
+    // src/test/kotlin/CommonConventionsPluginTest.kt). junit-bom is pinned
+    // directly to the same line the Spring Boot 3.5.16 BOM manages for the
+    // modules (5.12.2): buildSrc cannot inherit that platform without dragging
+    // all of it, and the version catalog carries no junit version entry to reuse.
+    testImplementation(platform("org.junit:junit-bom:5.12.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    // Gradle 9 needs the launcher on the test runtime classpath — same rule
+    // CommonConventionsPlugin applies to every module.
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation(gradleTestKit())
+}
+
+// Resolved JDK 21 installation for the TestKit probes (see tasks.test below).
+val probeJdk21 = extensions.getByType(JavaToolchainService::class.java)
+    .launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+    .map { it.metadata.installationPath.asFile.absolutePath }
+
+tasks.test {
+    useJUnitPlatform()
+    // The probe projects the tests drive must see the repo's real version
+    // catalog — the plugin resolves catalog aliases at apply time. buildSrc's
+    // project dir is <repo>/buildSrc, so ../gradle is the main build's.
+    systemProperty("repo.catalog", rootProject.file("../gradle/libs.versions.toml").absolutePath)
+    // The probes apply the same JDK 21 toolchain the modules get; hand the
+    // tests a RESOLVED installation (detection finds the daemon JDK /
+    // ~/.gradle/jdks / any auto-provisioned install) so the probe builds need
+    // no toolchain repositories of their own — the tests stay network-free.
+    // The test JVM itself may be any JDK the daemon picked (26 here), so
+    // java.home is NOT a valid substitute.
+    systemProperty("probe.jdk21", probeJdk21.get())
 }
 
 gradlePlugin {
