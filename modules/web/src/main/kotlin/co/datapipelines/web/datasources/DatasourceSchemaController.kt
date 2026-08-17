@@ -101,8 +101,8 @@ class DatasourceSchemaController(
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
                 message =
-                    "Datasource '$name' reports no current schema, so an unqualified read could merge " +
-                        "same-named tables across schemas. Pass an explicit schema (list them with " +
+                    "Datasource '$name' reports no current schema, so an unqualified read could merge the " +
+                        "columns of same-named tables across schemas. Pass an explicit schema (list them with " +
                         "GET /api/v1/datasources/$name/schemas).",
                 details = mapOf("datasource" to name),
                 cause = e,

@@ -3,6 +3,7 @@ package co.datapipelines.datasources
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -205,7 +206,13 @@ class SchemaIntrospectorRoutingTest {
                         every { connection.schema } returns null
                     }
 
-                shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+                // R5 F5: the runtime MESSAGE is columns-scoped — the exception is raised
+                // only by columns(), and agents read the message, not the KDoc. The old
+                // tables-flavored wording reinstated the tables/columns confusion F6 of
+                // round 4 spent its cycle removing.
+                val thrown = shouldThrow<CurrentSchemaUnknownException> { introspector.columns(name, "deals") }
+                thrown.message shouldContain "columns read"
+                thrown.message shouldContain "merge the columns"
             },
             {
                 val meta = mockk<DatabaseMetaData>()
