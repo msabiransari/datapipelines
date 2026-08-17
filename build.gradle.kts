@@ -22,15 +22,27 @@ allprojects {
 }
 
 dependencies {
-    // Derived from subprojects (009/F9): the hand-enumerated list let a NEW
-    // module silently escape the aggregate report. The buildFile filter drops
-    // Gradle's intermediate path projects (:modules, :tests carry no build
-    // file and no Kover plugin). Every real module applies
-    // CommonConventionsPlugin, which applies the Kover plugin — and a module
-    // with no main sources is carried by NO_COVERAGE_FLOOR_ALLOWLIST there.
-    subprojects
-        .filter { it.buildFile.exists() }
-        .forEach { kover(project(it.path)) }
+    // Root Kover aggregate, derived reactively (009/F9 → 012/F3): wire every
+    // subproject that ACTUALLY applies the Kover plugin, via
+    // pluginManager.withPlugin. The previous `buildFile.exists()` filter
+    // dragged :tests:integration-tests (Testcontainers) into the report's
+    // task graph — the root koverHtmlReport then needed a Docker daemon, and
+    // the aggregate absorbed integration coverage, making its numbers
+    // incomparable with the unit-only 2026-08-15 baseline the COVERAGE_FLOORS
+    // derive from. :tests:integration-tests is therefore excluded from the
+    // ROOT aggregate DELIBERATELY, for baseline comparability; its own
+    // module-level report still exists. A future subproject without the
+    // Kover plugin is simply not wired — no obscure resolution break.
+    // (The callbacks fire as each subproject applies the plugin, which is
+    // after this block runs; the root `kover` configuration is not resolved
+    // until the report tasks execute, so late additions are safe.)
+    subprojects.forEach { sub ->
+        sub.pluginManager.withPlugin("org.jetbrains.kotlinx.kover") {
+            if (sub.path != ":tests:integration-tests") {
+                kover(project(sub.path))
+            }
+        }
+    }
 }
 
 // The root project resolves the `kover` aggregation configuration, so it locks
