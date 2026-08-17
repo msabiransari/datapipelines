@@ -24,8 +24,17 @@
 #
 # Needs network on first run (trivy downloads its vulnerability DB to
 # ~/.cache/trivy) and a running Docker daemon for the image scan.
+#
+# Exit codes: trivy's --exit-code 1 = findings not allowlisted;
+# tooling/environment failures exit 2 (013/F1: unsupported OS/architecture,
+# or the sourced scan-tools.sh helpers' download/verify failures) — distinct
+# from 1 so an install-side breakage never reads as a scan finding.
 
 set -euo pipefail
+# Any UNHANDLED tooling failure (docker build, bootJar, tar, …) exits 2,
+# never a raw set -e death that would read as a trivy finding (013/F1).
+# Handled failures (the docker-info check) never fire this.
+trap 'echo "container-scan: unexpected tooling failure at line $LINENO — no verdict" >&2; exit 2' ERR
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 source "$ROOT/scripts/lib/scan-tools.sh"
@@ -34,14 +43,14 @@ TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir trivy)"
 
 os=$(uname -s)                    # Darwin | Linux
-arch=$(scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 1; }
+arch=$(scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 # trivy's asset names conflate OS and arch (macOS-ARM64, Linux-64bit, …): the
 # ARCH token comes from scan_tools_arch (one map for all scanners, 012/F10);
 # only the OS token is mapped here.
 case "$os" in
   Darwin) os_token="macOS" ;;
   Linux)  os_token="Linux" ;;
-  *) echo "container-scan: unsupported OS $os" >&2; exit 1 ;;
+  *) echo "container-scan: unsupported OS $os" >&2; exit 2 ;;
 esac
 asset="trivy_${TRIVY_VERSION}_${os_token}-${arch}.tar.gz"
 BIN="$TOOL_DIR/trivy-${TRIVY_VERSION}-${os}-$(uname -m)"

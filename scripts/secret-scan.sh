@@ -17,9 +17,17 @@
 # Allowlist: .gitleaks.toml at the repo root; every entry carries a reason +
 # date comment (project rule).
 #
-# Exit code is gitleaks': 0 = clean, 1 = leaks found.
+# Exit code is gitleaks': 0 = clean, 1 = leaks found. Tooling/environment
+# failures exit 2 (013/F1: unsupported architecture, or the sourced
+# scan-tools.sh helpers' download/verify failures) — distinct from 1 so an
+# install-side breakage never reads as "leaks found". The pre-commit hook
+# blocks on ANY non-zero, so its behavior is unchanged.
 
 set -euo pipefail
+# Any UNHANDLED tooling failure exits 2, never a raw set -e death that would
+# read as "leaks found" (013/F1). gitleaks itself runs via exec, replacing
+# this process — its own exit codes are untouched by the trap.
+trap 'echo "secret-scan: unexpected tooling failure at line $LINENO — no verdict" >&2; exit 2' ERR
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 source "$ROOT/scripts/lib/scan-tools.sh"
@@ -28,7 +36,7 @@ GITLEAKS_VERSION="8.30.1"    # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir gitleaks)"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
-arch=$(scan_tools_arch x64) || { echo "secret-scan: unsupported architecture $(uname -m)" >&2; exit 1; }
+arch=$(scan_tools_arch x64) || { echo "secret-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 BIN="$TOOL_DIR/gitleaks-${GITLEAKS_VERSION}-${os}-${arch}"
 
 install_gitleaks() {

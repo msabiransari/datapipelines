@@ -474,20 +474,32 @@ shared with `gate.sh` via `scripts/lib/scan-tools.sh`):
 
 - `0` — scan ran, no findings
 - `1` — scan ran, vulnerabilities found
-- `2` — scan did NOT reach a verdict: scanner error while online, or the
-  preflight classified the environment as broken (curl missing, TLS/CA
-  failure) — fails loudly with the cause named
+- `2` — scan did NOT reach a verdict, cause named: scanner error while
+  online; preflight classified the environment as broken (curl missing,
+  TLS/CA failure); install-side failure of the pinned scanner (download
+  failure, missing checksum entry, **SHA256 mismatch — a tampered binary is
+  a supply-chain failure, never a scan result**); unsupported platform; or
+  no committed lockfiles. (These paths must never exit 1, which means
+  "findings".)
 - `200` — skipped: offline (fail-soft; connection-level failures only —
-  connection refused, timeout, DNS)
+  connection refused, DNS — and a curl *timeout* only after one retry at a
+  longer budget, so a slow-but-online box cannot silently skip the scan)
 
 osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
 outside `build/`, so `gradlew clean` does not force a re-download — and
 SHA256-verified against the release manifest) checks the
-resolved dependency set — the lockfiles, direct and transitive — against the
-OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
+resolved dependency set — the lockfiles, direct and transitive — against
+the OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
 stage; exit 200 warns and does NOT fail the gate (the scan is meaningless
 without osv.dev — the skip is printed, never silent); exits 1 and 2 fail it.
+
+The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
+verify) exit `2` on failure for **all three** scanner scripts —
+secret-scan (`1` = leaks found) and container-scan (`1` = trivy finding)
+publish the same distinction between a findings verdict and a tooling
+failure, so an install-side breakage can never masquerade as a scan result
+in any consumer's branching.
 
 #### Secret scanning (gitleaks)
 
