@@ -317,6 +317,47 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
+    fun `a schemaless dialect NEVER consults the connection's current schema - even a throwing getSchema`() {
+        // R5 F3: the schemaless exemption was safe only by driver accident — the vendored
+        // sqlite-jdbc hardcodes getSchema() = null, so the current-schema consult could not
+        // throw TODAY. A future schemaless driver whose getSchema() throws (any of the
+        // classified shapes) would turn a working unfiltered columns read into a 502/400.
+        // The reorder makes the exemption structural: a schemaless dialect skips the
+        // current-schema consult entirely.
+        assertAll(
+            {
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "t", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.SQLITE, meta) { connection ->
+                        every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
+                    }
+
+                introspector.columns(name, "t") shouldBe emptyList()
+            },
+            {
+                // The same structural guarantee for a throwing getCatalog() — the consult
+                // a catalog-routing schemaless dialect would make.
+                val meta = mockk<DatabaseMetaData>()
+                val columnsRs = mockk<ResultSet>(relaxed = true)
+                every { meta.searchStringEscape } returns "\\"
+                every { meta.getColumns(null, null, "t", "%") } returns columnsRs
+                every { columnsRs.next() } returns false
+                val (introspector, name) =
+                    introspectorOver(Dialect.SQLITE, meta) { connection ->
+                        every { connection.catalog } throws
+                            java.sql.SQLNonTransientConnectionException("connection exception", "08001")
+                    }
+
+                introspector.columns(name, "t") shouldBe emptyList()
+            },
+        )
+    }
+
+    @Test
     fun `schemas reads TABLE_SCHEM from getSchemas for schema-filtered dialects`() {
         // Postgres-family: the schema vocabulary IS the JDBC schema — getSchemas()/TABLE_SCHEM.
         val meta = mockk<DatabaseMetaData>()

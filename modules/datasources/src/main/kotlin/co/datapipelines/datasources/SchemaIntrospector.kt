@@ -122,9 +122,17 @@ class SchemaIntrospector(
         withMetaData(datasourceName) { connection, meta, datasource ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val exempt = datasource.introspectionIncludeSchemas.toSet()
-            // A blank caller filter is absent (the same blank-sentinel rule tables() applies),
-            // so the current-schema default — never the JDBC '' sentinel — takes over.
-            val effectiveFilter = schemaFilter.asNonBlankOrNull() ?: connection.currentSchema(adapter, datasourceName)
+            // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
+            // The schemaless exemption is STRUCTURAL, not driver-dependent: a schemaless
+            // dialect never consults the connection's current schema at all (R5 F3 — the
+            // old order was safe only because the vendored sqlite-jdbc hardcodes
+            // getSchema() = null; a future schemaless driver whose getSchema()/getCatalog()
+            // throws would have turned a working unfiltered read into a classified failure),
+            // so the current-schema default — never the JDBC '' sentinel — applies only to
+            // schema-capable dialects.
+            val effectiveFilter =
+                schemaFilter.asNonBlankOrNull()
+                    ?: if (adapter.introspectionSchemaless) null else connection.currentSchema(adapter, datasourceName)
             if (effectiveFilter == null && !adapter.introspectionSchemaless) {
                 throw CurrentSchemaUnknownException(datasourceName)
             }
