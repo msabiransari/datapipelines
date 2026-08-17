@@ -123,29 +123,37 @@ class DatasourceValidator(
     }
 
     /**
-     * §3.3/§7A: `introspection_include_schemas` entries are exact schema names — non-blank,
-     * no wildcard patterns. The pattern vocabularies a DB operator naturally writes are
-     * rejected per character: the floors' prefix language (`apex_*`) and SQL-LIKE's `%`
-     * (`apex_%`) — as exact-match entries they can only ever exempt nothing, exactly the
-     * "looks like it exempts a family while exempting nothing" failure this rule exists to
-     * prevent. `_` is deliberately NOT rejected: it is an ordinary character in real schema
-     * names on every supported dialect (the documented use case is exempting Oracle's
-     * `APEX_REPORTING` via `apex_reporting`), and an underscore entry exempts the
-     * exactly-named schema. Lowercase normalization happens at the registry's save boundary
-     * (and the repository's read boundary), before this rule's outcome is persisted.
+     * §3.3/§7A: `introspection_include_schemas` entries are exact schema names over the
+     * **legal-identifier alphabet of the supported dialects** — lowercase letters, digits,
+     * `_`, `$`, `#` (the union of what an unquoted identifier may contain: Postgres, MySQL,
+     * H2 and DuckDB admit `_`/`$`; Oracle and SQL Server admit `_`/`$`/`#`; `_` stays legal
+     * per the ratified 008 deviation — the documented use case exempts Oracle's
+     * `APEX_REPORTING` via `apex_reporting`). Entries are lowercase post-normalization, so
+     * uppercase sits outside the stored alphabet by construction.
+     *
+     * An ALLOWLIST, not the per-character wildcard denylist it replaces (R5 F7): the
+     * denylist grew one character per review round (`*`, then `%`) while `?`, glob ranges
+     * `[a-z]`, pasted quoted identifiers, and qualified `db.schema` entries still stored —
+     * each looking like it exempts a family while exempting nothing, exactly the failure
+     * this rule exists to prevent. The complement — "can match a real schema name" — closes
+     * the whole class at once. A blank entry fails the alphabet too (empty matches `+`
+     * nothing), and normalization (which runs before validation on every save/validate
+     * path) already dropped blank-after-trim entries, so this branch fires only for direct
+     * raw-input callers.
      */
     private fun validateIntrospectionIncludeSchemas(
         datasource: Datasource,
         errors: MutableList<ValidationError>,
     ) {
         datasource.introspectionIncludeSchemas.forEach { entry ->
-            if (entry.isBlank() || entry.contains('*') || entry.contains('%')) {
+            if (!INCLUDE_SCHEMA_ENTRY_PATTERN.matches(entry)) {
                 errors +=
                     propertiesError(
                         "introspection_include_schemas",
-                        "introspection_include_schemas entries must be exact schema names — non-blank, no wildcard " +
-                            "patterns (`*`, `%`); '${entry.truncateForError()}' is not. The prefix language belongs to " +
-                            "the exclusion floors alone.",
+                        "introspection_include_schemas entries must be exact schema names over the legal-identifier " +
+                            "alphabet of the supported dialects — letters, digits, `_`, `\$`, `#`, lowercase " +
+                            "(normalized at save); '${entry.truncateForError()}' is not. Wildcards, quotes, and " +
+                            "qualified db.schema names can never match a real schema as an exact entry.",
                     )
             }
         }
@@ -316,6 +324,12 @@ class DatasourceValidator(
     companion object {
         const val MAX_NAME_LENGTH = 63
         private val NAME_PATTERN = Regex("^[a-z0-9_-]+$")
+
+        /**
+         * The §3.3/§7A allowlist entry alphabet — legal unquoted-identifier characters
+         * across the supported dialects, in the stored (lowercase, normalized) form.
+         */
+        private val INCLUDE_SCHEMA_ENTRY_PATTERN = Regex("""^[a-z0-9_$#]+$""")
 
         /** §5.4: negative initializationFailTimeout → pool constructs without connecting. */
         private const val TEST_POOL_NO_CONNECT = -1L

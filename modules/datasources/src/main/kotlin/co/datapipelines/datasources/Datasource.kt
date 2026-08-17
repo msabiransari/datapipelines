@@ -37,13 +37,15 @@ data class Datasource(
      * `apex_*` hides a customer's own `APEX_REPORTING` schema just like the engine's versioned
      * ones, with no warning; naming it here makes it visible again.
      *
-     * **Lowercase, exact names, no patterns** (an entry carrying `*` or `%` is rejected at
-     * save — a pattern here would look like it exempts a family while exempting nothing);
-     * normalization to lowercase happens at the registry's save boundary — the single
-     * place every write path crosses — and again at the repository's read boundary, so a
-     * row whose allowlist landed by restore or a manual JSONB edit cannot sit silently
-     * inert. Absent/empty = today's behavior: the dialect floor applies unchanged. Matching
-     * is case-insensitive, like the exclusion itself.
+     * **Lowercase, exact names, over the legal-identifier alphabet of the supported
+     * dialects** (letters, digits, `_`, `$`, `#` — anything else is rejected at save; an
+     * entry outside the alphabet can only ever look like it exempts something while
+     * exempting nothing); normalization — trim, lowercase, drop blanks, dedupe — happens at
+     * the registry's save boundary — the single place every write path crosses — and again
+     * at the repository's read boundary, so a row whose allowlist landed by restore or a
+     * manual JSONB edit cannot sit silently inert. Absent/empty = today's behavior: the
+     * dialect floor applies unchanged. Matching is case-insensitive, like the exclusion
+     * itself.
      */
     val introspectionIncludeSchemas: List<String> = emptyList(),
 ) {
