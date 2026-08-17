@@ -180,7 +180,7 @@ class ReferenceRulesTest {
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
         templates: TemplateDryRenderer = StubTemplates(),
-    ) = PipelineValidator(datasources, templates).validate(pipeline)
+    ) = PipelineValidator(datasources, templates, PipelineResolver { _, _ -> null }, 5).validate(pipeline)
 
     private fun h2Templates() = StubTemplates(defaultLookup = TemplateLookup.Found(Dialect.H2))
 }

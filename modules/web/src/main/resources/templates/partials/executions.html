@@ -20,7 +20,15 @@
       </thead>
       <tbody>
         <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
-          <td th:text="${r.pipelineId.toString().substring(0, 8) + '...'}">pipeline</td>
+          <td>
+            <span th:text="${r.pipelineId.toString().substring(0, 8) + '...'}">pipeline</span>
+            <div th:if="${r.parentExecutionId != null}" style="font-size: var(--text-xs);">
+              <a th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
+                 onclick="event.stopPropagation()"
+                 style="color: var(--text-muted);"
+                 th:text="${'spawned by ' + r.parentExecutionId.toString().substring(0, 8) + '...'}">spawned by</a>
+            </div>
+          </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>
             <span class="ds-badge"

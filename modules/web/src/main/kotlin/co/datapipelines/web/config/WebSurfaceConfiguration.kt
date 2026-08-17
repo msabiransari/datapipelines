@@ -15,14 +15,17 @@ import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.mcp.McpExecutionRunner
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.pipelines.ExecutionLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
+import co.datapipelines.web.pipelines.SubPipelineExecutionRunner
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionStreamRegistry
@@ -114,6 +117,56 @@ class WebSurfaceConfiguration {
         }
     }
 
+    /**
+     * The composition runtime (design 2026-08-13-pipeline-node-type §4.1): dag's `SubPipelineRunner`
+     * port implemented over the shared engine collaborators plus the pipeline registry — the one
+     * collaborator [McpRecordingExecutionRunner] does not need and this one cannot work without.
+     * Both execution entry points (the SSE launcher, the MCP runner) take it so a PIPELINE node
+     * behaves identically however the parent was started.
+     */
+    @Suppress("LongParameterList")
+    @Bean
+    fun subPipelineRunner(
+        pipelines: PipelineRepository,
+        templateEngine: TemplateEngine,
+        datasourceRegistry: DatasourceRegistry,
+        stagingFactory: StagingFactory,
+        writebackRunner: WritebackRunner,
+        resultStore: ResultStore,
+        cancellationRegistry: CancellationRegistry,
+        cancellationFlags: CancellationFlags,
+        executionSlots: ExecutionSlots,
+        executorDispatcher: ExecutorDispatcher,
+        executorConfig: ExecutorConfig,
+        resultUrls: ResultUrlFactory,
+        executorMetrics: ExecutorMetrics,
+        persistenceDispatcher: CoroutineDispatcher,
+        streams: ExecutionStreamRegistry,
+        eventLog: SseEventLog,
+        eventRepository: ExecutionEventRepository,
+        executionRepository: ExecutionRepository,
+    ): SubPipelineRunner =
+        SubPipelineExecutionRunner(
+            pipelines = pipelines,
+            templateEngine = templateEngine,
+            datasourceRegistry = datasourceRegistry,
+            stagingFactory = stagingFactory,
+            writebackRunner = writebackRunner,
+            resultStore = resultStore,
+            cancellationRegistry = cancellationRegistry,
+            cancellationFlags = cancellationFlags,
+            executionSlots = executionSlots,
+            executorDispatcher = executorDispatcher,
+            executorConfig = executorConfig,
+            resultUrls = resultUrls,
+            executorMetrics = executorMetrics,
+            persistenceDispatcher = persistenceDispatcher,
+            streams = streams,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+        )
+
     @Suppress("LongParameterList")
     @Bean
     fun executionLauncher(
@@ -139,6 +192,7 @@ class WebSurfaceConfiguration {
         idempotency: IdempotencyProperties,
         metrics: WebMetrics,
         scope: CoroutineScope,
+        subPipelineRunner: SubPipelineRunner,
     ): ExecutionLauncher =
         ExecutionLauncher(
             templateEngine = templateEngine,
@@ -164,6 +218,7 @@ class WebSurfaceConfiguration {
             mapper = ExecutorJson.mapper,
             metrics = metrics,
             scope = scope,
+            subPipelineRunner = subPipelineRunner,
         )
 
     /**
@@ -192,6 +247,7 @@ class WebSurfaceConfiguration {
         eventLog: SseEventLog,
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
+        subPipelineRunner: SubPipelineRunner,
     ): McpExecutionRunner =
         McpRecordingExecutionRunner(
             templateEngine = templateEngine,
@@ -211,5 +267,6 @@ class WebSurfaceConfiguration {
             eventLog = eventLog,
             eventRepository = eventRepository,
             executionRepository = executionRepository,
+            subPipelineRunner = subPipelineRunner,
         )
 }

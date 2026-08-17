@@ -72,6 +72,52 @@ class PipelineDeserializerTest {
     }
 
     @Test
+    fun `the type_invalid message names every catalogued wire value`() {
+        // §12.4's allowed-set, restated in the failure itself: the enum gaining `PIPELINE`
+        // (four values now) must show up in what the author is told.
+        val outcome = deserializer.read(pipelineJson(node(null, type = "SELECT")))
+
+        val failure = (outcome as DeserializationOutcome.Rejected).result.failures.single()
+        failure.message shouldContain "[DQL, DML, DDL, PIPELINE]"
+        failure.details["allowed"] shouldBe NodeType.WIRE_VALUES
+    }
+
+    @Test
+    fun `a PIPELINE node binds its pipeline reference and parameter map`() {
+        val pipeline =
+            parse(
+                pipelineJson(
+                    """{"id":"revenue","description":"d","type":"PIPELINE",
+                       "pipeline":{"name":"monthly_revenue","version":4},
+                       "parameters":{"start_date":"${'$'}{start_date}","region":"EU"},
+                       "output":{"target":"tempdb","table":"stg_revenue"},"depends_on":[]}""",
+                ),
+            )
+        val node = pipeline.nodes.single()
+
+        node.type shouldBe NodeType.PIPELINE
+        node.pipeline shouldBe PipelineNodeRef("monthly_revenue", 4)
+        node.parameters shouldBe
+            mapOf("start_date" to Fixtures.json("\"\${start_date}\""), "region" to Fixtures.json("\"EU\""))
+        node.output shouldBe NodeOutput.Tempdb("stg_revenue")
+    }
+
+    @Test
+    fun `an omitted output block on a PIPELINE node stays null`() {
+        // No D1 default: a zero-caller child is side-effect-only, and §12.9's
+        // output_on_sideeffect_child check needs to see the block was never declared.
+        val pipeline =
+            parse(
+                pipelineJson(
+                    """{"id":"revenue","description":"d","type":"PIPELINE",
+                       "pipeline":{"name":"monthly_revenue","version":4},"depends_on":[]}""",
+                ),
+            )
+
+        pipeline.nodes.single().output shouldBe null
+    }
+
+    @Test
     fun `an out-of-catalog output target is rejected with output_target_invalid`() {
         val outcome = deserializer.read(pipelineJson(node("""{"target":"kafka","topic":"orders"}""")))
 

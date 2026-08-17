@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
@@ -49,6 +51,9 @@ import java.util.Base64
 class ApplicationSmokeTest {
     @Autowired
     private lateinit var rest: TestRestTemplate
+
+    @Autowired
+    private lateinit var applicationContext: ApplicationContext
 
     private val mapper = ObjectMapper()
 
@@ -97,6 +102,20 @@ class ApplicationSmokeTest {
         // port; /actuator/prometheus lives on the separate management port (§4.2).
         rest.getForEntity("/actuator/health", String::class.java).statusCode.is2xxSuccessful shouldBe false
         rest.getForEntity("/actuator/env", String::class.java).statusCode.is2xxSuccessful shouldBe false
+    }
+
+    /**
+     * The composition wiring (design 2026-08-13-pipeline-node-type §4.1), asserted at the bean
+     * graph the assembled app actually boots: the `SubPipelineRunner` port and the
+     * repository-backed `PipelineResolver` must both exist, or a PIPELINE node would fail closed
+     * in production while module tests stayed green. (By name, not by type: `app` may only
+     * depend on `web`, module-structure §4.2 — the behavioral half of this wiring is covered in
+     * `web`'s `RepositoryPipelineResolverTest`.)
+     */
+    @Test
+    fun `composition beans are wired - sub-pipeline runner and repository-backed resolver`() {
+        applicationContext.getBean("subPipelineRunner") shouldNotBe null
+        applicationContext.getBean("pipelineResolver") shouldNotBe null
     }
 
     companion object {

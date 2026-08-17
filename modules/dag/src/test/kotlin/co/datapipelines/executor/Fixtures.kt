@@ -20,6 +20,7 @@ import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
 import io.mockk.every
 import io.mockk.mockk
@@ -223,6 +224,29 @@ class InMemoryResultStore(
                 warnings = schema.warnings,
             )
         return StoredResult(key, rows.size.toLong(), bytes, stored.getValue(key).expiresAt, schema.warnings)
+    }
+
+    override suspend fun materializeRows(
+        executionId: UUID,
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+        ttlSeconds: Long,
+    ): StoredResult {
+        failWith?.let { throw it }
+        val collected = rows.toList()
+        val bytes = collected.sumOf { row -> row.sumOf { (it?.toString() ?: "null").length.toLong() } }
+        val key = keyFor(executionId)
+        stored[key] =
+            StoredResultView(
+                key = key,
+                executionId = executionId,
+                schema = schema,
+                firstPage = collected.take(config.pageSizeRows),
+                totalRows = collected.size.toLong(),
+                bytes = bytes,
+                expiresAt = Instant.now().plusSeconds(ttlSeconds),
+            )
+        return StoredResult(key, collected.size.toLong(), bytes, stored.getValue(key).expiresAt)
     }
 
     /** This fake owns its own keyspace — deliberately NOT Redis's, so the two never get confused. */
@@ -526,6 +550,20 @@ class LatchedResultStore(
         )
     }
 
+    override suspend fun materializeRows(
+        executionId: UUID,
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+        ttlSeconds: Long,
+    ): StoredResult {
+        entered.countDown()
+        release.await()
+        throw co.datapipelines.typesystem.DatapipelinesException(
+            code = co.datapipelines.pipeline.PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+            message = "store went away mid-drain",
+        )
+    }
+
     override fun keyFor(executionId: UUID): String = "latched:result:$executionId"
 
     override fun describe(key: String): StoredResultView? = null
@@ -537,4 +575,25 @@ class LatchedResultStore(
     ): ResultPage? = null
 
     override fun discard(key: String) = Unit
+}
+
+/**
+ * Records what a `direct` delivery (design §4.2) streamed to it.
+ *
+ * The rows are consumed **inside** `accept`, as the contract requires — the sequence is lazy over
+ * a still-open cursor and reads garbage (or throws) once the node's `use` block has closed it.
+ */
+class RecordingSink : DirectResultSink {
+    var schema: List<ColumnSchema>? = null
+        private set
+
+    val rows = mutableListOf<List<Any?>>()
+
+    override suspend fun accept(
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
+    ) {
+        this.schema = schema
+        rows.forEach { this.rows += it }
+    }
 }

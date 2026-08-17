@@ -4,11 +4,14 @@ import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 
 /**
- * The SQL category a node's template generates (pipeline-contract §4.6, enums.md §2).
+ * The SQL category a node's template generates (pipeline-contract §4.6, enums.md §2) — or, for
+ * `PIPELINE`, a node that runs no SQL of its own at all.
  *
  * The value drives executor behaviour (§8.4): `DQL` stages / returns / writes back a
- * ResultSet, `DML` records an affected-row count, `DDL` records success. It also decides
- * whether an `output` block is legal at all — only `DQL` may carry one (§12.4).
+ * ResultSet, `DML` records an affected-row count, `DDL` records success, `PIPELINE` executes
+ * the pinned child pipeline and consumes its result (§8.5). It also decides whether an `output`
+ * block is legal at all — `DQL` always may carry one, `PIPELINE` may when the pinned child has
+ * a caller node (§12.9), `DML`/`DDL` never (§12.4).
  *
  * Wire values are UPPER and coincide with the constant names, but the `@JsonValue` /
  * `@JsonCreator` mapping is still explicit and mandatory: the enums.md catalog string, not
@@ -25,6 +28,9 @@ enum class NodeType(
 
     /** `CREATE` / `ALTER` / `DROP` / `TRUNCATE`. Produces success/failure; no `output` block. */
     DDL("DDL"),
+
+    /** Executes another pipeline as a child execution (§4.9, §8.5); carries a `pipeline` ref, never `source`/`template`. */
+    PIPELINE("PIPELINE"),
     ;
 
     companion object {

@@ -92,6 +92,8 @@ class AuditCauseIntegrationTest {
             renderBudgetChars = ExecutorConfig().renderOutputBudgetChars(),
             stagingMaxMemoryMb = 1024,
             tempdbDialect = Dialect.H2,
+            userId = UUID.randomUUID(),
+            rootExecutionId = executionId,
         )
 
     private fun source(): Datasource =

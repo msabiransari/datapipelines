@@ -19,6 +19,7 @@ import co.datapipelines.executor.RedisResultStore
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.staging.StagingFactory
@@ -63,6 +64,7 @@ class EngineConfiguration {
         executor: ExecutorProperties,
         staging: StagingH2Properties,
         sse: SseProperties,
+        pipelines: PipelineProperties,
         result: ResultConfig,
     ): ExecutorConfig =
         ExecutorConfig(
@@ -75,6 +77,7 @@ class EngineConfiguration {
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.
             cancelPollIntervalSeconds = sse.heartbeatIntervalSeconds,
+            maxCompositionDepth = pipelines.maxCompositionDepth,
             result = result,
         )
 
@@ -170,6 +173,7 @@ class EngineConfiguration {
         config: ExecutorConfig,
         resultUrls: ResultUrlFactory,
         metrics: ExecutorMetrics,
+        subPipelineRunner: SubPipelineRunner,
     ): PipelineExecutor =
         pipelineExecutor(
             templateEngine = templateEngine,
@@ -189,6 +193,10 @@ class EngineConfiguration {
             config = config,
             resultUrls = resultUrls,
             metrics = metrics,
+            // Same port the per-run executors get (composition is runner-agnostic): leaving this
+            // one unwired would make a PIPELINE node fail "not wired" only on whichever path
+            // happens to use the shared bean.
+            subPipelineRunner = subPipelineRunner,
         )
 
     /**

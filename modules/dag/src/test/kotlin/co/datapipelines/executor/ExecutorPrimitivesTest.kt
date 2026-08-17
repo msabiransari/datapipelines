@@ -80,6 +80,7 @@ class ExecutorPrimitivesTest {
         shouldThrow<IllegalArgumentException> { ExecutorConfig(maxParallelNodes = 0) }
         shouldThrow<IllegalArgumentException> { ExecutorConfig(executionTimeoutSeconds = 0) }
         shouldThrow<IllegalArgumentException> { ExecutorConfig(cancelPollIntervalSeconds = 0) }
+        shouldThrow<IllegalArgumentException> { ExecutorConfig(maxCompositionDepth = 0) }
         shouldThrow<IllegalArgumentException> { ResultConfig(ttlMinSeconds = 100, ttlMaxSeconds = 10) }
         shouldThrow<IllegalArgumentException> { ResultConfig(pageSizeRows = 10, pageMaxRows = 5) }
     }

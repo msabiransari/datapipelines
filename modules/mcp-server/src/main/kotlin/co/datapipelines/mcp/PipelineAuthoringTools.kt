@@ -71,10 +71,14 @@ internal class PipelineSaveSupport(
     companion object {
         /** The §6.2.4 `nodes` description, restated verbatim by both tools. */
         const val NODES_DESCRIPTION: String =
-            "Pipeline nodes. Each node has type (DQL/DML/DDL), source, template ref, depends_on array, and — for DQL " +
+            "Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL " +
                 "only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most " +
                 "one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare " +
-                "output.target='tempdb' with a table name explicitly."
+                "output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref " +
+                "{name, version} pinning an existing pipeline version to execute as a child execution, an optional " +
+                "parameters map (typed literals, or '\${parent_param}' to pass a parent parameter through), and an " +
+                "optional output block allowed only when the pinned child has a caller node; it declares neither source " +
+                "nor template."
 
         /** The §6.2.4 `parameters` description, restated verbatim by both tools. */
         const val PARAMETERS_DESCRIPTION: String =

@@ -5,11 +5,12 @@ package co.datapipelines.executor
  *
  * A plain immutable data class rather than a Spring `@ConfigurationProperties`, following the
  * pattern `H2StagingProperties` established: the assembling layer (`app`) binds
- * `datapipelines.executor.*`, `datapipelines.result.*`, `datapipelines.staging.h2.max-memory-mb`
- * and `datapipelines.sse.heartbeat-interval-seconds` and hands the executor **already-resolved**
+ * `datapipelines.executor.*`, `datapipelines.result.*`, `datapipelines.staging.h2.max-memory-mb`,
+ * `datapipelines.sse.heartbeat-interval-seconds` and
+ * `datapipelines.pipelines.max-composition-depth` and hands the executor **already-resolved**
  * effective values. Nothing here re-reads global config mid-execution, and no key is defined
  * here — [configuration.md](../../../../../../../docs/configuration.md) is the only authority
- * (D8). The defaults mirror §3.2 / §3.5 so a directly-constructed instance behaves as the
+ * (D8). The defaults mirror §3.2 / §3.5 / §3.16 so a directly-constructed instance behaves as the
  * documented out-of-the-box configuration.
  *
  * @property maxParallelNodes `datapipelines.executor.max-parallel-nodes`.
@@ -22,6 +23,8 @@ package co.datapipelines.executor
  *   `settings.tempdb.config.max_memory_mb` overrides it for that pipeline (D6).
  * @property cancelPollIntervalSeconds `datapipelines.sse.heartbeat-interval-seconds` — the
  *   cadence at which the executing instance re-reads the Redis cancel flag (§8.3.1).
+ * @property maxCompositionDepth `datapipelines.pipelines.max-composition-depth` — the deepest
+ *   PIPELINE-node composition chain admitted (checked at save time and again at run time).
  */
 data class ExecutorConfig(
     val maxParallelNodes: Int = 4,
@@ -31,6 +34,7 @@ data class ExecutorConfig(
     val executionTimeoutSeconds: Long = 600,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
+    val maxCompositionDepth: Int = 5,
     val result: ResultConfig = ResultConfig(),
 ) {
     init {
@@ -45,6 +49,7 @@ data class ExecutorConfig(
         require(executionTimeoutSeconds > 0) { "executionTimeoutSeconds must be positive" }
         require(stagingMaxMemoryMb > 0) { "stagingMaxMemoryMb must be positive" }
         require(cancelPollIntervalSeconds > 0) { "cancelPollIntervalSeconds must be positive" }
+        require(maxCompositionDepth >= 1) { "maxCompositionDepth must be >= 1, was $maxCompositionDepth" }
     }
 
     /**

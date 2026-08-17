@@ -99,7 +99,14 @@ class PipelineExecutor(
      */
     suspend fun execute(request: ExecuteRequest): ExecutionResult {
         val executionId = request.executionId ?: UUID.randomUUID()
-        return executionSlots.withSlot(request.userId) { runExecution(executionId, request) }
+        // Design §4.4 (corrected 2026-08-13): only ROOT executions take a concurrency slot. A
+        // child holding its own slot while its parent waits on it deadlocks any family larger
+        // than the cap; composition volume is bounded by depth and the per-pipeline node cap.
+        return if (request.rootExecutionId != null) {
+            runExecution(executionId, request)
+        } else {
+            executionSlots.withSlot(request.userId) { runExecution(executionId, request) }
+        }
     }
 
     @Suppress("LongMethod")
@@ -154,7 +161,7 @@ class PipelineExecutor(
             return withTimeout(config.executionTimeoutSeconds.seconds) {
                 coroutineScope {
                     handle.bind(coroutineContext.job)
-                    val poller = launch(dispatcher.context) { pollCancelFlag(executionId, run, handle) }
+                    val poller = launch(dispatcher.context) { pollCancelFlag(run, handle) }
                     try {
                         val results = runNodes(plan.dag, ctx, run)
                         succeed(run, results)
@@ -215,7 +222,7 @@ class PipelineExecutor(
     ): NodeResult {
         // §8.3.1: the Redis flag is checked at node boundaries as well as on the poll tick, so a
         // cross-instance cancel does not have to wait a full interval to stop the next node.
-        checkCancelFlag(run.executionId)
+        checkCancelFlag(run)
         val startedAt = Instant.now()
         run.stats.started(node.id, startedAt)
         emit(NodeStarted(run.executionId, node.id, startedAt))
@@ -480,7 +487,6 @@ class PipelineExecutor(
      * missing. On the clean path there is nothing running, so it is a no-op.
      */
     private suspend fun pollCancelFlag(
-        executionId: UUID,
         run: ExecutionRun,
         handle: CancellationHandle,
     ) {
@@ -488,7 +494,7 @@ class PipelineExecutor(
         try {
             while (true) {
                 delay(interval)
-                checkCancelFlag(executionId)
+                checkCancelFlag(run)
             }
         } finally {
             if (run.stats.runningNodeIds().isNotEmpty()) {
@@ -498,8 +504,18 @@ class PipelineExecutor(
         }
     }
 
-    private fun checkCancelFlag(executionId: UUID) {
-        cancellationFlags.read(executionId)?.let { cancellationRegistry.cancel(executionId, it) }
+    /**
+     * Reads the cross-instance flag for this execution — and, for a CHILD, for its family root
+     * too (design §4.3, D8). Flags are keyed per execution id (`dp:cancel:{execution_id}`), so
+     * both reads are required: the child's own flag stops it alone, the root's flag — set by
+     * `DELETE /executions/{id}` against the ancestor — stops the whole family.
+     */
+    private fun checkCancelFlag(run: ExecutionRun) {
+        cancellationFlags.read(run.executionId)?.let { cancellationRegistry.cancel(run.executionId, it) }
+        val root = run.request.rootExecutionId
+        if (root != null && root != run.executionId) {
+            cancellationFlags.read(root)?.let { cancellationRegistry.cancel(run.executionId, it) }
+        }
     }
 
     private fun nodeContext(
@@ -531,6 +547,12 @@ class PipelineExecutor(
             renderBudgetChars = config.renderOutputBudgetChars(budgetMb),
             stagingMaxMemoryMb = budgetMb,
             tempdbDialect = request.pipeline.settings.tempdb.engine.dialect,
+            userId = request.userId,
+            // A null rootExecutionId on the request marks a ROOT execution — its own id is the
+            // family's root, exactly as the repository persists it (metadata-db §4.6).
+            rootExecutionId = request.rootExecutionId ?: run.executionId,
+            compositionDepth = request.compositionDepth,
+            directSink = request.directSink,
         )
     }
 
@@ -626,9 +648,16 @@ fun pipelineExecutor(
     resultUrls: ResultUrlFactory,
     metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     auditSink: ExecutionAwareAuditSink? = null,
+    /**
+     * The composition port (design §4.1) every PIPELINE node of this executor dispatches to. The
+     * assembling layer (web) wires its `SubPipelineExecutionRunner`; left null, a PIPELINE node
+     * fails with `pipeline.node.child_execution_failed` ("not wired in this runtime").
+     */
+    subPipelineRunner: SubPipelineRunner? = null,
 ): PipelineExecutor =
     PipelineExecutor(
-        nodeRunner = NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics),
+        nodeRunner =
+            NodeRunner(templateEngine, datasourceRegistry, writebackRunner, resultStore, config, auditSink, metrics, subPipelineRunner),
         stagingFactory = stagingFactory,
         resultStore = resultStore,
         eventEmitter = eventEmitter,

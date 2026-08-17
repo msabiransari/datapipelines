@@ -70,10 +70,10 @@ class ApiErrorCatalogSpecDriftTest {
         val STATUS_ROW_REGEX = Regex("""^\|\s*`([a-z][a-z0-9_.]+)`\s*\|\s*([0-9]{3}|—)\s*\|""")
         val VALIDATION_ROW_REGEX = Regex("""^\| `(pipeline\.validation\.[a-z_]+)`\s*\|""")
 
-        /** §13.2–§13.11's row count on 2026-08-11 (gate C added template/datasource.not_found). */
-        const val SECTION_13_ROW_COUNT = 72
+        /** §13.2–§13.11's row count on 2026-08-17 (pipeline composition added the two §13.4 node codes). */
+        const val SECTION_13_ROW_COUNT = 74
 
-        /** §12's distinct validation codes on 2026-08-11 (one code appears in two tables). */
-        const val SECTION_12_CODE_COUNT = 35
+        /** §12's distinct validation codes on 2026-08-17 (pipeline composition added §12.9's 11). */
+        const val SECTION_12_CODE_COUNT = 46
     }
 }

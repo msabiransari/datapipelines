@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
@@ -183,6 +184,63 @@ class RedisResultStoreIntegrationTest {
                 .describe(second.key)
                 .shouldNotBeNull()
                 .firstPage.size shouldBe 2
+        }
+
+    @Test
+    fun `materializeRows stores a result that describe and page read identically to materialize`() =
+        runBlocking<Unit> {
+            // The shape Task 5's caller-target adapter hands over (design §4.2): a canonical
+            // schema plus already-decoded rows from a child's `direct` stream — no ResultSet.
+            val executionId = UUID.randomUUID()
+            val store = store()
+            val schema =
+                listOf(
+                    ColumnSchema("n", LogicalType.INTEGER),
+                    ColumnSchema("label", LogicalType.STRING),
+                    ColumnSchema("big", LogicalType.BIGINTEGER),
+                )
+            val data = (1..5).map { n -> listOf(n, "r$n", n.toLong()) }
+
+            val stored = store.materializeRows(executionId, schema, data.asSequence(), TTL_SECONDS)
+
+            stored.key shouldBe "dp:result:$executionId"
+            stored.totalRows shouldBe 5
+            (stored.bytes > 0).shouldBeTrue()
+
+            val view = store.describe(stored.key).shouldNotBeNull()
+            view.executionId shouldBe executionId
+            view.totalRows shouldBe 5
+            view.schema.map { it.name } shouldBe listOf("n", "label", "big")
+            // Same egress encoding as materialize: INTEGER a JSON number, BIGINTEGER a string.
+            view.firstPage shouldBe
+                listOf(
+                    listOf(1, "r1", "1"),
+                    listOf(2, "r2", "2"),
+                    listOf(3, "r3", "3"),
+                    listOf(4, "r4", "4"),
+                    listOf(5, "r5", "5"),
+                )
+
+            val tail = store.page(stored.key, offset = 3, limit = 5).shouldNotBeNull()
+            tail.rows shouldBe listOf(listOf(4, "r4", "4"), listOf(5, "r5", "5"))
+            tail.totalRows shouldBe 5
+            tail.hasMore shouldBe false
+        }
+
+    @Test
+    fun `materializeRows crossing max-size-bytes discards the partial result`() =
+        runBlocking<Unit> {
+            val executionId = UUID.randomUUID()
+            val store = store(ResultConfig(maxSizeBytes = 20))
+            val schema = listOf(ColumnSchema("n", LogicalType.INTEGER))
+
+            shouldThrow<DatapipelinesException> {
+                store.materializeRows(executionId, schema, (1..5_000).map { listOf(it) }.asSequence(), TTL_SECONDS)
+            }.code shouldBe PipelineErrorCodes.Result.TOO_LARGE
+
+            store.describe("dp:result:$executionId").shouldBeNull()
+            redis.hasKey("dp:result:$executionId:rows") shouldBe false
+            redis.hasKey("dp:result:$executionId:meta") shouldBe false
         }
 
     // ------------------------------------------------------------------ helpers

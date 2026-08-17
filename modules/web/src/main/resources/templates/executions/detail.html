@@ -34,6 +34,11 @@
             <span style="color: var(--text-muted);">Triggered via:</span>
             <span th:text="${record.triggeredVia.name()}">UI</span>
           </div>
+          <div th:if="${record.parentExecutionId != null}">
+            <span style="color: var(--text-muted);">Spawned by:</span>
+            <a th:href="@{/executions/{id}(id=${record.parentExecutionId})}"
+               th:text="${record.parentExecutionId.toString().substring(0, 8) + '...' + (record.parentNodeId != null ? ' / ' + record.parentNodeId : '')}">parent</a>
+          </div>
         </div>
       </div>
       <div style="display: flex; gap: var(--gap-sm);">
@@ -45,6 +50,44 @@
       </div>
     </div>
   </div>
+
+  <th:block th:if="${family.size() > 1}">
+    <div class="ds-card" style="margin-bottom: var(--gap-lg);">
+      <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Execution Family</h2>
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th>Execution</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="f : ${family}">
+            <td>
+              <a th:href="@{/executions/{id}(id=${f.executionId})}"
+                 th:text="${f.executionId.toString().substring(0, 8) + '...'}">exec</a>
+              <span th:if="${f.executionId == record.executionId}" style="color: var(--text-muted); font-size: var(--text-xs);"> (this one)</span>
+            </td>
+            <td>
+              <span th:if="${f.parentExecutionId == null}" style="color: var(--text-secondary);">root</span>
+              <span th:unless="${f.parentExecutionId == null}" style="color: var(--text-secondary);"
+                    th:text="${'child of ' + f.parentExecutionId.toString().substring(0, 8) + '...' + (f.parentNodeId != null ? ' / ' + f.parentNodeId : '')}">child</span>
+            </td>
+            <td>
+              <span class="ds-badge"
+                    th:classappend="${f.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${f.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${f.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
+                    th:text="${f.status.name()}">status</span>
+            </td>
+            <td th:text="${#temporals.format(f.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>
+            <td th:text="${f.durationMs != null} ? ${f.durationMs + 'ms'} : '-'">dur</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </th:block>
 
   <th:block th:if="${record.status.name() == 'FAILED' && errorJson != null}">
     <div class="ds-card" style="border-color: var(--accent-danger); margin-bottom: var(--gap-lg);">

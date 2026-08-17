@@ -43,7 +43,7 @@ object RedisSupport {
 
 /**
  * Locates files relative to the repository root, whichever directory the test task runs from —
- * the same helper `auth` and `pipeline-contract` use to execute app's real `V1__initial_schema.sql`
+ * the same helper `auth` and `pipeline-contract` use to execute app's shipped migrations
  * without any module taking a Flyway dependency (module-structure §3.1 rule 2).
  */
 object RepoFiles {
@@ -61,5 +61,22 @@ object RepoFiles {
                 require(it.exists()) { "Expected repo file not found: $relativePath (root=$root)" }
             }.readText()
 
-    const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
+    /**
+     * Every shipped migration as a repo-relative path, in NUMERIC version order — derived from
+     * the real directory, never a hand-copied list: a migration added to `app` but not to a
+     * literal list would run this suite against a stale schema (the R4 F5 failure that
+     * datasources' `ShippedMigrations` guards against). Lexicographic order would apply V10
+     * between V1 and V2.
+     */
+    fun migrationPaths(): List<String> =
+        File(root, MIGRATION_DIR)
+            .listFiles { f: File -> f.isFile }
+            .orEmpty()
+            .mapNotNull { f -> VERSION_PREFIX.matchEntire(f.name)?.let { it.groupValues[1].toInt() to f.name } }
+            .sortedBy { it.first }
+            .map { "$MIGRATION_DIR/${it.second}" }
+            .also { require(it.isNotEmpty()) { "No migrations found under $MIGRATION_DIR (root=$root)" } }
+
+    private const val MIGRATION_DIR = "modules/app/src/main/resources/db/migration"
+    private val VERSION_PREFIX = Regex("""^V(\d+)__.*\.sql$""")
 }

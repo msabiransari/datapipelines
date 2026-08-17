@@ -22,6 +22,7 @@ import co.datapipelines.executor.PipelineConcurrencyLimitException
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.pipeline.ParameterBinder
@@ -121,6 +122,12 @@ class ExecutionLauncher(
      * flow (streams, alias, idempotency) is exercisable without staging and datasources.
      */
     private val executorFactory: ((WebEventEmitter) -> PipelineExecutor)? = null,
+    /**
+     * The composition port (design 2026-08-13-pipeline-node-type §4.1) this run's PIPELINE nodes
+     * dispatch to. Passed through to the per-run executor; null only in module-slice wiring, where
+     * a PIPELINE node fails `pipeline.node.child_execution_failed` ("not wired in this runtime").
+     */
+    private val subPipelineRunner: SubPipelineRunner? = null,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionLauncher::class.java)
 
@@ -334,6 +341,7 @@ class ExecutionLauncher(
             config = executorConfig,
             resultUrls = resultUrls,
             metrics = executorMetrics,
+            subPipelineRunner = subPipelineRunner,
         )
 
     private companion object {

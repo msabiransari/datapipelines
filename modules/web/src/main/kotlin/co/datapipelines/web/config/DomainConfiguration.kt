@@ -10,12 +10,14 @@ import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.web.pipelines.PipelineBodies
+import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -43,6 +45,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     ExecutorProperties::class,
     StagingH2Properties::class,
     IdempotencyProperties::class,
+    PipelineProperties::class,
 )
 class DomainConfiguration {
     /**
@@ -96,11 +99,27 @@ class DomainConfiguration {
     @Bean
     fun schemaIntrospector(registry: DatasourceRegistry): SchemaIntrospector = SchemaIntrospector(registry)
 
+    /**
+     * The repository-backed [PipelineResolver] composition validation resolves pinned references
+     * through (design 2026-08-13-pipeline-node-type §3, D5). The resolution rules live in
+     * [repositoryPipelineResolver]; this bean is the assembly.
+     */
+    @Bean
+    fun pipelineResolver(repository: PipelineRepository): PipelineResolver = repositoryPipelineResolver(repository)
+
     @Bean
     fun pipelineValidator(
         datasources: ContractDatasourceRegistry,
         dryRenderer: TemplateDryRenderer,
-    ): PipelineValidator = PipelineValidator(datasources, dryRenderer)
+        pipelines: PipelineResolver,
+        properties: PipelineProperties,
+    ): PipelineValidator =
+        PipelineValidator(
+            datasources,
+            dryRenderer,
+            pipelines,
+            properties.maxCompositionDepth,
+        )
 
     /**
      * The per-execution tempdb factory (staging §3).

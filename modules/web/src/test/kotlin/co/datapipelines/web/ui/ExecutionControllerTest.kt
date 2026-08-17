@@ -133,6 +133,7 @@ class ExecutionControllerTest {
     fun `detail page shows execution data`() {
         authenticate(owner, setOf(Scope.READ))
         every { executions.findById(executionId) } returns record().copy(resultRowCount = 100)
+        every { executions.findByRoot(executionId) } returns listOf(record())
         every { pipelines.findById(pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
@@ -172,6 +173,7 @@ class ExecutionControllerTest {
         val adminId = UUID.randomUUID()
         authenticate(adminId, setOf(Scope.ADMIN))
         every { executions.findById(executionId) } returns record()
+        every { executions.findByRoot(executionId) } returns listOf(record())
         every { pipelines.findById(pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
@@ -185,9 +187,36 @@ class ExecutionControllerTest {
     }
 
     @Test
+    fun `detail exposes the whole execution family via the root`() {
+        authenticate(owner, setOf(Scope.READ))
+        val childId = UUID.randomUUID()
+        val child =
+            record().copy(
+                executionId = childId,
+                parentExecutionId = executionId,
+                parentNodeId = "revenue",
+                rootExecutionId = executionId,
+                triggeredVia = ExecutionTrigger.PIPELINE,
+            )
+        every { executions.findById(executionId) } returns record()
+        every { executions.findByRoot(executionId) } returns listOf(child, record())
+        every { pipelines.findById(pipelineId) } returns pipelineRecord()
+        every { resultStore.keyFor(executionId) } returns "result:key"
+        every { resultStore.describe("result:key") } returns null
+        every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
+
+        val model = ExtendedModelMap()
+        detailController.detail(executionId, model)
+
+        @Suppress("UNCHECKED_CAST")
+        (model["family"] as List<ExecutionRecord>).map { it.executionId } shouldBe listOf(childId, executionId)
+    }
+
+    @Test
     fun `detail shows canCancel for running execution with execute scope`() {
         authenticate(owner, setOf(Scope.EXECUTE))
         every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findByRoot(executionId) } returns listOf(record(ExecutionStatus.RUNNING))
         every { pipelines.findById(pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null

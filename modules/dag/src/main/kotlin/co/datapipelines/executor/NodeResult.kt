@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /** A node's outcome (dag-executor.md §7.2). `ABORTED` means the node never started. */
 enum class NodeStatus {
@@ -31,6 +32,11 @@ data class NodeResult(
     val completedAt: Instant,
     val durationMs: Long,
     val callerResultRef: String?,
+    /**
+     * PIPELINE nodes only: the execution the node spawned (design §5 — UI and API link parent
+     * node → child execution directly). Null on every other node type.
+     */
+    val childExecutionId: UUID? = null,
 ) {
     companion object {
         /** A successful node's result; the duration is computed from [startedAt] to now. */
@@ -41,6 +47,7 @@ data class NodeResult(
             callerResultRef: String? = null,
             bytesOutEstimate: Long = NOT_MEASURED,
             completedAt: Instant = Instant.now(),
+            childExecutionId: UUID? = null,
         ): NodeResult =
             NodeResult(
                 nodeId = nodeId,
@@ -51,6 +58,7 @@ data class NodeResult(
                 completedAt = completedAt,
                 durationMs = Duration.between(startedAt, completedAt).toMillis(),
                 callerResultRef = callerResultRef,
+                childExecutionId = childExecutionId,
             )
 
         /** The sentinel for a quantity that was not measured — §7.1's `-1`. */
@@ -90,6 +98,12 @@ data class NodeStats(
     val errorCode: String? = null,
     @field:JsonProperty("error_message") @get:JsonProperty("error_message") @param:JsonProperty("error_message")
     val errorMessage: String? = null,
+    /**
+     * PIPELINE nodes only: the child execution the node spawned (design §5). Absent from the JSON
+     * for every other node type (NON_NULL inclusion), so existing consumers see no shape change.
+     */
+    @field:JsonProperty("child_execution_id") @get:JsonProperty("child_execution_id") @param:JsonProperty("child_execution_id")
+    val childExecutionId: UUID? = null,
 ) {
     companion object {
         /** Projects a succeeded node (§7.2 row 1). */
@@ -102,6 +116,7 @@ data class NodeStats(
                 durationMs = result.durationMs,
                 rowsOut = result.rowsOut,
                 bytesOut = result.bytesOutEstimate,
+                childExecutionId = result.childExecutionId,
             )
 
         /** Synthesizes a failed node (§7.2 row 2). */

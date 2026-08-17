@@ -18,11 +18,30 @@ internal object NodeTypeRules {
         pipeline.nodes.forEachIndexed { index, node ->
             when (node.type) {
                 NodeType.DQL -> checkDqlOutput(index, node, into)
+
                 NodeType.DML -> forbidOutput(index, node, Validation.DML_HAS_OUTPUT, into)
+
                 NodeType.DDL -> forbidOutput(index, node, Validation.DDL_HAS_OUTPUT, into)
+
+                // A PIPELINE node's output legality is §12.9's job (CompositionRules): whether
+                // the block may exist at all depends on the pinned child's caller node. The
+                // block's companion-field shape is the standard §4.7 one, so CompositionRules
+                // reuses [checkOutputCompanions] below.
+                NodeType.PIPELINE -> Unit
             }
         }
     }
+
+    /**
+     * The §4.7 companion-field checks, exposed for [CompositionRules]: a PIPELINE node's
+     * `output` block — when §12.9 permits one — has the same required-companion-field rules as
+     * a DQL node's.
+     */
+    internal fun checkOutputCompanions(
+        index: Int,
+        node: Node,
+        into: FailureCollector,
+    ) = checkDqlOutput(index, node, into)
 
     /**
      * A DML/DDL node must carry no `output` block: its side effect *is* the output (§4.4,

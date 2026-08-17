@@ -22,10 +22,14 @@ class ExecutorHarness(
     val auditSink: ExecutionAwareAuditSink? = null,
     val cancellations: InMemoryCancellationRegistry = InMemoryCancellationRegistry(),
     val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+    /** Injected only by tests that must observe (or forbid) slot acquisition — normally real. */
+    executionSlots: ExecutionSlots? = null,
+    /** The composition port (design §4.1) — wired by tests that exercise PIPELINE nodes. */
+    subPipelineRunner: SubPipelineRunner? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
-    val slots = ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsGlobal)
+    val slots = executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsGlobal)
 
     /** Deliberately small: a bounded pool is what the deadlock test needs to be honest. */
     private val dispatcher = ExecutorDispatcher.forConfig(config, maxThreads = DISPATCHER_THREADS)
@@ -47,6 +51,7 @@ class ExecutorHarness(
             resultUrls = ResultUrlFactory.RELATIVE,
             metrics = metrics,
             auditSink = auditSink,
+            subPipelineRunner = subPipelineRunner,
         )
 
     override fun close() {

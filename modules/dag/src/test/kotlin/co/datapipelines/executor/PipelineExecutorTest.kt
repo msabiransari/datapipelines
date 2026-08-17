@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.events.DataReady
+import co.datapipelines.events.ExecutionAborted
 import co.datapipelines.events.NodeCompleted
 import co.datapipelines.events.NodeFailed
 import co.datapipelines.events.NodeStarted
@@ -19,6 +20,9 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -322,6 +326,80 @@ class PipelineExecutorTest {
                 h.slots.inFlight shouldBe 0
                 h.slots.trackedUsers shouldBe 0
                 h.cancellations.liveExecutions shouldBe 0
+            }
+        }
+
+    /**
+     * Design §4.4 (corrected 2026-08-13): only ROOT executions consume concurrency slots. A parent
+     * holding a slot while its children queued for their own deadlocks any family larger than the
+     * cap, so a child — a request carrying `rootExecutionId` — must never consult the slot pool.
+     */
+    @Test
+    fun `a child execution with a rootExecutionId runs without consulting the execution slots`() =
+        runBlocking<Unit> {
+            val slots = mockk<ExecutionSlots>()
+            every { slots.inFlight } returns 0
+
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("only" to "SELECT 1 AS n")),
+                executionSlots = slots,
+            ).use { h ->
+                val request =
+                    Fixtures
+                        .request(Fixtures.pipeline(listOf(Fixtures.node("only"))))
+                        .copy(
+                            parentExecutionId = UUID.randomUUID(),
+                            parentNodeId = "revenue",
+                            rootExecutionId = UUID.randomUUID(),
+                            compositionDepth = 1,
+                        )
+
+                val result = h.executor.execute(request)
+
+                result.status shouldBe ExecutionStatus.SUCCESS
+                coVerify(exactly = 0) { slots.withSlot(any(), any()) }
+            }
+        }
+
+    /**
+     * Family cancellation (design §4.3 / D8): flags are keyed per execution id, so a child polls
+     * BOTH its own id and its root's — a `DELETE /executions/{id}` against an ancestor stops every
+     * descendant, while a child's own flag still stops it alone.
+     */
+    @Test
+    fun `a child execution aborts on the cancel flag set under its root execution id`() =
+        runBlocking<Unit> {
+            harness(mapOf("only" to "SELECT 1 AS n")).use { h ->
+                val rootId = UUID.randomUUID()
+                h.flags.request(rootId, AbortReason.CANCELLED, TEST_TIMEOUT_SECONDS)
+
+                shouldThrow<ExecutionAbortedException> {
+                    h.executor.execute(
+                        Fixtures
+                            .request(Fixtures.pipeline(listOf(Fixtures.node("only"))))
+                            .copy(rootExecutionId = rootId),
+                    )
+                }
+
+                h.emitter
+                    .allOf<ExecutionAborted>()
+                    .single()
+                    .reason shouldBe AbortReason.CANCELLED
+                h.emitter.count(SseEventType.PIPELINE_COMPLETED) shouldBe 0
+                h.emitter.count(SseEventType.DATA_READY) shouldBe 0
+            }
+        }
+
+    /** A root execution consults only its OWN flag — a sibling root's flag must not reach it. */
+    @Test
+    fun `a root execution ignores a cancel flag set under a foreign execution id`() =
+        runBlocking<Unit> {
+            harness(mapOf("only" to "SELECT 1 AS n")).use { h ->
+                h.flags.request(UUID.randomUUID(), AbortReason.CANCELLED, TEST_TIMEOUT_SECONDS)
+
+                val result = h.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(Fixtures.node("only")))))
+
+                result.status shouldBe ExecutionStatus.SUCCESS
             }
         }
 

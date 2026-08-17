@@ -114,6 +114,16 @@ class SseEventProjectionTest {
         payload["rows_out"] shouldBe 10L
         payload["bytes_out"] shouldBe 100L
         payload["correlation_id"] shouldBe correlationId
+        // A non-PIPELINE node never carries the composition link (design §7).
+        payload.containsKey("child_execution_id") shouldBe false
+    }
+
+    @Test
+    fun `a PIPELINE node's completion links to the child execution it spawned`() {
+        val childExecutionId = UUID.randomUUID()
+        val event = NodeCompleted(executionId, "revenue", stats(NodeStatus.SUCCESS).copy(childExecutionId = childExecutionId))
+
+        projection.payload(event)["child_execution_id"] shouldBe childExecutionId
     }
 
     private fun stats(status: NodeStatus) =

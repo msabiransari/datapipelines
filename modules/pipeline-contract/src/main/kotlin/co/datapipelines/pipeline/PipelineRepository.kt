@@ -53,6 +53,20 @@ class PipelineRepository(
             .query("$SELECT_COLUMNS WHERE name = :name AND is_deleted = FALSE", mapOf("name" to name), MAPPER)
             .singleOrNull()
 
+    /**
+     * As [findByName], but **including soft-deleted rows** — the read composition needs.
+     *
+     * Soft-delete does not affect existing pinned references (design
+     * 2026-08-13-pipeline-node-type D7, mirroring templates): a saved PIPELINE node keeps
+     * resolving its pinned child after the child is deleted. The save-time resolver reads the
+     * row's `isDeleted` flag to block only NEW references, and the runtime runner reads the
+     * pinned body either way. Callers that list or look up live pipelines use [findByName].
+     */
+    fun findByNameIncludingDeleted(name: String): PipelineRecord? =
+        jdbc
+            .query("$SELECT_COLUMNS WHERE name = :name", mapOf("name" to name), MAPPER)
+            .singleOrNull()
+
     /** Every live pipeline, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
     fun findAll(
         ownerId: UUID? = null,

@@ -137,6 +137,15 @@
   word-break: break-word;
 }
 
+.pe-link {
+  color: var(--accent-primary, #2563eb);
+  text-decoration: none;
+}
+
+.pe-link:hover {
+  text-decoration: underline;
+}
+
 .pe-value-muted {
   color: var(--text-muted, #9ca3af);
   font-style: italic;

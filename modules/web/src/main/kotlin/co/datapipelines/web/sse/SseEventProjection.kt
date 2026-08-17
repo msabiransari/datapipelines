@@ -80,15 +80,18 @@ class SseEventProjection(
         )
 
     private fun nodeCompletedPayload(event: NodeCompleted) =
-        mapOf(
-            EXECUTION_ID to event.executionId,
-            NODE_ID to event.nodeId,
-            STARTED_AT to event.stats.startedAt,
-            "completed_at" to event.stats.completedAt,
-            DURATION_MS to event.stats.durationMs,
-            "rows_out" to event.stats.rowsOut,
-            "bytes_out" to event.stats.bytesOut,
-        )
+        buildMap {
+            put(EXECUTION_ID, event.executionId)
+            put(NODE_ID, event.nodeId)
+            put(STARTED_AT, event.stats.startedAt)
+            put("completed_at", event.stats.completedAt)
+            put(DURATION_MS, event.stats.durationMs)
+            put("rows_out", event.stats.rowsOut)
+            put("bytes_out", event.stats.bytesOut)
+            // Design §7: a PIPELINE node's completion links to the child execution it spawned.
+            // Conditional so every other node type's payload is byte-for-byte what it was.
+            event.stats.childExecutionId?.let { put("child_execution_id", it) }
+        }
 
     private fun nodeFailedPayload(event: NodeFailed) =
         mapOf(

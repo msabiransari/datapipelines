@@ -40,6 +40,17 @@ enum class ExecutionStatus {
  *   The default is [ExecutionTrigger.REST] — the catalogued value for a direct programmatic call,
  *   which is what an in-process construction is. It exists so callers predating this field still
  *   compile, not as a value a surface should rely on: `web` and `mcp-server` pass theirs.
+ * @param directSink the `direct` delivery target (design §4.2) — set only on a CHILD execution
+ *   spawned by a PIPELINE node through the internal execution service. When present, the caller
+ *   node's result streams here and never reaches the [ResultStore]. Null for root executions.
+ * @param parentExecutionId the execution whose PIPELINE node spawned this one; null for roots
+ *   (metadata-db §4.6, design §5).
+ * @param parentNodeId the PIPELINE node id in the parent that spawned this execution.
+ * @param rootExecutionId the family's top ancestor. Non-null marks this request as a child: it
+ *   takes no concurrency slot (design §4.4 correction) and honours the root's cancellation flag
+ *   in addition to its own (design §4.3, D8).
+ * @param compositionDepth how many PIPELINE-node hops sit above this execution; the runtime
+ *   depth backstop refuses beyond `datapipelines.pipelines.max-composition-depth`.
  */
 data class ExecuteRequest(
     val pipelineId: UUID,
@@ -52,6 +63,11 @@ data class ExecuteRequest(
     val correlationId: UUID? = null,
     val triggeredVia: ExecutionTrigger = ExecutionTrigger.REST,
     val executionId: UUID? = null,
+    val directSink: DirectResultSink? = null,
+    val parentExecutionId: UUID? = null,
+    val parentNodeId: String? = null,
+    val rootExecutionId: UUID? = null,
+    val compositionDepth: Int = 0,
 )
 
 /**

@@ -134,6 +134,11 @@ success/failure is the node's outcome.
   slot rather than overflow. A composition cannot multiply itself past the
   executor's limits.
 
+> **Correction (2026-08-13, plan):** children do not take concurrency slots —
+> root executions only; a waiting parent holding a slot while children queue
+> would deadlock. Bounds: depth ≤ max-composition-depth, 1000-node cap per
+> pipeline.
+
 ## 5. Metadata DB (additive migration)
 
 `pipeline_executions` gains three nullable columns + one index:

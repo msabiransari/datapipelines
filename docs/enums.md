@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.2 (living document — updated as enums evolve)
+**Status:** v1.4 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -70,6 +70,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `DQL` | Data Query Language — `SELECT`. Produces a ResultSet. May have an `output` block (tempdb / caller / datasource). |
 | `DML` | Data Manipulation Language — `INSERT`, `UPDATE`, `DELETE`, `MERGE`. Produces a row count. No `output` block. |
 | `DDL` | Data Definition Language — `CREATE`, `ALTER`, `DROP`, `TRUNCATE`. Produces success/failure. No `output` block. |
+| `PIPELINE` | Executes another pipeline as a child execution (pipeline composition). Carries a `pipeline` ref `{name, version}`, never `source`/`template`; may carry an `output` block only when the pinned child has a caller node ([Pipeline Contract §4.9](pipeline-contract.md#49-json-structure-pipeline-node), §8.5). |
 
 **Reserved for future:** `EXPRESSION`, `HTTP` (non-SQL node types — see [ROADMAP](ROADMAP.md)).
 
@@ -347,6 +348,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `UI` | User clicked "Run" in the pipeline editor |
 | `REST` | Direct REST API call (programmatic client) |
 | `MCP` | MCP tool invocation (agent) |
+| `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
 | `SCHEDULED` | (Future) Cron-triggered execution |
 | `WEBHOOK` | (Future) External webhook trigger |
 
@@ -398,3 +400,5 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-08-05 | v1.0 | initial draft | Initial enums reference: 18 enum categories cataloged, cross-reference table, validation discipline |
 | 2026-08-07 | v1.1 | consistency campaign | Case/serialization convention added; `OutputTarget` default → `caller` (D1); `ResultDelivery` removed (D9); `execution_aborted` SSE event added (D7); `AuthAuditEvent` synced to auth §10.1 (no password/lockout events); §16 reduced to domain registry pointing at the single concrete catalog (pipeline-contract §13), D5 renames applied; single authority per enum; broken source links fixed. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-11 | v1.2 | gate C review | §16: registered `template.not_found` / `datasource.not_found` as two-segment codes (read/mutate-path misses; pipeline-contract §13 v1.3); template domain row widened to `template.*`. |
+| 2026-08-16 | v1.3 | pipeline composition | §18 `ExecutionTrigger` gains `PIPELINE` — a child execution spawned by a parent's PIPELINE node (V3 migration widens `chk_triggered_via` to match). |
+| 2026-08-17 | v1.4 | pipeline composition | §2 `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a child execution (pipeline-contract §4.9/§8.5; guarded by the new `NodeTypeSpecDriftTest` in pipeline-contract). |

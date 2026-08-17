@@ -10,10 +10,14 @@ import java.util.UUID
 /**
  * The Redis-backed store for the caller node's result (dag-executor.md §6.4.2, D9).
  *
- * There is **one** delivery model: every caller result is fully materialized here before the
- * source connection closes, and every read — the `data_ready` inline first page, the REST
- * cursor, the MCP tool — pages the stored result. No inline-vs-claim-check split, no live
- * `ResultSet` outliving a node ([REST API §7](../../../../../../../docs/rest-api.md)).
+ * There is **one** delivery model for surface callers: every caller result is fully materialized
+ * here before the source connection closes, and every read — the `data_ready` inline first page,
+ * the REST cursor, the MCP tool — pages the stored result. No inline-vs-claim-check split, no
+ * live `ResultSet` outliving a node ([REST API §7](../../../../../../../docs/rest-api.md)).
+ *
+ * The single, deliberate exception is internal: a child execution spawned by a PIPELINE node can
+ * carry a [DirectResultSink] (design §4.2's `direct` mode), in which case its caller result
+ * streams to the parent executor and never passes through this store at all.
  */
 interface ResultStore {
     /**
@@ -35,6 +39,27 @@ interface ResultStore {
         executionId: UUID,
         resultSet: ResultSet,
         sourceDialect: Dialect,
+        ttlSeconds: Long,
+    ): StoredResult
+
+    /**
+     * Stores an **already-decoded** result — canonical [schema] plus [rows] — under exactly the
+     * contract [materialize] fulfils: same key layout, same during-drain size cap, same expiry,
+     * same `describe`/`page` readability.
+     *
+     * This is the re-publication half of composition (design §4.2): a parent PIPELINE node whose
+     * own `output.target` is `"caller"` lands the child's `direct`-streamed rows here so the
+     * parent's caller gets an ordinary cursor result. The rows carry no ResultSet and no dialect
+     * — decoding and dialect mapping happened upstream, in the child's executor.
+     *
+     * @param ttlSeconds the already-clamped effective TTL, as for [materialize].
+     * @throws co.datapipelines.typesystem.DatapipelinesException `result.too_large` /
+     *   `result.storage_unavailable`, under the same rules as [materialize].
+     */
+    suspend fun materializeRows(
+        executionId: UUID,
+        schema: List<ColumnSchema>,
+        rows: Sequence<List<Any?>>,
         ttlSeconds: Long,
     ): StoredResult
 

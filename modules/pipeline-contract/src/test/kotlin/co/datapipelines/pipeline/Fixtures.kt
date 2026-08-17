@@ -52,11 +52,19 @@ internal object Fixtures {
             nodes = nodes,
         )
 
-    /** A validator whose environment resolves everything the default fixtures reference. */
+    /**
+     * A validator whose environment resolves everything the default fixtures reference.
+     *
+     * The default resolver answers **null** for every pinned pipeline reference — the right
+     * default for specs that never declare a PIPELINE node, since [CompositionRules] only
+     * consults it for those.
+     */
     fun validator(
         datasources: DatasourceRegistry = StubDatasources(),
         templates: TemplateDryRenderer = StubTemplates(),
-    ): PipelineValidator = PipelineValidator(datasources, templates)
+        pipelines: PipelineResolver = PipelineResolver { _, _ -> null },
+        maxCompositionDepth: Int = 5,
+    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth)
 
     /**
      * Locates a repository file by walking up from the working directory, so tests do not
