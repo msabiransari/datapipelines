@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.response.Response
@@ -154,36 +155,60 @@ class PipelineCompositionE2eTest {
         assertResultRows(rootExecutionId)
 
         // Three rows: root, mid (child of root), leaf (child of mid); both children PIPELINE.
+        val (familySize, children) = loadFamily(rootExecutionId)
+        familySize shouldBe 3
+        children.size shouldBe 2
+        children.values.forEach { (parent, triggeredVia, status) ->
+            parent shouldNotBe null
+            triggeredVia shouldBe "PIPELINE"
+            status shouldBe "SUCCESS"
+        }
+        // One generation each: mid's parent is the root, leaf's parent is mid's execution.
+        val midExecutionId = children.entries.single { it.value.parent == rootExecutionId }.key
+        val leafParent =
+            children.entries
+                .single { it.key != midExecutionId }
+                .value
+                .parent
+        leafParent shouldBe midExecutionId
+    }
+
+    /** The execution family under a root: its size, and each non-root row's lineage triple. */
+    private data class ChildRow(
+        val parent: String?,
+        val triggeredVia: String,
+        val status: String,
+    )
+
+    private fun loadFamily(rootExecutionId: String): Pair<Int, Map<String, ChildRow>> {
+        val familySize =
+            queryExecutions(
+                "SELECT count(*) FROM pipeline_executions WHERE root_execution_id = '$rootExecutionId'",
+            ) { it.getInt(1) }
+                .single()
+        val children =
+            queryExecutions(
+                "SELECT execution_id::text, parent_execution_id::text, triggered_via, status " +
+                    "FROM pipeline_executions WHERE root_execution_id = '$rootExecutionId' " +
+                    "AND execution_id != '$rootExecutionId'",
+            ) { rs ->
+                rs.getString(1) to ChildRow(rs.getString(2), rs.getString(3), rs.getString(4))
+            }.toMap()
+        return familySize to children
+    }
+
+    /** Runs a metadata-DB query against the Testcontainers Postgres, collecting every row. */
+    private fun <T> queryExecutions(
+        sql: String,
+        read: (java.sql.ResultSet) -> T,
+    ): List<T> =
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { statement ->
-                statement
-                    .executeQuery(
-                        "SELECT count(*) FROM pipeline_executions WHERE root_execution_id = '$rootExecutionId'",
-                    ).use { rs ->
-                        rs.next()
-                        rs.getInt(1) shouldBe 3
-                    }
-                val children =
-                    mutableMapOf<String, Pair<String, String>>() // execution_id -> (parent_execution_id, triggered_via)
-                statement
-                    .executeQuery(
-                        "SELECT execution_id::text, parent_execution_id::text, triggered_via, status " +
-                            "FROM pipeline_executions WHERE root_execution_id = '$rootExecutionId' " +
-                            "AND execution_id != '$rootExecutionId'",
-                    ).use { rs ->
-                        while (rs.next()) {
-                            children[rs.getString(1)] = rs.getString(2) to rs.getString(3)
-                            rs.getString(4) shouldBe "SUCCESS"
-                        }
-                    }
-                children.size shouldBe 2
-                children.values.forEach { (_, triggeredVia) -> triggeredVia shouldBe "PIPELINE" }
-                // One generation each: mid's parent is the root, leaf's parent is mid's execution.
-                val midExecutionId = children.entries.single { it.value.first == rootExecutionId }.key
-                children.entries.single { it.key != midExecutionId }.value.first shouldBe midExecutionId
+                statement.executeQuery(sql).use { rs ->
+                    generateSequence { if (rs.next()) read(rs) else null }.toList()
+                }
             }
         }
-    }
 
     @Test
     @Order(3)
