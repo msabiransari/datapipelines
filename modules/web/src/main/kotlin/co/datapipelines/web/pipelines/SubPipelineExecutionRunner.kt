@@ -69,8 +69,9 @@ import java.util.UUID
  *   [DirectResultSink] that lands the child's caller rows exactly where a DQL node's own
  *   ResultSet would go (design §4.2): staged into the PARENT's tempdb, re-published as the
  *   parent's caller result — or streamed onward to the parent's own invoker when the parent
-     *   execution is itself a `direct` child — or written back to a datasource. A node that declares no `output` sends no sink
- *   and simply awaits the child's terminal state (D3's side-effect child).
+ *   execution is itself a `direct` child — or written back to a datasource. A node that
+ *   declares no `output` sends no sink and simply awaits the child's terminal state (D3's
+ *   side-effect child).
  *
  * ## The runtime depth backstop
  *
