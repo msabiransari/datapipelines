@@ -7,7 +7,9 @@ import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.pipeline.TemplateRef
+import com.fasterxml.jackson.databind.JsonNode
 
 /**
  * The executor's node representation (dag-executor.md §4) — separate from the wire [Node], which
@@ -36,6 +38,10 @@ data class ExecutableNode(
     /** DQL: always non-null (an omitted block deserialized to [NodeOutput.Caller] — §4.1). */
     val output: NodeOutput?,
     val dependsOn: Set<String>,
+    /** PIPELINE nodes only: the pinned child pipeline reference (pipeline-contract §4.9). */
+    val pipeline: PipelineNodeRef?,
+    /** PIPELINE nodes only: the child parameter map — literals and `${parent_param}` references (§4.9). */
+    val parameters: Map<String, JsonNode>?,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
@@ -51,6 +57,8 @@ data class ExecutableNode(
                 template = node.template,
                 output = node.output,
                 dependsOn = node.dependsOn.toSet(),
+                pipeline = node.pipeline,
+                parameters = node.parameters,
             )
     }
 }

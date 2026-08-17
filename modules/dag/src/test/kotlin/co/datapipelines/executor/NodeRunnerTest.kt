@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.WriteMode
 import co.datapipelines.staging.Staging
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRenderException
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
@@ -17,10 +18,12 @@ import io.kotest.matchers.shouldBe
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -262,6 +265,44 @@ class NodeRunnerTest {
             runner.run(ExecutableNode.from(Fixtures.node("c")), context(renderBudget = 4096))
 
             budgets shouldBe listOf(4096L)
+        }
+
+    @Test
+    fun `a PIPELINE node runs through the sub-pipeline runner, never through render or source resolution`() =
+        runBlocking<Unit> {
+            // Design §4.1: the dispatch happens BEFORE render/source — a PIPELINE node carries
+            // neither a template nor a source, so reaching either would fail for the wrong reason.
+            val engine = mockk<TemplateEngine>()
+            val expected = NodeResult.of("child", 7, Instant.now())
+            val registry = FakeDatasourceRegistry(emptyMap())
+            val runner =
+                NodeRunner(
+                    engine,
+                    registry,
+                    JdbcWritebackRunner(registry),
+                    InMemoryResultStore(),
+                    ExecutorConfig(),
+                    subPipelineRunner = SubPipelineRunner { _, _ -> expected },
+                )
+
+            val result = runner.run(ExecutableNode.from(Fixtures.node("child", type = NodeType.PIPELINE, source = "")), context())
+
+            result shouldBe expected
+            verify(exactly = 0) { engine.render(any(), any(), any()) }
+        }
+
+    @Test
+    fun `a PIPELINE node without a wired sub-pipeline runner fails with child_execution_failed`() =
+        runBlocking<Unit> {
+            val runner = runner(sql = "SELECT 1")
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner.run(ExecutableNode.from(Fixtures.node("child", type = NodeType.PIPELINE, source = "")), context())
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            thrown.details["node"] shouldBe "child"
         }
 
     // ------------------------------------------------------------------ helpers

@@ -10,6 +10,7 @@ import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.staging.H2StagingFactory
@@ -101,7 +102,17 @@ class DomainConfiguration {
     fun pipelineValidator(
         datasources: ContractDatasourceRegistry,
         dryRenderer: TemplateDryRenderer,
-    ): PipelineValidator = PipelineValidator(datasources, dryRenderer)
+        properties: PipelineProperties,
+    ): PipelineValidator =
+        PipelineValidator(
+            datasources,
+            dryRenderer,
+            // The repository-backed resolver is wired by the composition runtime change; until
+            // then every pinned reference resolves to null and a PIPELINE node is rejected at
+            // save time with `pipeline_not_found` — fail-closed, matching the unwired executor.
+            PipelineResolver { _, _ -> null },
+            properties.maxCompositionDepth,
+        )
 
     /**
      * The per-execution tempdb factory (staging §3).

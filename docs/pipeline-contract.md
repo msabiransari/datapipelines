@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.3 (revised — see Change Log)
+**Status:** v1.4 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-08-11
+**Last updated:** 2026-08-17
 
 ---
 
@@ -248,15 +248,17 @@ Note: no `output` block. DML's side effect IS the output.
 |---|---|---|---|
 | `id` | string | yes | Node identifier. `[a-z0-9_]+`. Unique within the pipeline. Stable across versions and environments. |
 | `description` | string | yes | Human-readable. Shown in UI editor. |
-| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`. Drives executor behavior. |
-| `source` | string | yes | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. |
-| `template` | object | yes | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` nodes. See §4.7. |
+| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`. Drives executor behavior. |
+| `source` | string | yes, except PIPELINE | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9). |
+| `template` | object | yes, except PIPELINE | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9). |
+| `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
+| `parameters` | object | no | Child parameter bindings on a `PIPELINE` node: each value is a typed literal in the child parameter's §6.3 wire encoding, or `"${parent_param}"` naming a parent parameter of the identical type. See §4.9. |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. |
 
 ### 4.7 `output` block reference
 
-The `output` block declares where the node's ResultSet goes. Optional for DQL nodes — **omitted means `{"target": "caller"}`**; forbidden for DML/DDL.
+The `output` block declares where the node's ResultSet goes. Optional for DQL nodes — **omitted means `{"target": "caller"}`**; forbidden for DML/DDL. On a PIPELINE node the block declares where the child execution's caller result lands, and is permitted only when the pinned child has a caller node (§12.9 `pipeline_output_on_sideeffect_child`).
 
 | `target` value | Additional fields | Description |
 |---|---|---|
@@ -270,6 +272,32 @@ The `output` block declares where the node's ResultSet goes. Optional for DQL no
   - A registered datasource name in this environment (validated against the datasource registry at write time), OR
   - The reserved literal `"tempdb"`, meaning "run this SQL against the in-memory staging database for this execution."
 - The reserved `"tempdb"` literal cannot also be a registered datasource name (validation rejects registering a datasource with that name).
+
+### 4.9 JSON structure (PIPELINE node)
+
+```json
+{
+  "id": "revenue",
+  "description": "Monthly revenue component.",
+  "type": "PIPELINE",
+  "pipeline": {"name": "monthly_revenue", "version": 4},
+  "parameters": {"start_date": "${start_date}", "region": "EU"},
+  "output": {"target": "tempdb", "table": "stg_revenue"},
+  "depends_on": []
+}
+```
+
+A PIPELINE node executes another pipeline — the version pinned by `pipeline` — as a real, separate **child execution** (§8.5) and consumes its result. Composition is by invocation, not inlining: the child keeps its own execution record, tempdb, stats, and SSE stream.
+
+Field rules:
+
+- `pipeline` — required: `{name, version}`. `name` per `[a-z0-9_]+`; `version` a positive integer pinning an existing, immutable pipeline version. Self-reference (`name` = the containing pipeline's own name) is invalid. There is no "latest".
+- `source` and `template` — **forbidden** (mirrors "output forbidden on DML/DDL"): the node runs a pipeline, not SQL.
+- `parameters` — optional map filling the child's declared parameters. Each value is either a typed literal obeying the child parameter's §6.3 wire encoding, or the string form `"${parent_param}"` referencing one of the parent's declared parameters of the identical type. No expressions, no concatenation — a value is a literal or a reference, nothing in between (v1).
+- `output` — standard §4.7 block, permitted only when the pinned child has a caller node. Zero-caller child ⇒ `output` must be absent; the node is side-effect-only and downstream `depends_on` gives ordering.
+- `depends_on` — unchanged.
+
+Deleting a pipeline (soft delete) does **not** affect existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly.
 
 ---
 
@@ -441,6 +469,7 @@ when (node.type) {
     DQL -> executeDql(node, context, staging)
     DML -> executeDml(node, context)
     DDL -> executeDdl(node, context)
+    PIPELINE -> executeSubPipeline(node, context)   // §8.5 — before render/source resolution
 }
 
 fun executeDql(node, context, staging) {
@@ -456,6 +485,16 @@ fun executeDql(node, context, staging) {
     }
 }
 ```
+
+### 8.5 PIPELINE nodes
+
+A PIPELINE node executes the pipeline pinned by its `pipeline` reference as a **child execution**: a real, separate execution with its own execution record, own tempdb, own stats, and own SSE stream, started through the internal execution service (never HTTP). The child runs under the parent's principal; authorization is checked on the parent only. Dispatch happens before render/source resolution — a PIPELINE node carries neither a `template` nor a `source`.
+
+- **Parameters.** The node's `parameters` map becomes the child's execution parameters: literals pass through as supplied; each `"${parent_param}"` reference resolves to the parent execution's bound value for that parameter.
+- **Result.** The child's caller-node ResultSet streams **directly** to the parent executor (`direct` delivery — nothing is materialized to the result store, and the result is not re-fetchable afterwards; re-running is the recovery path) and lands per the node's `output` block, exactly like a DQL node's ResultSet (§8.1). A zero-caller child produces no stream: the parent waits for child completion, and success/failure is the node's outcome.
+- **Failure.** A failed child fails the PIPELINE node fail-fast with `pipeline.node.child_execution_failed`; the detail carries the child's error code and execution id, so the debugging trail leads to a real execution record.
+- **Cancellation.** Cancelling an ancestor cancels the whole family: the cancellation flag is honored for every execution sharing the family's `root_execution_id` ([Metadata DB §4.6](metadata-db.md#46-pipeline_executions)).
+- **Guards.** Composition depth is bounded by `datapipelines.pipelines.max-composition-depth` (default 5), checked statically at save time (`composition_too_deep`, §12.9 — pins are immutable, so the reference tree is fully computable) and again at run time (`pipeline.node.composition_depth_exceeded` — a backstop; reaching it means save-time validation was bypassed). Cycles are impossible by construction: a pin references an existing, immutable version. Child executions do **not** take per-user concurrency slots — only root executions do; a waiting parent holding a slot while its children queue would deadlock.
 
 ---
 
@@ -613,7 +652,7 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.type_invalid` | Each node `type` is one of `DQL`, `DML`, `DDL` |
+| `pipeline.validation.type_invalid` | Each node `type` is one of `DQL`, `DML`, `DDL`, `PIPELINE` |
 | `pipeline.validation.dml_has_output` | DML nodes must NOT have an `output` block |
 | `pipeline.validation.ddl_has_output` | DDL nodes must NOT have an `output` block |
 | `pipeline.validation.output_target_invalid` | `output.target` (when the block is present) is one of `tempdb`, `caller`, `datasource` |
@@ -654,6 +693,24 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 |---|---|
 | `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is `H2` (v1) |
 | `pipeline.validation.tempdb_config_invalid` | `settings.tempdb.config` keys are valid for the chosen engine |
+
+### 12.9 Composition validations
+
+The PIPELINE-node rules (§4.9). Everything here is computed against the pinned — immutable — child bodies, so the verdicts are stable: editing the child later produces a new version and never invalidates a saved reference.
+
+| Code | Check |
+|---|---|
+| `pipeline.validation.pipeline_not_found` | `pipeline.name` exists in the registry |
+| `pipeline.validation.pipeline_version_not_found` | Pinned `version` exists for that name |
+| `pipeline.validation.pipeline_self_reference` | Node does not reference its containing pipeline |
+| `pipeline.validation.pipeline_reference_deleted` | Referenced pipeline is not soft-deleted (blocks NEW references only — soft-delete never breaks an existing pinned reference, mirroring template deletion) |
+| `pipeline.validation.pipeline_node_has_source` | PIPELINE node has no `source` |
+| `pipeline.validation.pipeline_node_has_template` | PIPELINE node has no `template` |
+| `pipeline.validation.pipeline_parameter_unmapped` | Every required-without-default child parameter is supplied |
+| `pipeline.validation.pipeline_parameter_unknown` | Every supplied key exists in the child's `parameters` |
+| `pipeline.validation.pipeline_parameter_type_mismatch` | Literals obey the child parameter's wire encoding; `${ref}` targets a parent parameter of a compatible type |
+| `pipeline.validation.pipeline_output_on_sideeffect_child` | `output` absent when the pinned child has zero caller nodes |
+| `pipeline.validation.composition_too_deep` | Static reference-tree depth ≤ configured max (`datapipelines.pipelines.max-composition-depth`, default 5). Computed iteratively, never recursively in graph depth — §12.2's crash-safety rule applies here too. |
 
 ---
 
@@ -698,6 +755,8 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.staging_failed` | 500 | Could not stage ResultSet into tempdb |
 | `pipeline.node.writeback_failed` | 500 | Could not write ResultSet to external datasource (output.target: "datasource") |
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
+| `pipeline.node.child_execution_failed` | 500 | A PIPELINE node's child execution failed; the detail carries the child's error code and execution id |
+| `pipeline.node.composition_depth_exceeded` | 500 | Runtime composition-depth backstop hit; indicates a save-time validation gap, since static depth (§12.9) should catch it first |
 
 ### 13.5 Staging
 
@@ -823,8 +882,8 @@ The Pipeline Contract is **versioned, additive-only**.
 ### 15.1 What is frozen in v1.1
 
 - The top-level Pipeline JSON shape (`schema_version`, `id`, `name`, `nodes`, `settings`, etc.).
-- The Node JSON shape (`id`, `type`, `source`, `template`, `output`, `depends_on`).
-- The `type` enum: `DQL`, `DML`, `DDL`.
+- The Node JSON shape (`id`, `type`, `source`, `template`, `output`, `depends_on`). Gained the optional `pipeline` / `parameters` fields for PIPELINE nodes 2026-08-17 — additive per §15.2; readers that predate them ignore the keys.
+- The `type` enum: `DQL`, `DML`, `DDL`. `PIPELINE` added 2026-08-17 as an additive value per §15.2 — old documents remain valid; a deserializer that predates it rejects it with `type_invalid`.
 - The `output.target` enum: `tempdb`, `caller`, `datasource`.
 - The `output.mode` enum: `replace`, `append`.
 - The parameter descriptor shape.
@@ -1035,3 +1094,4 @@ Out of scope for v1.1, tracked for future:
 | 2026-08-05 | v1.1 | review feedback | Replaced `terminal_node_id` with auto-detection (§9). Added `type` enum (DQL/DML/DDL) — §4.6, §8. Added `output` block with `target` (tempdb/caller/datasource) — §4.7, §8.1. Added `settings.tempdb` — §5. Renamed `__staging__` → `tempdb` throughout. Removed `datasources_used` (redundant with node sources). Added `engine` field placeholder for templates. **Rejected `parallel_id`** — `depends_on` is mathematically complete for DAG parallelism (two nodes run in parallel iff neither is reachable from the other); a second parallelism source-of-truth would create reconciliation bugs. |
 | 2026-08-07 | v1.2 | consistency campaign | **D1:** omitted `output` defaults to `caller` (was `tempdb`); topology-based terminal auto-detection replaced by caller-node resolution (§9); any DQL target combination legal — deleted `dql_sink_missing_caller_target`, `no_dql_sink`, `disconnected_terminal`, `dql_missing_output`; `multiple_caller_targets` → `multiple_caller_nodes`; zero caller nodes legal. **D3:** template variables validated by save-time dry-render (§7.4, §12.6); pipeline `parameters` is the single declaration point. **D5:** §13 expanded with §13.7–13.11 (auth normalized to 3-segment codes, datasource, template, result, rate-limit/idempotency) — the single concrete code catalog. §6.3 strict coercion rules; §10.1 per-namespace table uniqueness; §11.4 scan fields + heuristics specified; §15.4 version-counter disambiguation; §17.3 defers DDL to metadata-db. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-11 | v1.3 | gate C review | Additive §13 rows: `template.not_found` (404) and `datasource.not_found` (404) — read/mutate-path misses previously borrowed `pipeline.validation.*` codes, which are 400s for write-time validation. Adjudicated answer to the catalog gap flagged by mcp-server's McpNotFound and web's ApiErrors. |
+| 2026-08-17 | v1.4 | pipeline composition | `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a separate child execution and consumes its caller result (§4.9 node shape, §8.5 execution behavior). New §12.9 composition validations; §13.4 gains `pipeline.node.child_execution_failed` and `pipeline.node.composition_depth_exceeded`; §12.4 `type_invalid` enum widened. Additive per §15.2 (§15.1 records the additions). |

@@ -94,6 +94,13 @@ class NodeRunner(
     private val auditSink: ExecutionAwareAuditSink? = null,
     /** `datapipelines.staging.rows` had zero call sites before F10 — it was permanently 0. */
     private val metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
+    /**
+     * The composition port (design §4.1) a PIPELINE node dispatches to. Null means this runtime
+     * has no composition wired — a PIPELINE node then fails with
+     * `pipeline.node.child_execution_failed` rather than reaching render or source resolution,
+     * which it has no fields for.
+     */
+    private val subPipelineRunner: SubPipelineRunner? = null,
 ) {
     /** Executes [node] and returns its result. Throws [NodeFailedSignal] on any failure. */
     suspend fun run(
@@ -101,6 +108,16 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant = Instant.now(),
     ): NodeResult {
+        // BEFORE render/source dispatch (design §4.1): a PIPELINE node carries neither a
+        // template nor a source, so it never enters the SQL paths below.
+        if (node.type == NodeType.PIPELINE) {
+            return subPipelineRunner?.run(node, ctx)
+                ?: throw DatapipelinesException(
+                    code = PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED,
+                    message = "Pipeline composition is not wired in this runtime.",
+                    details = mapOf("node" to node.id),
+                )
+        }
         val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
         return when (node.source) {
             is NodeSource.Tempdb -> runOnTempdb(node, sql, ctx, startedAt)
@@ -131,6 +148,7 @@ class NodeRunner(
         return when (node.type) {
             NodeType.DQL -> tempdbQuery(node, sql, ctx, startedAt, timeout)
             NodeType.DML, NodeType.DDL -> tempdbWrite(node, sql, ctx, startedAt, timeout)
+            NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
         }
     }
 
@@ -341,6 +359,7 @@ class NodeRunner(
                 NodeType.DQL -> datasourceQuery(node, conn, sql, ctx, startedAt, timeout, datasource.dialect)
                 NodeType.DML -> datasourceUpdate(node, conn, sql, ctx, startedAt, timeout)
                 NodeType.DDL -> datasourceDdl(node, conn, sql, ctx, startedAt, timeout)
+                NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
             }
         }
     }

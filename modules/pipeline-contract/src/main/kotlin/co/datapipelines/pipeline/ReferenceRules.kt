@@ -21,6 +21,13 @@ internal object ReferenceRules {
     ) {
         val sampleContext = ParameterBinder(pipeline.parameters).sampleContext()
         pipeline.nodes.forEachIndexed { index, node ->
+            if (node.type == NodeType.PIPELINE) {
+                // §12.9 (CompositionRules) owns a PIPELINE node's references: it carries no
+                // source and no template to resolve. Its `output` block, when §12.9 permits one,
+                // is a standard §4.7 block, so a datasource target is still registry-checked here.
+                checkOutputDatasource(index, node, datasources, into)
+                return@forEachIndexed
+            }
             val sourceDialect = checkSource(index, node, datasources, pipeline, into)
             checkOutputDatasource(index, node, datasources, into)
             checkTemplate(index, node, sourceDialect, templates, sampleContext, into)

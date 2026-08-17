@@ -30,13 +30,15 @@ package co.datapipelines.pipeline
  * ## Save-time, universally
  *
  * D2 / §2 principle 8: nothing invalid ever reaches the database. This validator is that
- * gate for pipelines, and it is why §12.5 and §12.6 take the environment's registries — an
- * unresolvable datasource or a template that cannot render is rejected at save, not
- * discovered at 3am by an execution.
+ * gate for pipelines, and it is why §12.5, §12.6 and §12.9 take the environment's registries — an
+ * unresolvable datasource, a template that cannot render, or a pipeline reference that does not
+ * resolve is rejected at save, not discovered at 3am by an execution.
  */
 class PipelineValidator(
     private val datasources: DatasourceRegistry,
     private val templates: TemplateDryRenderer,
+    private val pipelines: PipelineResolver,
+    private val maxCompositionDepth: Int,
 ) {
     /** Runs §12 against [pipeline] and returns every failure. */
     fun validate(pipeline: Pipeline): ValidationResult {
@@ -47,6 +49,7 @@ class PipelineValidator(
         ReferenceRules.check(pipeline, datasources, templates, collector)
         ParameterRules.check(pipeline, collector)
         SettingsRules.check(pipeline, collector)
+        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, collector)
         return collector.toResult()
     }
 

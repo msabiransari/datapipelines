@@ -160,6 +160,45 @@ object PipelineErrorCodes {
 
         /** §12.8 — `settings.tempdb.config` keys are valid for the chosen engine. */
         const val TEMPDB_CONFIG_INVALID = "pipeline.validation.tempdb_config_invalid"
+
+        /** §12.9 — a PIPELINE node's `pipeline.name` exists in the pipeline registry. */
+        const val PIPELINE_NOT_FOUND = "pipeline.validation.pipeline_not_found"
+
+        /** §12.9 — the pinned `pipeline.version` exists for that name. */
+        const val PIPELINE_VERSION_NOT_FOUND = "pipeline.validation.pipeline_version_not_found"
+
+        /** §12.9 — a PIPELINE node must not reference its containing pipeline. */
+        const val PIPELINE_SELF_REFERENCE = "pipeline.validation.pipeline_self_reference"
+
+        /**
+         * §12.9 — the referenced pipeline is soft-deleted (D7: blocks NEW references at save
+         * time only; existing pinned references keep resolving).
+         */
+        const val PIPELINE_REFERENCE_DELETED = "pipeline.validation.pipeline_reference_deleted"
+
+        /** §12.9 — a PIPELINE node carries no `source` (it runs no SQL of its own). */
+        const val PIPELINE_NODE_HAS_SOURCE = "pipeline.validation.pipeline_node_has_source"
+
+        /** §12.9 — a PIPELINE node carries no `template` (it runs no SQL of its own). */
+        const val PIPELINE_NODE_HAS_TEMPLATE = "pipeline.validation.pipeline_node_has_template"
+
+        /** §12.9 — every required-without-default child parameter is supplied. */
+        const val PIPELINE_PARAMETER_UNMAPPED = "pipeline.validation.pipeline_parameter_unmapped"
+
+        /** §12.9 — every supplied parameter key exists in the child's `parameters`. */
+        const val PIPELINE_PARAMETER_UNKNOWN = "pipeline.validation.pipeline_parameter_unknown"
+
+        /**
+         * §12.9 — a literal obeys the child parameter's §6.3 wire encoding; a `${ref}` names a
+         * parent parameter of the identical declared type.
+         */
+        const val PIPELINE_PARAMETER_TYPE_MISMATCH = "pipeline.validation.pipeline_parameter_type_mismatch"
+
+        /** §12.9 — `output` is absent when the pinned child has zero caller nodes. */
+        const val PIPELINE_OUTPUT_ON_SIDEEFFECT_CHILD = "pipeline.validation.pipeline_output_on_sideeffect_child"
+
+        /** §12.9 — the static reference-tree depth is within the configured maximum. */
+        const val COMPOSITION_TOO_DEEP = "pipeline.validation.composition_too_deep"
     }
 
     /** §13.2 — pipeline import. */
@@ -194,6 +233,19 @@ object PipelineErrorCodes {
         const val STAGING_FAILED = "pipeline.node.staging_failed"
         const val WRITEBACK_FAILED = "pipeline.node.writeback_failed"
         const val WRITEBACK_TARGET_MISSING = "pipeline.node.writeback_target_missing"
+
+        /**
+         * §13.4 — a PIPELINE node's child execution failed; the detail carries the child's
+         * error code and execution id, so the debugging trail leads to a real execution record.
+         */
+        const val CHILD_EXECUTION_FAILED = "pipeline.node.child_execution_failed"
+
+        /**
+         * §13.4 — the run-time composition-depth backstop fired. Reaching it means save-time
+         * validation (§12.9 `composition_too_deep`) was bypassed, since the static depth check
+         * over immutable pins should have caught the chain first.
+         */
+        const val COMPOSITION_DEPTH_EXCEEDED = "pipeline.node.composition_depth_exceeded"
     }
 
     /** §13.5 — staging (tempdb). */

@@ -104,6 +104,57 @@ class PipelineSerializerTest {
     }
 
     @Test
+    fun `a PIPELINE node round-trips with its pipeline reference and parameter map intact`() {
+        val node =
+            Node(
+                id = "revenue",
+                description = "Monthly revenue component.",
+                type = NodeType.PIPELINE,
+                source = "",
+                template = TemplateRef(),
+                output = NodeOutput.Tempdb("stg_revenue"),
+                dependsOn = emptyList(),
+                pipeline = PipelineNodeRef("monthly_revenue", 4),
+                parameters =
+                    mapOf(
+                        "start_date" to Fixtures.json("\"\${start_date}\""),
+                        "region" to Fixtures.json("\"EU\""),
+                    ),
+            )
+        val pipeline = Fixtures.pipeline(nodes = listOf(node))
+
+        val written = serializer.write(pipeline)
+
+        // The wire keys are the frozen snake_case names — asserted on the document, not on a
+        // round trip that would pass just as happily if both ends agreed on the wrong spelling.
+        val serialized = Fixtures.json(written).path("nodes").single()
+        serialized.path("type").asText() shouldBe "PIPELINE"
+        serialized.path("pipeline").path("name").asText() shouldBe "monthly_revenue"
+        serialized.path("pipeline").path("version").asInt() shouldBe 4
+        serialized.path("parameters").path("region").asText() shouldBe "EU"
+        PipelineDeserializer().readOrThrow(written) shouldBe pipeline
+    }
+
+    @Test
+    fun `a PIPELINE node with no pipeline or parameters emits neither key`() {
+        val node =
+            Node(
+                id = "revenue",
+                description = "d",
+                type = NodeType.PIPELINE,
+                source = "",
+                template = TemplateRef(),
+                output = null,
+                dependsOn = emptyList(),
+            )
+        val serialized = Fixtures.json(serializer.write(Fixtures.pipeline(nodes = listOf(node)))).path("nodes").single()
+
+        serialized.has("pipeline") shouldBe false
+        serialized.has("parameters") shouldBe false
+        serialized.has("output") shouldBe false
+    }
+
+    @Test
     fun `writePretty produces the same document, indented`() {
         val pipeline = Fixtures.pipeline()
 
