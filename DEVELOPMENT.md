@@ -431,8 +431,10 @@ merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in e
 ### 10.2 Quality tooling
 
 Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
-guard has been proven able to fail (see the handback docs under
-`orchestration/handbacks/`).
+guard has been proven able to fail (see the run handbacks in the private
+orchestration store — a sibling repo outside this one, per the 2026-08-15
+convention that keeps orchestration material out of the product repo; the
+buildSrc guard tests in-tree are the live descendants of those proofs).
 
 #### Coverage (Kover)
 
@@ -549,8 +551,15 @@ datapipelines/
 │   ├── docker-compose.dev.yml  ← local dev infra (Postgres + Redis)
 │   └── docker-compose.yml      ← reference production compose
 ├── scripts/
-│   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter
-│   └── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
+│   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
+│   ├── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
+│   ├── gate.sh                 ← Gate A: clean/build/build cycles + buildSrc guard tests + vuln-scan
+│   ├── install-hooks.sh        ← one-time: point git's core.hooksPath at .githooks/
+│   ├── secret-scan.sh          ← gitleaks secret scan (full history / --staged for the hook)
+│   ├── vuln-scan.sh            ← OSV-Scanner over the committed lockfiles (§10.2)
+│   ├── container-scan.sh       ← trivy config + image scan (§10.2)
+│   └── lib/
+│       └── scan-tools.sh       ← shared pinned-scanner install/verify machinery (sourced)
 ├── modules/
 │   ├── typesystem/             ← canonical types, per-dialect mappers
 │   ├── pipeline-contract/      ← pipeline model, validation

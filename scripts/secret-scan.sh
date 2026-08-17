@@ -43,6 +43,7 @@ install_gitleaks() {
   mv "$TOOL_DIR/gitleaks" "$BIN"
   chmod +x "$BIN"
   rm -f "$TOOL_DIR/$asset"
+  scan_tools_prune secret-scan gitleaks "$BIN"
 }
 
 [ -x "$BIN" ] || install_gitleaks

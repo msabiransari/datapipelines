@@ -64,6 +64,7 @@ install_osv_scanner() {
   scan_tools_download vuln-scan "$base/osv-scanner_SHA256SUMS" "$TOOL_DIR/SHA256SUMS"
   scan_tools_verify_sha256 vuln-scan "$BIN" "$TOOL_DIR/SHA256SUMS" "$asset"
   chmod +x "$BIN"
+  scan_tools_prune vuln-scan osv-scanner "$BIN"
 }
 
 # Fail-soft offline preflight: osv-scanner is useless without osv.dev.

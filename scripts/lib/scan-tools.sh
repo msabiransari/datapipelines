@@ -29,10 +29,12 @@ scan_tools_dir() {
 
 # scan_tools_arch <style> — map `uname -m` to the arch token a tool's release
 # assets use. Styles: "amd64" (osv-scanner), "x64" (gitleaks names its amd64
-# assets x64). trivy's asset names conflate OS and arch, so container-scan.sh
-# keeps its own case. linux reports aarch64 where assets say arm64 — without
-# this map the download 404s under `curl -f` (same-run inconsistency:
-# container-scan.sh already mapped it, the other two did not).
+# assets x64), "trivy" (trivy calls them 64bit / ARM64). trivy's asset names
+# conflate OS and arch (macOS-ARM64, Linux-64bit, …), so container-scan.sh
+# still maps the OS token itself — but the ARCH mapping lives HERE, once
+# (012/F10: container-scan.sh carried a private arch case before). linux
+# reports aarch64 where assets say arm64 — without this map the download 404s
+# under `curl -f`.
 scan_tools_arch() {
   local style="$1" raw
   raw=$(uname -m)
@@ -41,6 +43,8 @@ scan_tools_arch() {
     amd64:aarch64|amd64:arm64) echo arm64 ;;
     x64:x86_64)                echo x64 ;;
     x64:aarch64|x64:arm64)     echo arm64 ;;
+    trivy:x86_64)              echo 64bit ;;
+    trivy:aarch64|trivy:arm64) echo ARM64 ;;
     *) return 1 ;;
   esac
 }
@@ -57,6 +61,27 @@ scan_tools_download() {
     echo "  (network unreachable, or no release asset for this platform — see scan_tools_arch)" >&2
     exit 1
   fi
+}
+
+# scan_tools_prune <script-name> <tool> <keep-binary>
+# Remove superseded version-suffixed binaries of <tool> (files named
+# "<tool>-<version>-…" under .tools/) except <keep-binary>. Called by each
+# installer AFTER a successful verify of a new version: without it every
+# version bump left the previous ~50-100MB binary in .tools/ forever (009
+# review cut list). Prunes only on install — a failed download/verify never
+# deletes the working binary it would fall back to.
+scan_tools_prune() {
+  local script="$1" tool="$2" keep="$3" removed=0 f
+  for f in "$(scan_tools_dir "$tool")"/"$tool"-*; do
+    [ -e "$f" ] || continue
+    [ "$f" = "$keep" ] && continue
+    rm -f "$f"
+    removed=$((removed + 1))
+  done
+  if [ "$removed" -gt 0 ]; then
+    echo "$script: pruned $removed superseded $tool binary(ies) from $(scan_tools_dir "$tool")"
+  fi
+  return 0
 }
 
 # scan_tools_verify_sha256 <script-name> <file> <sums-file> <asset-name>

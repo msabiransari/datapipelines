@@ -33,15 +33,18 @@ source "$ROOT/scripts/lib/scan-tools.sh"
 TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir trivy)"
 
-os=$(uname -s); arch=$(uname -m)
-case "$os-$arch" in
-  Darwin-arm64)  asset="trivy_${TRIVY_VERSION}_macOS-ARM64.tar.gz" ;;
-  Darwin-x86_64) asset="trivy_${TRIVY_VERSION}_macOS-64bit.tar.gz" ;;
-  Linux-x86_64)  asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" ;;
-  Linux-aarch64) asset="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz" ;;
-  *) echo "container-scan: unsupported platform $os-$arch" >&2; exit 1 ;;
+os=$(uname -s)                    # Darwin | Linux
+arch=$(scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 1; }
+# trivy's asset names conflate OS and arch (macOS-ARM64, Linux-64bit, …): the
+# ARCH token comes from scan_tools_arch (one map for all scanners, 012/F10);
+# only the OS token is mapped here.
+case "$os" in
+  Darwin) os_token="macOS" ;;
+  Linux)  os_token="Linux" ;;
+  *) echo "container-scan: unsupported OS $os" >&2; exit 1 ;;
 esac
-BIN="$TOOL_DIR/trivy-${TRIVY_VERSION}-${os}-${arch}"
+asset="trivy_${TRIVY_VERSION}_${os_token}-${arch}.tar.gz"
+BIN="$TOOL_DIR/trivy-${TRIVY_VERSION}-${os}-$(uname -m)"
 
 install_trivy() {
   mkdir -p "$TOOL_DIR"
@@ -54,6 +57,7 @@ install_trivy() {
   mv "$TOOL_DIR/trivy" "$BIN"
   chmod +x "$BIN"
   rm -f "$TOOL_DIR/$asset"
+  scan_tools_prune container-scan trivy "$BIN"
 }
 
 [ -x "$BIN" ] || install_trivy
