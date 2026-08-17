@@ -43,6 +43,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     ExecutorProperties::class,
     StagingH2Properties::class,
     IdempotencyProperties::class,
+    PipelineProperties::class,
 )
 class DomainConfiguration {
     /**

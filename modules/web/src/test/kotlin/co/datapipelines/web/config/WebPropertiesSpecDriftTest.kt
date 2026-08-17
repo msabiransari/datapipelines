@@ -61,6 +61,12 @@ class WebPropertiesSpecDriftTest {
     }
 
     @Test
+    fun `pipelines property defaults match configuration-md section 3-16`() {
+        val props = PipelineProperties()
+        documented.getValue("datapipelines.pipelines.max-composition-depth") shouldBe props.maxCompositionDepth.toString()
+    }
+
+    @Test
     fun `staging and idempotency defaults match configuration-md sections 3-3 and 3-8`() {
         val staging = StagingH2Properties()
         documented.getValue("datapipelines.staging.h2.mode") shouldBe staging.mode

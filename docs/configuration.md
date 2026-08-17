@@ -190,6 +190,12 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (standard OTel env var, exception to §1 derivation) |
 | `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format |
 
+### 3.16 Pipelines
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.pipelines.max-composition-depth` | `5` | Deepest admitted chain of pipelines executing pipelines (a PIPELINE node spawning a child execution). Enforced at save time and again at runtime; must be ≥ 1 |
+
 ---
 
 ## 4. Precedence
@@ -287,6 +293,9 @@ datapipelines:
     max-concurrent-executions-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_GLOBAL:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
+
+  pipelines:
+    max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
 
   staging:
     h2:
@@ -408,3 +417,4 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |
 | 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-12 | v1.2 | dev infra ports | §6 dev profile now targets host ports 5434 (Postgres) / 6381 (Redis) instead of the colliding defaults 5432/6379; added the dev-host-ports note. Operator-facing keys and production defaults unchanged. |
+| 2026-08-17 | v1.3 | pipeline composition | Added §3.16 `datapipelines.pipelines.max-composition-depth` (default 5) — the depth guard for PIPELINE-node composition |

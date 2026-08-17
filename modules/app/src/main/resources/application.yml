@@ -130,6 +130,9 @@ datapipelines:
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
 
+  pipelines:
+    max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
+
   staging:
     h2:
       mode: ${DATAPIPELINES_STAGING_H2_MODE:PostgreSQL}

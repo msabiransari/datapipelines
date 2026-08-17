@@ -63,6 +63,7 @@ class EngineConfiguration {
         executor: ExecutorProperties,
         staging: StagingH2Properties,
         sse: SseProperties,
+        pipelines: PipelineProperties,
         result: ResultConfig,
     ): ExecutorConfig =
         ExecutorConfig(
@@ -75,6 +76,7 @@ class EngineConfiguration {
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.
             cancelPollIntervalSeconds = sse.heartbeatIntervalSeconds,
+            maxCompositionDepth = pipelines.maxCompositionDepth,
             result = result,
         )
 

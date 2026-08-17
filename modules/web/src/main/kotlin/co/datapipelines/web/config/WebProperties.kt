@@ -87,6 +87,23 @@ data class ExecutorProperties(
     val executionTimeoutSeconds: Long = 600,
 )
 
+/**
+ * The `datapipelines.pipelines.*` keys ([Configuration §3.16](../../../../../../../docs/configuration.md)).
+ *
+ * Defaults here MUST equal the defaults in configuration.md §3.16 — that document is the single
+ * authority, and a binding class that quietly disagrees with it is a second authority.
+ * `WebPropertiesSpecDriftTest` fails the build on any divergence.
+ */
+@ConfigurationProperties(prefix = "datapipelines.pipelines")
+data class PipelineProperties(
+    /** `max-composition-depth` — the deepest PIPELINE-node chain admitted (composition depth guard). */
+    val maxCompositionDepth: Int = 5,
+) {
+    init {
+        require(maxCompositionDepth >= 1) { "datapipelines.pipelines.max-composition-depth must be >= 1" }
+    }
+}
+
 /** The `datapipelines.staging.h2.*` subset `web` must pass to the executor (Configuration §3.3). */
 @ConfigurationProperties(prefix = "datapipelines.staging.h2")
 data class StagingH2Properties(
