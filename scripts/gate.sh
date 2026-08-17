@@ -16,7 +16,11 @@
 #      buildSrc through its JAR (verified: `build --dry-run` stops at
 #      :buildSrc:jar), so its test task NEVER runs automatically; the gate is
 #      what makes the COVERAGE_FLOORS / -Pkover.off guard falsifiable on
-#      every quality pass (012/F6).
+#      every quality pass (012/F6). Failures are crash-classified like every
+#      other stage (013/F3); the tests are forced to execute via cleanTest
+#      (013/F4); and an offline preflight skips the stage fail-soft with the
+#      cause named, since the TestKit probes resolve from Maven Central when
+#      their cache is cold (013/F6).
 #   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
 #      fails the gate on real findings and warns without failing when the
 #      network is unreachable (fail-soft by design).
@@ -116,31 +120,65 @@ for i in $(seq 1 "$CYCLES"); do
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
 
-# ---- buildSrc guard tests (012/F6) -------------------------------------------
+# ---- buildSrc guard tests (012/F6; 013/F3/F4/F6) ------------------------------
 # The convention-plugin guards (COVERAGE_FLOORS fail-loud, -Pkover.off skip)
 # live in buildSrc, and a main build never executes buildSrc:test — only its
-# jar. Run them here so every gate pass exercises them. Same no-pipe rule.
+# jar. Run them here so every gate pass exercises them. Same no-pipe rule:
+# routed through run() and classified by crashed() like every other stage
+# (013/F3 — the old inline form reported an OOM-killed daemon as a genuine
+# failure with the re-run advice suppressed).
+#
+# cleanTest (013/F4): the gate's `clean` never touches buildSrc (separate
+# included build), so a bare `test` is UP-TO-DATE on an unchanged tree and
+# the stage would print PASS having executed nothing. cleanTest deletes the
+# task's outputs, forcing the guards to RUN on every gate pass; the catalog
+# CONTENT is also declared a test input in buildSrc/build.gradle.kts, so a
+# bare `-p buildSrc test` re-executes on a libs.versions.toml edit too.
+#
+# Offline (013/F6): the TestKit probes resolve real dependencies from Maven
+# Central (test (c) compiles Kotlin and runs JUnit in the probe), so with a
+# cold TestKit cache the stage NEEDS network. Same fail-soft story as
+# vuln-scan below: preflight classifies (a single curl timeout is retried at
+# a longer budget); connection-level/double-timeout offline → SKIPPED, named;
+# anything else broken → loud FAIL.
+source "$ROOT/scripts/lib/scan-tools.sh"
 echo
-btest=0
-./gradlew -p buildSrc test > "$LOGDIR/buildsrc-test.log" 2>&1 || btest=$?
-if [ "$btest" -eq 0 ]; then
-  echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
-else
-  fails=$((fails + 1))
-  echo "  buildSrc tests  EXIT=$btest  (log: $LOGDIR/buildsrc-test.log)"
-fi
+bnet="$(scan_tools_classify_network gate https://repo.maven.apache.org/maven2/)"
+case "$bnet" in
+  online)
+    btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test)
+    if [ "$btest" -eq 0 ]; then
+      echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+    else
+      fails=$((fails + 1))
+      if crashed "$LOGDIR/buildsrc-test.log"; then
+        crashes=$((crashes + 1))
+        echo "  buildSrc tests  EXIT=$btest  ** TOOLING CRASH — no verdict, not a test failure **"
+        grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$LOGDIR/buildsrc-test.log" | sed 's/^/        /'
+      else
+        echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
+      fi
+    fi
+    ;;
+  offline)
+    echo "  buildSrc tests  SKIPPED — offline (fail-soft by design; the TestKit cache may be cold — re-run online)"
+    ;;
+  *)
+    fails=$((fails + 1))
+    echo "  buildSrc tests  FAIL — network preflight classified as $bnet; stage not run"
+    ;;
+esac
 
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
 # osv.dev is genuinely unreachable the script exits $SCAN_EXIT_OFFLINE (200,
-# defined once in scripts/lib/scan-tools.sh) — branched on AFTER the
-# exit-code check. Fail-soft BY DESIGN: an offline laptop must not fail the
-# gate. Findings exit 1 and scan errors / broken environments exit 2; both
-# fail the gate (012/F1: vuln-scan's exit codes are its OWN contract, never
-# osv-scanner's propagated raw). The pre-009 grep for a magic log string is
-# gone: wording drift would have converted an offline skip into an
+# defined once in scripts/lib/scan-tools.sh, sourced above) — branched on
+# AFTER the exit-code check. Fail-soft BY DESIGN: an offline laptop must not
+# fail the gate. Findings exit 1 and scan errors / broken environments exit 2;
+# both fail the gate (012/F1: vuln-scan's exit codes are its OWN contract,
+# never osv-scanner's propagated raw). The pre-009 grep for a magic log
+# string is gone: wording drift would have converted an offline skip into an
 # affirmative PASS.
-source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 scan=0
 ./scripts/vuln-scan.sh > "$LOGDIR/vuln-scan.log" 2>&1 || scan=$?

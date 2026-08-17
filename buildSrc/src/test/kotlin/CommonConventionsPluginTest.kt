@@ -26,9 +26,20 @@ import java.io.File
  *     either way; what the flag removes is the floor rule.)
  *
  * The probe projects reuse the repo's real version catalog — the plugin
- * resolves catalog aliases at apply time — but resolve NO dependencies:
- * every asserted behavior happens at configuration time, so these tests need
- * no network, no repositories, and no toolchain download.
+ * resolves catalog aliases at apply time. Tests (a) and (b) stop at
+ * configuration ("help"), but test (c) writes real sources and runs
+ * :modules:web:koverVerify, which COMPILES Kotlin and runs JUnit inside the
+ * probe — resolving the convention dependency set from the probe's own
+ * `mavenCentral()`. Network truth (013/F6 — this KDoc previously claimed
+ * "no network, no repositories", which was false): the tests need either
+ * NETWORK or a warm Gradle TestKit cache. TestKit's default testKitDir
+ * (`.gradle-test-kit-<user>` under the test JVM's temp dir, which Gradle
+ * forks into `buildSrc/build/tmp/test/work`) is a CACHE, not a checkout
+ * artifact — a fresh worktree or a cleaned buildSrc starts COLD and
+ * re-downloads the probe dependencies on first run. `gate.sh` therefore
+ * preflights the network before this stage and skips it fail-soft with the
+ * cause named when offline. No TOOLCHAIN download ever happens: the probes
+ * run on the pre-resolved JDK 21 handed in via `probe.jdk21`.
  */
 class CommonConventionsPluginTest {
 
@@ -83,9 +94,9 @@ class CommonConventionsPluginTest {
             *args,
             // The probe's Kotlin compilation wants the JDK 21 toolchain; hand it
             // the installation the build resolved (see build.gradle.kts) instead
-            // of relying on the probe settings' foojay resolver — keeps the
-            // tests network-free. Harmless for "help", required for dry-runs of
-            // compile-bearing tasks.
+            // of relying on the probe settings' foojay resolver — the probes
+            // never download a toolchain. (Dependency resolution is separate:
+            // compile-bearing probes resolve from Maven Central — see KDoc.)
             "-Porg.gradle.java.installations.paths=$jdk21Home",
         )
 

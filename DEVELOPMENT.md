@@ -160,7 +160,7 @@ cd ../datapipelines
 ./scripts/sync-design-system.sh   # copies dist/ → modules/web/src/main/resources/static/vendor/design-system/
 ```
 
-Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure).
+Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift).
 
 ---
 
@@ -460,7 +460,12 @@ The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
 project missing from the maps fails configuration; `-Pkover.off` drops the
 floor rule). A main build only builds buildSrc through its jar, so its tests
 never run automatically: `./gradlew -p buildSrc test` runs them, and
-`scripts/gate.sh` runs that as a stage.
+`scripts/gate.sh` runs that as a stage — forced to execute (`cleanTest`;
+the catalog file's content is a declared test input, so a
+`gradle/libs.versions.toml` edit re-runs the guards even without the gate),
+and skipped fail-soft with the cause named when the network preflight says
+offline (the TestKit probes resolve their compile/test dependencies from
+Maven Central when their cache is cold).
 
 #### Dependency vulnerabilities (OSV-Scanner)
 
@@ -474,20 +479,32 @@ shared with `gate.sh` via `scripts/lib/scan-tools.sh`):
 
 - `0` — scan ran, no findings
 - `1` — scan ran, vulnerabilities found
-- `2` — scan did NOT reach a verdict: scanner error while online, or the
-  preflight classified the environment as broken (curl missing, TLS/CA
-  failure) — fails loudly with the cause named
+- `2` — scan did NOT reach a verdict, cause named: scanner error while
+  online; preflight classified the environment as broken (curl missing,
+  TLS/CA failure); install-side failure of the pinned scanner (download
+  failure, missing checksum entry, **SHA256 mismatch — a tampered binary is
+  a supply-chain failure, never a scan result**); unsupported platform; or
+  no committed lockfiles. (These paths must never exit 1, which means
+  "findings".)
 - `200` — skipped: offline (fail-soft; connection-level failures only —
-  connection refused, timeout, DNS)
+  connection refused, DNS — and a curl *timeout* only after one retry at a
+  longer budget, so a slow-but-online box cannot silently skip the scan)
 
 osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
 outside `build/`, so `gradlew clean` does not force a re-download — and
 SHA256-verified against the release manifest) checks the
-resolved dependency set — the lockfiles, direct and transitive — against the
-OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
+resolved dependency set — the lockfiles, direct and transitive — against
+the OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
 stage; exit 200 warns and does NOT fail the gate (the scan is meaningless
 without osv.dev — the skip is printed, never silent); exits 1 and 2 fail it.
+
+The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
+verify) exit `2` on failure for **all three** scanner scripts —
+secret-scan (`1` = leaks found) and container-scan (`1` = trivy finding)
+publish the same distinction between a findings verdict and a tooling
+failure, so an install-side breakage can never masquerade as a scan result
+in any consumer's branching.
 
 #### Secret scanning (gitleaks)
 

@@ -38,12 +38,22 @@
 # "offline" the way the old raw exit 3 did):
 #   0   scan ran, no findings
 #   1   scan ran, vulnerabilities found (osv-scanner's 1)
-#   2   scan did NOT run to a verdict: scanner error while online, or the
+#   2   scan did NOT reach a verdict: scanner error while online; the
 #       preflight classified the environment as broken (curl missing, TLS/CA
-#       failure) — fails the gate loudly with the cause named
-#   200 skipped: offline (fail-soft sentinel; connection-level failures only)
+#       failure); install-side failure of the pinned scanner (download
+#       failure, missing checksum-manifest entry, SHA256 mismatch — a
+#       tampered binary is a supply-chain failure, never a scan result);
+#       unsupported platform; or no committed lockfiles to scan. Fails the
+#       gate loudly with the cause named. (013/F1: these paths used to exit 1,
+#       colliding with "vulnerabilities found".)
+#   200 skipped: offline (fail-soft sentinel; connection-level failures only,
+#       and a curl timeout only after a retry at a longer budget — 013/F2)
 
 set -euo pipefail
+# Any UNHANDLED tooling failure (mkdir, chmod, git, …) exits 2 with its line —
+# never a raw set -e death whose status could collide with a verdict code
+# (013/F1). Handled failures (|| , if, while conditions) never fire this.
+trap 'echo "vuln-scan: unexpected tooling failure at line $LINENO — no verdict" >&2; exit 2' ERR
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 source "$ROOT/scripts/lib/scan-tools.sh"
@@ -52,7 +62,7 @@ OSV_SCANNER_VERSION="v2.5.0"   # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir osv-scanner)"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
-arch=$(scan_tools_arch amd64) || { echo "vuln-scan: unsupported architecture $(uname -m)" >&2; exit 1; }
+arch=$(scan_tools_arch amd64) || { echo "vuln-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 BIN="$TOOL_DIR/osv-scanner-${OSV_SCANNER_VERSION}-${os}-${arch}"
 
 install_osv_scanner() {
@@ -70,31 +80,35 @@ install_osv_scanner() {
 # Fail-soft offline preflight: osv-scanner is useless without osv.dev.
 # Runs BEFORE the install: offline + no cached binary must skip, not fail.
 #
-# The preflight CLASSIFIES curl's failure (012/F2) — the old any-nonzero
-# branch read every failure as "offline", so a broken CA store (curl 60/77)
-# or a missing curl (127) skipped the scan forever with nobody told:
-#   * curl 5/6/7/28 — connection-level: couldn't resolve host/proxy,
-#     connection refused, timed out → GENUINELY offline → sentinel skip.
-#   * curl 0 — online. Any HTTP response counts (the root path answers 404,
-#     and a proxy that ANSWERS means TCP+TLS work; if osv.dev is then blocked
-#     the scan itself fails loudly as exit 2, not silently skipped).
-#   * anything else (127 curl absent, 35/60/77 TLS/CA breakage, …) —
-#     environment breakage → FAIL LOUD, naming the cause. Fail-soft is the
-#     exception that must be earned; every unrecognised failure is loud.
-curl_rc=0
-curl -s --max-time 5 -o /dev/null https://api.osv.dev/ || curl_rc=$?
-case "$curl_rc" in
-  0) : ;;
-  5|6|7|28)
-    echo "vuln-scan: WARNING — osv.dev unreachable (offline, curl exit $curl_rc); vulnerability scan SKIPPED (fail-soft)." >&2
+# Classification lives in scan_tools_classify_network (scripts/lib/
+# scan-tools.sh, 013/F2): the old any-nonzero branch read every failure as
+# "offline", so a broken CA store (curl 60/77) or a missing curl (127)
+# skipped the scan forever with nobody told. The classifier prints
+# online / offline / nocurl / broken:<rc>:
+#   * offline — connection-level failures (5/6/7) or a DOUBLE timeout
+#     (curl 28 once at 5s, retried at 20s, timed out again — a single 28
+#     is a deadline, not proof of offline: reachable fully online behind a
+#     cold DNS container or slow proxy) → GENUINELY offline → sentinel skip.
+#   * online — any HTTP response counts (the root path answers 404, and a
+#     proxy that ANSWERS means TCP+TLS work; if osv.dev is then blocked the
+#     scan itself fails loudly as exit 2, not silently skipped).
+#   * nocurl / broken:<rc> — environment breakage → FAIL LOUD, naming the
+#     cause. Fail-soft is the exception that must be earned; every
+#     unrecognised failure is loud.
+net=$(scan_tools_classify_network vuln-scan https://api.osv.dev/)
+case "$net" in
+  online)
+    : ;;
+  offline)
+    echo "vuln-scan: WARNING — osv.dev unreachable (offline, connection-level or double-timeout per the classifier above); vulnerability scan SKIPPED (fail-soft)." >&2
     exit "$SCAN_EXIT_OFFLINE"
     ;;
-  127)
+  nocurl)
     echo "vuln-scan: FAIL — curl is not installed (exit 127); cannot run the offline preflight at all. Install curl." >&2
     exit 2
     ;;
   *)
-    echo "vuln-scan: FAIL — preflight to https://api.osv.dev/ failed with curl exit $curl_rc (TLS/CA/proxy breakage, not a connection-level offline state); scan NOT skipped." >&2
+    echo "vuln-scan: FAIL — preflight to https://api.osv.dev/ classified as $net (TLS/CA/proxy breakage, not a connection-level offline state); scan NOT skipped." >&2
     exit 2
     ;;
 esac
@@ -104,8 +118,10 @@ esac
 lockfiles=()
 while IFS= read -r f; do lockfiles+=("$f"); done < <(git ls-files -- 'gradle.lockfile' '**/gradle.lockfile')
 if [ "${#lockfiles[@]}" -eq 0 ]; then
-  echo "vuln-scan: no committed gradle.lockfile files found" >&2
-  exit 1
+  # 013/F1: no lockfiles = nothing to scan = NO VERDICT, not "findings" —
+  # exit 1 read to gate.sh's caller as vulnerabilities found.
+  echo "vuln-scan: FAIL — no committed gradle.lockfile files found; there is nothing to scan (no verdict, not a clean result)." >&2
+  exit 2
 fi
 
 args=()

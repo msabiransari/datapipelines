@@ -44,11 +44,22 @@ tasks.test {
     // The probe projects the tests drive must see the repo's real version
     // catalog — the plugin resolves catalog aliases at apply time. buildSrc's
     // project dir is <repo>/buildSrc, so ../gradle is the main build's.
-    systemProperty("repo.catalog", rootProject.file("../gradle/libs.versions.toml").absolutePath)
+    //
+    // The catalog's CONTENT is a declared input (013/F4): the tests read the
+    // file through the repo.catalog system property, whose value is only a
+    // PATH — so before this, editing gradle/libs.versions.toml left :test
+    // UP-TO-DATE and the guards unexecuted while still reporting PASS.
+    // withPathSensitivity(NONE): only content changes invalidate, not the
+    // checkout's absolute location.
+    val repoCatalog = rootProject.file("../gradle/libs.versions.toml")
+    inputs.file(repoCatalog).withPathSensitivity(PathSensitivity.NONE)
+    systemProperty("repo.catalog", repoCatalog.absolutePath)
     // The probes apply the same JDK 21 toolchain the modules get; hand the
     // tests a RESOLVED installation (detection finds the daemon JDK /
     // ~/.gradle/jdks / any auto-provisioned install) so the probe builds need
-    // no toolchain repositories of their own — the tests stay network-free.
+    // no toolchain repositories of their own and no toolchain DOWNLOAD.
+    // (Dependency resolution is a separate matter: the probes resolve their
+    // compile/test set from Maven Central — see the test KDoc. 013/F6.)
     // The test JVM itself may be any JDK the daemon picked (26 here), so
     // java.home is NOT a valid substitute.
     systemProperty("probe.jdk21", probeJdk21.get())
