@@ -463,8 +463,20 @@ never run automatically: `./gradlew -p buildSrc test` runs them, and
 #### Dependency vulnerabilities (OSV-Scanner)
 
 ```bash
-./scripts/vuln-scan.sh    # scans every committed gradle.lockfile; exit 1 on findings
+./scripts/vuln-scan.sh    # scans every committed gradle.lockfile
 ```
+
+Exit codes — the contract callers script from (the scanner's own codes are
+remapped INSIDE the script, never propagated raw; the offline sentinel is
+shared with `gate.sh` via `scripts/lib/scan-tools.sh`):
+
+- `0` — scan ran, no findings
+- `1` — scan ran, vulnerabilities found
+- `2` — scan did NOT reach a verdict: scanner error while online, or the
+  preflight classified the environment as broken (curl missing, TLS/CA
+  failure) — fails loudly with the cause named
+- `200` — skipped: offline (fail-soft; connection-level failures only —
+  connection refused, timeout, DNS)
 
 osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
 outside `build/`, so `gradlew clean` does not force a re-download — and
@@ -472,8 +484,8 @@ SHA256-verified against the release manifest) checks the
 resolved dependency set — the lockfiles, direct and transitive — against the
 OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
-stage; when the machine is offline the stage warns and does NOT fail (the scan
-is meaningless without osv.dev — the skip is printed, never silent).
+stage; exit 200 warns and does NOT fail the gate (the scan is meaningless
+without osv.dev — the skip is printed, never silent); exits 1 and 2 fail it.
 
 #### Secret scanning (gitleaks)
 
