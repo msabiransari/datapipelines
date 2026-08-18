@@ -3,7 +3,6 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.PipelineErrorCodes
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
@@ -63,7 +62,6 @@ data class ExecutionRecord(
  * The repository lives in `dag` because `dag` owns the entity; schema creation belongs to `app`'s
  * Flyway alone (§3.1 rule 2) and nothing here creates or alters a table.
  */
-@Repository
 class ExecutionRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

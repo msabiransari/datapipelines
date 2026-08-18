@@ -3,7 +3,6 @@ package co.datapipelines.executor
 import co.datapipelines.events.SseEventType
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -33,7 +32,6 @@ data class ExecutionEventRecord(
  *
  * Append-only and immutable: no `updated_at`, and the only DELETE is the retention job.
  */
-@Repository
 class ExecutionEventRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

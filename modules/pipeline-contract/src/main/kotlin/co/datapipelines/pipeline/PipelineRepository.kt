@@ -4,7 +4,6 @@ import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -39,7 +38,6 @@ import java.util.UUID
  * `updated_at = NOW()` in its own `SET` clause, and "an UPDATE that forgets `updated_at` is a
  * bug in the repository method". Both UPDATE statements below set it.
  */
-@Repository
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

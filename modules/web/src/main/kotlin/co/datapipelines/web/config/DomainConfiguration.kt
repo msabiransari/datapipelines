@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistry
 
 /**
@@ -33,9 +34,9 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
  * key, the resolved staging properties, the pipeline-name lookup a datasource delete needs). This
  * is that layer.
  *
- * `templates` and `pipeline-contract` are different — `templates` ships `TemplatesConfiguration`
- * and both repositories are `@Repository`, so those beans are already in the context and are
- * injected here rather than rebuilt.
+ * `pipeline-contract` ships no Spring configuration either, so its [PipelineRepository] is
+ * declared here alongside [DatasourceRepository]; `templates` ships `TemplatesConfiguration`,
+ * which declares its own `TemplateRepository` (015, module-structure.md §8.4).
  */
 @Configuration
 @EnableConfigurationProperties(
@@ -48,6 +49,12 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     PipelineProperties::class,
 )
 class DomainConfiguration {
+    @Bean
+    fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
+
+    @Bean
+    fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)
+
     /**
      * The AES-256-GCM encryptor for stored datasource passwords (datasources §6).
      *

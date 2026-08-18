@@ -3,7 +3,6 @@ package co.datapipelines.templates
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -32,7 +31,6 @@ data class TemplateVersionSummary(
  * transaction — a `templates` row whose `current_version` names a version row that was never
  * inserted is unrepresentable. There is deliberately **no `params_schema` column** (D3).
  */
-@Repository
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

@@ -17,6 +17,10 @@ dependencies {
     implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.thymeleaf)
     implementation(libs.spring.boot.starter.validation)
+    // spring-jdbc: EngineConfiguration/DomainConfiguration declare the dag/datasources/
+    // pipeline-contract repositories as @Bean methods (015), so NamedParameterJdbcTemplate
+    // is a COMPILE-time type here, not merely a runtime one.
+    implementation(libs.spring.boot.starter.jdbc)
     // Redis: post-completion SSE event log (1h) + per-user rate-limit counters.
     // The durable 7-day record is dag's ExecutionEventRepository (D9).
     implementation(libs.spring.boot.starter.data.redis)
@@ -55,9 +59,8 @@ dependencies {
     // Real forward-only cursors for the result-store round trip (the fixture dag's own
     // RedisResultStoreIntegrationTest uses); the alias already exists in the catalog.
     testImplementation(libs.h2)
-    // The integration test drives dag's @Repository classes against a Postgres container
-    // directly; spring-jdbc is their implementation detail, so tests need it explicitly.
-    testImplementation(libs.spring.boot.starter.jdbc)
+    // The integration test drives dag's repository classes against a Postgres container
+    // directly (spring-jdbc is a main dependency — see above).
     // Konsist architecture guard for the web layer (module-structure.md §7.8).
     testImplementation(libs.konsist)
 }

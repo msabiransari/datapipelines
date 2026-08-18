@@ -9,7 +9,6 @@ import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -69,7 +68,6 @@ class DatasourceRow(
  * clause. `duplicate_name` is the primary-key violation translated to the catalog code — the
  * database is the only atomic authority on name uniqueness (same pattern as `PipelineRepository`).
  */
-@Repository
 class DatasourceRepository(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper = DEFAULT_MAPPER,
