@@ -5,10 +5,13 @@ import co.datapipelines.staging.StagingFactory
 import kotlinx.coroutines.runBlocking
 import org.springframework.boot.actuate.health.Health
 import org.springframework.boot.actuate.health.HealthIndicator
-import org.springframework.stereotype.Component
 import java.util.UUID
 
-@Component("h2_factory")
+/**
+ * Actuator indicator for the staging H2 factory. The bean name is the actuator health
+ * path — it must stay `h2_factory` (rest-api.md §11.1 names that exact component key),
+ * which is why the declaring `@Bean` pins the name explicitly (015).
+ */
 class StagingHealthIndicator(
     private val stagingFactory: StagingFactory,
 ) : HealthIndicator {

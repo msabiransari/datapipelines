@@ -90,6 +90,14 @@ class WebCorsConfiguration(
 
     /** The first thing that touches a request, so every response carries a quotable id. */
     @Bean
+    fun correlationIdFilter(): CorrelationIdFilter = CorrelationIdFilter()
+
+    /**
+     * Container-wide registration with the order stated (rest-api.md §3.4) — the one
+     * filter that genuinely belongs on EVERY path, so unlike the auth filters it is
+     * deliberately registered with the servlet container.
+     */
+    @Bean
     fun correlationIdFilterRegistration(filter: CorrelationIdFilter): FilterRegistrationBean<CorrelationIdFilter> =
         FilterRegistrationBean(filter).apply {
             order = CorrelationIdFilter.ORDER

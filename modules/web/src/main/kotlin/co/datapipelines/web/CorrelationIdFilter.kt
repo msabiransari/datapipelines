@@ -6,7 +6,6 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.MDC
 import org.springframework.core.Ordered
-import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 
 /**
@@ -19,7 +18,9 @@ import org.springframework.web.filter.OncePerRequestFilter
  * back out would silently lose it there).
  *
  * ## Ordering
- * Registered at the highest precedence so the id exists before Spring Security rejects anything:
+ * Registered container-wide by an explicit `FilterRegistrationBean`
+ * ([co.datapipelines.web.config.WebCorsConfiguration.correlationIdFilterRegistration])
+ * at the highest precedence so the id exists before Spring Security rejects anything:
  * `auth`'s [co.datapipelines.auth.AuthErrorWriter] falls back to this MDC slot, so a 401 from the
  * filter chain carries the same id as a 200 from a controller. Being ahead of the security chain
  * also means an unauthenticated request still gets a quotable id — which is the whole point of
@@ -28,7 +29,6 @@ import org.springframework.web.filter.OncePerRequestFilter
  * The MDC is cleared in a `finally`: leaving the slot populated would leak this request's id onto
  * whatever the container's thread does next.
  */
-@Component
 class CorrelationIdFilter : OncePerRequestFilter() {
     override fun doFilterInternal(
         request: HttpServletRequest,
