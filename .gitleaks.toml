@@ -84,13 +84,20 @@ regexes = ['''^ZGV2LWVuY3J5cHRpb24ta2V5LTMyLWJ5dGVzIQ==$''']
 
 # modules/web vendor-manifest.json — SHA-256 checksums of VENDORED, publicly
 # committed CSS assets (013/F7: sync-design-system.sh records one hash per
-# file). gitleaks' generic-api-key rule flags ONE of the fourteen (the
-# tokens.css hash, entropy 3.90); a checksum of a public file is not a
-# credential. Scoped to this exact hash string in this exact file — any other
-# secret in the manifest still fires. (2026-08-17)
+# file). gitleaks' generic-api-key rule flags high-entropy hashes (the
+# tokens.css hash, entropy 3.90, at 2026-08-17); a checksum of a public file
+# is not a credential. Scoped by SHA-256 SHAPE (exactly 64 lowercase hex
+# chars) in this exact file rather than one literal digest (014/F5): the
+# recorded hashes change on every re-vendor, so a digest-pinned entry would
+# block the next sync's commit whenever a DIFFERENT hash trips the entropy
+# check. The AND-condition and path pin stay, so any secret in this file
+# that is not itself a 64-lowercase-hex string still fires (proven with a
+# planted AWS key, 2026-08-18). Residual, accepted: a real secret that IS
+# exactly 64 lowercase hex chars in this manifest is indistinguishable from
+# a checksum. (2026-08-18)
 [[allowlists]]
-description = "vendor-manifest.json: SHA-256 of vendored public CSS (2026-08-17)"
+description = "vendor-manifest.json: SHA-256 hashes of vendored public CSS (2026-08-18)"
 condition = "AND"
 paths = ['''modules/web/src/main/resources/static/vendor/design-system/vendor-manifest\.json$''']
 regexTarget = "secret"
-regexes = ['''^0d86fc432d63ebbf277d4645163e392c317da8f3cbdfcb4d7a51339fa7078250$''']
+regexes = ['''^[a-f0-9]{64}$''']

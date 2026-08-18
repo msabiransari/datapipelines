@@ -18,9 +18,10 @@
 #      what makes the COVERAGE_FLOORS / -Pkover.off guard falsifiable on
 #      every quality pass (012/F6). Failures are crash-classified like every
 #      other stage (013/F3); the tests are forced to execute via cleanTest
-#      (013/F4); and an offline preflight skips the stage fail-soft with the
-#      cause named, since the TestKit probes resolve from Maven Central when
-#      their cache is cold (013/F6).
+#      (013/F4). The stage is ATTEMPTED even when the preflight says
+#      offline — a warm TestKit cache passes offline — and only a dependency-
+#      resolution failure while genuinely offline is the fail-soft skip;
+#      skipped stages are counted and named in the summary (014/F4).
 #   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
 #      fails the gate on real findings and warns without failing when the
 #      network is unreachable (fail-soft by design).
@@ -56,6 +57,10 @@ set -u
 CYCLES="${1:-1}"
 STRICT="${2:-}"
 [[ "$CYCLES" =~ ^[0-9]+$ ]] || { echo "usage: $0 [cycles] [--strict]" >&2; exit 2; }
+# 014/F6: `seq 1 0` counts DOWN on BSD seq (prints "1 0"), so a bare `0`
+# here would run TWO full cycles instead of zero — it bit the 013 lane
+# twice. There is no stages-only mode; run the stages by hand if wanted.
+[ "$CYCLES" -ge 1 ] || { echo "usage: $0 [cycles] [--strict] — cycles must be >= 1 (BSD 'seq 1 0' counts down: two cycles, not zero)" >&2; exit 2; }
 
 cd "$(dirname "$0")/.." || exit 2
 ROOT="$PWD"
@@ -93,7 +98,7 @@ crashed() {
   grep -qE 'NoSuchFileException|EOFException|OutOfMemoryError|finished with non-zero exit value|Gradle build daemon disappeared' "$1" 2>/dev/null
 }
 
-fails=0; crashes=0
+fails=0; crashes=0; skips=0
 for i in $(seq 1 "$CYCLES"); do
   c=$(run "$LOGDIR/cycle${i}-1-clean.log" clean)
   b=$(run "$LOGDIR/cycle${i}-2-build.log" build)
@@ -120,7 +125,7 @@ for i in $(seq 1 "$CYCLES"); do
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
 
-# ---- buildSrc guard tests (012/F6; 013/F3/F4/F6) ------------------------------
+# ---- buildSrc guard tests (012/F6; 013/F3/F4/F6; 014/F4) ----------------------
 # The convention-plugin guards (COVERAGE_FLOORS fail-loud, -Pkover.off skip)
 # live in buildSrc, and a main build never executes buildSrc:test — only its
 # jar. Run them here so every gate pass exercises them. Same no-pipe rule:
@@ -135,39 +140,36 @@ done
 # CONTENT is also declared a test input in buildSrc/build.gradle.kts, so a
 # bare `-p buildSrc test` re-executes on a libs.versions.toml edit too.
 #
-# Offline (013/F6): the TestKit probes resolve real dependencies from Maven
-# Central (test (c) compiles Kotlin and runs JUnit in the probe), so with a
-# cold TestKit cache the stage NEEDS network. Same fail-soft story as
-# vuln-scan below: preflight classifies (a single curl timeout is retried at
-# a longer budget); connection-level/double-timeout offline → SKIPPED, named;
-# anything else broken → loud FAIL.
+# Offline (013/F6 → 014/F4): the stage is ATTEMPTED regardless of the
+# network preflight — the old classification-only skip left the guard
+# unexercised whenever the preflight said offline, even with a WARM TestKit
+# cache that would have passed offline, and a slow-but-online box (double
+# curl-28 → "offline") silently lost the guard too. The TestKit probes
+# resolve real dependencies from Maven Central only when their cache is
+# cold, so the fail-soft skip is earned ONLY by a failure whose log shows
+# dependency resolution AND an offline preflight; a resolution failure on
+# any other preflight verdict fails the gate loudly (consistent with
+# vuln-scan: online-but-unreachable fails, never silently skips). A PASS
+# line therefore never hides an unrun guard; skips are counted and named.
 source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 bnet="$(scan_tools_classify_network gate https://repo.maven.apache.org/maven2/)"
-case "$bnet" in
-  online)
-    btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test)
-    if [ "$btest" -eq 0 ]; then
-      echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
-    else
-      fails=$((fails + 1))
-      if crashed "$LOGDIR/buildsrc-test.log"; then
-        crashes=$((crashes + 1))
-        echo "  buildSrc tests  EXIT=$btest  ** TOOLING CRASH — no verdict, not a test failure **"
-        grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$LOGDIR/buildsrc-test.log" | sed 's/^/        /'
-      else
-        echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
-      fi
-    fi
-    ;;
-  offline)
-    echo "  buildSrc tests  SKIPPED — offline (fail-soft by design; the TestKit cache may be cold — re-run online)"
-    ;;
-  *)
+btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test)
+if [ "$btest" -eq 0 ]; then
+  echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+else
+  if grep -qE 'Could not resolve|Could not GET|Could not HEAD' "$LOGDIR/buildsrc-test.log" 2>/dev/null && [ "$bnet" = "offline" ]; then
+    skips=$((skips + 1))
+    echo "  buildSrc tests  SKIPPED — dependency resolution failed and the network preflight says offline (cold TestKit cache; fail-soft by design — re-run online). log: $LOGDIR/buildsrc-test.log"
+  elif crashed "$LOGDIR/buildsrc-test.log"; then
+    fails=$((fails + 1)); crashes=$((crashes + 1))
+    echo "  buildSrc tests  EXIT=$btest  ** TOOLING CRASH — no verdict, not a test failure **"
+    grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$LOGDIR/buildsrc-test.log" | sed 's/^/        /'
+  else
     fails=$((fails + 1))
-    echo "  buildSrc tests  FAIL — network preflight classified as $bnet; stage not run"
-    ;;
-esac
+    echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
+  fi
+fi
 
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
@@ -185,6 +187,7 @@ scan=0
 if [ "$scan" -eq 0 ]; then
   echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
 elif [ "$scan" -eq "$SCAN_EXIT_OFFLINE" ]; then
+  skips=$((skips + 1))
   echo "  vuln-scan  SKIPPED — offline (fail-soft by design; log: $LOGDIR/vuln-scan.log)"
 else
   fails=$((fails + 1))
@@ -192,11 +195,18 @@ else
 fi
 
 echo "--------------------------------------------------------------"
+# Skipped stages are surfaced in the summary (014/F4): a PASS that
+# silently dropped a guard is the failure mode this round fixed.
+if [ "$skips" -gt 0 ]; then
+  skip_note=", $skips stage(s) skipped (named above)"
+else
+  skip_note=""
+fi
 if [ "$fails" -eq 0 ]; then
-  echo "  GATE A PASS — $CYCLES cycle(s), $((CYCLES * 3)) invocations, 0 failures"
+  echo "  GATE A PASS — $CYCLES cycle(s), $((CYCLES * 3)) invocations, 0 failures${skip_note}"
   exit 0
 fi
-echo "  GATE A FAIL — $fails failed invocation(s), of which $crashes were tooling crashes"
+echo "  GATE A FAIL — $fails failed invocation(s), of which $crashes were tooling crashes${skip_note}"
 [ "$crashes" -gt 0 ] && echo "  A tooling crash is NOT a red test suite. Re-run before drawing any conclusion,"
 [ "$crashes" -gt 0 ] && echo "  and confirm no other build actor was touching this tree."
 exit 1

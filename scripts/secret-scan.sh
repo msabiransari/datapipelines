@@ -23,7 +23,12 @@
 # install-side breakage never reads as "leaks found". The pre-commit hook
 # blocks on ANY non-zero, so its behavior is unchanged.
 
-set -euo pipefail
+set -Eeuo pipefail
+# -E/errtrace (014/F2): the ERR trap must be inherited by shell functions —
+# without it install_gitleaks' unguarded mkdir/tar/mv/chmod died as a raw
+# exit 1 (which here means "leaks found"; 014/F2 proof: read-only .tools/
+# → "mkdir: Permission denied", exit 1), and the pre-commit hook reported a
+# secret leak that did not exist.
 # Any UNHANDLED tooling failure exits 2, never a raw set -e death that would
 # read as "leaks found" (013/F1). gitleaks itself runs via exec, replacing
 # this process — its own exit codes are untouched by the trap.

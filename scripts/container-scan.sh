@@ -25,15 +25,24 @@
 # Needs network on first run (trivy downloads its vulnerability DB to
 # ~/.cache/trivy) and a running Docker daemon for the image scan.
 #
-# Exit codes: trivy's --exit-code 1 = findings not allowlisted;
+# Exit codes: trivy's --exit-code 1 = findings not allowlisted — trivy's
+# verdict exits are CAPTURED and re-exited deliberately (014/F1: a bare
+# invocation under set -e fired the ERR trap on a real finding and replaced
+# exit 1 with "tooling failure" exit 2);
 # tooling/environment failures exit 2 (013/F1: unsupported OS/architecture,
-# or the sourced scan-tools.sh helpers' download/verify failures) — distinct
-# from 1 so an install-side breakage never reads as a scan finding.
+# or the sourced scan-tools.sh helpers' download/verify failures — with
+# errtrace set, also any unhandled failure inside install_trivy, 014/F2) —
+# distinct from 1 so an install-side breakage never reads as a scan finding.
 
-set -euo pipefail
+set -Eeuo pipefail
+# -E/errtrace (014/F2): without it this trap is NOT inherited by shell
+# functions, so install_trivy's unguarded mkdir/tar/mv/chmod died as a raw
+# exit 1 — which in this contract means "trivy finding" (014/F2 proof:
+# read-only .tools/ → "mkdir: Permission denied", exit 1).
 # Any UNHANDLED tooling failure (docker build, bootJar, tar, …) exits 2,
 # never a raw set -e death that would read as a trivy finding (013/F1).
-# Handled failures (the docker-info check) never fire this.
+# Handled failures (the docker-info check, the captured trivy verdicts)
+# never fire this.
 trap 'echo "container-scan: unexpected tooling failure at line $LINENO — no verdict" >&2; exit 2' ERR
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -74,9 +83,34 @@ install_trivy() {
 IGNORE_ARGS=()
 [ -f "$ROOT/.trivyignore" ] && IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore")
 
+# trivy_verdict <stage-label> <captured-rc> — map trivy's CAPTURED exit to
+# the published contract (014/F1): 0 = clean, 1 = findings not allowlisted
+# (trivy's own output above is the finding report). Anything else is a
+# trivy error, not a verdict → exit 2. Bare invocations under set -e used
+# to fire the ERR trap on a REAL finding and replace its exit 1 with
+# "tooling failure" (exit 2) — the same commit that introduced the trap
+# inverted the contract it documented.
+# KNOWN LIMIT (verified against trivy 0.74.0, 2026-08-18): trivy exits 1
+# for FATAL errors too, so a FATAL lands in the 1 branch — loud (its FATAL
+# line prints above) but misclassified; exit 2 can only catch codes ≠ 0/1.
+trivy_verdict() {
+  case "$2" in
+    0) return 0 ;;
+    1) echo "container-scan: $1 — findings not allowlisted (report above)." >&2; exit 1 ;;
+    *) echo "container-scan: $1 — trivy exited $2 without a verdict (error, not findings)." >&2; exit 2 ;;
+  esac
+}
+
 echo "== trivy $TRIVY_VERSION — config scan (Dockerfile, deploy/) =="
-"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/Dockerfile"
-"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/deploy"
+# Verdicts are CAPTURED and re-exited deliberately (014/F1) — never bare
+# under set -e. Second scan only runs while the first is clean (the
+# pre-013 set -e semantics), so a finding names its stage.
+scan_rc=0
+"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/Dockerfile" || scan_rc=$?
+if [ "$scan_rc" -eq 0 ]; then
+  "$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/deploy" || scan_rc=$?
+fi
+trivy_verdict "config scan" "$scan_rc"
 
 if [ "${1:-}" = "--config-only" ]; then
   echo "container-scan: --config-only given; image scan skipped."
@@ -93,4 +127,6 @@ echo "== building production image (bootJar + docker build) =="
 docker build -q -t datapipelines:trivy-scan "$ROOT" > /dev/null
 
 echo "== trivy $TRIVY_VERSION — image scan (datapipelines:trivy-scan) =="
-"$BIN" image --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} datapipelines:trivy-scan
+scan_rc=0
+"$BIN" image --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} datapipelines:trivy-scan || scan_rc=$?
+trivy_verdict "image scan" "$scan_rc"

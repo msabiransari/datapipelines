@@ -24,6 +24,10 @@
 #     file is missing from dist/, a copied file's hash does not match its
 #     source, or the manifest cannot be parsed/validated. Any failure exits
 #     non-zero — there is no fail-soft path in a vendoring step.
+#   * --check additionally asserts the manifest's sha256 KEY SET equals the
+#     curated list in BOTH directions (014/F3): a list addition that was
+#     never synced, or a stale manifest entry after a removal, is drift —
+#     the per-file hash loop alone cannot see either.
 #
 # The vendored surface is a CURATED SUBSET of dist/ (the files the app
 # actually serves): classless.css, base-scoped.css, adapters/, and the icon
@@ -109,6 +113,33 @@ if $CHECK_ONLY; then
   # substitution's own failure is invisible to the while loop.)
   status=0
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$MANIFEST" || fail "manifest is not valid JSON."
+  # The manifest's sha256 KEY SET must EQUAL the curated list, both
+  # directions (014/F3): the verification loop below is driven by the
+  # manifest's keys while the OK line counts VENDED_FILES — a file added
+  # to the list but never synced was claimed verified without ever being
+  # looked at (proven: classless.css added to the list → "check OK — 15
+  # vendored file(s)", exit 0). Missing keys = unsynced addition; extra
+  # keys = stale manifest entry after a list removal.
+  listed=$(printf '%s\n' "${VENDED_FILES[@]}" | sort)
+  in_manifest=$(python3 - "$MANIFEST" <<'PY'
+import json, sys
+block = json.load(open(sys.argv[1])).get("design-system", {})
+print("\n".join(sorted(block.get("sha256", {}).keys())))
+PY
+)
+  if [ "$in_manifest" != "$listed" ]; then
+    unsynced=$(comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest"))
+    stale_key=$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest"))
+    if [ -n "$unsynced" ]; then
+      echo "sync-design-system: DRIFT — in the curated list but NOT in the manifest (run a full sync):" >&2
+      printf '%s\n' "$unsynced" | sed 's/^/    /' >&2
+    fi
+    if [ -n "$stale_key" ]; then
+      echo "sync-design-system: DRIFT — in the manifest but NOT in the curated list (stale entry):" >&2
+      printf '%s\n' "$stale_key" | sed 's/^/    /' >&2
+    fi
+    status=1
+  fi
   first=true
   saw_hash=false
   while IFS= read -r line; do
