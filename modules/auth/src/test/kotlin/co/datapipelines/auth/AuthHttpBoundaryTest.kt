@@ -3,8 +3,11 @@ package co.datapipelines.auth
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
+import jakarta.servlet.ServletContext
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -54,6 +57,8 @@ class AuthHttpBoundaryTest {
     @Autowired private lateinit var apiKeyService: ApiKeyService
 
     @Autowired private lateinit var context: ApplicationContext
+
+    @Autowired private lateinit var servletContext: ServletContext
 
     private val mapper = ObjectMapper()
 
@@ -356,6 +361,86 @@ class AuthHttpBoundaryTest {
             }
     }
 
+    // ----------------------------------- filter execution count (B12 behavioral, 015)
+
+    /**
+     * AU-API-10 proven BEHAVIORALLY, not by the presence of the workaround: each
+     * auth filter must execute EXACTLY ONCE per request. Spring Boot auto-registers
+     * every `Filter` bean with the servlet container on top of the security chain —
+     * the hazard `AuthFilterRegistrationConfig` suppresses today and the zero-bean
+     * wiring (015) removes structurally. Each test below fails the moment its filter
+     * executes twice for one request, whatever the wiring mechanism that caused it.
+     */
+
+    /**
+     * The container's own registration table must name none of the three auth
+     * filter classes. Today the disabled `FilterRegistrationBean`s keep them out;
+     * after 015 the filters are not beans at all. Either way, a registration here
+     * means a second, container-level execution path exists.
+     */
+    @Test
+    fun `the servlet container holds no registration for any auth filter class`() {
+        val authFilterClasses =
+            setOf(
+                ApiKeyFilter::class.java.name,
+                JwtAuthenticationFilter::class.java.name,
+                LoginRateLimitFilter::class.java.name,
+            )
+        servletContext.filterRegistrations.values
+            .filter { it.className in authFilterClasses }
+            .shouldBeEmpty()
+    }
+
+    /**
+     * The login rate limit is pinned to 4 ([props]). Five `/login` calls must yield
+     * exactly one 429 — the FIFTH. A double-executed [LoginRateLimitFilter] counts
+     * two per request and 429s on the third call instead.
+     */
+    @Test
+    fun `the login rate limiter meters each request exactly once`() {
+        repeat(LOGIN_LIMIT) {
+            call(HttpMethod.GET, "/login").statusCode.value() shouldNotBe 429
+        }
+        call(HttpMethod.GET, "/login").statusCode.value() shouldBe 429
+    }
+
+    /**
+     * One well-shaped-but-unknown key is validated once and refused once: exactly
+     * one `auth.api_key.rejected` audit row (§10.1). A double-executed
+     * [ApiKeyFilter] — the AU-API-10 "two Argon2 verifications" hazard — writes two.
+     */
+    @Test
+    fun `one rejected api key produces exactly one audit row`() {
+        val before = rejectionCount()
+        val response =
+            call(HttpMethod.GET, "/api/v1/probe", headers(apiKey = "dpk_ZZZZZZZZZZZZ.${"A".repeat(48)}"))
+        response.statusCode.value() shouldBe 401
+        rejectionCount() shouldBe before + 1
+    }
+
+    /**
+     * A rejected session cookie is cleared by exactly one `Set-Cookie` header. A
+     * double-executed [JwtAuthenticationFilter] clears it twice.
+     */
+    @Test
+    fun `a rejected session cookie is cleared exactly once`() {
+        val response =
+            call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=${expiredSession()}")))
+
+        response.statusCode.value() shouldBe 401
+        response.headers[HttpHeaders.SET_COOKIE].orEmpty()
+            .count { it.startsWith("${OidcSuccessHandler.SESSION_COOKIE}=") } shouldBe 1
+    }
+
+    private fun rejectionCount(): Int =
+        checkNotNull(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE event = 'auth.api_key.rejected'",
+                emptyMap<String, Any>(),
+                Int::class.java,
+            ),
+        ) { "COUNT(*) returned no row" }
+
     private fun expiredSession(): String {
         val past = Instant.now().minusSeconds(3600)
         return Jwts
@@ -373,6 +458,9 @@ class AuthHttpBoundaryTest {
 
     private companion object {
         val JWT_SECRET: String = Base64.getEncoder().encodeToString(ByteArray(32) { (it + 11).toByte() })
+
+        /** Pinned login rate limit for the filter-once test — see [props]. */
+        const val LOGIN_LIMIT = 4
 
         // Started in the static initializer, not via @Testcontainers: with @SpringBootTest
         // the context (and @DynamicPropertySource) can load before the extension's
@@ -397,6 +485,8 @@ class AuthHttpBoundaryTest {
             registry.add("spring.datasource.username", postgres::getUsername)
             registry.add("spring.datasource.password", postgres::getPassword)
             registry.add("datapipelines.jwt.secret") { JWT_SECRET }
+            // Pinned low so the filter-once test (B12) needs only five /login calls.
+            registry.add("datapipelines.auth.rate-limit.login-per-minute") { LOGIN_LIMIT }
             // Required once a provider is configured (§5.2); no OIDC login happens here.
             registry.add("datapipelines.auth.base-url") { "https://dp.example.com" }
             registry.add("datapipelines.auth.oidc.providers[0].name") { "stub" }
