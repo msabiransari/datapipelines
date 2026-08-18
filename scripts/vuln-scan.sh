@@ -49,7 +49,11 @@
 #   200 skipped: offline (fail-soft sentinel; connection-level failures only,
 #       and a curl timeout only after a retry at a longer budget — 013/F2)
 
-set -euo pipefail
+set -Eeuo pipefail
+# -E/errtrace (014/F2): the ERR trap must be inherited by shell functions —
+# without it install_osv_scanner's unguarded mkdir/chmod died as a raw
+# exit 1 (which here means "vulnerabilities found"; 014/F2 proof: read-only
+# .tools/ → "mkdir: Permission denied", exit 1).
 # Any UNHANDLED tooling failure (mkdir, chmod, git, …) exits 2 with its line —
 # never a raw set -e death whose status could collide with a verdict code
 # (013/F1). Handled failures (|| , if, while conditions) never fire this.
