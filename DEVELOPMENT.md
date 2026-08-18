@@ -160,7 +160,7 @@ cd ../datapipelines
 ./scripts/sync-design-system.sh   # copies dist/ → modules/web/src/main/resources/static/vendor/design-system/
 ```
 
-Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift).
+Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift — including the manifest's sha256 key set drifting from the curated file list in either direction, 014/F3).
 
 ---
 
@@ -462,10 +462,12 @@ floor rule). A main build only builds buildSrc through its jar, so its tests
 never run automatically: `./gradlew -p buildSrc test` runs them, and
 `scripts/gate.sh` runs that as a stage — forced to execute (`cleanTest`;
 the catalog file's content is a declared test input, so a
-`gradle/libs.versions.toml` edit re-runs the guards even without the gate),
-and skipped fail-soft with the cause named when the network preflight says
-offline (the TestKit probes resolve their compile/test dependencies from
-Maven Central when their cache is cold).
+`gradle/libs.versions.toml` edit re-runs the guards even without the gate).
+The stage is attempted even when the network preflight says offline (a warm
+TestKit cache passes offline); only a dependency-resolution failure in the
+log while genuinely offline skips it fail-soft, and skipped stages are
+counted and named in the gate's summary line — a PASS never hides an unrun
+guard (014/F4).
 
 #### Dependency vulnerabilities (OSV-Scanner)
 
@@ -504,7 +506,10 @@ verify) exit `2` on failure for **all three** scanner scripts —
 secret-scan (`1` = leaks found) and container-scan (`1` = trivy finding)
 publish the same distinction between a findings verdict and a tooling
 failure, so an install-side breakage can never masquerade as a scan result
-in any consumer's branching.
+in any consumer's branching. Each script's ERR trap (`set -E`) is inherited
+by its shell functions, so the same `2` covers unhandled failures inside
+the install functions too (mkdir/tar/mv/chmod — a full or read-only disk
+is "no verdict", not "leaks found"; 014/F2).
 
 #### Secret scanning (gitleaks)
 
@@ -537,8 +542,13 @@ package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
 comment AND an `exp:` expiry per entry — an expired entry fails the scan
 again, so baselines get re-triaged instead of rotting (same discipline as
 `osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new
-findings fail. We do not chase base-image CVE zero — record the count, fix
-what a base-image bump or an obvious Dockerfile change resolves cheaply.
+findings fail. trivy's findings verdicts are captured and re-exited
+deliberately (`0` clean / `1` findings; anything else is a trivy error →
+`2`, no verdict) — a bare invocation under the script's ERR trap used to
+convert a real finding into "tooling failure" (014/F1); note trivy itself
+exits 1 for FATAL errors too, so its output is the tiebreaker. We do not
+chase base-image CVE zero — record the count, fix what a base-image bump or
+an obvious Dockerfile change resolves cheaply.
 trivy 0.74 has no docker-compose scanner, so `deploy/*.yml` is not covered.
 First run needs network (vulnerability DB download); the image scan needs a
 Docker daemon.
