@@ -1,6 +1,5 @@
 package co.datapipelines.auth
 
-import org.springframework.stereotype.Service
 import java.util.UUID
 
 /**
@@ -14,7 +13,6 @@ import java.util.UUID
  * the next must resolve to one row — otherwise one human forks into two accounts and,
  * worse, the §4.4 bootstrap-admin comparison could mint a second admin.
  */
-@Service
 class UserService(
     private val userRepository: UserRepository,
     private val authCache: AuthCache,

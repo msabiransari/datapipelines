@@ -5,7 +5,6 @@ import io.jsonwebtoken.ExpiredJwtException
 import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
-import org.springframework.stereotype.Service
 import java.util.Base64
 import java.util.Date
 import javax.crypto.Mac
@@ -30,7 +29,6 @@ import javax.crypto.spec.SecretKeySpec
  *   (There is no `datapipelines.auth.jwt.algorithm` key: Configuration §3.4 does not
  *   define one, and a configurable signing algorithm is a downgrade lever, AU-API-7.)
  */
-@Service
 class JwtService(
     jwtProperties: JwtProperties,
     authProperties: AuthProperties,

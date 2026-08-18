@@ -4,7 +4,6 @@ import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.core.env.Environment
 import org.springframework.core.io.ClassPathResource
-import org.springframework.stereotype.Component
 import java.util.Base64
 
 /**
@@ -21,7 +20,6 @@ import java.util.Base64
  * without a Spring context — including the §7 closing rule that the *documented dev
  * setup* (configuration.md §6 values) must pass these production rules.
  */
-@Component
 class ConfigValidator(
     private val environment: Environment,
 ) {

@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import java.util.UUID
 
@@ -29,7 +28,6 @@ import java.util.UUID
  * proceeds unauthenticated. Unexpected exceptions are left to propagate (a 500 at
  * the container boundary) rather than being swallowed as "just an invalid token".
  */
-@Component
 class JwtAuthenticationFilter(
     private val jwtService: JwtService,
     private val userService: UserService,

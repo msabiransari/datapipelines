@@ -699,11 +699,17 @@ Konsist tests (pinned in the catalog, TEST dependency only):
   reflection-based `RequiredScopeCoverageTest`: one proves it on the live
   classpath, the other statically from sources.
 - `tests/integration-tests` — `ArchitectureGuardTest`, scanning every module's
-  production sources from the cross-module suite: no field injection
-  (`@Autowired` on properties/fields), and `@Transactional` only on types
-  carrying Spring's `@Service` stereotype, matched by its fully-qualified
-  name (a homegrown annotation named `Service` exempts nothing) — classes,
-  interfaces, and Kotlin `object` declarations all in scope.
+  production sources from the cross-module suite:
+  - no field injection (`@Autowired` on properties/fields) — constructor
+    injection only;
+  - no DI stereotypes — no class, interface, or `object` carries `@Service`,
+    `@Component`, or `@Repository` (zero allowlist; every bean is an explicit
+    `@Bean` method, §8.4);
+  - no declarative transactions — `@Transactional` is banned on classes,
+    interfaces, `object`s, AND functions; the sanctioned mechanism for a
+    multi-statement unit of work is an injected `TransactionTemplate` (§8.4);
+  - the production scope itself is non-empty (a guard scanning nothing
+    proves nothing).
 
 Konsist lives in existing test source sets only — no dedicated Gradle module.
 
@@ -724,9 +730,9 @@ Reasons:
 
 **Where repositories live:** in the module that owns the entity, never in `web` and never in a shared persistence module — see the §3.1 persistence-ownership rule for the full mapping and the Flyway/Redis boundaries. Each owning module takes `spring-boot-starter-jdbc`; the `DataSource` bean itself is app-level.
 
-Pattern per module (`pipeline-contract`):
+Pattern per module (`pipeline-contract`; declared as a `@Bean` in the consuming
+configuration — no `@Repository` stereotype, §8.4):
 ```kotlin
-@Repository
 class PipelineRepository(private val jdbc: NamedParameterJdbcTemplate) {
 
     fun findById(id: UUID): Pipeline? =
@@ -805,8 +811,24 @@ datapipelines:
 ### 8.4 Beans and DI
 
 - **Constructor injection only.** No `@Autowired` on fields (per the user's global rules).
-- **`@Service` / `@Repository` / `@Configuration`** used per Spring conventions.
-- **Open classes**: Spring's `kotlin-spring` plugin opens classes that need CGLIB proxying. No manual `open` keyword required.
+- **Zero DI stereotypes.** No production class carries `@Service`, `@Component`,
+  or `@Repository` — every bean is declared explicitly as a `@Bean` method in the
+  module's `@Configuration` class (auth: `AuthConfiguration`; engine/domain
+  repositories: `EngineConfiguration` / `DomainConfiguration` where their
+  consumers are already wired; templates: `TemplatesConfiguration`). Component
+  scanning stays on, but the only annotated production classes are
+  configurations (`@Configuration` / `@AutoConfiguration`),
+  `@ConfigurationProperties`, and the web edge (`@RestController`,
+  `@ControllerAdvice`). Enforced by `ArchitectureGuardTest` (§7.8).
+- **Transactions:** `@Transactional` is banned in production sources (guard,
+  §7.8). First-choice atomicity is a single data-modifying CTE (the
+  `PipelineRepository` stance); a future unit of work that genuinely cannot be
+  one statement takes an injected `TransactionTemplate` (Boot auto-configures
+  it from the metadata `DataSource`) — propagation `REQUIRED` by default, any
+  exception escaping the lambda rolls back, void work uses
+  `executeWithoutResult`. No CGLIB open-class trap, no self-invocation trap.
+- **Open classes**: Spring's `kotlin-spring` plugin opens `@Configuration`
+  classes that need CGLIB proxying. No manual `open` keyword required.
 
 ---
 
@@ -939,3 +961,4 @@ Before considering the module structure "ready":
 | 2026-08-05 | v1.1 | design system integration | Added `@acme/design-tokens` as the styling foundation for the `web` module. Documented vendoring approach (CSS files, not npm). Referenced Pipeline Editor spec for integration details. |
 | 2026-08-07 | v1.2 | consistency campaign | **Persistence ownership** (§3.1): repositories live in their owning domain module (`PipelineRepository`, `TemplateRepository`, `DatasourceRepository`, `UserRepository`/`ApiKeyRepository`, `ExecutionRepository`/`ExecutionEventRepository`), each taking `spring-boot-starter-jdbc`; Flyway dep + migrations confined to `app`; Redis (`spring-boot-starter-data-redis`, Lettuce) confined to `dag` and `web`; catalog gains flyway-core + flyway-database-postgresql. **§4.1** graph regenerated to match the §5.x lists; **§4.2** ambiguous layering rules replaced by one machine-checkable allowed-dependency table (+ Gradle verification task). **§5.1** `H2TypeMapper` → `H2IngressMapper` / `H2EgressMapper` (staging §5.3). **§5.2** `TerminalDetector` → `CallerNodeResolver` [D1], `PipelineRepository` added, Jackson named as the ser/deser stack. **§5.3** params-schema types dropped [D3]. **§5.4.1** new: `-Poracle`/`-Pmysql` conditional `runtimeOnly` sketch + `lib/` drop-in via `PropertiesLauncher`/`loader.path`. **§5.6** dag API gains `NodeResult`, `CancellationRegistry`, `CancellationHandle`, `ResultStore`, `ExecutionSlots`, `ExecutionAbortedException`, `AbortReason`, `ExecutorDispatcher`. **§5.11** `db2` Testcontainer removed (not a supported dialect); Redis container added. Both "Verification needed" markers converted to implementation gates G1/G2 with exact commands (§13.1). Duplicate `### 8.2` renumbered (→ 8.3/8.4). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-15 | v1.3 | dependency locking | **§7.6** new: STRICT `lockAllConfigurations()` dependency locking applied by `CommonConventionsPlugin` to every module and declared in `buildSrc/build.gradle.kts`; committed `gradle.lockfile` per module + buildSrc + settings; `resolveAndLockAll --write-locks` is the documented regeneration path (DEVELOPMENT.md §6.2). §5.4.1's flag-gated drivers (`ojdbc11`, `mysql-connector-j`) are the only lock-validation exclusions, declared in `modules/datasources/build.gradle.kts`. Closes the §13.1 G2 sub-item (lockfile was deferred to P9) and the §13.2 "Gradle lockfile committed" checklist row. Zero dependency version changes — the locks record current resolution. |
+| 2026-08-17 | v1.4 | explicit bean wiring | **§7.8** rewritten to the three-guard reality: `ArchitectureGuardTest` now bans field injection, DI stereotypes (`@Service`/`@Component`/`@Repository`, zero allowlist), and declarative transactions (`@Transactional` anywhere) across every module's production sources, plus the scope-non-emptiness guard; the stale `@Transactional`-on-`@Service` rule is gone. **§8.4** rewritten: zero DI stereotypes — every bean is an explicit `@Bean` method in a `@Configuration` class; the only annotated production classes are configurations, `@ConfigurationProperties`, and the web edge; transaction policy codified (`TransactionTemplate` sanctioned, `@Transactional` banned); the "open classes" bullet now names configurations as the CGLIB target. **§8.1** pattern snippet drops the `@Repository` annotation to match. |

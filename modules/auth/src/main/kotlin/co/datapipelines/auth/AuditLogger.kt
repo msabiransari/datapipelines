@@ -3,7 +3,6 @@ package co.datapipelines.auth
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Component
 import java.util.UUID
 
 /**
@@ -15,7 +14,6 @@ import java.util.UUID
  * pass silently: it is logged as a structured WARN at a defined boundary (rules/02),
  * not swallowed.
  */
-@Component
 class AuditLogger(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper,

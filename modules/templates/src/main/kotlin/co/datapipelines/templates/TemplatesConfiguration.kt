@@ -4,12 +4,14 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
 /**
- * Wires the templates module's value-constructed beans (module-structure §8.2/§8.4).
+ * Wires the templates module's beans (module-structure §8.2/§8.4).
  *
- * The repository is a component-scanned `@Repository`; everything else takes primitive config
- * values ([TemplatesProperties]) rather than framework types, so it is assembled here by
+ * The repository is declared here like everything else (015 — no component-scanned
+ * stereotypes anywhere); the rest take primitive config values ([TemplatesProperties])
+ * rather than framework types, so they are assembled here by
  * constructor injection. This keeps [TemplateEngine], [TemplateValidator] and the rest
  * framework-agnostic and directly unit-testable, with the Spring knowledge confined to this
  * one file.
@@ -17,6 +19,9 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 @EnableConfigurationProperties(TemplatesProperties::class)
 class TemplatesConfiguration {
+    @Bean
+    fun templateRepository(jdbc: NamedParameterJdbcTemplate): TemplateRepository = TemplateRepository(jdbc)
+
     @Bean
     fun templateRegistry(
         repository: TemplateRepository,

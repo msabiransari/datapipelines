@@ -7,7 +7,6 @@ import org.springframework.security.core.Authentication
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken
 import org.springframework.security.oauth2.core.oidc.user.OidcUser
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler
-import org.springframework.stereotype.Component
 
 /**
  * OIDC login callback (auth.md §5.5). Fully provider-agnostic — reads
@@ -28,7 +27,6 @@ import org.springframework.stereotype.Component
  * at the provider would **take over** the existing row for that address. A provider
  * that omits the claim entirely is treated as vouching for the address.
  */
-@Component
 class OidcSuccessHandler(
     private val userService: UserService,
     private val jwtService: JwtService,

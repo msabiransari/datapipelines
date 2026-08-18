@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.security.oauth2.client.web.AuthorizationRequestRepository
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest
-import org.springframework.stereotype.Component
 import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Mac
@@ -44,7 +43,6 @@ import javax.crypto.spec.SecretKeySpec
  * and every failure path — including `Error`s such as `StackOverflowError` raised by
  * hostile input — resolves to `null` (no authorization request) rather than a 500.
  */
-@Component
 class CookieOAuth2AuthorizationRequestRepository(
     jwtService: JwtService,
     private val objectMapper: ObjectMapper,

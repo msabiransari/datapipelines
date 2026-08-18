@@ -31,24 +31,37 @@ class ArchitectureGuardTest {
     }
 
     /**
-     * `@Transactional` belongs to the service layer only. The layer is identified by
-     * Spring's `@Service` STEREOTYPE pinned to its fully-qualified name, not the
-     * `*Service` name suffix (009/F8: a `@Repository class ExecutionCleanupService`
-     * passed the old name check). The FQN pin matters (012/F5): Konsist's
-     * `hasAnnotationWithName` matches its argument against BOTH the annotation's
-     * simple name and its fully-qualified name, so the old `"Service"` argument
-     * exempted ANY annotation named Service — a homegrown one from another package
-     * took @Transactional silently. Passing the FQN makes the exemption mean
-     * exactly `org.springframework.stereotype.Service`. The scan covers INTERFACES
-     * and Kotlin `object` declarations too (`classesAndInterfacesAndObjects()`,
-     * 009/F8 + 012/F5: `object ExecutionCleanup { @Transactional fun purge() }` is
-     * as much a transaction boundary as a class, and escaped
-     * `classesAndInterfaces()`). All three service classes at adoption time
-     * (JwtService, UserService, ApiKeyService) carry Spring's `@Service` —
-     * verified by grep, not recall.
+     * Zero DI stereotypes in production code (015, spec D1): every bean is
+     * declared explicitly as a `@Bean` method in a `@Configuration` class, so
+     * no class, interface, or object may carry `@Service`, `@Component`, or
+     * `@Repository`. Zero allowlist. Component scanning stays ON for
+     * `@Configuration` classes and the web edge (`@RestController`,
+     * `@ControllerAdvice`) — those annotations are not stereotypes and are
+     * not matched here.
      */
     @Test
-    fun `transactional only on service-layer types`() {
+    fun `no stereotype annotations in production code`() {
+        productionScope()
+            .classesAndInterfacesAndObjects()
+            .withAnnotationNamed("Service", "Component", "Repository")
+            .assertEmpty()
+    }
+
+    /**
+     * No declarative transactions anywhere in production code (015, spec D2):
+     * `@Transactional` is banned outright on classes, interfaces, objects, AND
+     * functions. First-choice atomicity is a single data-modifying CTE; any
+     * future multi-statement unit of work uses an injected
+     * `TransactionTemplate` (module-structure.md §8.4). This replaces the
+     * pre-015 `@Transactional`-requires-`@Service` guard — its `@Service`
+     * anchor no longer exists once the stereotype guard above is green. The
+     * scan covers interfaces and Kotlin `object` declarations too (009/F8 +
+     * 012/F5: `object ExecutionCleanup { @Transactional fun purge() }` is as
+     * much a transaction boundary as a class, and escaped
+     * `classesAndInterfaces()`).
+     */
+    @Test
+    fun `no declarative transactions in production code`() {
         val transacting =
             productionScope()
                 .classesAndInterfacesAndObjects()
@@ -57,9 +70,7 @@ class ArchitectureGuardTest {
                         decl.functions().any { it.hasAnnotationWithName("Transactional") }
                 }
 
-        transacting
-            .filterNot { it.hasAnnotationWithName("org.springframework.stereotype.Service") }
-            .assertEmpty()
+        transacting.assertEmpty()
     }
 
     /** A guard scanning an empty scope proves nothing — the scope must see production code. */

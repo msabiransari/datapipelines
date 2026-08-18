@@ -4,7 +4,6 @@ import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,7 +29,6 @@ import java.util.concurrent.atomic.AtomicInteger
  * flood costs memory in no scenario. In-memory and per instance by design: this is a
  * brute-force damper, not a distributed quota.
  */
-@Component
 class LoginRateLimitFilter(
     private val authProperties: AuthProperties,
     private val errorWriter: AuthErrorWriter,

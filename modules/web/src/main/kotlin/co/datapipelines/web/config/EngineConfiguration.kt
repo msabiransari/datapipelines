@@ -5,6 +5,8 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
 import co.datapipelines.executor.ExecutionCancellationService
+import co.datapipelines.executor.ExecutionEventRepository
+import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorDispatcher
@@ -33,6 +35,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.net.URI
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -40,14 +43,21 @@ import java.util.concurrent.Executors
 /**
  * The execution engine, assembled (module-structure §5.9, dag-executor §5.2).
  *
- * `dag` ships **no** Spring configuration — the two repositories are `@Repository` and everything
- * else is constructed by whoever assembles the application, which is this module. That is also why
+ * `dag` ships **no** Spring configuration — the two repositories are declared as beans
+ * below ([executionRepository], [executionEventRepository]) and everything else is
+ * constructed by whoever assembles the application, which is this module. That is also why
  * `mcp-server`'s autoconfiguration is `@ConditionalOnBean(PipelineExecutor::class)`: the MCP
  * surface appears precisely because the beans below exist, and would silently vanish if they did
  * not.
  */
 @Configuration
 class EngineConfiguration {
+    @Bean
+    fun executionRepository(jdbc: NamedParameterJdbcTemplate): ExecutionRepository = ExecutionRepository(jdbc)
+
+    @Bean
+    fun executionEventRepository(jdbc: NamedParameterJdbcTemplate): ExecutionEventRepository = ExecutionEventRepository(jdbc)
+
     @Bean
     fun resultConfig(properties: ResultProperties): ResultConfig =
         ResultConfig(

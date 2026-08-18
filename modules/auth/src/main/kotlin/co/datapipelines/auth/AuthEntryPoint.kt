@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.security.core.AuthenticationException
 import org.springframework.security.web.AuthenticationEntryPoint
-import org.springframework.stereotype.Component
 
 /**
  * Emits the §13.7 error envelope when an unauthenticated request hits a protected
@@ -14,7 +13,6 @@ import org.springframework.stereotype.Component
  * `auth.api_key.missing` (AU-TEST-3). With no recorded rejection the default is
  * `auth.api_key.missing` (401) — "no credentials provided" (auth.md §9).
  */
-@Component
 class AuthEntryPoint(
     private val errorWriter: AuthErrorWriter,
 ) : AuthenticationEntryPoint {

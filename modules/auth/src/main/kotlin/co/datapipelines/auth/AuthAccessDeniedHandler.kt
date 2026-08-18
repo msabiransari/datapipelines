@@ -7,7 +7,6 @@ import org.springframework.security.access.AccessDeniedException
 import org.springframework.security.web.access.AccessDeniedHandler
 import org.springframework.security.web.csrf.CsrfException
 import org.springframework.security.web.csrf.MissingCsrfTokenException
-import org.springframework.stereotype.Component
 
 /**
  * Maps Spring Security access-denied outcomes to the §13.7 envelope.
@@ -29,7 +28,6 @@ import org.springframework.stereotype.Component
  * [ScopeInterceptor], which raises [ScopeInsufficientException] with the real
  * `required`/`held` pair; this handler never invents one (security NEW-7).
  */
-@Component
 class AuthAccessDeniedHandler(
     private val errorWriter: AuthErrorWriter,
 ) : AccessDeniedHandler {

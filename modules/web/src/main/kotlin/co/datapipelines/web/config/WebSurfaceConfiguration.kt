@@ -22,6 +22,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.web.executions.ResultCursor
+import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.pipelines.ExecutionLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
@@ -58,6 +59,14 @@ class WebSurfaceConfiguration {
         redis: StringRedisTemplate,
         properties: RateLimitProperties,
     ): RateLimiter = RedisRateLimiter(redis, properties)
+
+    /**
+     * Actuator resolves `HealthIndicator` beans by name; `h2_factory` is the health-path
+     * key rest-api.md §11.1's contract promises (and `HealthController` probes), so the
+     * name is pinned explicitly rather than left to the method name.
+     */
+    @Bean(name = ["h2_factory"])
+    fun stagingHealthIndicator(stagingFactory: StagingFactory): StagingHealthIndicator = StagingHealthIndicator(stagingFactory)
 
     @Bean(destroyMethod = "shutdown")
     fun sseLogScheduler(): ScheduledExecutorService =

@@ -2,7 +2,6 @@ package co.datapipelines.auth
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.util.UUID
 
@@ -15,7 +14,6 @@ import java.util.UUID
  * caller's contract ([UserService]); this repository additionally lowercases on the
  * lookup path so a stray mixed-case argument cannot miss an existing row.
  */
-@Repository
 class UserRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

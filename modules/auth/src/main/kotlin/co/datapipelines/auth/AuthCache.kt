@@ -1,6 +1,5 @@
 package co.datapipelines.auth
 
-import org.springframework.stereotype.Component
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -37,7 +36,6 @@ import java.util.concurrent.ConcurrentHashMap
  * still re-read per request (D13), which is what keeps `RevocationTtlTest`'s
  * semantics intact.
  */
-@Component
 class AuthCache(
     authProperties: AuthProperties,
     private val nowNanos: () -> Long = System::nanoTime,

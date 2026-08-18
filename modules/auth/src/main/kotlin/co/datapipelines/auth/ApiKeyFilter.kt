@@ -8,7 +8,6 @@ import org.springframework.dao.DataAccessException
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import java.util.concurrent.ThreadLocalRandom
 
@@ -36,7 +35,6 @@ import java.util.concurrent.ThreadLocalRandom
  * The rejection the *caller* sees is unchanged: [AuthEntryPoint] still answers
  * `auth.api_key.invalid`.
  */
-@Component
 class ApiKeyFilter(
     private val apiKeyService: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,

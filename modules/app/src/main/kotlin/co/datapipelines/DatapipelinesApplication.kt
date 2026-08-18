@@ -6,11 +6,12 @@ import org.springframework.boot.runApplication
 /**
  * Application entry point — main class `co.datapipelines.DatapipelinesApplicationKt`
  * (DEVELOPMENT.md §6). Component scanning is rooted at `co.datapipelines`, so every
- * module's beans are discovered from this package: `auth`'s `SecurityConfig` /
- * `OidcConfig` (auth.md §8, §5.2), `web`'s engine/surface configuration
- * (module-structure.md §5.9), `templates`' and the repositories' stereotype beans, and
- * `mcp-server`'s autoconfiguration (dormant unless the engine beans exist — it is
- * `@ConditionalOnBean(PipelineExecutor)`).
+ * module's `@Configuration` is discovered from this package: `auth`'s `SecurityConfig` /
+ * `OidcConfig` / `AuthConfiguration` (auth.md §8, §5.2), `web`'s engine/surface
+ * configuration (module-structure.md §5.9) — which also declares the dag/datasources/
+ * pipeline-contract repositories as explicit `@Bean`s (015, §8.4) — `templates`'
+ * `TemplatesConfiguration`, and `mcp-server`'s autoconfiguration (dormant unless the
+ * engine beans exist — it is `@ConditionalOnBean(PipelineExecutor)`).
  *
  * P7 removed the P0/P6a scaffold excludes (the three Spring Security autoconfig
  * excludes and the `co.datapipelines.(auth|web)` scan filter): the real security
