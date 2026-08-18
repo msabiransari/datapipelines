@@ -348,16 +348,14 @@ class AuthHttpBoundaryTest {
     }
 
     // ----------------------------------- filter execution count (B12 behavioral, 015)
-
-    /**
-     * AU-API-10 proven BEHAVIORALLY, not by the presence of a workaround: each
-     * auth filter must execute EXACTLY ONCE per request. Spring Boot auto-registers
-     * every `Filter` bean with the servlet container on top of the security chain —
-     * the hazard the deleted `AuthFilterRegistrationConfig` used to suppress and the
-     * zero-bean wiring (015) removes structurally. Each test below fails the moment
-     * its filter executes twice for one request, whatever the wiring mechanism that
-     * caused it.
-     */
+    //
+    // AU-API-10 proven BEHAVIORALLY, not by the presence of a workaround: each
+    // auth filter must execute EXACTLY ONCE per request. Spring Boot auto-registers
+    // every `Filter` bean with the servlet container on top of the security chain —
+    // the hazard the deleted `AuthFilterRegistrationConfig` used to suppress and the
+    // zero-bean wiring (015) removes structurally. Each test below fails the moment
+    // its filter executes twice for one request, whatever the wiring mechanism that
+    // caused it.
 
     /**
      * The container's own registration table must name none of the three auth
@@ -415,7 +413,8 @@ class AuthHttpBoundaryTest {
             call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=${expiredSession()}")))
 
         response.statusCode.value() shouldBe 401
-        response.headers[HttpHeaders.SET_COOKIE].orEmpty()
+        response.headers[HttpHeaders.SET_COOKIE]
+            .orEmpty()
             .count { it.startsWith("${OidcSuccessHandler.SESSION_COOKIE}=") } shouldBe 1
     }
 

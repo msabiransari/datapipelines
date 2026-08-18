@@ -61,8 +61,7 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
         secretHasher: SecretHasher,
         authProperties: AuthProperties,
-    ): ApiKeyService =
-        ApiKeyService(apiKeyRepository, userService, authCache, auditLogger, secretHasher, authProperties)
+    ): ApiKeyService = ApiKeyService(apiKeyRepository, userService, authCache, auditLogger, secretHasher, authProperties)
 
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)
@@ -71,8 +70,7 @@ class AuthConfiguration {
     fun authEntryPoint(authErrorWriter: AuthErrorWriter): AuthEntryPoint = AuthEntryPoint(authErrorWriter)
 
     @Bean
-    fun authAccessDeniedHandler(authErrorWriter: AuthErrorWriter): AuthAccessDeniedHandler =
-        AuthAccessDeniedHandler(authErrorWriter)
+    fun authAccessDeniedHandler(authErrorWriter: AuthErrorWriter): AuthAccessDeniedHandler = AuthAccessDeniedHandler(authErrorWriter)
 
     @Bean
     fun auditLogoutHandler(auditLogger: AuditLogger): AuditLogoutHandler = AuditLogoutHandler(auditLogger)
