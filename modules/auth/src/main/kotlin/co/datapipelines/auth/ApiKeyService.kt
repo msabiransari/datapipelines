@@ -1,7 +1,6 @@
 package co.datapipelines.auth
 
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Service
 import java.security.SecureRandom
 import java.time.Instant
 import java.util.UUID
@@ -23,7 +22,6 @@ import java.util.UUID
  * expiry and the owner's liveness are still re-read on **every** request — the D13
  * revocation-latency contract is untouched by the hash cache.
  */
-@Service
 class ApiKeyService(
     private val apiKeyRepository: ApiKeyRepository,
     private val userService: UserService,

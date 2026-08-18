@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.security.core.Authentication
 import org.springframework.security.web.authentication.logout.LogoutHandler
-import org.springframework.stereotype.Component
 
 /**
  * Writes the `auth.logout` audit row (auth.md §10.1) as the session cookie is
@@ -15,7 +14,6 @@ import org.springframework.stereotype.Component
  * the row carries the real `user_id` (and `key_id`, when a key-authenticated client
  * calls `/logout`) rather than an anonymous marker.
  */
-@Component
 class AuditLogoutHandler(
     private val auditLogger: AuditLogger,
 ) : LogoutHandler {

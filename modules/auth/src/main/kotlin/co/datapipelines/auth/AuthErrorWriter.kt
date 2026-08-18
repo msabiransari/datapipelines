@@ -5,7 +5,6 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.MDC
 import org.springframework.http.MediaType
-import org.springframework.stereotype.Component
 import java.util.UUID
 
 /**
@@ -37,7 +36,6 @@ import java.util.UUID
  * `web` module (P6a) writes non-auth errors through this same writer rather than
  * growing a second envelope implementation.
  */
-@Component
 class AuthErrorWriter(
     private val objectMapper: ObjectMapper,
 ) {

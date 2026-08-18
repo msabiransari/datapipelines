@@ -2,7 +2,6 @@ package co.datapipelines.auth
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
@@ -12,7 +11,6 @@ import java.util.UUID
  * `scopes` is a Postgres `TEXT[]`; revocation is a soft flag (never a DELETE) so
  * `audit_log.key_id` keeps resolving (metadata-db §4.2 note).
  */
-@Repository
 class ApiKeyRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

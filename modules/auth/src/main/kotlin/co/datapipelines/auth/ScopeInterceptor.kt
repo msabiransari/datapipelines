@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.stereotype.Component
 import org.springframework.web.method.HandlerMethod
 import org.springframework.web.servlet.HandlerInterceptor
 
@@ -25,7 +24,6 @@ import org.springframework.web.servlet.HandlerInterceptor
  * static assets and health probes are gated by the filter chain's `permitAll`
  * list (§8.3), not by the scope matrix.
  */
-@Component
 class ScopeInterceptor(
     private val errorWriter: AuthErrorWriter,
     private val auditLogger: AuditLogger,

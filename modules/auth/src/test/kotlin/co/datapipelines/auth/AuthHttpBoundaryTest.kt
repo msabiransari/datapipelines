@@ -15,8 +15,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
-import org.springframework.boot.web.servlet.FilterRegistrationBean
-import org.springframework.context.ApplicationContext
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
@@ -55,8 +53,6 @@ class AuthHttpBoundaryTest {
     @Autowired private lateinit var jwtService: JwtService
 
     @Autowired private lateinit var apiKeyService: ApiKeyService
-
-    @Autowired private lateinit var context: ApplicationContext
 
     @Autowired private lateinit var servletContext: ServletContext
 
@@ -351,32 +347,23 @@ class AuthHttpBoundaryTest {
         call(HttpMethod.POST, "/api/v1/probe", headers(apiKey = readKey)).statusCode.value() shouldBe 200
     }
 
-    // --------------------------------------------------- filter registration (B12)
-
-    @Test
-    fun `the auth filters are not also registered with the servlet container`() {
-        listOf("apiKeyFilterRegistration", "jwtAuthenticationFilterRegistration", "loginRateLimitFilterRegistration")
-            .forEach { name ->
-                (context.getBean(name) as FilterRegistrationBean<*>).isEnabled shouldBe false
-            }
-    }
-
     // ----------------------------------- filter execution count (B12 behavioral, 015)
 
     /**
-     * AU-API-10 proven BEHAVIORALLY, not by the presence of the workaround: each
+     * AU-API-10 proven BEHAVIORALLY, not by the presence of a workaround: each
      * auth filter must execute EXACTLY ONCE per request. Spring Boot auto-registers
      * every `Filter` bean with the servlet container on top of the security chain —
-     * the hazard `AuthFilterRegistrationConfig` suppresses today and the zero-bean
-     * wiring (015) removes structurally. Each test below fails the moment its filter
-     * executes twice for one request, whatever the wiring mechanism that caused it.
+     * the hazard the deleted `AuthFilterRegistrationConfig` used to suppress and the
+     * zero-bean wiring (015) removes structurally. Each test below fails the moment
+     * its filter executes twice for one request, whatever the wiring mechanism that
+     * caused it.
      */
 
     /**
      * The container's own registration table must name none of the three auth
-     * filter classes. Today the disabled `FilterRegistrationBean`s keep them out;
-     * after 015 the filters are not beans at all. Either way, a registration here
-     * means a second, container-level execution path exists.
+     * filter classes. Since 015 the filters are not beans at all, so there is
+     * nothing for Boot to auto-register; a registration here means a second,
+     * container-level execution path exists.
      */
     @Test
     fun `the servlet container holds no registration for any auth filter class`() {

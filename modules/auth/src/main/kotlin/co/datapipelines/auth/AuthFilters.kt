@@ -1,46 +1,22 @@
 package co.datapipelines.auth
 
-import jakarta.servlet.Filter
-import org.springframework.boot.web.servlet.FilterRegistrationBean
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
-import org.springframework.stereotype.Component
-
 /**
  * The three servlet filters the auth chain installs (auth.md §8.2), grouped so
- * [SecurityConfig] takes one collaborator instead of three and the pair of places
- * that need them — the chain and the registration-disabling config below — cannot
- * drift apart.
+ * [SecurityConfig] takes one collaborator instead of three.
+ *
+ * These are PLAIN objects, constructed inside the `authFilters` `@Bean`
+ * ([AuthConfiguration]) and never top-level beans themselves. A `Filter` that is
+ * not a bean is never auto-registered with the servlet container, so the AU-API-10
+ * double-registration hazard (each filter running twice per request — two Argon2
+ * verifications for one API key, two rate-limit increments for one login, and a
+ * container-level copy running on `permitAll` paths the security chain
+ * deliberately does not authenticate) is structurally impossible. The
+ * `FilterRegistrationBean(isEnabled = false)` workarounds that used to suppress
+ * it were deleted with the scanning that made them necessary (015, spec D4);
+ * exact-once execution is proven behaviorally by `AuthHttpBoundaryTest`.
  */
-@Component
 data class AuthFilters(
     val apiKey: ApiKeyFilter,
     val jwt: JwtAuthenticationFilter,
     val loginRateLimit: LoginRateLimitFilter,
 )
-
-/**
- * Keeps the auth filters OUT of the servlet container's own filter chain (AU-API-10).
- *
- * Spring Boot auto-registers every `Filter` **bean** with the servlet container. All
- * three are also placed explicitly in the security chain ([SecurityConfig]), so
- * without these registrations each one runs **twice** per request: two Argon2
- * verifications for one API key, two rate-limit increments for one login, and — worse
- * — the container-level copy runs on `permitAll` paths the security chain
- * deliberately does not authenticate.
- */
-@Configuration
-class AuthFilterRegistrationConfig(
-    private val filters: AuthFilters,
-) {
-    @Bean
-    fun apiKeyFilterRegistration(): FilterRegistrationBean<ApiKeyFilter> = disabled(filters.apiKey)
-
-    @Bean
-    fun jwtAuthenticationFilterRegistration(): FilterRegistrationBean<JwtAuthenticationFilter> = disabled(filters.jwt)
-
-    @Bean
-    fun loginRateLimitFilterRegistration(): FilterRegistrationBean<LoginRateLimitFilter> = disabled(filters.loginRateLimit)
-
-    private fun <T : Filter> disabled(filter: T): FilterRegistrationBean<T> = FilterRegistrationBean(filter).apply { isEnabled = false }
-}
