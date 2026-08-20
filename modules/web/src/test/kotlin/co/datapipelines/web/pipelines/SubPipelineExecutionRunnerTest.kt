@@ -255,25 +255,63 @@ class SubPipelineExecutionRunnerTest {
             parameters["limit"] shouldBe IntNode(25)
         }
 
+    /**
+     * F4 — the backstop's boundary, in the unit save-time validation uses: **pipelines**.
+     *
+     * `CompositionRules.referenceDepth` counts pipelines (a leaf pipeline is depth 1) and
+     * `checkDepth` rejects `depth > max`. `CompositionRulesTest`'s
+     * "a reference chain deeper than the configured maximum is composition_too_deep" pins the same
+     * boundary on the save-time path with the same numbers: a `parent → child → grandchild` tree is
+     * depth 3, accepted at `max = 3` and rejected at `max = 2`. This is the runtime twin, so the two
+     * guards can be read against each other rather than drifting apart again.
+     *
+     * `compositionDepth` on the context counts HOPS above the parent execution (a root is 0), so a
+     * parent at `compositionDepth = 1` is itself the 2nd pipeline and its child is the 3rd.
+     */
     @Test
     fun `a child at exactly the maximum depth runs, and one beyond is refused with the catalogued code`() =
         runTest {
             stubRegistry()
-            // max = 2: a parent at depth 1 spawns depth 2 — allowed.
+            // max = 3, matching CompositionRulesTest: a parent at hop 1 (the 2nd pipeline) spawns
+            // the 3rd — exactly the maximum, so it runs.
             val allowed = ExecutorStub()
-            runner(allowed, maxCompositionDepth = 2).run(pipelineNode(), context(compositionDepth = 1))
+            runner(allowed, maxCompositionDepth = 3).run(pipelineNode(), context(compositionDepth = 1))
             allowed.captured.single().compositionDepth shouldBe 2
 
-            // A parent at depth 2 would spawn depth 3 — refused before any registry read.
+            // One more generation is the 4th pipeline — refused before any registry read, and
+            // refused at exactly the tree save-time validation would have rejected.
             val refused = ExecutorStub()
             val thrown =
                 shouldThrow<DatapipelinesException> {
-                    runner(refused, maxCompositionDepth = 2).run(pipelineNode(), context(compositionDepth = 2))
+                    runner(refused, maxCompositionDepth = 3).run(pipelineNode(), context(compositionDepth = 2))
                 }
             thrown.code shouldBe PipelineErrorCodes.Node.COMPOSITION_DEPTH_EXCEEDED
-            thrown.details["depth"] shouldBe 3
-            thrown.details["max"] shouldBe 2
+            thrown.details["depth"] shouldBe 4
+            thrown.details["max"] shouldBe 3
             refused.captured shouldBe emptyList()
+        }
+
+    /**
+     * F4's regression pin: at the configured default the backstop admits exactly the reference tree
+     * §12.9 admits — 5 pipelines — and refuses the 6th. Counting hops instead admitted a 6th
+     * pipeline, so the backstop would have run a chain `POST /pipelines` refuses to save (which is
+     * what `PipelineCompositionE2eTest`'s depth-6 scenario asserts on the save side).
+     */
+    @Test
+    fun `at the documented default the backstop admits the same five pipelines save-time validation does`() =
+        runTest {
+            stubRegistry()
+            // The 5th pipeline: a parent at hop 3 is the 4th, its child the 5th.
+            val fifth = ExecutorStub()
+            runner(fifth, maxCompositionDepth = DEFAULT_MAX_DEPTH).run(pipelineNode(), context(compositionDepth = 3))
+            fifth.captured.single().compositionDepth shouldBe 4
+
+            // The 6th — the depth `pipeline.validation.composition_too_deep` rejects at save.
+            val sixth = ExecutorStub()
+            shouldThrow<DatapipelinesException> {
+                runner(sixth, maxCompositionDepth = DEFAULT_MAX_DEPTH).run(pipelineNode(), context(compositionDepth = 4))
+            }.details["depth"] shouldBe 6
+            sixth.captured shouldBe emptyList()
         }
 
     @Test
@@ -417,6 +455,50 @@ class SubPipelineExecutionRunnerTest {
             thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
         }
 
+    /**
+     * F3 — the delivery guard covered `caller` only, so the two silent shapes went unguarded.
+     *
+     * The guard exists for the case §12.9 makes unreachable: a body reaching the runtime without
+     * save-time validation, which is exactly what `requireRef` and `loadChild` defend against. A
+     * `tempdb` node whose pinned child has no caller node completed `SUCCESS` with `rowsOut = 0`
+     * and **no table created** — and the failure then surfaced on a downstream node as an unrelated
+     * "table not found", pointing at the wrong node entirely.
+     */
+    @Test
+    fun `a tempdb-target node whose child delivers nothing fails instead of leaving the table uncreated`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            // The zero-caller child: it "succeeds" without ever invoking the sink.
+            stub.drive = { request -> stub.success(request) }
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner(stub).run(pipelineNode(output = NodeOutput.Tempdb("stg_absent")), context())
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            stagedTableCount("stg_absent") shouldBe 0L
+        }
+
+    /** F3, the other silent shape: a write-back that wrote nothing and said `SUCCESS`. */
+    @Test
+    fun `a datasource-target node whose child delivers nothing fails instead of silently writing nothing`() =
+        runTest {
+            stubRegistry()
+            val output = NodeOutput.Datasource("warehouse", "revenue", WriteMode.APPEND)
+            val stub = ExecutorStub()
+            stub.drive = { request -> stub.success(request) }
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner(stub).run(pipelineNode(output = output), context())
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any()) }
+        }
+
     @Test
     fun `a tempdb-target node stages the child's rows into the parent's staging table`() =
         runTest {
@@ -512,6 +594,19 @@ class SubPipelineExecutionRunnerTest {
             coVerify(exactly = 0) { resultStore.materializeRows(any(), any(), any(), any()) }
         }
 
+    /** Base tables in the parent's tempdb catalog under [tableName] — 0 when nothing was staged. */
+    private suspend fun stagedTableCount(tableName: String): Long =
+        staging.withConnection { connection ->
+            connection.createStatement().use { statement ->
+                statement
+                    .executeQuery("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$tableName'")
+                    .use { rs ->
+                        rs.next()
+                        rs.getLong(1)
+                    }
+            }
+        }
+
     private fun coVerifyStore(
         executionId: UUID,
         ttl: Long,
@@ -523,4 +618,9 @@ class SubPipelineExecutionRunnerTest {
 
     /** The mid-stream child failure, as a named type (detekt: no generic throws). */
     private class ChildCursorDied : RuntimeException("child cursor died mid-stream")
+
+    private companion object {
+        /** `datapipelines.pipelines.max-composition-depth`'s documented default (configuration.md §3.16). */
+        const val DEFAULT_MAX_DEPTH = 5
+    }
 }

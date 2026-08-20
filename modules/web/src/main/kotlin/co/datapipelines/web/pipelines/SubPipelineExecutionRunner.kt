@@ -80,6 +80,11 @@ import java.util.UUID
  * anyway (design §4.4 — defense in depth, because a request can in principle arrive that no
  * validator saw). `pipeline.node.composition_depth_exceeded` is the refusal.
  *
+ * Both guards count the same unit — **pipelines**, the unit `CompositionRules.referenceDepth` uses
+ * and the unit configuration.md documents ("the deepest admitted chain of pipelines"). See
+ * [childPipelineDepth] for why, and for the off-by-one that made the backstop admit chains the
+ * primary guard rejects.
+ *
  * ## Failure mapping
  *
  * A failed child fails the parent node fail-fast with
@@ -125,7 +130,7 @@ class SubPipelineExecutionRunner(
     ): NodeResult {
         val startedAt = Instant.now()
         val ref = requireRef(node)
-        checkDepth(node, ctx.compositionDepth + 1)
+        checkDepth(node, childPipelineDepth(ctx))
         val (record, child) = loadChild(node, ref)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
@@ -135,7 +140,7 @@ class SubPipelineExecutionRunner(
         val request = childRequest(node, ctx, ref, record, child, childExecutionId, outcome)
         val result = executeChild(node, record, request)
         recordResultColumns(result)
-        ensureCallerResultDelivered(node, request.executionId, outcome)
+        ensureOutputDelivered(node, request.executionId, outcome)
 
         return NodeResult.of(
             nodeId = node.id,
@@ -160,6 +165,27 @@ class SubPipelineExecutionRunner(
                 cause = null,
             )
 
+    /**
+     * The child's depth **in pipelines** — the unit both guards now count in (F4).
+     *
+     * `max-composition-depth` is documented as "the deepest admitted chain of pipelines"
+     * (configuration.md §3.16) and `CompositionRules.referenceDepth` computes exactly that: a
+     * pipeline with no PIPELINE nodes has depth 1, and `checkDepth` rejects `depth > max`. So
+     * `max = 5` admits 5 pipelines / 4 hops, at save time.
+     *
+     * [NodeExecutionContext.compositionDepth] counts **hops** above this execution (a root is 0),
+     * so the parent's own depth in pipelines is `compositionDepth + 1` and the child's is one more.
+     * The backstop previously passed `compositionDepth + 1` — the child's HOP count — against the
+     * same `> max` test, so it admitted 6 pipelines / 5 hops: the "defense in depth" never agreed
+     * with the guard it backs, and in the one case it is documented for (a request no validator
+     * saw) it admitted a chain save-time validation rejects.
+     *
+     * Pipelines, not hops, is the unit that keeps the documented `max = 5` meaning what it has
+     * always meant: nothing about save-time validation, the config doc, or any existing pipeline
+     * changes — only the runtime backstop moves, and it moves onto the primary guard's number.
+     */
+    private fun childPipelineDepth(ctx: NodeExecutionContext): Int = ctx.compositionDepth + PARENT_AND_CHILD
+
     /** The runtime depth backstop (design §4.4) — §12.9's static check is the primary guard. */
     private fun checkDepth(
         node: ExecutableNode,
@@ -169,8 +195,9 @@ class SubPipelineExecutionRunner(
         throw DatapipelinesException(
             code = PipelineErrorCodes.Node.COMPOSITION_DEPTH_EXCEEDED,
             message =
-                "Executing node '${node.id}' would reach composition depth $childDepth, beyond the configured " +
-                    "maximum of ${executorConfig.maxCompositionDepth} (datapipelines.pipelines.max-composition-depth).",
+                "Executing node '${node.id}' would reach a reference-tree depth of $childDepth pipelines, beyond the " +
+                    "configured maximum of ${executorConfig.maxCompositionDepth} " +
+                    "(datapipelines.pipelines.max-composition-depth).",
             details =
                 mapOf(
                     "node" to node.id,
@@ -274,18 +301,28 @@ class SubPipelineExecutionRunner(
     /**
      * §12.9 makes a missing delivery unreachable (output is only legal on a child WITH a caller
      * node, and such a child delivers through the sink) — this guard keeps a silently absent
-     * parent result from reading as a legal zero-caller SUCCESS.
+     * result from reading as a legal zero-caller SUCCESS.
+     *
+     * It keys on **any** declared output, not on `caller` alone (F3). The scenario the guard exists
+     * for is a body reaching the runtime without §12.9 validation, which is exactly what
+     * [requireRef] and [loadChild] defend against — and the two non-`caller` targets fail *more*
+     * quietly than `caller` does: a `tempdb` node completed `SUCCESS` with `rowsOut = 0` and no
+     * table created, so the first symptom was a downstream node's unrelated "table not found"
+     * naming the wrong node; a `datasource` node silently wrote nothing at all. Every branch of
+     * [sinkFor] therefore sets [SinkOutcome.delivered], and this reads the same flag for all three.
      */
-    private fun ensureCallerResultDelivered(
+    private fun ensureOutputDelivered(
         node: ExecutableNode,
         childExecutionId: UUID?,
         outcome: SinkOutcome,
     ) {
-        if (node.output != NodeOutput.Caller || outcome.delivered) return
+        val output = node.output ?: return
+        if (outcome.delivered) return
         throw childFailure(
             node,
             childExecutionId,
-            "Child execution completed without delivering the caller result this node's output requires.",
+            "Child execution completed without delivering the result this node's output " +
+                "(target '${output.target.wire}') requires.",
             cause = null,
         )
     }
@@ -347,6 +384,7 @@ class SubPipelineExecutionRunner(
                     ctx.warnings.addAll(staged.warnings)
                     checkStagingBudget(ctx)
                     outcome.rowsOut = staged.rowsStaged
+                    outcome.delivered = true
                 }
             }
 
@@ -377,6 +415,7 @@ class SubPipelineExecutionRunner(
             is NodeOutput.Datasource -> {
                 DirectResultSink { schema, rows ->
                     outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output)
+                    outcome.delivered = true
                 }
             }
         }
@@ -477,13 +516,23 @@ class SubPipelineExecutionRunner(
         var callerResultRef: String? = null
         var bytesOutEstimate: Long = NodeResult.NOT_MEASURED
 
-        /** Set by either `caller` delivery path (stored or streamed onward); guards a missing delivery. */
+        /**
+         * Set by **every** [sinkFor] branch — both `caller` paths (stored or streamed onward),
+         * `tempdb` and `datasource` (F3). It is the guard's only evidence that the child actually
+         * reached the sink, so a branch that forgets it reports a silent zero-delivery SUCCESS.
+         */
         var delivered: Boolean = false
     }
 
     private companion object {
         /** §12.9's whole `${parent_param}` reference form — the same pattern CompositionRules validates. */
         val PARAMETER_REFERENCE = Regex("^\\$\\{([a-z_][a-z0-9_]*)\\}$")
+
+        /**
+         * Hops-above → pipelines: the parent's own pipeline plus the child's (see
+         * [childPipelineDepth]). A root parent (`compositionDepth = 0`) spawns a depth-2 tree.
+         */
+        const val PARENT_AND_CHILD = 2
 
         const val BYTES_PER_KB = 1024L
         const val KB_PER_MB = 1024L
