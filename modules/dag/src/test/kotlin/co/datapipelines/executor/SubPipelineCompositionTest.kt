@@ -1,10 +1,12 @@
 package co.datapipelines.executor
 
 import co.datapipelines.events.ExecutionAborted
+import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeType
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -131,7 +133,95 @@ class SubPipelineCompositionTest {
             }
         }
 
+    /**
+     * F1 — the case the flag-set-before-start test above structurally cannot reach.
+     *
+     * ## The machinery, named
+     *
+     * The child runs *inside* the parent node's coroutine, so when the parent's
+     * `withTimeout(execution-timeout-seconds)` fires it is **structured concurrency** — not any code
+     * in this repository — that decides what reaches the child. Measured against the pinned
+     * kotlinx: a cancellation cause that is already a `CancellationException` is handed down to
+     * children **unwrapped** (`JobSupport.getChildJobCancellationCause`), so the parent's
+     * `TimeoutCancellationException` arrives at the child as that exact type — and the child
+     * reported it as *its own* `pipeline.execution.timeout`, a `FAILED` outcome for an execution
+     * that never came near its deadline. `PipelineExecutor.cancelledByAncestor` is the fix's
+     * discriminator, and this test is what proves it fires.
+     *
+     * The user-visible half of the same defect is the durable row: `WebEventEmitter.emit` persists
+     * behind `withContext(persistenceDispatcher)`, which refuses to start on a cancelled job, so
+     * the terminal UPDATE never ran and the child's `pipeline_executions` row stayed `RUNNING` /
+     * `completed_at = NULL` forever. That is asserted where it is visible — at the database level,
+     * in `PipelineCompositionE2eTest`; `ExecutionRun.emitTerminal`'s `NonCancellable` is its fix.
+     *
+     * ## Why two harnesses
+     *
+     * In production the parent and the child share one `execution-timeout-seconds`, and the parent's
+     * clock starts first, so the parent's deadline always fires first. Two executors (parent 2s,
+     * child 120s) make that ordering deterministic rather than a race the test would intermittently
+     * lose to the child's own deadline — which is the already-handled path and would pass vacuously.
+     */
+    @Test
+    fun `a child killed by the parent's timeout aborts, and never reports the parent's timeout as its own`() =
+        runBlocking<Unit> {
+            val childExecutionId = UUID.randomUUID()
+            childHarness().use { child ->
+                parentHarness(child, childExecutionId).use { parent ->
+                    shouldThrow<PipelineTimeoutException> {
+                        parent.executor.execute(Fixtures.request(parentPipeline()))
+                    }
+
+                    // The child started — otherwise the assertions below would be vacuous.
+                    child.emitter.allOf<ExecutionStarted>().map { it.executionId } shouldContain childExecutionId
+                    // …and it ended ABORTED: cancellation is not failure (§8.3).
+                    child.emitter.allOf<ExecutionAborted>().map { it.executionId } shouldContain childExecutionId
+                    // Not `pipeline_failed(execution.timeout)` — the child's own deadline never fired.
+                    child.emitter.count(SseEventType.PIPELINE_FAILED) shouldBe 0
+                    // The parent's own outcome is unchanged: its timeout IS a failure.
+                    parent.emitter.count(SseEventType.PIPELINE_FAILED) shouldBe 1
+                }
+            }
+        }
+
+    /** The child's executor: a genuinely slow node and a deadline far beyond the parent's. */
+    private fun childHarness() =
+        ExecutorHarness(
+            templateEngine = Fixtures.templateEngine(mapOf("slow" to Fixtures.SLOW_SQL)),
+            registry = FakeDatasourceRegistry(mapOf(SLOW_DS to h2Datasource(SLOW_DS, listOf("CREATE TABLE unused (n INT)")))),
+            config = ExecutorConfig(executionTimeoutSeconds = PARENT_TIMEOUT_SECONDS * CHILD_TIMEOUT_FACTOR),
+        )
+
+    /** The parent's executor: a PIPELINE node that hands off to [child], and a short deadline. */
+    private fun parentHarness(
+        child: ExecutorHarness,
+        childExecutionId: UUID,
+    ) = ExecutorHarness(
+        templateEngine = Fixtures.templateEngine(mapOf("child_ref" to "")),
+        config = ExecutorConfig(executionTimeoutSeconds = PARENT_TIMEOUT_SECONDS),
+        subPipelineRunner =
+            SubPipelineRunner { node, ctx ->
+                child.executor.execute(
+                    ExecuteRequest(
+                        pipelineId = UUID.randomUUID(),
+                        pipelineVersion = 1,
+                        pipeline = Fixtures.pipeline(listOf(Fixtures.node("slow", source = SLOW_DS))),
+                        userId = ctx.userId,
+                        triggeredVia = ExecutionTrigger.PIPELINE,
+                        executionId = childExecutionId,
+                        parentExecutionId = ctx.executionId,
+                        parentNodeId = node.id,
+                        rootExecutionId = ctx.rootExecutionId,
+                        compositionDepth = ctx.compositionDepth + 1,
+                    ),
+                )
+                NodeResult.of(node.id, 0, Instant.now(), childExecutionId = childExecutionId)
+            },
+    )
+
     private companion object {
         const val TEST_TIMEOUT_SECONDS = 3600L
+        const val SLOW_DS = "slow_src"
+        const val PARENT_TIMEOUT_SECONDS = 2L
+        const val CHILD_TIMEOUT_FACTOR = 60L
     }
 }

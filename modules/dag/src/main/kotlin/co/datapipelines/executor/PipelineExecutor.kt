@@ -28,6 +28,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -39,6 +40,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.seconds
 import co.datapipelines.pipeline.StagingEngine as PipelineStagingEngine
 
@@ -173,13 +175,21 @@ class PipelineExecutor(
         } catch (e: NodeExecutionException) {
             failWithNode(run, e)
         } catch (e: TimeoutCancellationException) {
-            failWithTimeout(run, e)
+            // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
+            // `CancellationException` down to children **verbatim** (`getChildJobCancellationCause`),
+            // so a parent's expired deadline arrives here as this exact type — see [cancelledByAncestor].
+            if (cancelledByAncestor()) abortStructurally(run, e) else failWithTimeout(run, e)
         } catch (e: ExecutionAbortedException) {
             abort(run, e)
         } catch (e: DatapipelinesException) {
             // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
             // the stream as `pipeline_failed` on the execution the caller is already watching.
             failWithSetup(run, e)
+        } catch (e: CancellationException) {
+            // Everything ABOVE this clause is a cancellation this execution decided for itself.
+            // This one is decided by the machinery: our scope was cancelled by an ANCESTOR — see
+            // [abortStructurally].
+            abortStructurally(run, e)
         } finally {
             cleanup(executionId, staging)
         }
@@ -434,6 +444,82 @@ class PipelineExecutor(
         throw e
     }
 
+    /**
+     * True when this execution's scope was cancelled by something ABOVE it rather than by its own
+     * deadline or its own registry (F1).
+     *
+     * `runExecution`'s own `coroutineContext` is its **caller's** — for a child execution, the
+     * parent PIPELINE node's coroutine; for a root, the launcher's scope. Its own
+     * `withTimeout`/`handle.cancel()` cancel only the scopes *inside* the `try`, so that job is
+     * still active when the execution stopped itself, and inactive exactly when an ancestor stopped
+     * it. That is the whole discriminator, and it needs no exception-shape guesswork: kotlinx hands
+     * a cancellation cause that is already a `CancellationException` down to children **unwrapped**
+     * (`JobSupport.getChildJobCancellationCause`), so a parent's `TimeoutCancellationException`
+     * arrives at a child as the very type the child would raise for its own expired deadline.
+     */
+    private suspend fun cancelledByAncestor(): Boolean = !coroutineContext.isActive
+
+    /**
+     * The execution's scope was cancelled from **outside** it — structural cancellation (F1).
+     *
+     * A child execution runs inside its parent's node coroutine, so a parent that times out (or is
+     * cancelled with a cause the family does not share) takes the child down with it. Before this
+     * handler the child reported that as its OWN `pipeline.execution.timeout` — a `FAILED` row
+     * quoting an elapsed time far below the configured timeout, for an execution that never
+     * exceeded its deadline. Cancellation is not failure (§8.3), so the outcome is `ABORTED`.
+     *
+     * A root reaches here by the same route whenever the scope that launched it is cancelled from
+     * outside (`ExecutionLauncher`'s `scope` at shutdown) — the path was never child-specific, only
+     * child-*reachable* in normal operation, which is why the handler lives on the shared path
+     * rather than in the composition runner.
+     *
+     * The ORIGINAL exception is rethrown untouched, so the ancestor's structured concurrency
+     * unwinds exactly as before. Persistence of the terminal event survives the cancelled scope
+     * because [ExecutionRun.emitTerminal] runs its block under [NonCancellable] — see its KDoc; the
+     * metrics sit inside that block so a terminal event that already won the CAS cannot be
+     * double-counted.
+     */
+    private suspend fun abortStructurally(
+        run: ExecutionRun,
+        cancellation: CancellationException,
+    ): Nothing {
+        val reason = familyAbortReason(cancellation)
+        val abortedAt = Instant.now()
+        run.emitTerminal {
+            emit(
+                ExecutionAborted(
+                    executionId = run.executionId,
+                    pipelineId = run.request.pipelineId,
+                    reason = reason,
+                    abortedAt = abortedAt,
+                    nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                ),
+            )
+            metrics.executionAborted(reason)
+            metrics.executionFinished(run.request.pipelineId, ExecutionStatus.ABORTED, run.elapsed(abortedAt))
+        }
+        throw cancellation
+    }
+
+    /**
+     * The family's own abort reason if the cancellation chain carries one, else [AbortReason.CANCELLED].
+     *
+     * A `DELETE /executions/{id}` against an ancestor reaches here as
+     * `JobCancellationException(cause = … = ExecutionAbortedException(reason))` — one wrapping layer
+     * per generation — so the reason a user asked for survives onto the descendant's row. A parent
+     * *timeout* carries `TimeoutCancellationException` instead, and there is no `AbortReason` for
+     * "an ancestor timed out": `cancelled` is the honest catalogued answer (§6.4.8 lists three, and
+     * adding a fourth would be a wire-catalogue change this finding does not need). The walk is
+     * depth-bounded so a pathological cause cycle cannot spin.
+     */
+    private fun familyAbortReason(cancellation: CancellationException): AbortReason =
+        generateSequence(cancellation as Throwable) { it.cause }
+            .take(MAX_CAUSE_DEPTH)
+            .filterIsInstance<ExecutionAbortedException>()
+            .firstOrNull()
+            ?.reason
+            ?: AbortReason.CANCELLED
+
     private fun pipelineFailed(
         run: ExecutionRun,
         failedAt: Instant,
@@ -568,6 +654,9 @@ class PipelineExecutor(
 
     private companion object {
         val LOG = LoggerFactory.getLogger(PipelineExecutor::class.java)
+
+        /** Bound on [familyAbortReason]'s cause walk — one link per composition generation, plus slack. */
+        const val MAX_CAUSE_DEPTH = 32
     }
 }
 
@@ -601,9 +690,27 @@ internal class ExecutionRun(
      * Emits a terminal event at most once (§12.1): "whichever of `pipeline_completed` /
      * `execution_aborted` wins, the other is suppressed". A cancellation that lands while the
      * success path is already emitting must not produce two terminal events on one stream.
+     *
+     * ## Why [NonCancellable] (F1)
+     *
+     * Every terminal path reaches here *while the execution is ending*, and three of them —
+     * timeout, abort, structural cancellation — reach here on a scope that is **already
+     * cancelled**. The emitter's own persistence hop is a `withContext(persistenceDispatcher)`
+     * (`WebEventEmitter.emit`), and `withContext` refuses to start on a cancelled job: the event
+     * was therefore dropped before `ExecutionRepository.complete` ever ran, leaving the row
+     * `status = RUNNING`, `completed_at = NULL` **permanently**. Measured on a real composition
+     * family: a child killed by its parent's deadline stayed `RUNNING` in `pipeline_executions`
+     * forever, with no event to notice it by.
+     *
+     * The guard belongs here rather than at each call site because it is a property of terminal
+     * emission itself: the row's single terminal UPDATE is the last thing an execution owes the
+     * world, and it cannot be conditional on the scope still being alive. Same reasoning as
+     * [PipelineExecutor.cleanup]'s `NonCancellable`, one layer up. The work inside is bounded (one
+     * SSE write plus the emitter's own JDBC/Redis persistence, which swallows its own failures), so
+     * this cannot turn a cancellation into a hang.
      */
     suspend fun emitTerminal(block: suspend () -> Unit) {
-        if (terminalEmitted.compareAndSet(false, true)) block()
+        if (terminalEmitted.compareAndSet(false, true)) withContext(NonCancellable) { block() }
     }
 
     fun result(
