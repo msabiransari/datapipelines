@@ -187,6 +187,14 @@ class ExecutionsController(
             put("triggered_via", triggeredVia.name)
             put("result_row_count", resultRowCount)
             put("result_size_bytes", resultSizeBytes)
+            // The composition lineage V3 added (metadata-db §4.6). The history UI renders it and
+            // the repository has always selected it; only this projection dropped it, so an API
+            // client could see a child execution but never learn it was one (T1). Null parents mark
+            // a root; `root_execution_id` is NOT NULL since V3's backfill and equals `execution_id`
+            // for a root, so `?root_execution_id=` grouping needs no special case.
+            put("parent_execution_id", parentExecutionId?.toString())
+            put("parent_node_id", parentNodeId)
+            put("root_execution_id", rootExecutionId?.toString())
             if (includeResult && status == ExecutionStatus.SUCCESS && resultRowCount != null) {
                 // Present only while the result is actually fetchable (§10.2).
                 resultStore.describe(resultStore.keyFor(executionId))?.let { view ->
