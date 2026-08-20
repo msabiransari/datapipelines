@@ -81,12 +81,16 @@ interface Staging : AutoCloseable {
      * This is the composition ingress path (design 2026-08-13-pipeline-node-type §4.2): a parent
      * PIPELINE node's `direct`-delivered child rows arrive decoded, with the source-dialect mapping
      * already applied by the child's executor, so there is no ResultSet and no dialect left to
-     * consult. Everything else is [stage]'s contract unchanged: the same duplicate-name guard and
-     * bare `CREATE TABLE` (§4.5), the same batched insert (§4.3), the same partial-table rollback —
-     * a failure mid-stream leaves **no** table behind — and the same post-write memory-budget check
-     * (§8.2). Because no source metadata is read, [StageResult.warnings] is always empty; the
-     * child's own warnings rode its execution.
+     * consult. Everything else is [stage]'s contract unchanged: the same **column-label
+     * validation** — [columns] carry the child's caller-node labels, which are user SQL one
+     * execution removed and therefore no more trusted than a cursor's metadata — the same
+     * duplicate-name guard and bare `CREATE TABLE` (§4.5), the same batched insert (§4.3), the same
+     * partial-table rollback — a failure mid-stream leaves **no** table behind — and the same
+     * post-write memory-budget check (§8.2). Because no source metadata is read,
+     * [StageResult.warnings] is always empty; the child's own warnings rode its execution.
      *
+     * @throws StagingInvalidColumnNameException a label is malformed or case-insensitively
+     *   duplicated (§4.5) — the same refusal the identical SQL gets through [stage].
      * @throws StagingTableAlreadyExistsException [tableName] is already staged this execution.
      * @throws StagingMemoryLimitException the staged footprint exceeds the budget (§8.2).
      */

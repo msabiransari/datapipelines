@@ -88,6 +88,51 @@ class H2StagingStageRowsTest {
     /** The mid-stream child failure, as a named type (detekt: no generic throws). */
     private class ChildCursorDied : RuntimeException("child cursor died mid-stream")
 
+    /**
+     * F2 — §4.5's column-label validation is the **security boundary**
+     * ([StagingIdentifiers]'s KDoc: "validation is the security boundary, quoting the second
+     * layer"), and it applies here for the same reason it applies to [Staging.stage]: these labels
+     * come from user SQL. They are the child's caller-node result labels, read by
+     * `ResultRowReader.schemaOf` off a `SELECT … AS "whatever the author typed"` — the identical
+     * provenance, one execution removed. `stageRows` went straight to `createTable`, so the
+     * identical DQL statement was rejected on the tempdb path and accepted on the composition one.
+     */
+    @Test
+    fun `case-insensitively duplicated child labels fail with the catalogued code, as stage does`() {
+        // `SELECT 1 AS total, 2 AS "TOTAL"` in the child's caller node: H2 folds unquoted
+        // identifiers to upper case, so these two collide in the generated CREATE TABLE.
+        val colliding =
+            listOf(
+                ColumnSchema("total", LogicalType.INTEGER),
+                ColumnSchema("TOTAL", LogicalType.INTEGER),
+            )
+
+        val thrown =
+            shouldThrow<StagingInvalidColumnNameException> {
+                runBlocking { staging.stageRows("stg_collide", colliding, sequenceOf(listOf(1, 2))) }
+            }
+
+        // Not the generic `staging_failed` a raw H2 duplicate-column SQLException maps to.
+        thrown.code shouldBe StagingErrorCodes.INVALID_COLUMN_NAME
+        staging.readFromStaging { tableCount(it) } shouldBe 0
+    }
+
+    @Test
+    fun `a malformed child label is refused before it reaches generated DDL`() {
+        listOf("total revenue", "tötal", "1st", "a".repeat(MAX_LABEL_CHARS + 1)).forEachIndexed { i, label ->
+            val thrown =
+                shouldThrow<StagingInvalidColumnNameException> {
+                    runBlocking {
+                        staging.stageRows("stg_bad_$i", listOf(ColumnSchema(label, LogicalType.STRING)), sequenceOf(listOf("x")))
+                    }
+                }
+            thrown.code shouldBe StagingErrorCodes.INVALID_COLUMN_NAME
+        }
+
+        // Refused before `createTable`, so no name was claimed and no table exists.
+        staging.readFromStaging { tableCount(it) } shouldBe 0
+    }
+
     @Test
     fun `a row with the wrong arity is rejected before it reaches the table`() {
         shouldThrow<IllegalArgumentException> {
@@ -95,5 +140,10 @@ class H2StagingStageRowsTest {
         }
 
         staging.readFromStaging { tableCount(it) } shouldBe 0
+    }
+
+    private companion object {
+        /** H2's identifier limit, the bound [StagingIdentifiers.COLUMN_NAME] encodes. */
+        const val MAX_LABEL_CHARS = 63
     }
 }
