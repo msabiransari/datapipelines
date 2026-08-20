@@ -253,6 +253,11 @@ class SubPipelineExecutionRunner(
         parentNodeId = node.id,
         rootExecutionId = ctx.rootExecutionId,
         compositionDepth = ctx.compositionDepth + 1,
+        // F5: the family shares the id of the request that started it. Carried on the REQUEST, not
+        // just handed to the emitter, so it reaches the child's own `execution_started` payload and
+        // is inherited again by every grandchild. Roots always carry one (`ExecutionLauncher`,
+        // `McpRecordingExecutionRunner`); the fallback only covers a request built without one.
+        correlationId = ctx.correlationId ?: UUID.randomUUID(),
     )
 
     /**
@@ -272,7 +277,8 @@ class SubPipelineExecutionRunner(
                         pipelineId = record.id,
                         pipelineVersion = request.pipelineVersion,
                         userId = request.userId,
-                        correlationId = UUID.randomUUID(),
+                        // Non-null by `childRequest`; the elvis is the type's, not a second policy.
+                        correlationId = request.correlationId ?: UUID.randomUUID(),
                         triggeredVia = ExecutionTrigger.PIPELINE,
                         parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
                         parentExecutionId = request.parentExecutionId,
@@ -383,6 +389,11 @@ class SubPipelineExecutionRunner(
                     val staged = ctx.staging.stageRows(output.table, schema, rows)
                     ctx.warnings.addAll(staged.warnings)
                     checkStagingBudget(ctx)
+                    // F6: the same instrument `NodeRunner.dispatchOutput`'s Tempdb branch records.
+                    // Without it every row staged through a PIPELINE node was invisible to
+                    // `datapipelines.staging.rows` — the metric this repo already had to rescue
+                    // once from being permanently 0 (009/F10).
+                    executorMetrics.rowsStaged(staged.rowsStaged)
                     outcome.rowsOut = staged.rowsStaged
                     outcome.delivered = true
                 }

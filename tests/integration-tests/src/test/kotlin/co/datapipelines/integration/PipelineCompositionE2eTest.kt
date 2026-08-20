@@ -118,6 +118,13 @@ class PipelineCompositionE2eTest {
         // Exactly TWO execution rows in the family, with the lineage links of §5.
         val childExecutionId = assertFamilyOfTwo(parentExecutionId)
 
+        // F5 — the whole family is joinable by the id of the request that started it (rest-api
+        // §3.4, observability §3.3). The child used to carry a fresh random id, which made
+        // correlation id the one field that could not do the one job it exists for.
+        queryExecutions(
+            "SELECT correlation_id::text FROM pipeline_executions WHERE root_execution_id = '$parentExecutionId'",
+        ) { it.getString(1) }.toSet() shouldBe setOf(correlationId)
+
         // The parent's node stats carry the child execution id — both the durable
         // node_stats_json and the SSE node_completed event (design §5/§7).
         assertNodeStatsCarryChild(parentExecutionId, childExecutionId)

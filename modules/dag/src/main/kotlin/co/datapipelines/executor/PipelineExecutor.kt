@@ -639,6 +639,10 @@ class PipelineExecutor(
             rootExecutionId = request.rootExecutionId ?: run.executionId,
             compositionDepth = request.compositionDepth,
             directSink = request.directSink,
+            // F5: carried so a PIPELINE node's child request can inherit it. Without it the child
+            // minted a fresh random id and the family could not be joined by the one field that
+            // exists to join it.
+            correlationId = request.correlationId,
         )
     }
 

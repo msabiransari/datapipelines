@@ -9,6 +9,7 @@ import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.executor.NodeExecutionContext
 import co.datapipelines.executor.PipelineExecutionFailed
@@ -42,6 +43,7 @@ import io.kotest.matchers.shouldNotBe
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
@@ -67,6 +69,7 @@ class SubPipelineExecutionRunnerTest {
     private val parentExecutionId = UUID.randomUUID()
     private val parentRootId = UUID.randomUUID()
     private val parentUserId = UUID.randomUUID()
+    private val parentCorrelationId = UUID.randomUUID()
     private val childRecordId = UUID.randomUUID()
 
     private val staging: Staging = H2StagingFactory(H2StagingProperties()).create(parentExecutionId)
@@ -149,6 +152,7 @@ class SubPipelineExecutionRunnerTest {
             rootExecutionId = parentRootId,
             compositionDepth = compositionDepth,
             directSink = directSink,
+            correlationId = parentCorrelationId,
         )
 
     /**
@@ -183,6 +187,12 @@ class SubPipelineExecutionRunnerTest {
     private fun runner(
         stub: ExecutorStub,
         maxCompositionDepth: Int = 5,
+        /**
+         * Real, not a mock (F6): `datapipelines.staging.rows` is recorded on this path, and a bare
+         * `mockk()` would have turned the missing call into an unstubbed-call failure the moment it
+         * appeared — which is to say it could never have shown the call was ABSENT.
+         */
+        metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     ) = SubPipelineExecutionRunner(
         pipelines = pipelines,
         templateEngine = mockk(),
@@ -196,7 +206,7 @@ class SubPipelineExecutionRunnerTest {
         executorDispatcher = mockk(),
         executorConfig = ExecutorConfig(maxCompositionDepth = maxCompositionDepth),
         resultUrls = mockk(),
-        executorMetrics = mockk(),
+        executorMetrics = metrics,
         persistenceDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
         streams = mockk(),
         eventLog = mockk(relaxed = true),
@@ -232,6 +242,26 @@ class SubPipelineExecutionRunnerTest {
             request.compositionDepth shouldBe 1
             request.executionId shouldNotBe null
             result.childExecutionId shouldBe request.executionId
+        }
+
+    /**
+     * F5 — the child minted `correlationId = UUID.randomUUID()`, so its `pipeline_executions` row,
+     * its SSE payloads (via `SseEventProjection`) and its logs all carried an id unrelated to the
+     * request that started the family. Correlation id is the one field designed to join exactly
+     * that (rest-api §3.4, observability §3.3), so a composition family was the one shape it could
+     * not join.
+     */
+    @Test
+    fun `the child request inherits the parent's correlation id rather than minting a fresh one`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context())
+
+            // On the REQUEST, so it also reaches the child's own `execution_started` payload and is
+            // inherited again by any grandchild the child spawns.
+            stub.captured.single().correlationId shouldBe parentCorrelationId
         }
 
     @Test
@@ -520,6 +550,32 @@ class SubPipelineExecutionRunnerTest {
                     }
                 }
             }
+        }
+
+    /**
+     * F6 — `NodeRunner.dispatchOutput`'s `Tempdb` branch calls `metrics.rowsStaged`; `sinkFor`'s did
+     * not, so every row staged through a PIPELINE node was invisible to `datapipelines.staging.rows`.
+     * This repo treats that metric as load-bearing: it had zero call sites before 009/F10 and was
+     * "permanently 0", and a composition-heavy deployment would have quietly reproduced that.
+     */
+    @Test
+    fun `a tempdb-target node records the staged rows on datapipelines_staging_rows`() =
+        runTest {
+            stubRegistry()
+            val registry = SimpleMeterRegistry()
+            val stub = ExecutorStub()
+            stub.drive = { request ->
+                request.directSink?.accept(schema, sequenceOf(listOf("EU", 3), listOf("US", 4)))
+                stub.success(request)
+            }
+
+            runner(stub, metrics = ExecutorMetrics(registry))
+                .run(pipelineNode(output = NodeOutput.Tempdb("stg_metered")), context())
+
+            registry
+                .find(ExecutorMetrics.STAGING_ROWS)
+                .counter()
+                ?.count() shouldBe 2.0
         }
 
     @Test

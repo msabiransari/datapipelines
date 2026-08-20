@@ -81,7 +81,9 @@ class SubPipelineCompositionTest {
                 NodeResult.of(node.id, 0, Instant.now(), childExecutionId = child.executionId)
             }.use { h ->
                 val userId = UUID.randomUUID()
-                val parent = h.executor.execute(Fixtures.request(parentPipeline(), userId = userId))
+                val correlationId = UUID.randomUUID()
+                val parent =
+                    h.executor.execute(Fixtures.request(parentPipeline(), userId = userId, correlationId = correlationId))
 
                 parent.status shouldBe ExecutionStatus.SUCCESS
                 val ctx = seen.get()
@@ -90,6 +92,9 @@ class SubPipelineCompositionTest {
                 ctx.userId shouldBe userId
                 ctx.rootExecutionId shouldBe parent.executionId
                 ctx.compositionDepth shouldBe 0
+                // F5: and the id of the request that started the family, so the child's request can
+                // inherit it instead of minting one nothing else in the family shares.
+                ctx.correlationId shouldBe correlationId
 
                 // §5: the parent's node stats link the PIPELINE node to the child execution.
                 val stats =

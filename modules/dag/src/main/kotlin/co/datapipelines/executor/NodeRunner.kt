@@ -77,6 +77,15 @@ data class NodeExecutionContext(
      * result streams here and the [ResultStore] is never touched.
      */
     val directSink: DirectResultSink? = null,
+    /**
+     * The id of the REQUEST that started this execution ([ExecuteRequest.correlationId]) — the one
+     * field designed to join everything one request caused (rest-api §3.4, observability §3.3).
+     *
+     * A PIPELINE node's child request carries it verbatim, so a whole composition family — every
+     * `pipeline_executions` row, every SSE payload, every log line — is joinable by a single id.
+     * Null only when the surface that built the request supplied none; `web` always does.
+     */
+    val correlationId: UUID? = null,
 )
 
 /**

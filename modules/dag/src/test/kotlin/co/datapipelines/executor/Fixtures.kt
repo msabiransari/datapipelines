@@ -73,6 +73,7 @@ object Fixtures {
         pipeline: Pipeline,
         userId: UUID = UUID.randomUUID(),
         resultTtlSeconds: Long? = null,
+        correlationId: UUID? = null,
     ): ExecuteRequest =
         ExecuteRequest(
             pipelineId = UUID.randomUUID(),
@@ -80,6 +81,7 @@ object Fixtures {
             pipeline = pipeline,
             userId = userId,
             resultTtlSeconds = resultTtlSeconds,
+            correlationId = correlationId,
         )
 
     /** A template engine that returns [sql] for every reference, recording the budget it was given. */
