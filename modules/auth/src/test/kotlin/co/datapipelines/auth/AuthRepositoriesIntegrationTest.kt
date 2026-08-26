@@ -21,10 +21,10 @@ import java.time.Instant
 
 /**
  * [UserRepository], [ApiKeyRepository] and [AuditLogger] against a real Postgres
- * running the **shipped** `V1__initial_schema.sql` (metadata-db §4.1/§4.2/§4.3). The
- * migration is executed off disk rather than via Flyway — domain modules carry no
- * Flyway dependency (module-structure §3.1 rule 2), the same discipline as the
- * sibling `PipelineRepositoryIntegrationTest`.
+ * running the **shipped** migrations V1 + V4 (metadata-db §4.1/§4.2/§4.3 — V4 adds the
+ * `api_keys.workspace_id` pin). The migrations are executed off disk rather than via Flyway —
+ * domain modules carry no Flyway dependency (module-structure §3.1 rule 2), the same
+ * discipline as the sibling `PipelineRepositoryIntegrationTest`.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -37,7 +37,7 @@ class AuthRepositoriesIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(RepoFiles.read(RepoFiles.MIGRATION_PATH))
+        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -45,7 +45,13 @@ class AuthRepositoriesIntegrationTest {
         users = UserRepository(jdbc)
         keys = ApiKeyRepository(jdbc)
         audit = AuditLogger(jdbc, ObjectMapper())
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace ApiKeyRepository pins is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
     }
 
     @Test

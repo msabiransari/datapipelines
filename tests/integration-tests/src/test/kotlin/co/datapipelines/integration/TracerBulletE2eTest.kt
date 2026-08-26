@@ -436,17 +436,21 @@ class TracerBulletE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection.prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes) VALUES (?, ?, ?, ?, ?)").use { ps ->
-                for (key in listOf(ADMIN_KEY, READ_ONLY_KEY)) {
-                    ps.setString(1, key.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, key.name)
-                    ps.setString(4, key.hash)
-                    ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                    ps.addBatch()
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
+                ).use { ps ->
+                    for (key in listOf(ADMIN_KEY, READ_ONLY_KEY)) {
+                        ps.setString(1, key.id)
+                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setString(3, key.name)
+                        ps.setString(4, key.hash)
+                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
                 }
-                ps.executeBatch()
-            }
         }
     }
 

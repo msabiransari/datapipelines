@@ -3,7 +3,7 @@
 **Status:** v1.1 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-26
 
 ---
 
@@ -47,6 +47,15 @@ users ──1:N── pipeline_executions (triggered_by)
 users ──1:N── audit_log
 users ──1:N── pipeline_versions (created_by)
 users ──1:N── template_versions (created_by)
+users ──0:N── workspaces (created_by; NULL = system-provisioned)
+
+workspaces ──1:N── workspace_members
+users ──1:N── workspace_members
+
+workspaces ──1:N── pipelines (workspace_id)
+workspaces ──1:N── templates (workspace_id)
+workspaces ──0:N── datasources (workspace_id; NULL = global)
+workspaces ──1:N── api_keys (workspace_id)
 
 pipelines ──1:N── pipeline_versions
 pipelines ──1:N── pipeline_executions
@@ -58,7 +67,7 @@ pipeline_executions ──1:N── execution_events
 templates ──1:N── template_versions
 ```
 
-Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK).
+Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
 
 ---
 
@@ -106,6 +115,7 @@ API keys issued per-user-per-agent. See [Auth spec §7](auth.md#7-api-keys).
 CREATE TABLE api_keys (
     id                    TEXT        PRIMARY KEY,          -- 'dpk_ABCDEFGHIJKL'
     user_id               UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workspace_id          UUID        NOT NULL REFERENCES workspaces(id),   -- pinned at issuance (V4, D3)
     name                  TEXT        NOT NULL,             -- 'Claude Desktop key'
     key_hash              TEXT        NOT NULL,             -- Argon2id hash of full key
     scopes                TEXT[]      NOT NULL DEFAULT '{read}',
@@ -124,6 +134,7 @@ CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
 
 **Notes:**
 - `id` is the public key prefix (`dpk_...`), not a UUID — it is the lookup handle presented in the `DP-API-Key` header (D10). `key_hash` is the Argon2id hash of the *full* key; the secret itself is returned exactly once at creation and never stored.
+- `workspace_id` (V4) pins the key to exactly one workspace at issuance (workspaces design D3): an agent key is a workspace-scoped credential, and the pinned workspace — not a request header — is the key's context. V4 backfills existing keys to `default`; slice 1 issues every new key into `default` from repository code (no column DEFAULT — slice 2 must find every pin by grepping the constant, [§4.11](#411-workspaces)).
 - `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
@@ -165,21 +176,23 @@ Pipeline metadata. One row per pipeline (not per version). See [Pipeline Contrac
 ```sql
 CREATE TABLE pipelines (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            TEXT        NOT NULL UNIQUE,     -- machine name, [a-z0-9_]+
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),   -- owning workspace (V4)
+    name            TEXT        NOT NULL,            -- machine name, [a-z0-9_]+
     display_name    TEXT        NOT NULL,
     description     TEXT        NOT NULL DEFAULT '',
     owner_id        UUID        NOT NULL REFERENCES users(id),
     current_version INTEGER     NOT NULL DEFAULT 0,
     is_deleted      BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_pipelines_workspace_name UNIQUE (workspace_id, name)
 );
 
 CREATE INDEX idx_pipelines_owner ON pipelines(owner_id) WHERE is_deleted = FALSE;
 ```
 
 **Notes:**
-- `name` is UNIQUE; the constraint's implicit index (`pipelines_name_key`) serves name lookup — no separate index is created. Uniqueness is **global, including soft-deleted rows**: a deleted pipeline's name is not reusable until the row is hard-deleted. This is deliberate (execution history references the name) and is why the UNIQUE constraint is not a partial index.
+- `name` is unique **per workspace** (V4, workspaces design D2 — pre-launch break, owner-ratified 2026-08-16); the constraint's implicit index (`uq_pipelines_workspace_name`) serves name lookup within a workspace — no separate index is created. The mechanism is exactly the one the global rule used: a plain UNIQUE constraint, **not** a partial index, so uniqueness **includes soft-deleted rows** — a deleted pipeline's name is not reusable *within its workspace* until the row is hard-deleted. This is deliberate (execution history references the name) and is why the constraint is not a partial index. V4 backfills every existing row to the `default` workspace ([§4.11](#411-workspaces)).
 - `current_version` is `0` only between the two statements of `create()` in a transaction that has not yet committed; every committed pipeline has `current_version >= 1` ([§6.1](#61-example-pipeline-repository)).
 - `updated_at` is set by the application in every UPDATE (§2).
 
@@ -290,20 +303,26 @@ Template metadata. See [Templates spec](templates.md).
 
 ```sql
 CREATE TABLE templates (
-    id              TEXT        PRIMARY KEY,          -- 'fetch_orders.sql'
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),  -- surrogate (V4)
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),     -- owning workspace (V4)
+    name            TEXT        NOT NULL,          -- the human id: 'fetch_orders.sql'
     display_name    TEXT        NOT NULL,
     description     TEXT        NOT NULL DEFAULT '',
     current_version INTEGER     NOT NULL DEFAULT 0,
     is_deleted      BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID        NOT NULL REFERENCES users(id)
+    created_by      UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_templates_workspace_name UNIQUE (workspace_id, name)
 );
 
-CREATE INDEX idx_templates_active ON templates(id) WHERE is_deleted = FALSE;
+CREATE INDEX idx_templates_active ON templates(name) WHERE is_deleted = FALSE;
 ```
 
 **Notes:**
+- **Surrogate key (V4).** `id` was the TEXT human id (`'fetch_orders.sql'`) and the primary key until V4; per-workspace name uniqueness (workspaces design D2) required a surrogate, so `id` is now a generated UUID PK and the human id lives in `name`. Everything that referenced the TEXT id keeps working on `name`: pipeline-JSON `template: {id, version}` refs, `imports_json` `{id, version, alias}` entries, REST path params, and MCP tool arguments all mean `name`, resolved within the active workspace. Stored payloads are immutable and were **not** rewritten — nothing anywhere stores the surrogate except `template_versions.template_id` and the `templates` PK itself.
+- `name` is unique per workspace via `uq_templates_workspace_name` — a plain UNIQUE constraint like the pipelines rule ([§4.4](#44-pipelines)), so a soft-deleted template's name stays taken within its workspace until the row is hard-deleted (the row stays, and saved references to its versions keep resolving, [Templates §5](templates.md#5-template-versioning)).
+- `idx_templates_active` indexed `templates(id)` before V4; the column rename carried it onto `name`, which is exactly the listing path it exists for (search/order by `name`, `is_deleted = FALSE`).
 - **No `params_schema` column** (D3). Templates declare no parameters; the render context is the calling pipeline's `parameters` map with defaults applied — see [Templates §3](templates.md#3-template-entity).
 - **`is_library` lives on `template_versions`, not here** (§4.9). Import validation resolves it at an exact `{id, version}` ([Templates §6](templates.md#6-library-templates)), so a table-level copy would be a second source of truth that a new version could silently contradict. Listing "all libraries" joins to the current version.
 - `description` is `NOT NULL DEFAULT ''` here (unlike `datasources.description`, §4.10) because [Templates §3](templates.md#3-template-entity) makes it the discoverability field agents search on. The asymmetry with datasources is deliberate, not drift.
@@ -316,7 +335,7 @@ Immutable per-version template bodies.
 
 ```sql
 CREATE TABLE template_versions (
-    template_id     TEXT        NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+    template_id     UUID        NOT NULL REFERENCES templates(id) ON DELETE CASCADE,  -- surrogate (V4)
     version         INTEGER     NOT NULL,
     engine          TEXT        NOT NULL DEFAULT 'freemarker',
     dialect         TEXT        NOT NULL,            -- 'POSTGRES', 'ORACLE', etc.
@@ -333,6 +352,7 @@ CREATE INDEX idx_template_versions_dialect ON template_versions(dialect);
 ```
 
 **Notes:**
+- `template_id` re-keyed from the TEXT human id to the surrogate `templates.id` in V4 (§4.8) — same FK name (`template_versions_template_id_fkey`), same `ON DELETE CASCADE`, new type. Lookups by human id join `templates` on the surrogate and filter `name` within the workspace; the join back is how a stored version "resolves to its named template".
 - **No `params_schema` column** (D3) — deleted, not deprecated. Any migration from a pre-v1.1 draft drops it.
 - `engine` carries the [`TemplateEngine`](enums.md#6-templateengine--template-language) value. It is `NOT NULL DEFAULT 'freemarker'` and deliberately has **no CHECK constraint**: v1 accepts only `freemarker` (enforced by save-time validation, D2), and future engines must not require a migration to become storable. The default exists for the v1 write path, which never omits it.
 - `is_library` is version-scoped (§4.8). [Templates §6](templates.md#6-library-templates) resolves `template.validation.import_not_library` against the *exact* `{id, version}` an `imports` entry names, so this is the column that validation reads. A library body holds only macro/function definitions — `body` is still `NOT NULL`.
@@ -356,6 +376,8 @@ CREATE TABLE datasources (
     properties_json         JSONB       NOT NULL DEFAULT '{}',  -- {"hikari": {...}, "jdbc": {...}}
     query_timeout_seconds   INTEGER,                        -- NULL = fall back to the global executor default
     introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]', -- §7A allowlist: schemas exempt from the system-schema exclusion (V2)
+    workspace_id            UUID        REFERENCES workspaces(id),    -- NULL = global (V4)
+    is_readonly             BOOLEAN     NOT NULL DEFAULT FALSE,       -- write-shaped uses forbidden (V4)
     is_deleted              BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -382,8 +404,52 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 - `dialect`'s CHECK duplicates the application-level validation on purpose — a bad dialect reaching this table would break every pipeline referencing the datasource, and the DB is the last place to catch it. Values are the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set.
 - `password_encrypted` is `BYTEA` ciphertext only ([Datasources §7.1](datasources.md#71-encryption-at-rest)) — never plaintext, never returned by any endpoint, and never logged. The master key is required and fail-fast (D8).
 - `created_by` is a real foreign key to `users(id)` (`ON DELETE RESTRICT`, the §2 default) — a user who owns datasources cannot be hard-deleted.
+- `workspace_id` (V4) binds the datasource to a workspace as **visibility/ownership only** — `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract). **`NULL = global`**: existing rows backfilled NULL, preserving the pre-workspaces shared behavior (D9). `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract; enforcement arrives with the readonly slice, the columns land here. Both are columns only in this slice — the datasources module's entity and repository are unchanged.
 - `idx_datasources_active` gives soft-delete parity with `pipelines` and `templates`: the registry's hot path is "list/lookup non-deleted datasources", and without it that scan had no supporting index. Note the PK index cannot serve it — `is_deleted` is not in the PK, so the filter would be a heap recheck on every row.
 - All timestamps are `TIMESTAMPTZ`; `updated_at` is set by the application in every UPDATE (§2), including credential rotation and pool-affecting property changes.
+
+### 4.11 `workspaces`
+
+The unit of team isolation (workspaces design 2026-08-16, D1). Pipelines and templates belong to exactly one workspace; datasources bind by visibility only (§4.10); API keys pin one at issuance (§4.2).
+
+```sql
+CREATE TABLE workspaces (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         TEXT        NOT NULL UNIQUE,          -- [a-z0-9_-]+, 1–63, immutable (referenced in config/UX)
+    display_name TEXT        NOT NULL,
+    is_personal  BOOLEAN     NOT NULL DEFAULT FALSE,   -- TRUE only for auto-per-user provisioned workspaces
+    created_by   UUID        REFERENCES users(id),     -- NULL = system-provisioned (R1)
+    is_deleted   BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Notes:**
+- **`created_by` is nullable (re-base resolution R1).** The design spec's `NOT NULL REFERENCES users(id)` gave V4's `default`-workspace seed no user to reference on a fresh install. NULL means **system-provisioned**; workspaces provisioned for a user later (auto-per-user mode) carry the real user.
+- **The `default` workspace carries the well-known constant UUID `defa0000-0000-0000-0000-000000000001` (re-base resolution R2).** V4 seeds it (`created_by NULL`, `is_personal = FALSE`) and backfills every pre-existing pipeline/template/api-key row onto it (D9: the pre-workspaces world was one shared space). Slice-1 repositories pin this constant in code — deliberately **not** a column DEFAULT and **not** a boot-time lookup or config key: the constant is deterministic across deployments and greppable, and slice 2 replaces the pins with real workspace resolution by finding every occurrence of the value. A boot-time DB lookup or a config key was considered and rejected for exactly those reasons.
+- `name` is globally UNIQUE (the namespace is flat — workspaces themselves are not scoped) and immutable, like datasource names. No CHECK constraint here: the `[a-z0-9_-]+`, 1–63 rule is validated by the application on write, matching how `templates.name` is handled (contrast `datasources`, whose CHECK exists because a bad name breaks every referencing pipeline).
+- `is_deleted` is the house soft-delete flag; the uniqueness of `name` includes soft-deleted rows (house rule — the name is not reusable until the row is hard-deleted).
+
+### 4.12 `workspace_members`
+
+Membership with a coarse role (workspaces design D4). Global `is_admin` bypasses membership checks entirely (existing admin semantics).
+
+```sql
+CREATE TABLE workspace_members (
+    workspace_id UUID        NOT NULL REFERENCES workspaces(id),
+    user_id      UUID        NOT NULL REFERENCES users(id),
+    role         TEXT        NOT NULL DEFAULT 'member',
+    joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (workspace_id, user_id),
+    CONSTRAINT chk_workspace_member_role CHECK (role IN ('owner', 'member'))
+);
+```
+
+**Notes:**
+- **V4 enters every pre-existing user as `'owner'` of `default`.** Before workspaces, every active user had full capability over the shared content; the owner role is the backfill that preserves that world (D9). New memberships created later default to `'member'`.
+- The role set is deliberately closed (CHECK): `owner` manages the workspace and its members, `member` authors within it. Finer-grained workspace roles are deferred with per-datasource ACLs (workspaces design D4).
+- No `updated_at`: membership rows are inserted and deleted, and role flips are rare administrative acts — `joined_at` carries the only timestamp the model needs.
 
 ---
 
@@ -407,7 +473,7 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 | `audit_log` | `idx_audit_user` | explicit (partial) | Per-user audit trail |
 | `audit_log` | `idx_audit_event` | explicit | Filter by event type |
 | `pipelines` | `pipelines_pkey` | via PK | Lookup by id |
-| `pipelines` | `pipelines_name_key` | via UNIQUE | Name lookup; prevents duplicate names (incl. soft-deleted) |
+| `pipelines` | `uq_pipelines_workspace_name` | via UNIQUE | Name lookup within a workspace; prevents duplicate names per workspace (incl. soft-deleted) |
 | `pipelines` | `idx_pipelines_owner` | explicit (partial) | List non-deleted pipelines by owner |
 | `pipeline_versions` | `pipeline_versions_pkey` | via PK | `(pipeline_id, version)` fetch; also the target of `fk_executions_pipeline_version` |
 | `pipeline_executions` | `pipeline_executions_pkey` | via PK | Lookup by `execution_id` |
@@ -418,17 +484,22 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 | `pipeline_executions` | `idx_executions_root` | explicit | The whole execution family (root + descendants) in one lookup — composition lineage and cancellation key off `root_execution_id` (V3) |
 | `execution_events` | `execution_events_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `execution_events` | `uq_events_execution_event` | via UNIQUE | Event replay ordered by `event_id`; enforces no duplicate sequence numbers |
-| `templates` | `templates_pkey` | via PK | Lookup by template id |
-| `templates` | `idx_templates_active` | explicit (partial) | List non-deleted templates |
-| `template_versions` | `template_versions_pkey` | via PK | `(template_id, version)` fetch — the render path's lookup |
+| `templates` | `templates_pkey` | via PK | Lookup by surrogate id (V4) |
+| `templates` | `uq_templates_workspace_name` | via UNIQUE | Name lookup within a workspace; prevents duplicate names per workspace (incl. soft-deleted) |
+| `templates` | `idx_templates_active` | explicit (partial) | List non-deleted templates (indexed on `name` since V4) |
+| `template_versions` | `template_versions_pkey` | via PK | `(template_id, version)` fetch — the render path's lookup (surrogate `template_id` since V4) |
 | `template_versions` | `idx_template_versions_dialect` | explicit | Filter template versions by dialect |
 | `datasources` | `datasources_pkey` | via PK | Lookup by name — the registry's hot path |
 | `datasources` | `idx_datasources_active` | explicit (partial) | List non-deleted datasources |
+| `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
+| `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
+| `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
 
 **Deliberately absent:**
-- `uq_users_email` and `uq_pipelines_name` — these names never existed. Both uniqueness rules are `UNIQUE` *constraints* declared inline in §4, so Postgres names their indexes `users_email_key` / `pipelines_name_key`. The old entries would have sent a migration author looking for `CREATE UNIQUE INDEX` statements that were not there.
+- `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
 - `idx_events_execution` — dropped as an exact duplicate of the `uq_events_execution_event` constraint index on the schema's highest-volume table.
 - Indexes on FK columns that are only ever joined *from* the parent (`pipeline_versions.created_by`, `template_versions.created_by`, `templates.created_by`, `datasources.created_by`). v1 has no "list everything user X created" screen. Add them when a query needs one — an unused index on a write-heavy table is a cost with no return.
+- Indexes on the V4 `workspace_id` FK columns (`pipelines`, `templates`, `api_keys`, `datasources`) and on `workspace_members.user_id`. Slice-1 read paths pin one constant workspace, so these indexes would filter nothing; slice 2's real workspace resolution adds them with the queries that need them.
 
 ---
 
@@ -470,8 +541,8 @@ class PipelineRepository(
     fun create(pipeline: Pipeline, bodyJson: String, createdBy: UUID): Pipeline {
         val sql = """
             WITH new_pipeline AS (
-                INSERT INTO pipelines (id, name, display_name, description, owner_id, current_version)
-                VALUES (:id, :name, :displayName, :description, :ownerId, 1)
+                INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version)
+                VALUES (:id, :name, :displayName, :description, :ownerId, :workspaceId, 1)
                 RETURNING id, name, display_name, description, owner_id,
                           current_version, is_deleted, created_at, updated_at
             ), new_version AS (
@@ -493,6 +564,7 @@ class PipelineRepository(
                 "displayName" to pipeline.displayName,
                 "description" to pipeline.description,
                 "ownerId" to pipeline.ownerId,
+                "workspaceId" to pipeline.workspaceId,
                 "bodyJson" to bodyJson,
                 "createdBy" to createdBy
             ),
@@ -564,8 +636,10 @@ What is **not** acceptable is either statement running outside a transaction: a 
 ```
 modules/app/src/main/resources/db/migration/
 ├── V1__initial_schema.sql          ← all 10 tables + indexes (this spec)
-├── V2__seed_admin_user.sql         ← optional: seed first admin user
-└── V3__...                         ← future migrations
+├── V2__datasource_introspection_include_schemas.sql
+├── V3__execution_lineage.sql
+├── V4__workspaces_rekey.sql        ← workspaces + workspace_members; workspace_id on pipelines/templates/api_keys/datasources; templates surrogate re-key
+└── V5__...                         ← future migrations
 ```
 
 ### 7.2 V1 migration
@@ -676,3 +750,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.10](SPEC-REVIEW-2026-08.md#210-metadata-dbmd). Established as sole DDL authority (D4): `_json` suffix rule stated in §2 and applied (`audit_log.details` → `details_json`); `TIMESTAMPTZ` confirmed everywhere. `datasources` (§4.10) absorbed the datasources.md reconciliation — `description` nullable, `name` CHECK (63 chars + `^[a-z0-9_-]+$`), new `query_timeout_seconds` column with CHECK, soft-delete partial index, `properties_json` documented as the hikari/jdbc passthrough (D7). `params_schema` deleted from `template_versions` (D3); `is_library` moved from `templates` to `template_versions` (version-scoped per D12); `idx_templates_active` added. `users` gained `updated_at` + `theme_preference TEXT NULL` (NULL = follow the deployment default `datapipelines.ui.theme`; stored preference, not session state — ui-screens §2.12.4), with the per-request `is_active` cache note (D13); `templates` gained `updated_at`; `updated_at` maintenance rule stated (app-set, no triggers). `pipeline_executions` gained the composite FK to `pipeline_versions(pipeline_id, version)`, dropped `result_delivery` (D9), gained `result_row_count`. `execution_events`: redundant `idx_events_execution` dropped, UNIQUE constraint named. §5 regenerated from §4 with constraint-backed indexes under their real names (phantom `uq_users_email` / `uq_pipelines_name` removed) plus a deliberately-absent list. §6.1 `create()` rewritten as working single-CTE SQL + a real `RowMapper` whose result is returned; §6.2 conventions extended. §8 renamed "Operational Jobs" and fully parameterized from config keys (D8) — no interval literals. New §9 stating idempotency keys, results, the 1-hour event log, and cancel flags are Redis-only (D9/D7). Broken link `pipeline-contract §15.3` → §17.3 fixed; terminal-node language replaced by the caller-node model (D1) |
 | 2026-08-15 | v1.2 | V2 migration | §4.10 `datasources` gains `introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]'` (migration V2) — the §7A introspection allowlist of datasources.md §3.3; `[]` and absent are the same behavior. |
 | 2026-08-16 | v1.3 | V3 migration | §4.6 `pipeline_executions` gains the composition-lineage columns `parent_execution_id` (self-FK), `parent_node_id`, `root_execution_id` (migration V3, design doc 2026-08-13-pipeline-node-type §5) — `root_execution_id` backfilled to `execution_id` and NOT NULL going forward, so family queries and cancellation never special-case NULL; new explicit index `idx_executions_root`; `chk_triggered_via` widened with `'PIPELINE'`. |
+| 2026-08-26 | v1.4 | V4 migration | Workspaces, slice 1 (design doc 2026-08-16-workspaces-design §3/§4, D2/D9; re-base resolutions R1/R2 recorded here, amending that spec's PROPOSED DDL). New tables §4.11 `workspaces` and §4.12 `workspace_members`; the `default` workspace is seeded with the well-known constant UUID `defa0000-0000-0000-0000-000000000001` (R2 — deterministic across deployments and greppable; a boot-time DB lookup or a config key was considered and rejected) and `created_by` NULL (R1 — NULL = system-provisioned; the spec's `NOT NULL` gave the seed no user to reference on a fresh install). §4.4 `pipelines` gains `workspace_id NOT NULL` backfilled to `default`; name uniqueness moves from global (`pipelines_name_key`) to per-workspace via the explicitly named `uq_pipelines_workspace_name` — same mechanism (plain UNIQUE constraint, soft-deleted rows included). §4.8 `templates` re-keys onto a surrogate `id UUID` PK; the TEXT id becomes `name`, unique per workspace (`uq_templates_workspace_name`); `idx_templates_active` follows the rename onto `name`. §4.9 `template_versions.template_id` re-keys onto the surrogate (same FK name and `ON DELETE CASCADE`); pipeline-JSON and `imports_json` `{id, version}` refs keep meaning the human id (`name`) — stored payloads not rewritten. §4.10 `datasources` gains `workspace_id UUID NULL` (NULL = global; existing rows backfill NULL, D9) and `is_readonly NOT NULL DEFAULT FALSE` — columns only, no datasources-module change in this slice. §4.2 `api_keys` gains `workspace_id NOT NULL` backfilled to `default` (D3 pinning). §3 ERD, §5 index table, §6.1 example, and §7.1 file list updated (the §7.1 list also stops showing the stale `V2__seed_admin_user.sql` placeholder — V2/V3 are the introspection and lineage migrations). |

@@ -124,7 +124,8 @@ class AuthHttpBoundaryTest {
 
     @BeforeAll
     fun seed() {
-        jdbc.jdbcTemplate.execute(RepoFiles.read(RepoFiles.MIGRATION_PATH))
+        // V1 + V4: apiKeyService.issue writes api_keys.workspace_id (the V4 pin).
+        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = false)
         readKey = apiKeyService.issue(user.id, "read-key", setOf(Scope.READ), setOf(Scope.ADMIN)).plaintext
         expiredKey =

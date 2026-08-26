@@ -57,11 +57,12 @@ class FlywayMigrationIntegrationTest {
                 "1|initial schema|true",
                 "2|datasource introspection include schemas|true",
                 "3|execution lineage|true",
+                "4|workspaces rekey|true",
             )
     }
 
     @Test
-    fun `creates exactly the ten tables of metadata-db §4`() {
+    fun `creates exactly the twelve tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -83,6 +84,8 @@ class FlywayMigrationIntegrationTest {
                 "template_versions",
                 "templates",
                 "users",
+                "workspace_members",
+                "workspaces",
             )
     }
 
@@ -91,9 +94,11 @@ class FlywayMigrationIntegrationTest {
         // The negative half matters most: §5 deliberately does NOT create
         // idx_events_execution (duplicate of the uq_events_execution_event
         // constraint index on the highest-volume table) and does NOT create
-        // uq_users_email / uq_pipelines_name (those are UNIQUE constraints, whose
-        // indexes Postgres names itself). An extra CREATE INDEX here is a silent
-        // write-amplification regression, which is why this asserts the exact set.
+        // uq_users_email (a UNIQUE constraint, whose index Postgres names itself).
+        // An extra CREATE INDEX here is a silent write-amplification regression,
+        // which is why this asserts the exact set. V4 replaced the implicit
+        // pipelines_name_key with the explicitly named uq_pipelines_workspace_name
+        // (per-workspace uniqueness) and re-keyed the templates PK onto the surrogate.
         val indexes =
             query(
                 """
@@ -124,15 +129,19 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_executions.pipeline_executions_pkey",
                 "pipeline_versions.pipeline_versions_pkey",
                 "pipelines.idx_pipelines_owner",
-                "pipelines.pipelines_name_key",
                 "pipelines.pipelines_pkey",
+                "pipelines.uq_pipelines_workspace_name",
                 "template_versions.idx_template_versions_dialect",
                 "template_versions.template_versions_pkey",
                 "templates.idx_templates_active",
                 "templates.templates_pkey",
+                "templates.uq_templates_workspace_name",
                 "users.uq_users_provider_subject",
                 "users.users_email_key",
                 "users.users_pkey",
+                "workspace_members.workspace_members_pkey",
+                "workspaces.workspaces_name_key",
+                "workspaces.workspaces_pkey",
             )
     }
 
@@ -171,6 +180,7 @@ class FlywayMigrationIntegrationTest {
                 "chk_dialect",
                 "chk_status",
                 "chk_triggered_via",
+                "chk_workspace_member_role",
             )
     }
 
@@ -271,7 +281,10 @@ class FlywayMigrationIntegrationTest {
                 }
             connection
                 .prepareStatement(
-                    "INSERT INTO pipelines (id, name, display_name, owner_id, current_version) VALUES (?, ?, 'T', ?, 1)",
+                    """
+                    INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)
+                    VALUES (?, ?, 'T', ?, 1, 'defa0000-0000-0000-0000-000000000001')
+                    """.trimIndent(),
                 ).use {
                     it.setObject(1, pipelineId)
                     it.setString(2, "p_" + pipelineId.toString().replace("-", ""))
@@ -307,6 +320,130 @@ class FlywayMigrationIntegrationTest {
         }
     }
 
+    @Test
+    fun `V4 seeds the default workspace with the constant UUID and no creator`() {
+        // metadata-db §4.11 (R1/R2): the seed carries the well-known constant — slice-1
+        // repositories pin it, slice 2 finds every pin by grepping it — and created_by NULL
+        // (system-provisioned; a fresh install has no user to reference).
+        val rows =
+            query(
+                "SELECT id::TEXT || '|' || name || '|' || is_personal || '|' || COALESCE(created_by::TEXT, 'NULL')" +
+                    " FROM workspaces WHERE name = 'default'",
+            ) { it.getString(1) }
+
+        rows shouldContainExactly listOf("defa0000-0000-0000-0000-000000000001|default|false|NULL")
+    }
+
+    @Test
+    fun `V4 re-keys templates onto a surrogate UUID PK and template_versions follows`() {
+        // metadata-db §4.8/§4.9: today's TEXT id is the `name` column; the PK and the
+        // template_versions reference are the surrogate UUID. Pipeline-JSON and imports_json
+        // {id, version} refs keep meaning `name` — stored payloads are not rewritten.
+        val columns =
+            query(
+                """
+                SELECT table_name || '.' || column_name || '.' || data_type
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND ((table_name = 'templates' AND column_name IN ('id', 'name'))
+                    OR (table_name = 'template_versions' AND column_name = 'template_id'))
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "template_versions.template_id.uuid",
+                "templates.id.uuid",
+                "templates.name.text",
+            )
+    }
+
+    @Test
+    fun `V4 adds the datasource scoping columns - nullable workspace, readonly defaulting false`() {
+        // metadata-db §4.10: NULL workspace_id = global (existing rows backfill NULL, D9);
+        // columns only — the datasources module does not change in this slice.
+        val columns =
+            query(
+                """
+                SELECT column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'datasources'
+                   AND column_name IN ('workspace_id', 'is_readonly')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "is_readonly|NO|false",
+                "workspace_id|YES|NONE",
+            )
+    }
+
+    @Test
+    fun `V4 scopes pipeline name uniqueness per workspace, soft-deleted rows included`() {
+        // metadata-db §4.4: the mechanism is unchanged — a plain UNIQUE constraint, no
+        // partial index — re-keyed (workspace_id, name). The same name is legal in two
+        // workspaces and violated in one, and a soft-deleted row still holds its name
+        // within its workspace. The constraint name is pinned: PipelineRepository maps
+        // its violation to pipeline.validation.duplicate_name.
+        val userId = UUID.randomUUID()
+        val secondWorkspace = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection
+                .prepareStatement(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (?, ?, 'T', 'google', ?)",
+                ).use {
+                    it.setObject(1, userId)
+                    it.setString(2, "u$userId@example.com")
+                    it.setString(3, "sub-$userId")
+                    it.executeUpdate()
+                }
+            connection
+                .prepareStatement(
+                    "INSERT INTO workspaces (id, name, display_name, created_by) VALUES (?, 'second', 'Second', ?)",
+                ).use {
+                    it.setObject(1, secondWorkspace)
+                    it.setObject(2, userId)
+                    it.executeUpdate()
+                }
+
+            fun insertPipeline(
+                name: String,
+                workspaceId: UUID,
+            ) {
+                connection
+                    .prepareStatement(
+                        """
+                        INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)
+                        VALUES (?, ?, 'T', ?, 1, ?)
+                        """.trimIndent(),
+                    ).use {
+                        it.setObject(1, UUID.randomUUID())
+                        it.setString(2, name)
+                        it.setObject(3, userId)
+                        it.setObject(4, workspaceId)
+                        it.executeUpdate()
+                    }
+            }
+
+            insertPipeline("shared_name", DEFAULT_WORKSPACE_UUID)
+            insertPipeline("shared_name", secondWorkspace) // legal across workspaces
+            shouldThrow<SQLException> { insertPipeline("shared_name", DEFAULT_WORKSPACE_UUID) }
+                .message shouldContain "uq_pipelines_workspace_name"
+
+            // The soft-delete variant: a deleted row keeps its name taken within its workspace.
+            insertPipeline("retired_name", DEFAULT_WORKSPACE_UUID)
+            connection.createStatement().use {
+                it.executeUpdate("UPDATE pipelines SET is_deleted = TRUE WHERE name = 'retired_name'")
+            }
+            insertPipeline("retired_name", secondWorkspace) // legal in the other workspace
+            shouldThrow<SQLException> { insertPipeline("retired_name", DEFAULT_WORKSPACE_UUID) }
+                .message shouldContain "uq_pipelines_workspace_name"
+        }
+    }
+
     private fun <T> query(
         sql: String,
         row: (ResultSet) -> T,
@@ -337,6 +474,9 @@ class FlywayMigrationIntegrationTest {
 
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
+
+        /** The seeded `default` workspace (metadata-db §4.11, R2) the V4 assertions pin against. */
+        private val DEFAULT_WORKSPACE_UUID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
         /**
          * In-process OIDC discovery (auth.md §5.2) for the configured providers — the

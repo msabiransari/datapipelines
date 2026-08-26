@@ -21,11 +21,11 @@ import java.util.UUID
 /**
  * [TemplateRepository] against a real Postgres running the **shipped** schema.
  *
- * Executes `app`'s real `V1__initial_schema.sql` off disk rather than running Flyway — the same
- * discipline `PipelineRepositoryIntegrationTest` documents: module-structure §3.1 rule 2 keeps
- * the Flyway dependency in `app` only, so a domain module never gains a schema-creation tool,
- * yet the test still runs the exact DDL the application migrates with (including the D3
- * `no params_schema` column shape).
+ * Executes `app`'s real migrations off disk in version order rather than running Flyway — the
+ * same discipline `PipelineRepositoryIntegrationTest` documents: module-structure §3.1 rule 2
+ * keeps the Flyway dependency in `app` only, so a domain module never gains a schema-creation
+ * tool, yet the test still runs the exact DDL the application migrates with (including the D3
+ * `no params_schema` column shape and the V4 surrogate-key re-key).
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -37,13 +37,19 @@ class TemplateRepositoryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(MIGRATION_PATH).readText())
+        MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText()) }
     }
 
     @BeforeEach
     fun setUp() {
         repository = TemplateRepository(jdbc)
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace the repository pins is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE templates, users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
         actor = insertUser()
     }
 
@@ -283,8 +289,13 @@ class TemplateRepositoryIntegrationTest {
 
         val alias =
             jdbc.queryForObject(
-                "SELECT imports_json -> 0 ->> 'alias' FROM template_versions WHERE template_id = :id AND version = 1",
-                mapOf("id" to "fetch_orders.sql"),
+                """
+                SELECT v.imports_json -> 0 ->> 'alias'
+                  FROM template_versions v
+                  JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND v.version = 1
+                """.trimIndent(),
+                mapOf("name" to "fetch_orders.sql"),
                 String::class.java,
             )
 
@@ -316,7 +327,17 @@ class TemplateRepositoryIntegrationTest {
         }
 
     private companion object {
-        const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
+        /**
+         * The shipped migrations in version order — V1 alone would miss the `workspaces`
+         * re-key (V4) the repository now writes against.
+         */
+        val MIGRATION_PATHS =
+            listOf(
+                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
+                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
+                "modules/app/src/main/resources/db/migration/V3__execution_lineage.sql",
+                "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
+            )
 
         @Container
         @JvmStatic

@@ -556,14 +556,18 @@ class PipelineCompositionE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection.prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes) VALUES (?, ?, ?, ?, ?)").use { ps ->
-                ps.setString(1, ADMIN_KEY.id)
-                ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                ps.setString(3, ADMIN_KEY.name)
-                ps.setString(4, ADMIN_KEY.hash)
-                ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                ps.executeUpdate()
-            }
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
+                ).use { ps ->
+                    ps.setString(1, ADMIN_KEY.id)
+                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                    ps.setString(3, ADMIN_KEY.name)
+                    ps.setString(4, ADMIN_KEY.hash)
+                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
+                    ps.executeUpdate()
+                }
         }
     }
 

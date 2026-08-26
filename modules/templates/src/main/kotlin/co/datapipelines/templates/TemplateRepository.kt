@@ -30,6 +30,16 @@ data class TemplateVersionSummary(
  * in **one** data-modifying-CTE statement so the pair is atomic without an enclosing
  * transaction — a `templates` row whose `current_version` names a version row that was never
  * inserted is unrepresentable. There is deliberately **no `params_schema` column** (D3).
+ *
+ * ## Surrogate key and workspace pinning (slice 1)
+ *
+ * Since V4 `templates` has a surrogate `id UUID` PK and the human id is the `name` column,
+ * unique per workspace (metadata-db §4.8); `template_versions` references the surrogate.
+ * Every method below keeps taking the human id as a `String` — pipeline-JSON and
+ * `imports_json` `{id, version}` refs mean `name`, never the surrogate. Until workspace
+ * resolution lands (slice 2), reads resolve within the seeded `default` workspace and writes
+ * pin it — via [DEFAULT_WORKSPACE_ID] in code, never a column DEFAULT, so slice 2 finds
+ * every pin by grepping the constant.
  */
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -38,8 +48,9 @@ class TemplateRepository(
     fun findLatest(id: String): Template? =
         jdbc
             .query(
-                "$SELECT_JOINED WHERE t.id = :id AND t.is_deleted = FALSE AND v.version = t.current_version",
-                mapOf("id" to id),
+                "$SELECT_JOINED WHERE t.name = :name AND t.workspace_id = :workspaceId" +
+                    " AND t.is_deleted = FALSE AND v.version = t.current_version",
+                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
                 MAPPER,
             ).singleOrNull()
 
@@ -50,8 +61,8 @@ class TemplateRepository(
     ): Template? =
         jdbc
             .query(
-                "$SELECT_JOINED WHERE t.id = :id AND v.version = :version",
-                mapOf("id" to id, "version" to version),
+                "$SELECT_JOINED WHERE t.name = :name AND t.workspace_id = :workspaceId AND v.version = :version",
+                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID, "version" to version),
                 MAPPER,
             ).singleOrNull()
 
@@ -67,25 +78,26 @@ class TemplateRepository(
     ): TemplateVersion? =
         jdbc
             .query(
-                "$SELECT_VERSION WHERE template_id = :id AND version = :version",
-                mapOf("id" to id, "version" to version),
+                "$SELECT_VERSION WHERE t.name = :name AND t.workspace_id = :workspaceId AND v.version = :version",
+                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID, "version" to version),
                 VERSION_MAPPER,
             ).singleOrNull()
 
     /** True when any version of [id] exists — the `template_not_found` vs `version_not_found` split. */
     fun existsId(id: String): Boolean =
         jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM template_versions WHERE template_id = :id)",
-            mapOf("id" to id),
+            "SELECT EXISTS(SELECT 1 FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                " WHERE t.name = :name AND t.workspace_id = :workspaceId)",
+            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
             Boolean::class.java,
         ) == true
 
     /**
      * The `GET /templates?dialect=&q=&offset=&limit=` page (templates.md §9, rest-api §8.5).
      *
-     * Returns each live template at its **current** version, `id`-ordered so paging is stable.
+     * Returns each live template at its **current** version, `name`-ordered so paging is stable.
      * Both filters are optional and independent: [dialect] is an exact match on the version's
-     * dialect, [q] a case-insensitive substring of `id`, `display_name` or `description`.
+     * dialect, [q] a case-insensitive substring of `name`, `display_name` or `description`.
      *
      * `q` is bound as a parameter and its own LIKE metacharacters are escaped ([escapeLike]), so
      * a search for `100%_off` searches for that literal string instead of turning into a wildcard
@@ -104,15 +116,16 @@ class TemplateRepository(
             """
             $SELECT_JOINED
              WHERE t.is_deleted = FALSE
+               AND t.workspace_id = :workspaceId
                AND v.version = t.current_version
                AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
                AND (
                      CAST(:pattern AS TEXT) IS NULL
-                     OR t.id ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                     OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                      OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                      OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                    )
-             ORDER BY t.id
+             ORDER BY t.name
              LIMIT :limit OFFSET :offset
             """.trimIndent(),
             mapOf(
@@ -120,6 +133,7 @@ class TemplateRepository(
                 // type to infer and the statement will not even prepare.
                 "dialect" to dialect?.wire,
                 "pattern" to q?.let { "%${escapeLike(it)}%" },
+                "workspaceId" to DEFAULT_WORKSPACE_ID,
                 "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT),
                 "offset" to maxOf(0, offset),
             ),
@@ -130,12 +144,13 @@ class TemplateRepository(
     fun listVersions(id: String): List<TemplateVersionSummary> =
         jdbc.query(
             """
-            SELECT template_id, version, created_at, created_by
-              FROM template_versions
-             WHERE template_id = :id
-             ORDER BY version DESC
+            SELECT t.name AS template_id, v.version, v.created_at, v.created_by
+              FROM template_versions v
+              JOIN templates t ON t.id = v.template_id
+             WHERE t.name = :name AND t.workspace_id = :workspaceId
+             ORDER BY v.version DESC
             """.trimIndent(),
-            mapOf("id" to id),
+            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
         ) { rs, _ ->
             TemplateVersionSummary(
                 id = rs.getString("template_id"),
@@ -186,8 +201,9 @@ class TemplateRepository(
     /** Soft-deletes the template (§9). Returns false when nothing live was there to delete. */
     fun softDelete(id: String): Boolean =
         jdbc.update(
-            "UPDATE templates SET is_deleted = TRUE, updated_at = NOW() WHERE id = :id AND is_deleted = FALSE",
-            mapOf("id" to id),
+            "UPDATE templates SET is_deleted = TRUE, updated_at = NOW()" +
+                " WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
+            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
         ) > 0
 
     private fun params(
@@ -196,7 +212,8 @@ class TemplateRepository(
         actor: UUID,
     ): Map<String, Any?> =
         mapOf(
-            "id" to id,
+            "name" to id,
+            "workspaceId" to DEFAULT_WORKSPACE_ID,
             "displayName" to draft.displayName,
             "description" to draft.description,
             "engine" to draft.engine,
@@ -238,16 +255,27 @@ class TemplateRepository(
                     .take(GENERATED_ID_HEX_LENGTH)
 
         /**
+         * The seeded `default` workspace every slice-1 read resolves within and every slice-1
+         * write pins (metadata-db §4.11, R2). A code constant — never a column DEFAULT — so
+         * slice 2's real workspace resolution finds every pin by grepping the value.
+         */
+        private val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
+
+        /**
          * `created_by` comes from `template_versions`, never from `templates` (TPL-API-2).
          *
          * The two are genuinely different people: `templates.created_by` is whoever first
          * created the template, `template_versions.created_by` is whoever wrote *this* version.
          * Reading the former made a version updated by B report A as its author — and disagree
          * with [listVersions], which reads the version row, about the very same version.
+         *
+         * `t.name AS id`: since V4 the human id is the `name` column (the PK is a surrogate
+         * UUID, metadata-db §4.8); the alias keeps the record types name-based, which is what
+         * pipeline-JSON and `imports_json` `{id, version}` refs mean.
          */
         private val SELECT_JOINED =
             """
-            SELECT t.id, t.display_name, t.description,
+            SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
                    v.body, v.created_at, v.created_by AS version_created_by
               FROM templates t
@@ -255,15 +283,16 @@ class TemplateRepository(
             """.trimIndent()
 
         private const val SELECT_VERSION =
-            "SELECT template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json, " +
-                "body, created_at, created_by FROM template_versions"
+            "SELECT t.name AS template_id, v.version, v.engine, v.dialect, v.is_library, " +
+                "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by " +
+                "FROM template_versions v JOIN templates t ON t.id = v.template_id"
 
         private val INSERT_SQL =
             """
             WITH new_template AS (
-                INSERT INTO templates (id, display_name, description, current_version, created_by)
-                VALUES (:id, :displayName, :description, 1, :actor)
-                RETURNING id, display_name, description, created_by
+                INSERT INTO templates (name, display_name, description, current_version, workspace_id, created_by)
+                VALUES (:name, :displayName, :description, 1, :workspaceId, :actor)
+                RETURNING id, name, display_name, description
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, dialect, is_library, imports_json, body, created_by)
@@ -272,7 +301,7 @@ class TemplateRepository(
                 RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
-            SELECT t.id, t.display_name, t.description,
+            SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
                    v.created_by AS version_created_by
               FROM new_template t
@@ -287,8 +316,8 @@ class TemplateRepository(
                        display_name = :displayName,
                        description = :description,
                        updated_at = NOW()
-                 WHERE id = :id AND is_deleted = FALSE
-                RETURNING id, display_name, description, current_version
+                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                RETURNING id, name, display_name, description, current_version
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, dialect, is_library, imports_json, body, created_by)
@@ -297,7 +326,7 @@ class TemplateRepository(
                 RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
-            SELECT t.id, t.display_name, t.description,
+            SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
                    v.created_by AS version_created_by
               FROM bumped t

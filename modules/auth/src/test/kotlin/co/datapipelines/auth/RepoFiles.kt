@@ -26,6 +26,17 @@ object RepoFiles {
     fun read(relativePath: String): String = file(relativePath).readText()
 
     const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
+
+    /**
+     * V1 plus the `workspaces` re-key (V4), in version order — the suites that exercise
+     * [ApiKeyRepository] need the `api_keys.workspace_id` column and its FK parent.
+     */
+    val MIGRATION_PATHS =
+        listOf(
+            MIGRATION_PATH,
+            "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
+        )
+
     const val AUTH_SPEC_PATH = "docs/auth.md"
     const val PIPELINE_CONTRACT_PATH = "docs/pipeline-contract.md"
 }
