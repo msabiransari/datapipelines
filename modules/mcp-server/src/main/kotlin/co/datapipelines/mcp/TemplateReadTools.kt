@@ -43,13 +43,14 @@ class TemplatesListTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val limit = args.int("limit", default = TemplateRepository.DEFAULT_PAGE_LIMIT, min = 1, max = TemplateRepository.MAX_PAGE_LIMIT)
         val isLibrary = args.boolean("is_library")
         // `is_library` has no repository-level filter (templates.md §9 does not expose one), so it
         // is applied here. It narrows a page rather than paging past it — same visible-set rule the
         // REST listing has, and the alternative would be an unbounded scan.
         return templates
-            .list(dialect = args.dialect("dialect"), q = args.string("q"), limit = limit)
+            .list(workspaceId, dialect = args.dialect("dialect"), q = args.string("q"), limit = limit)
             .filter { isLibrary == null || it.isLibrary == isLibrary }
             .map { it.toMetadata() }
     }
@@ -96,9 +97,10 @@ class TemplatesGetTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
-        val version = args.version() ?: return templates.findLatest(id) ?: throw McpNotFound.template(id)
-        return templates.findVersion(id, version)
-            ?: if (templates.existsId(id)) throw McpNotFound.templateVersion(id, version) else throw McpNotFound.template(id)
+        val version = args.version() ?: return templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
+        return templates.findVersion(workspaceId, id, version)
+            ?: if (templates.existsId(workspaceId, id)) throw McpNotFound.templateVersion(id, version) else throw McpNotFound.template(id)
     }
 }

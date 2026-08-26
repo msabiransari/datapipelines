@@ -48,6 +48,7 @@ class ApiKeysPartialController(
                 name = name,
                 scopes = requestedScopes,
                 creatorScopes = principal.scopes,
+                workspaceId = principal.requireWorkspace().id,
                 expiresAt = expiresAt,
             )
         val keys = apiKeyRepository.findByUser(principal.userId)

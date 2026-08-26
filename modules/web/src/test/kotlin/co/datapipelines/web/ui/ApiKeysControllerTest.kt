@@ -7,6 +7,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -28,6 +29,7 @@ class ApiKeysControllerTest {
     private val controller = ApiKeysController(apiKeyRepository, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val principal =
         AuthenticatedPrincipal(
@@ -36,6 +38,7 @@ class ApiKeysControllerTest {
             displayName = "A",
             scopes = setOf(Scope.AUTHOR),
             authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
     @AfterEach
@@ -57,6 +60,8 @@ class ApiKeysControllerTest {
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             lastUsedAt = null,
             expiresAt = null,
+            workspaceId = workspaceId,
+            workspaceName = "acme",
         )
 
     @Test
@@ -81,6 +86,7 @@ class ApiKeysPartialControllerTest {
     private val partialController = ApiKeysPartialController(apiKeyService, apiKeyRepository)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val principal =
         AuthenticatedPrincipal(
@@ -89,6 +95,7 @@ class ApiKeysPartialControllerTest {
             displayName = "A",
             scopes = setOf(Scope.AUTHOR),
             authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
     @AfterEach
@@ -110,6 +117,8 @@ class ApiKeysPartialControllerTest {
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             lastUsedAt = null,
             expiresAt = null,
+            workspaceId = workspaceId,
+            workspaceName = "acme",
         )
 
     private fun sampleIssued() =
@@ -121,7 +130,7 @@ class ApiKeysPartialControllerTest {
     @Test
     fun `create returns partial with key plaintext`() {
         authenticate()
-        every { apiKeyService.issue(any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any()) } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
         val model: ExtendedModelMap = ExtendedModelMap()

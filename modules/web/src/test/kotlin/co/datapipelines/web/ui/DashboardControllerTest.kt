@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -29,6 +30,7 @@ class DashboardControllerTest {
 
     private val userId = UUID.randomUUID()
     private val adminId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -37,7 +39,15 @@ class DashboardControllerTest {
         id: UUID,
         scopes: Set<Scope>,
     ) {
-        val principal = AuthenticatedPrincipal(id, "u@d.p", "User", scopes, AuthMethod.OIDC)
+        val principal =
+            AuthenticatedPrincipal(
+                id,
+                "u@d.p",
+                "User",
+                scopes,
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -57,9 +67,9 @@ class DashboardControllerTest {
     @Test
     fun `stats returns pipeline count executions today and success rate`() {
         authenticate(userId, setOf(Scope.READ))
-        every { pipelines.countAll() } returns 2
+        every { pipelines.countAll(any()) } returns 2
         val records = listOf(record(), record(ExecutionStatus.FAILED), record())
-        every { executions.findByUser(userId, null, null, null, null, limit = 100, offset = 0) } returns records
+        every { executions.findByUser(any(), userId, null, null, null, null, limit = 100, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = controller.stats(model)
@@ -74,7 +84,7 @@ class DashboardControllerTest {
     fun `recent executions returns last 10 for user`() {
         authenticate(userId, setOf(Scope.READ))
         val records = (1..10).map { record() }
-        every { executions.findByUser(userId, limit = 10, offset = 0) } returns records
+        every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = controller.recentExecutions(model)
@@ -88,7 +98,7 @@ class DashboardControllerTest {
     @Test
     fun `recent executions empty state when no executions`() {
         authenticate(userId, setOf(Scope.READ))
-        every { executions.findByUser(userId, limit = 10, offset = 0) } returns emptyList()
+        every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
         controller.recentExecutions(model)
@@ -101,8 +111,8 @@ class DashboardControllerTest {
     @Test
     fun `admin sees all pipelines and executions`() {
         authenticate(adminId, setOf(Scope.ADMIN))
-        every { pipelines.countAll() } returns 1
-        every { executions.findAll(limit = 100, offset = 0) } returns listOf(record())
+        every { pipelines.countAll(any()) } returns 1
+        every { executions.findAll(any(), limit = 100, offset = 0) } returns listOf(record())
 
         val model = ExtendedModelMap()
         controller.stats(model)

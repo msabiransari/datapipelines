@@ -274,6 +274,9 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
+| `auth.workspace.provisioned` | Personal workspace auto-created on first login (`auto-per-user` mode) |
+| `auth.workspace.created` | Workspace created through the service path |
+| `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
 
 > There are no password or lockout events — the system has no local passwords ([Auth §2](auth.md#2-design-principles)).
 
@@ -309,6 +312,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
 | `rate_limit.exceeded` | Rate limit hit (single code for all layers) | pipeline-contract §13.11 |
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
+| `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 

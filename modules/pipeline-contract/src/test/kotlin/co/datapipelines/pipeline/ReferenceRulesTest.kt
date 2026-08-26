@@ -10,6 +10,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * pipeline-contract §12.5 (datasource existence) and §12.6 (template registry + dry render).
@@ -19,6 +20,8 @@ import org.junit.jupiter.api.Test
  * module declares, is the payoff of inverting those dependencies.
  */
 class ReferenceRulesTest {
+    private val workspaceId = UUID.randomUUID()
+
     @Test
     fun `an unregistered source datasource is rejected`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(source = "pg-staging")))
@@ -180,7 +183,7 @@ class ReferenceRulesTest {
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
         templates: TemplateDryRenderer = StubTemplates(),
-    ) = PipelineValidator(datasources, templates, PipelineResolver { _, _ -> null }, 5).validate(pipeline)
+    ) = PipelineValidator(datasources, templates, PipelineResolver { _, _, _ -> null }, 5).validate(pipeline, workspaceId)
 
     private fun h2Templates() = StubTemplates(defaultLookup = TemplateLookup.Found(Dialect.H2))
 }

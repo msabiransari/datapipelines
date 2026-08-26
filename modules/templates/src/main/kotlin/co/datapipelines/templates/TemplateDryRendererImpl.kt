@@ -21,14 +21,17 @@ import co.datapipelines.pipeline.TemplateRef
  * classifies rather than raises.
  */
 class TemplateDryRendererImpl(
-    private val engine: TemplateEngine,
-    private val registry: TemplateRegistry,
+    private val engines: WorkspaceTemplateEngines,
 ) : TemplateDryRenderer {
     /**
      * Splits the registry's null into the two §12.6 outcomes: a missing id is
      * `template_not_found`, an existing id at a missing version is `template_version_not_found`.
      */
-    override fun lookup(ref: TemplateRef): TemplateLookup {
+    override fun lookup(
+        workspaceId: java.util.UUID,
+        ref: TemplateRef,
+    ): TemplateLookup {
+        val registry = engines.registryFor(workspaceId)
         val version = registry.lookup(ref.id, ref.version)
         return when {
             version != null -> TemplateLookup.Found(version.dialect)
@@ -38,10 +41,11 @@ class TemplateDryRendererImpl(
     }
 
     override fun dryRender(
+        workspaceId: java.util.UUID,
         ref: TemplateRef,
         context: Map<String, Any?>,
     ): DryRenderOutcome =
-        when (val outcome = engine.execute(ref, context)) {
+        when (val outcome = engines.engineFor(workspaceId).execute(ref, context)) {
             is RenderOutcome.Success -> DryRenderOutcome.Success
 
             is RenderOutcome.UndefinedVariable -> DryRenderOutcome.UndeclaredVariable(outcome.variable, outcome.detail)

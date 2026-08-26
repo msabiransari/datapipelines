@@ -4,6 +4,7 @@ import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.io.File
+import java.util.UUID
 
 /**
  * Builders and test doubles shared across this module's specs.
@@ -62,7 +63,7 @@ internal object Fixtures {
     fun validator(
         datasources: DatasourceRegistry = StubDatasources(),
         templates: TemplateDryRenderer = StubTemplates(),
-        pipelines: PipelineResolver = PipelineResolver { _, _ -> null },
+        pipelines: PipelineResolver = PipelineResolver { _, _, _ -> null },
         maxCompositionDepth: Int = 5,
     ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth)
 
@@ -121,9 +122,13 @@ internal class StubTemplates(
     /** Contexts the validator passed in, keyed by template id — the §7.4 sample-context evidence. */
     val renderedContexts = mutableMapOf<String, Map<String, Any?>>()
 
-    override fun lookup(ref: TemplateRef): TemplateLookup = lookups[ref.id] ?: defaultLookup
+    override fun lookup(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): TemplateLookup = lookups[ref.id] ?: defaultLookup
 
     override fun dryRender(
+        workspaceId: UUID,
         ref: TemplateRef,
         context: Map<String, Any?>,
     ): DryRenderOutcome {

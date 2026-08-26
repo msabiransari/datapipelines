@@ -24,9 +24,11 @@ class ApiKeyVerificationCacheTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties(apiKeys = AuthProperties.ApiKeys(cacheTtlSeconds = ttlSeconds))) { nowNanos }
     private val hasher = CountingHasher()
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, hasher, AuthProperties())
+    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+    private val service = ApiKeyService(repo, userService, cache, auditLogger, hasher, AuthProperties(), workspaceService)
 
     private val ownerId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     /** Counts verifications so "how often did Argon2 run?" is an assertion, not a guess. */
     private class CountingHasher : SecretHasher {
@@ -45,12 +47,12 @@ class ApiKeyVerificationCacheTest {
 
     private fun issueKey(): IssuedApiKey {
         val hash = slot<String>()
-        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any()) } answers {
-            ApiKey(firstArg(), ownerId, thirdArg(), hash.captured, arg(4), false, Instant.now(), null, arg(5))
+        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
+            ApiKey(firstArg(), ownerId, thirdArg(), hash.captured, arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
-        val issued = service.issue(ownerId, "k", setOf(Scope.READ), setOf(Scope.READ))
+        val issued = service.issue(ownerId, "k", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         return issued
     }

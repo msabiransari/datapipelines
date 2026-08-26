@@ -24,9 +24,12 @@ internal class PipelineSaveSupport(
     private val validator: PipelineValidator,
     private val serializer: PipelineSerializer,
 ) {
-    /** Args → validated [Pipeline] + its canonical body JSON. */
-    fun validated(args: McpArguments): Pair<Pipeline, String> {
-        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(bodyJson(args)))
+    /** Args → validated [Pipeline] + its canonical body JSON. Validates within [workspaceId]. */
+    fun validated(
+        args: McpArguments,
+        workspaceId: UUID,
+    ): Pair<Pipeline, String> {
+        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(bodyJson(args)), workspaceId)
         return pipeline to serializer.write(pipeline)
     }
 
@@ -113,8 +116,9 @@ class PipelinesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
-        val (pipeline, body) = support.validated(args)
-        val record = pipelines.create(NewPipeline.from(pipeline, ownerId = ctx.principal.userId), body, ctx.principal.userId)
+        val workspaceId = ctx.principal.requireWorkspace().id
+        val (pipeline, body) = support.validated(args, workspaceId)
+        val record = pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = ctx.principal.userId), body, ctx.principal.userId)
         return support.response(record, body)
     }
 
@@ -165,9 +169,10 @@ class PipelinesUpdateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val id: UUID = args.requiredUuid("id")
-        val (pipeline, body) = support.validated(args)
-        val record = pipelines.update(id, pipeline, body, ctx.principal.userId) ?: throw McpNotFound.pipeline(id)
+        val (pipeline, body) = support.validated(args, workspaceId)
+        val record = pipelines.update(workspaceId, id, pipeline, body, ctx.principal.userId) ?: throw McpNotFound.pipeline(id)
         return support.response(record, body)
     }
 

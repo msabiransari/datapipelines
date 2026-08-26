@@ -22,9 +22,11 @@ class ApiKeyServiceTest {
     private val userService = mockk<UserService>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties())
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties())
+    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+    private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
 
     private val ownerId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private fun activeOwner() =
         User(ownerId, "owner@company.com", "Owner", null, "keycloak", "sub", true, false, Instant.now(), Instant.now(), null)
@@ -32,7 +34,7 @@ class ApiKeyServiceTest {
     /** Stubs `insert` to echo back a record built from its arguments (real keyHash). */
     private fun echoInsert(): io.mockk.CapturingSlot<String> {
         val hash = slot<String>()
-        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any()) } answers {
+        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
             ApiKey(
                 id = firstArg(),
                 userId = ownerId,
@@ -43,6 +45,8 @@ class ApiKeyServiceTest {
                 createdAt = Instant.now(),
                 lastUsedAt = null,
                 expiresAt = arg(5),
+                workspaceId = arg(6),
+                workspaceName = "acme",
             )
         }
         return hash
@@ -51,7 +55,7 @@ class ApiKeyServiceTest {
     @Test
     fun `issue returns a dpk_ plaintext and persists only the hash`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR), workspaceId)
 
         issued.plaintext shouldStartWith "dpk_"
         issued.record.id shouldStartWith "dpk_"
@@ -63,7 +67,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a freshly issued key validates and resolves the owner principal`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.EXECUTE), setOf(Scope.AUTHOR))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.EXECUTE), setOf(Scope.AUTHOR), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -78,7 +82,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a wrong secret for a real key id is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner()
 
@@ -89,7 +93,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a revoked key is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
 
         shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
@@ -98,7 +102,7 @@ class ApiKeyServiceTest {
     @Test
     fun `an expired key maps to api_key expired`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record.copy(expiresAt = Instant.now().minusSeconds(60))
 
         shouldThrow<ApiKeyExpiredException> { service.validate(issued.plaintext) }
@@ -107,7 +111,7 @@ class ApiKeyServiceTest {
     @Test
     fun `a key whose owner is inactive is rejected as invalid`() {
         echoInsert()
-        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ))
+        val issued = service.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner().copy(isActive = false)
 
@@ -123,7 +127,20 @@ class ApiKeyServiceTest {
     @Test
     fun `escalation guard - a read creator cannot mint an author key (§7-4)`() {
         shouldThrow<ScopeInsufficientException> {
-            service.issue(ownerId, "Escalate", setOf(Scope.AUTHOR), creatorScopes = setOf(Scope.READ))
+            service.issue(ownerId, "Escalate", setOf(Scope.AUTHOR), creatorScopes = setOf(Scope.READ), workspaceId = workspaceId)
+        }
+    }
+
+    @Test
+    fun `issuance into a workspace the creator cannot access is refused (§7-4)`() {
+        val denying =
+            mockk<WorkspaceService> {
+                every { requireAccess(any(), any(), any()) } throws WorkspaceMembershipRequiredException()
+            }
+        val guarded = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), denying)
+
+        shouldThrow<WorkspaceMembershipRequiredException> {
+            guarded.issue(ownerId, "Claude", setOf(Scope.READ), setOf(Scope.AUTHOR), workspaceId)
         }
     }
 
@@ -132,13 +149,13 @@ class ApiKeyServiceTest {
         // A non-default configured value, so a hard-coded `read` cannot pass this test.
         val configured =
             AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("execute")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured)
+        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
         val scopes = slot<Set<Scope>>()
-        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any()) } answers {
-            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5))
+        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
+            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR))
+        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.EXECUTE)
     }
@@ -146,13 +163,13 @@ class ApiKeyServiceTest {
     @Test
     fun `an unusable configured default falls back to read (§7-5)`() {
         val configured = AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("nonsense")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured)
+        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
         val scopes = slot<Set<Scope>>()
-        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any()) } answers {
-            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5))
+        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
+            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
 
-        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR))
+        withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
 
         scopes.captured shouldContainExactlyInAnyOrder setOf(Scope.READ)
     }
@@ -168,14 +185,14 @@ class ApiKeyServiceTest {
     fun `an unparseable configured default-scopes token is reported at WARN, naming the token`() {
         val configured =
             AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("nonsense", "execute")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured)
+        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
         val scopes = slot<Set<Scope>>()
-        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any()) } answers {
-            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5))
+        every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
+            ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
         val logged =
             captureWarnings(ApiKeyService::class.java) {
-                withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR))
+                withDefaults.issue(ownerId, "Claude", emptySet(), creatorScopes = setOf(Scope.AUTHOR), workspaceId = workspaceId)
             }
 
         logged.any { it.contains("nonsense") } shouldBe true

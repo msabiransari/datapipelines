@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import io.kotest.matchers.collections.shouldHaveSize
@@ -23,6 +24,7 @@ class PipelineUiControllerTest {
     private val controller = PipelineUiController(repository, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
     private val pageSize = 25
 
     private fun pipeline(name: String = "my-pipeline") =
@@ -41,10 +43,25 @@ class PipelineUiControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
+    private fun authenticate() {
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.AUTHOR),
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
     @Test
     fun `list page returns pipelines view with theme and pipelines`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline("other"))
+        every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline("other"))
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null)
@@ -61,8 +78,9 @@ class PipelineUiControllerTest {
 
     @Test
     fun `list page filters by search query`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null) } returns
+        every { repository.findAll(any()) } returns
             listOf(
                 pipeline("alpha"),
                 pipeline("beta"),
@@ -81,6 +99,7 @@ class PipelineUiControllerTest {
 
     @Test
     fun `list page search filter matches displayName and description`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         val now = java.time.Instant.now()
         val record1 =
@@ -119,7 +138,7 @@ class PipelineUiControllerTest {
                 now,
                 now,
             )
-        every { repository.findAll(null) } returns listOf(record1, record2, record3)
+        every { repository.findAll(any()) } returns listOf(record1, record2, record3)
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "bravo", null)
@@ -131,7 +150,8 @@ class PipelineUiControllerTest {
 
     @Test
     fun `partial returns fragment view with correct model`() {
-        every { repository.findAll(null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline(), pipeline())
+        authenticate()
+        every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline(), pipeline())
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -145,7 +165,8 @@ class PipelineUiControllerTest {
 
     @Test
     fun `partial paginates correctly`() {
-        every { repository.findAll(null, pageSize + 1, 25) } returns (1..5).map { pipeline("p${it + 25}") }
+        authenticate()
+        every { repository.findAll(any(), null, pageSize + 1, 25) } returns (1..5).map { pipeline("p${it + 25}") }
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -160,19 +181,10 @@ class PipelineUiControllerTest {
 
     @Test
     fun `scopes are populated from authenticated principal`() {
-        val principal =
-            AuthenticatedPrincipal(
-                userId,
-                "a@b.c",
-                "A",
-                setOf(Scope.AUTHOR),
-                AuthMethod.OIDC,
-            )
-        SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+        authenticate()
 
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null, pageSize + 1, 0) } returns emptyList()
+        every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)
@@ -184,8 +196,9 @@ class PipelineUiControllerTest {
 
     @Test
     fun `empty list renders with hasMore false`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.findAll(null, pageSize + 1, 0) } returns emptyList()
+        every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)

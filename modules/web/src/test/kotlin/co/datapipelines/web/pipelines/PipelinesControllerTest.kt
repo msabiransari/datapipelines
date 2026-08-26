@@ -3,6 +3,7 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -35,6 +36,7 @@ class PipelinesControllerTest {
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
     private val record =
         PipelineRecord(
             id = pipelineId,
@@ -52,7 +54,15 @@ class PipelinesControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     private fun authenticate() {
-        val principal = AuthenticatedPrincipal(userId, "a@b.c", "A", setOf(Scope.AUTHOR), AuthMethod.OIDC)
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.AUTHOR),
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -63,8 +73,8 @@ class PipelinesControllerTest {
         val body =
             """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
                 """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
-        every { validator.validateOrThrow(any()) } answers { firstArg() }
-        every { repository.create(any<NewPipeline>(), any(), any()) } returns record
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { repository.create(any(), any<NewPipeline>(), any(), any()) } returns record
 
         val response = controller.create(body)
 
@@ -79,7 +89,8 @@ class PipelinesControllerTest {
 
     @Test
     fun `get on an unknown pipeline is the catalogued 404`() {
-        every { repository.findById(pipelineId) } returns null
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns null
 
         val error = shouldThrow<ApiException> { controller.get(pipelineId) }
         error.code shouldBe "pipeline.execution.not_found"
@@ -87,8 +98,9 @@ class PipelinesControllerTest {
 
     @Test
     fun `get merges server fields into the stored body`() {
-        every { repository.findById(pipelineId) } returns record
-        every { repository.findVersionBody(pipelineId, 1) } returns """{"schema_version":1,"name":"monthly_revenue"}"""
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns """{"schema_version":1,"name":"monthly_revenue"}"""
 
         val data = controller.get(pipelineId).data
         data.get("name").asText() shouldBe "monthly_revenue"
@@ -98,8 +110,9 @@ class PipelinesControllerTest {
 
     @Test
     fun `list paginates the memoized scan and derives has_more honestly`() {
+        authenticate()
         val records = (1..5).map { i -> record.copy(id = UUID.randomUUID(), name = "p$i") }
-        every { repository.findAll(null) } returns records
+        every { repository.findAll(any(), null) } returns records
 
         val first = controller.list(owner = null, datasource = null, q = null, offset = 0, limit = 2).data
         first.items.size shouldBe 2
@@ -112,10 +125,11 @@ class PipelinesControllerTest {
 
     @Test
     fun `delete is 204 on success and 404 when nothing was live`() {
-        every { repository.softDelete(pipelineId) } returns true
+        authenticate()
+        every { repository.softDelete(any(), pipelineId) } returns true
         controller.delete(pipelineId)
 
-        every { repository.softDelete(pipelineId) } returns false
+        every { repository.softDelete(any(), pipelineId) } returns false
         shouldThrow<ApiException> { controller.delete(pipelineId) }.code shouldBe "pipeline.execution.not_found"
     }
 }

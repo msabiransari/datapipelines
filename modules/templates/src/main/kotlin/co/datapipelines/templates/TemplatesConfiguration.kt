@@ -15,6 +15,14 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * constructor injection. This keeps [TemplateEngine], [TemplateValidator] and the rest
  * framework-agnostic and directly unit-testable, with the Spring knowledge confined to this
  * one file.
+ *
+ * ## Per-workspace engines (slice 2, T24)
+ *
+ * There is deliberately **no** singleton `TemplateEngine`/`TemplateRegistry` bean: template
+ * names are unique only per workspace, so the render path's caches must be workspace-bound
+ * or they collide across workspaces. [WorkspaceTemplateEngines] vends the bound pairs;
+ * every consumer (REST render, MCP tools, pipeline validation, the execution path's
+ * assemblers in `web`) resolves its workspace and picks the matching engine.
  */
 @Configuration
 @EnableConfigurationProperties(TemplatesProperties::class)
@@ -23,35 +31,16 @@ class TemplatesConfiguration {
     fun templateRepository(jdbc: NamedParameterJdbcTemplate): TemplateRepository = TemplateRepository(jdbc)
 
     @Bean
-    fun templateRegistry(
+    fun workspaceTemplateEngines(
         repository: TemplateRepository,
         properties: TemplatesProperties,
-    ): TemplateRegistry = RepositoryTemplateRegistry(repository, properties.cacheSize)
-
-    @Bean
-    fun libraryResolver(registry: TemplateRegistry): LibraryResolver = LibraryResolver(registry)
-
-    @Bean
-    fun templateValidator(
-        libraryResolver: LibraryResolver,
-        properties: TemplatesProperties,
-    ): TemplateValidator = TemplateValidator(libraryResolver, properties.maxBodyChars)
-
-    // Named `sqlTemplateEngine`, not `templateEngine`: the `web` module pulls in
-    // spring-boot-starter-thymeleaf, whose autoconfiguration already registers a bean named
-    // `templateEngine` (Thymeleaf's SpringTemplateEngine). Bean-definition overriding is off by
-    // default in Spring Boot, so a name clash fails context startup. Injection is by type.
-    @Bean
-    fun sqlTemplateEngine(
-        registry: TemplateRegistry,
-        properties: TemplatesProperties,
-    ): TemplateEngine =
-        TemplateEngine(
-            registry = registry,
+    ): WorkspaceTemplateEngines =
+        WorkspaceTemplateEngines(
+            repository = repository,
             cacheSize = properties.cacheSize,
             renderTimeoutMs = properties.renderTimeoutMs,
             // Output-size budget is Staging §8's to own; this is the engine-wide backstop against
-            // pathological output. `dag` injects this engine rather than constructing it
+            // pathological output. `dag` injects an engine rather than constructing it
             // (dag-executor §5.2), so it supplies the real per-execution budget per call —
             // `render(ref, context, maxOutputChars)` — not at construction. NOT a templates
             // config key (configuration.md §3.9).
@@ -59,10 +48,16 @@ class TemplatesConfiguration {
         )
 
     @Bean
-    fun templateDryRenderer(
-        engine: TemplateEngine,
-        registry: TemplateRegistry,
-    ): TemplateDryRenderer = TemplateDryRendererImpl(engine, registry)
+    fun libraryResolver(engines: WorkspaceTemplateEngines): LibraryResolver = LibraryResolver(engines::registryFor)
+
+    @Bean
+    fun templateValidator(
+        libraryResolver: LibraryResolver,
+        properties: TemplatesProperties,
+    ): TemplateValidator = TemplateValidator(libraryResolver, properties.maxBodyChars)
+
+    @Bean
+    fun templateDryRenderer(engines: WorkspaceTemplateEngines): TemplateDryRenderer = TemplateDryRendererImpl(engines)
 
     private companion object {
         /** 64M characters — a backstop against pathological output, not the real staging budget. */

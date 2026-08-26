@@ -37,8 +37,8 @@ class McpResourceReaderTest {
 
     @Test
     fun `a pipeline reads as its JSON body`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val contents = contents(McpResourceUri.pipeline(McpFixtures.PIPELINE_ID))
 
@@ -50,8 +50,8 @@ class McpResourceReaderTest {
 
     @Test
     fun `a specific pipeline version reads that version`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 5)
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "older")
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 5)
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "older")
 
         McpTools.readTree(contents("datapipelines://pipelines/${McpFixtures.PIPELINE_ID}/versions/2").text())["name"].asText() shouldBe
             "older"
@@ -59,8 +59,8 @@ class McpResourceReaderTest {
 
     @Test
     fun `the parameters resource carries only the parameter declarations`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val text = contents("datapipelines://pipelines/${McpFixtures.PIPELINE_ID}/parameters").text()
 
@@ -72,7 +72,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `a template reads as its Freemarker body`() {
-        every { templates.findLatest("revenue.sql") } returns McpFixtures.template()
+        every { templates.findLatest(any(), "revenue.sql") } returns McpFixtures.template()
 
         val contents = contents(McpResourceUri.template("revenue.sql"))
 
@@ -109,14 +109,14 @@ class McpResourceReaderTest {
 
     @Test
     fun `an execution reads as its metadata`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
 
         McpTools.readTree(contents(McpResourceUri.execution(McpFixtures.EXECUTION_ID)).text())["status"].asText() shouldBe "SUCCESS"
     }
 
     @Test
     fun `execution events replay in SSE framing`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { events.findByExecution(McpFixtures.EXECUTION_ID) } returns
             listOf(
                 ExecutionEventRecord(McpFixtures.EXECUTION_ID, 1, "execution_started", Instant.parse("2026-08-09T12:00:00Z"), "{}"),
@@ -134,7 +134,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `another user's execution and its events are not readable`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
 
         assertAll(
@@ -145,7 +145,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `a specific template version reads that version's body`() {
-        every { templates.lookupVersion("revenue.sql", 2) } returns
+        every { templates.lookupVersion(any(), "revenue.sql", 2) } returns
             TemplateVersion(
                 id = "revenue.sql",
                 version = 2,
@@ -178,7 +178,7 @@ class McpResourceReaderTest {
 
         assertAll(
             { error.jsonRpcError.code() shouldBe McpArguments.FORBIDDEN },
-            { verify(exactly = 0) { pipelines.findById(any()) } },
+            { verify(exactly = 0) { pipelines.findById(any(), any()) } },
         )
     }
 
@@ -189,7 +189,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `an unknown entity is a resource-not-found protocol error`() {
-        every { templates.findLatest("nope") } returns null
+        every { templates.findLatest(any(), "nope") } returns null
 
         shouldThrow<McpError> { reader.read(McpResourceUri.template("nope"), ctx) }
     }

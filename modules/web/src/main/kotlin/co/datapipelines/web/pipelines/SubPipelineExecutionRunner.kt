@@ -34,7 +34,7 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.staging.StagingMemoryLimitException
-import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStreamRegistry
@@ -97,7 +97,7 @@ import java.util.UUID
 @Suppress("LongParameterList")
 class SubPipelineExecutionRunner(
     private val pipelines: PipelineRepository,
-    private val templateEngine: TemplateEngine,
+    private val templateEngines: WorkspaceTemplateEngines,
     private val datasourceRegistry: DatasourceRegistry,
     private val stagingFactory: StagingFactory,
     private val writebackRunner: WritebackRunner,
@@ -131,14 +131,15 @@ class SubPipelineExecutionRunner(
         val startedAt = Instant.now()
         val ref = requireRef(node)
         checkDepth(node, childPipelineDepth(ctx))
-        val (record, child) = loadChild(node, ref)
+        val workspaceId = parentWorkspace(node, ctx)
+        val (record, child) = loadChild(node, ref, workspaceId)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
         // able to name the child execution even when it never completes.
         val childExecutionId = UUID.randomUUID()
         val outcome = SinkOutcome()
         val request = childRequest(node, ctx, ref, record, child, childExecutionId, outcome)
-        val result = executeChild(node, record, request)
+        val result = executeChild(node, record, request, workspaceId)
         recordResultColumns(result)
         ensureOutputDelivered(node, request.executionId, outcome)
 
@@ -151,6 +152,27 @@ class SubPipelineExecutionRunner(
             childExecutionId = childExecutionId,
         )
     }
+
+    /**
+     * The workspace the child resolves in — the PARENT execution's workspace (design §3:
+     * cross-workspace references do not exist). `dag`'s frozen [NodeExecutionContext] cannot
+     * carry it down, so it is derived from the parent execution's row (whose pipeline's
+     * `workspace_id` is the scope, §5.3). A missing row means the parent's bookkeeping is
+     * gone — corruption, reported like a vanished reference.
+     */
+    private fun parentWorkspace(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+    ): UUID =
+        executionRepository.workspaceOfExecution(ctx.executionId)
+            ?: throw childFailure(
+                node,
+                childExecutionId = null,
+                message =
+                    "The parent execution '${ctx.executionId}' has no recorded workspace; " +
+                        "a running execution's row cannot vanish, so this indicates corruption.",
+                cause = null,
+            )
 
     /**
      * The pinned reference — non-null by save-time validation (§12.9); the guard keeps a
@@ -209,15 +231,17 @@ class SubPipelineExecutionRunner(
 
     /**
      * The pinned body load: same repository sequence as `pipelines_execute`
-     * (PipelineExecuteTool), by name — the cross-pipeline identifier (§3.2, D5). Soft-delete
-     * does not affect an existing pinned reference (D7), so the read includes deleted rows.
+     * (PipelineExecuteTool), by name — the cross-pipeline identifier (§3.2, D5) — resolved in
+     * [workspaceId]. Soft-delete does not affect an existing pinned reference (D7), so the
+     * read includes deleted rows.
      */
     private fun loadChild(
         node: ExecutableNode,
         ref: PipelineNodeRef,
+        workspaceId: UUID,
     ): Pair<PipelineRecord, Pipeline> {
-        val record = pipelines.findByNameIncludingDeleted(ref.name)
-        val body = record?.let { pipelines.findVersionBody(it.id, ref.version) }
+        val record = pipelines.findByNameIncludingDeleted(workspaceId, ref.name)
+        val body = record?.let { pipelines.findVersionBody(workspaceId, it.id, ref.version) }
         if (record == null || body == null) {
             throw childFailure(
                 node,
@@ -269,6 +293,7 @@ class SubPipelineExecutionRunner(
         node: ExecutableNode,
         record: PipelineRecord,
         request: ExecuteRequest,
+        workspaceId: UUID,
     ): ExecutionResult {
         val emitter =
             WebEventEmitter(
@@ -281,6 +306,7 @@ class SubPipelineExecutionRunner(
                         correlationId = request.correlationId ?: UUID.randomUUID(),
                         triggeredVia = ExecutionTrigger.PIPELINE,
                         parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
+                        workspaceId = workspaceId,
                         parentExecutionId = request.parentExecutionId,
                         parentNodeId = request.parentNodeId,
                         rootExecutionId = request.rootExecutionId,
@@ -293,7 +319,7 @@ class SubPipelineExecutionRunner(
                 persistenceDispatcher = persistenceDispatcher,
             )
         return try {
-            (executorFactory?.invoke(emitter) ?: newExecutor(emitter)).execute(request)
+            (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)).execute(request)
         } catch (e: CancellationException) {
             // Family cancellation (design §4.3, D8) — never relabelled as a node failure.
             throw e
@@ -503,9 +529,12 @@ class SubPipelineExecutionRunner(
      * addition: `subPipelineRunner = this`, so a child's own PIPELINE nodes (grandchildren)
      * dispatch through the same machinery with the depth counter they carry.
      */
-    private fun newExecutor(emitter: WebEventEmitter): PipelineExecutor =
+    private fun newExecutor(
+        emitter: WebEventEmitter,
+        workspaceId: UUID,
+    ): PipelineExecutor =
         pipelineExecutor(
-            templateEngine = templateEngine,
+            templateEngine = templateEngines.engineFor(workspaceId),
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,

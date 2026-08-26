@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
@@ -21,7 +22,7 @@ import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.staging.StagingFactory
-import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
@@ -50,7 +51,7 @@ import java.util.UUID
  */
 @Suppress("LongParameterList")
 class McpRecordingExecutionRunner(
-    private val templateEngine: TemplateEngine,
+    private val templateEngines: WorkspaceTemplateEngines,
     private val datasourceRegistry: DatasourceRegistry,
     private val stagingFactory: StagingFactory,
     private val writebackRunner: WritebackRunner,
@@ -76,7 +77,10 @@ class McpRecordingExecutionRunner(
 ) : McpExecutionRunner {
     private val log = LoggerFactory.getLogger(McpRecordingExecutionRunner::class.java)
 
-    override suspend fun run(request: ExecuteRequest): ExecutionResult {
+    override suspend fun run(
+        request: ExecuteRequest,
+        workspace: WorkspaceContext,
+    ): ExecutionResult {
         val emitter =
             WebEventEmitter(
                 context =
@@ -87,6 +91,7 @@ class McpRecordingExecutionRunner(
                         correlationId = request.correlationId ?: UUID.randomUUID(),
                         triggeredVia = ExecutionTrigger.MCP,
                         parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
+                        workspaceId = workspace.id,
                     ),
                 stream = null,
                 streams = streams,
@@ -95,7 +100,7 @@ class McpRecordingExecutionRunner(
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
             )
-        val result = newExecutor(emitter).execute(request.copy(triggeredVia = ExecutionTrigger.MCP))
+        val result = newExecutor(emitter, workspace.id).execute(request.copy(triggeredVia = ExecutionTrigger.MCP))
         recordResultColumns(result)
         return result
     }
@@ -113,10 +118,13 @@ class McpRecordingExecutionRunner(
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
-    /** One executor per run — same reasoning as [ExecutionLauncher.newExecutor]. */
-    private fun newExecutor(emitter: WebEventEmitter): PipelineExecutor =
+    /** One executor per run — same reasoning as [ExecutionLauncher.newExecutor]; the engine is the workspace's own (T24). */
+    private fun newExecutor(
+        emitter: WebEventEmitter,
+        workspaceId: UUID,
+    ): PipelineExecutor =
         pipelineExecutor(
-            templateEngine = templateEngine,
+            templateEngine = templateEngines.engineFor(workspaceId),
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,

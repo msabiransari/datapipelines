@@ -71,14 +71,16 @@ class ExecutionsController(
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val wanted = status?.let { parseStatus(it) }
         val raw =
             if (Scope.satisfies(principal.scopes, Scope.ADMIN)) {
-                executions.findAll(pipelineId, wanted, startedAfter, startedBefore, limit = size + 1, offset = page)
+                executions.findAll(workspaceId, pipelineId, wanted, startedAfter, startedBefore, limit = size + 1, offset = page)
             } else {
                 executions.findByUser(
+                    workspaceId,
                     principal.userId,
                     pipelineId,
                     wanted,
@@ -98,8 +100,9 @@ class ExecutionsController(
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
         val record =
-            executions.findById(id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         return ApiResponse.of(record.toMetadata(includeResult = true))
     }
@@ -114,8 +117,9 @@ class ExecutionsController(
     fun cancel(
         @PathVariable id: UUID,
     ) {
+        val workspaceId = currentPrincipal().requireWorkspace().id
         val record =
-            executions.findById(id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         if (record.status != ExecutionStatus.RUNNING) {
             throw ApiErrors.executionNotRunning(id.toString(), record.status.name)
@@ -139,8 +143,9 @@ class ExecutionsController(
     fun events(
         @PathVariable id: UUID,
     ): SseEmitter {
+        val workspaceId = currentPrincipal().requireWorkspace().id
         val record =
-            executions.findById(id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         if (!streamer.hasLog(record.executionId)) {
             throw ApiErrors.resultExpired(id.toString())

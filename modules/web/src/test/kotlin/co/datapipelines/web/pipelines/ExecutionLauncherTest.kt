@@ -3,6 +3,7 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.executor.ExecutionCancellationService
@@ -49,6 +50,7 @@ class ExecutionLauncherTest {
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
     private val correlationId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
     private lateinit var registry: ExecutionStreamRegistry
 
     @BeforeEach
@@ -64,7 +66,7 @@ class ExecutionLauncherTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun launcher(executorFactory: (co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor): ExecutionLauncher =
         ExecutionLauncher(
-            templateEngine = mockk(),
+            templateEngines = mockk(),
             datasourceRegistry = mockk(),
             stagingFactory = mockk(),
             writebackRunner = mockk(),
@@ -97,7 +99,16 @@ class ExecutionLauncherTest {
         pipelineId = pipelineId,
         pipelineVersion = 1,
         pipeline = pipeline(),
-        principal = AuthenticatedPrincipal(userId, "a@b.c", "A", setOf(Scope.EXECUTE), AuthMethod.API_KEY, "dpk_x"),
+        principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.EXECUTE),
+                AuthMethod.API_KEY,
+                "dpk_x",
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            ),
         parameters = parameters,
         parametersJson = "{}",
         correlationId = correlationId,

@@ -15,22 +15,24 @@ import co.datapipelines.pipeline.PipelineErrorCodes
  * as version pinning intends.
  */
 class LibraryResolver(
-    private val registry: TemplateRegistry,
+    private val registryFor: (java.util.UUID) -> TemplateRegistry,
 ) {
     /**
-     * Adds every §6.4 import failure of [imports] to [collector].
+     * Adds every §6.4 import failure of [imports] to [collector]. Imports resolve within
+     * [workspaceId] (design 2026-08-16-workspaces §3: cross-workspace references do not exist).
      *
      * [imports] is the array under validation (a draft's, or a library's during recursion);
      * duplicate-alias is checked on this array only, because each library's own array was
      * validated at its own save.
      */
     fun validate(
+        workspaceId: java.util.UUID,
         imports: List<TemplateImport>,
         collector: MutableList<TemplateValidationFailure>,
     ) {
         addUnsafeEntryFailures(imports, collector)
         addDuplicateAliasFailures(imports, collector)
-        walk(imports, depth = 1, path = emptySet(), state = WalkState(), collector = collector)
+        walk(registryFor(workspaceId), imports, depth = 1, path = emptySet(), state = WalkState(), collector = collector)
     }
 
     /**
@@ -107,6 +109,7 @@ class LibraryResolver(
     }
 
     private fun walk(
+        registry: TemplateRegistry,
         imports: List<TemplateImport>,
         depth: Int,
         path: Set<String>,
@@ -132,12 +135,13 @@ class LibraryResolver(
         }
         for (imp in imports) {
             if (state.stopped) return
-            visitImport(imp, depth, path, state, collector)
+            visitImport(registry, imp, depth, path, state, collector)
         }
     }
 
     /** Judges one `imports` entry and, when it resolves to a not-yet-expanded library, walks it. */
     private fun visitImport(
+        registry: TemplateRegistry,
         imp: TemplateImport,
         depth: Int,
         path: Set<String>,
@@ -172,7 +176,7 @@ class LibraryResolver(
             // walk only recurses when this (library, depth) pair is new.
             else -> {
                 if (state.expanded.add("${imp.key}#$depth") && chargeExpansion(state, collector)) {
-                    walk(resolved.imports, depth + 1, path + imp.key, state, collector)
+                    walk(registry, resolved.imports, depth + 1, path + imp.key, state, collector)
                 }
             }
         }

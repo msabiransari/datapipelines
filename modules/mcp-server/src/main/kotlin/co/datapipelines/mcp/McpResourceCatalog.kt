@@ -57,8 +57,9 @@ class McpResourceCatalog(
         cursor: String?,
     ): McpResourcePage {
         requireReadScope(ctx)
+        val workspaceId = ctx.principal.requireWorkspace().id
         val start = cursor?.let { McpResourceCursor.decode(it, KINDS) } ?: McpResourceCursor.first(KINDS)
-        val scan = RequestScan()
+        val scan = RequestScan(workspaceId)
         val page = mutableListOf<McpSchema.Resource>()
         var kindIndex = KINDS.indexOf(start.kind)
         var offset = start.offset
@@ -108,7 +109,7 @@ class McpResourceCatalog(
     ): List<McpSchema.Resource> =
         when (kind) {
             McpResourceUri.PIPELINES -> pipelineDescriptors(offset, limit, scan)
-            McpResourceUri.TEMPLATES -> templateDescriptors(offset, limit)
+            McpResourceUri.TEMPLATES -> templateDescriptors(offset, limit, scan.workspaceId)
             McpResourceUri.DATASOURCES -> datasourceDescriptors(offset, limit, scan)
             McpResourceUri.EXECUTIONS -> executionDescriptors(offset, limit, ctx)
             else -> emptyList()
@@ -134,9 +135,10 @@ class McpResourceCatalog(
     private fun templateDescriptors(
         offset: Int,
         limit: Int,
+        workspaceId: java.util.UUID,
     ): List<McpSchema.Resource> =
         templates
-            .list(offset = offset, limit = limit)
+            .list(workspaceId, offset = offset, limit = limit)
             .map {
                 descriptor(
                     uri = McpResourceUri.template(it.id),
@@ -178,7 +180,7 @@ class McpResourceCatalog(
     ): List<McpSchema.Resource> {
         val since = clock.instant().minus(EXECUTION_WINDOW)
         return executions
-            .findByUser(ctx.principal.userId, limit = limit, offset = offset)
+            .findByUser(ctx.principal.requireWorkspace().id, ctx.principal.userId, limit = limit, offset = offset)
             .filter { it.startedAt.isAfter(since) && it.visibleTo(ctx) }
             .map {
                 descriptor(
@@ -196,8 +198,10 @@ class McpResourceCatalog(
      * A page walks its kinds and then probes `hasMore`, so an un-memoized `findAll()` ran two or
      * three times per page. Memoizing bounds a call to **one** scan of each.
      */
-    private inner class RequestScan {
-        val pipelines by lazy { this@McpResourceCatalog.pipelines.findAll().sortedBy { it.id } }
+    private inner class RequestScan(
+        val workspaceId: java.util.UUID,
+    ) {
+        val pipelines by lazy { this@McpResourceCatalog.pipelines.findAll(workspaceId).sortedBy { it.id } }
 
         val datasources by lazy { this@McpResourceCatalog.datasources.list().sortedBy { it.name } }
     }

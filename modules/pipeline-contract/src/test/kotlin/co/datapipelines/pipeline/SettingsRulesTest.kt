@@ -5,22 +5,24 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** pipeline-contract §12.8 and §5.1 — `settings.tempdb`. */
 class SettingsRulesTest {
     private val validator = Fixtures.validator()
+    private val workspaceId = UUID.randomUUID()
 
     @Test
     fun `the documented H2 config is accepted and exposed typed`() {
         val settings = tempdb("""{"max_memory_mb": 1024}""")
 
-        validator.validate(Fixtures.pipeline(settings = settings)).failures.shouldBeEmpty()
+        validator.validate(Fixtures.pipeline(settings = settings), workspaceId).failures.shouldBeEmpty()
         settings.tempdb.maxMemoryMb shouldBe 1024
     }
 
     @Test
     fun `a config key H2 does not define is rejected`() {
-        val codes = validator.validate(Fixtures.pipeline(settings = tempdb("""{"page_size": 8}"""))).codes
+        val codes = validator.validate(Fixtures.pipeline(settings = tempdb("""{"page_size": 8}""")), workspaceId).codes
 
         codes shouldContainExactly listOf(Validation.TEMPDB_CONFIG_INVALID)
     }
@@ -28,7 +30,7 @@ class SettingsRulesTest {
     @Test
     fun `max_memory_mb must be a positive integer`() {
         listOf("""{"max_memory_mb": 0}""", """{"max_memory_mb": -1}""", """{"max_memory_mb": "1024"}""").forEach {
-            validator.validate(Fixtures.pipeline(settings = tempdb(it))).codes shouldContainExactly
+            validator.validate(Fixtures.pipeline(settings = tempdb(it)), workspaceId).codes shouldContainExactly
                 listOf(Validation.TEMPDB_CONFIG_INVALID)
         }
     }

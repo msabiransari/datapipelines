@@ -70,6 +70,7 @@ class PipelineTransferController(
         @RequestBody body: String,
     ): ResponseEntity<ApiResponse<JsonNode>> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedPipelineBody(IllegalArgumentException("not an object"))
         val requestedId =
             tree.remove("id")?.takeIf { it.isTextual }?.let { raw ->
@@ -83,17 +84,18 @@ class PipelineTransferController(
         SERVER_FIELDS.forEach(tree::remove)
 
         val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
-        importValidation(pipeline.name, validator.validate(pipeline)).orThrow()
+        importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
         val canonical = serializer.write(pipeline)
 
-        val existing = requestedId?.let(pipelines::findById)
+        val existing = requestedId?.let { pipelines.findById(workspaceId, it) }
         val record =
             if (existing != null) {
-                pipelines.update(existing.id, pipeline, canonical, principal.userId)
+                pipelines.update(workspaceId, existing.id, pipeline, canonical, principal.userId)
                     ?: throw ApiErrors.pipelineNotFound(existing.id.toString())
             } else {
                 try {
                     pipelines.create(
+                        workspaceId,
                         NewPipeline.from(pipeline, ownerId = principal.userId, id = requestedId ?: UUID.randomUUID()),
                         canonical,
                         principal.userId,
@@ -118,13 +120,14 @@ class PipelineTransferController(
         @PathVariable id: UUID,
         @RequestParam(name = "include_templates", required = false) includeTemplates: Boolean = true,
     ): ApiResponse<Map<String, Any?>> {
-        val record = pipelines.findById(id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val body =
-            pipelines.findVersionBody(id, record.currentVersion)
+            pipelines.findVersionBody(workspaceId, id, record.currentVersion)
                 ?: throw ApiErrors.pipelineNotFound(id.toString())
         val pipeline = deserializer.readOrThrow(body)
 
-        val bundled = if (includeTemplates) referencedTemplates(pipeline.nodes.map { it.template }) else emptyList()
+        val bundled = if (includeTemplates) referencedTemplates(workspaceId, pipeline.nodes.map { it.template }) else emptyList()
         val data =
             mapOf(
                 "pipeline" to PipelineResponses.full(record, body),
@@ -184,25 +187,29 @@ class PipelineTransferController(
     }
 
     /** Direct node references plus the transitive library-import closure, deduplicated. */
-    private fun referencedTemplates(refs: List<TemplateRef>): List<Template> {
+    private fun referencedTemplates(
+        workspaceId: UUID,
+        refs: List<TemplateRef>,
+    ): List<Template> {
         val seen = mutableSetOf<String>()
         val queue = ArrayDeque(refs)
         val found = mutableListOf<Template>()
         while (queue.isNotEmpty()) {
-            collect(queue.removeFirst(), seen, queue, found)
+            collect(workspaceId, queue.removeFirst(), seen, queue, found)
         }
         return found
     }
 
     private fun collect(
+        workspaceId: UUID,
         ref: TemplateRef,
         seen: MutableSet<String>,
         queue: ArrayDeque<TemplateRef>,
         found: MutableList<Template>,
     ) {
         if (!seen.add(ref.key)) return
-        val version = templates.lookupVersion(ref.id, ref.version) ?: return
-        templates.findVersion(ref.id, ref.version)?.let(found::add)
+        val version = templates.lookupVersion(workspaceId, ref.id, ref.version) ?: return
+        templates.findVersion(workspaceId, ref.id, ref.version)?.let(found::add)
         version.imports.forEach { queue.addLast(TemplateRef(it.id, it.version)) }
     }
 

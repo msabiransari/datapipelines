@@ -86,6 +86,10 @@ class AuthController(
                 name = body.name,
                 scopes = scopes,
                 creatorScopes = principal.scopes,
+                // D3 + §7.4: the key pins the creator's ACTIVE workspace (their membership in
+                // it is re-checked inside issue). No request-payload workspace exists in v1 —
+                // cross-workspace key issuance has no surface.
+                workspaceId = principal.requireWorkspace().id,
                 expiresAt = body.expiresAt,
             )
         return ApiResponse.of(

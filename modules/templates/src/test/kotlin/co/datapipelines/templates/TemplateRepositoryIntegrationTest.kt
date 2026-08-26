@@ -34,6 +34,9 @@ class TemplateRepositoryIntegrationTest {
     private lateinit var repository: TemplateRepository
     private lateinit var actor: UUID
 
+    /** The V4-seeded `default` workspace this suite re-seeds after every truncate — a pinned literal, not a guess. */
+    private val workspaceId: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
+
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
@@ -72,47 +75,47 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `create inserts the template and version 1 together, returning what the database stored`() {
-        val stored = repository.create(draft(imports = listOf(TemplateImport("lib.sql", 1, "l"))), actor)
+        val stored = repository.create(workspaceId, draft(imports = listOf(TemplateImport("lib.sql", 1, "l"))), actor)
 
         stored.version shouldBe 1
         stored.id shouldBe "fetch_orders.sql"
         stored.imports shouldContainExactly listOf(TemplateImport("lib.sql", 1, "l"))
         stored.createdBy shouldBe actor
-        repository.lookupVersion("fetch_orders.sql", 1).shouldNotBeNull()
+        repository.lookupVersion(workspaceId, "fetch_orders.sql", 1).shouldNotBeNull()
     }
 
     @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
-        val stored = repository.create(draft(id = null), actor)
+        val stored = repository.create(workspaceId, draft(id = null), actor)
         TEMPLATE_ID.matches(stored.id) shouldBe true
     }
 
     @Test
     fun `update appends a new immutable version and bumps current_version`() {
-        repository.create(draft(body = "SELECT 1"), actor)
+        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
 
-        val v2 = repository.update("fetch_orders.sql", draft(body = "SELECT 2"), actor)
+        val v2 = repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor)
 
         v2.shouldNotBeNull()
         v2.version shouldBe 2
         v2.body shouldBe "SELECT 2"
-        repository.findLatest("fetch_orders.sql")?.version shouldBe 2
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.version shouldBe 2
         // Version 1 is untouched — immutable per version (§5.1).
-        repository.findVersion("fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
-        repository.listVersions("fetch_orders.sql").map { it.version } shouldContainExactly listOf(2, 1)
+        repository.findVersion(workspaceId, "fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
+        repository.listVersions(workspaceId, "fetch_orders.sql").map { it.version } shouldContainExactly listOf(2, 1)
     }
 
     @Test
     fun `update on an unknown id returns null and writes nothing`() {
-        repository.update("nope.sql", draft(), actor).shouldBeNull()
+        repository.update(workspaceId, "nope.sql", draft(), actor).shouldBeNull()
         existsRows("template_versions") shouldBe 0
     }
 
     @Test
     fun `lookupVersion round-trips imports and dialect`() {
-        repository.create(draft(imports = listOf(TemplateImport("lib.sql", 3, "d")), dialect = Dialect.MYSQL), actor)
+        repository.create(workspaceId, draft(imports = listOf(TemplateImport("lib.sql", 3, "d")), dialect = Dialect.MYSQL), actor)
 
-        val version = repository.lookupVersion("fetch_orders.sql", 1)
+        val version = repository.lookupVersion(workspaceId, "fetch_orders.sql", 1)
 
         version.shouldNotBeNull()
         version.dialect shouldBe Dialect.MYSQL
@@ -121,23 +124,23 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `existsId reflects whether any version exists`() {
-        repository.existsId("fetch_orders.sql") shouldBe false
-        repository.create(draft(), actor)
-        repository.existsId("fetch_orders.sql") shouldBe true
+        repository.existsId(workspaceId, "fetch_orders.sql") shouldBe false
+        repository.create(workspaceId, draft(), actor)
+        repository.existsId(workspaceId, "fetch_orders.sql") shouldBe true
     }
 
     @Test
     fun `a soft-deleted template disappears from findLatest but its versions still resolve`() {
-        repository.create(draft(), actor)
+        repository.create(workspaceId, draft(), actor)
 
-        repository.softDelete("fetch_orders.sql") shouldBe true
+        repository.softDelete(workspaceId, "fetch_orders.sql") shouldBe true
 
         // §5.1: pipelines referencing a deleted template's version continue to work, so the
         // registry lookup must still resolve it, but the current-version projection is gone.
-        repository.findLatest("fetch_orders.sql").shouldBeNull()
-        repository.lookupVersion("fetch_orders.sql", 1).shouldNotBeNull()
-        repository.findVersion("fetch_orders.sql", 1).shouldNotBeNull()
-        repository.softDelete("fetch_orders.sql") shouldBe false
+        repository.findLatest(workspaceId, "fetch_orders.sql").shouldBeNull()
+        repository.lookupVersion(workspaceId, "fetch_orders.sql", 1).shouldNotBeNull()
+        repository.findVersion(workspaceId, "fetch_orders.sql", 1).shouldNotBeNull()
+        repository.softDelete(workspaceId, "fetch_orders.sql") shouldBe false
     }
 
     @Test
@@ -146,14 +149,14 @@ class TemplateRepositoryIntegrationTest {
         // template must not gain new ones — the UPDATE's `is_deleted = FALSE` predicate is the
         // only thing enforcing that, and a CTE whose first leg matches no row must not leave the
         // INSERT leg to run on its own.
-        repository.create(draft(body = "SELECT 1"), actor)
-        repository.softDelete("fetch_orders.sql")
+        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
+        repository.softDelete(workspaceId, "fetch_orders.sql")
 
-        repository.update("fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
+        repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
 
         existsRows("template_versions") shouldBe 1
-        repository.lookupVersion("fetch_orders.sql", 2).shouldBeNull()
-        repository.lookupVersion("fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
+        repository.lookupVersion(workspaceId, "fetch_orders.sql", 2).shouldBeNull()
+        repository.lookupVersion(workspaceId, "fetch_orders.sql", 1)?.body shouldBe "SELECT 1"
     }
 
     @Test
@@ -163,33 +166,33 @@ class TemplateRepositoryIntegrationTest {
         // original creator for someone else's edit — and disagree with `listVersions`, which reads
         // the version row, about the very same version.
         val updater = insertUser(email = "editor@example.com", subject = "sub-2")
-        repository.create(draft(body = "SELECT 1"), actor)
+        repository.create(workspaceId, draft(body = "SELECT 1"), actor)
 
-        val v2 = repository.update("fetch_orders.sql", draft(body = "SELECT 2"), updater)
+        val v2 = repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), updater)
 
         v2.shouldNotBeNull()
         v2.createdBy shouldBe updater
         withClue("findLatest must agree with the update's own return value") {
-            repository.findLatest("fetch_orders.sql")?.createdBy shouldBe updater
+            repository.findLatest(workspaceId, "fetch_orders.sql")?.createdBy shouldBe updater
         }
         withClue("and with listVersions, which reads the same column") {
-            repository.listVersions("fetch_orders.sql").single { it.version == 2 }.createdBy shouldBe updater
-            repository.listVersions("fetch_orders.sql").single { it.version == 1 }.createdBy shouldBe actor
+            repository.listVersions(workspaceId, "fetch_orders.sql").single { it.version == 2 }.createdBy shouldBe updater
+            repository.listVersions(workspaceId, "fetch_orders.sql").single { it.version == 1 }.createdBy shouldBe actor
         }
         withClue("version 1 still belongs to its own author") {
-            repository.findVersion("fetch_orders.sql", 1)?.createdBy shouldBe actor
+            repository.findVersion(workspaceId, "fetch_orders.sql", 1)?.createdBy shouldBe actor
         }
     }
 
     @Test
     fun `list returns live templates at their current version, id-ordered`() {
-        repository.create(draft(id = "b.sql"), actor)
-        repository.create(draft(id = "a.sql"), actor)
-        repository.update("a.sql", draft(id = "a.sql", body = "SELECT 2"), actor)
-        repository.create(draft(id = "gone.sql"), actor)
-        repository.softDelete("gone.sql")
+        repository.create(workspaceId, draft(id = "b.sql"), actor)
+        repository.create(workspaceId, draft(id = "a.sql"), actor)
+        repository.update(workspaceId, "a.sql", draft(id = "a.sql", body = "SELECT 2"), actor)
+        repository.create(workspaceId, draft(id = "gone.sql"), actor)
+        repository.softDelete(workspaceId, "gone.sql")
 
-        val page = repository.list()
+        val page = repository.list(workspaceId)
 
         page.map { it.id } shouldContainExactly listOf("a.sql", "b.sql")
         withClue("the current version, not every version") { page.single { it.id == "a.sql" }.version shouldBe 2 }
@@ -197,16 +200,17 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `list filters by dialect`() {
-        repository.create(draft(id = "pg.sql", dialect = Dialect.POSTGRES), actor)
-        repository.create(draft(id = "my.sql", dialect = Dialect.MYSQL), actor)
+        repository.create(workspaceId, draft(id = "pg.sql", dialect = Dialect.POSTGRES), actor)
+        repository.create(workspaceId, draft(id = "my.sql", dialect = Dialect.MYSQL), actor)
 
-        repository.list(dialect = Dialect.MYSQL).map { it.id } shouldContainExactly listOf("my.sql")
+        repository.list(workspaceId, dialect = Dialect.MYSQL).map { it.id } shouldContainExactly listOf("my.sql")
     }
 
     @Test
     fun `list searches id, display name and description case-insensitively`() {
-        repository.create(draft(id = "orders_daily.sql"), actor)
+        repository.create(workspaceId, draft(id = "orders_daily.sql"), actor)
         repository.create(
+            workspaceId,
             TemplateDraft(
                 id = "unrelated.sql",
                 dialect = Dialect.POSTGRES,
@@ -219,17 +223,18 @@ class TemplateRepositoryIntegrationTest {
             actor,
         )
 
-        repository.list(q = "ORDERS").map { it.id } shouldContainExactly listOf("orders_daily.sql", "unrelated.sql")
-        repository.list(q = "rollup").map { it.id } shouldContainExactly listOf("unrelated.sql")
-        repository.list(q = "nothing-matches").shouldBeEmpty()
+        repository.list(workspaceId, q = "ORDERS").map { it.id } shouldContainExactly listOf("orders_daily.sql", "unrelated.sql")
+        repository.list(workspaceId, q = "rollup").map { it.id } shouldContainExactly listOf("unrelated.sql")
+        repository.list(workspaceId, q = "nothing-matches").shouldBeEmpty()
     }
 
     @Test
     fun `a search term's LIKE metacharacters are matched literally`() {
         // Unescaped, a `q` of "%" matches every row and "_" matches any single character — a
         // search box that silently becomes a full scan (and a wrong result).
-        repository.create(draft(id = "plain.sql"), actor)
+        repository.create(workspaceId, draft(id = "plain.sql"), actor)
         repository.create(
+            workspaceId,
             TemplateDraft(
                 id = "discount.sql",
                 dialect = Dialect.POSTGRES,
@@ -242,18 +247,18 @@ class TemplateRepositoryIntegrationTest {
             actor,
         )
 
-        repository.list(q = "%").map { it.id } shouldContainExactly listOf("discount.sql")
-        repository.list(q = "100% off").map { it.id } shouldContainExactly listOf("discount.sql")
+        repository.list(workspaceId, q = "%").map { it.id } shouldContainExactly listOf("discount.sql")
+        repository.list(workspaceId, q = "100% off").map { it.id } shouldContainExactly listOf("discount.sql")
     }
 
     @Test
     fun `list pages with limit and offset`() {
-        listOf("a.sql", "b.sql", "c.sql").forEach { repository.create(draft(id = it), actor) }
+        listOf("a.sql", "b.sql", "c.sql").forEach { repository.create(workspaceId, draft(id = it), actor) }
 
-        repository.list(limit = 2).map { it.id } shouldContainExactly listOf("a.sql", "b.sql")
-        repository.list(offset = 2, limit = 2).map { it.id } shouldContainExactly listOf("c.sql")
+        repository.list(workspaceId, limit = 2).map { it.id } shouldContainExactly listOf("a.sql", "b.sql")
+        repository.list(workspaceId, offset = 2, limit = 2).map { it.id } shouldContainExactly listOf("c.sql")
         withClue("a negative offset must be clamped, not passed through to the database") {
-            repository.list(offset = -5).map { it.id } shouldContainExactly listOf("a.sql", "b.sql", "c.sql")
+            repository.list(workspaceId, offset = -5).map { it.id } shouldContainExactly listOf("a.sql", "b.sql", "c.sql")
         }
     }
 
@@ -262,9 +267,9 @@ class TemplateRepositoryIntegrationTest {
         // The old assertion used limit=Int.MAX over 3 rows, so the clamp half was vacuous — the
         // query would have returned the same 3 rows unclamped (NEW-4a). With more rows than the
         // maximum, only a real clamp produces this result.
-        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach { repository.create(draft(id = "t%04d.sql".format(it)), actor) }
+        (1..TemplateRepository.MAX_PAGE_LIMIT + 25).forEach { repository.create(workspaceId, draft(id = "t%04d.sql".format(it)), actor) }
 
-        repository.list(limit = 500).size shouldBe TemplateRepository.MAX_PAGE_LIMIT
+        repository.list(workspaceId, limit = 500).size shouldBe TemplateRepository.MAX_PAGE_LIMIT
     }
 
     @Test
@@ -272,20 +277,20 @@ class TemplateRepositoryIntegrationTest {
         // TPL-API-6 had no regression test. rest-api §8.4 allows a template's dialect to change
         // across versions precisely because existing pipelines pin a version — which only holds if
         // the stored per-version value is what is read back.
-        repository.create(draft(id = "shift.sql", dialect = Dialect.POSTGRES), actor)
+        repository.create(workspaceId, draft(id = "shift.sql", dialect = Dialect.POSTGRES), actor)
 
-        val v2 = repository.update("shift.sql", draft(id = "shift.sql", dialect = Dialect.MYSQL), actor)
+        val v2 = repository.update(workspaceId, "shift.sql", draft(id = "shift.sql", dialect = Dialect.MYSQL), actor)
 
         v2.shouldNotBeNull()
         v2.dialect shouldBe Dialect.MYSQL
-        repository.findVersion("shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
-        repository.lookupVersion("shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
-        repository.lookupVersion("shift.sql", 2)?.dialect shouldBe Dialect.MYSQL
+        repository.findVersion(workspaceId, "shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
+        repository.lookupVersion(workspaceId, "shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
+        repository.lookupVersion(workspaceId, "shift.sql", 2)?.dialect shouldBe Dialect.MYSQL
     }
 
     @Test
     fun `imports are stored as JSONB and queryable as such`() {
-        repository.create(draft(imports = listOf(TemplateImport("lib.sql", 1, "l"))), actor)
+        repository.create(workspaceId, draft(imports = listOf(TemplateImport("lib.sql", 1, "l"))), actor)
 
         val alias =
             jdbc.queryForObject(

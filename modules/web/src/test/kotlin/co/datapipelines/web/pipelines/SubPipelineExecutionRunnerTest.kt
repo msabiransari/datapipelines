@@ -5,6 +5,7 @@ import co.datapipelines.executor.DirectResultSink
 import co.datapipelines.executor.ExecutableNode
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
+import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
@@ -65,12 +66,14 @@ class SubPipelineExecutionRunnerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val resultStore = mockk<ResultStore>()
     private val writebackRunner = mockk<WritebackRunner>()
+    private val executionRepository = mockk<ExecutionRepository>(relaxed = true)
 
     private val parentExecutionId = UUID.randomUUID()
     private val parentRootId = UUID.randomUUID()
     private val parentUserId = UUID.randomUUID()
     private val parentCorrelationId = UUID.randomUUID()
     private val childRecordId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val staging: Staging = H2StagingFactory(H2StagingProperties()).create(parentExecutionId)
 
@@ -111,8 +114,9 @@ class SubPipelineExecutionRunnerTest {
         )
 
     private fun stubRegistry() {
-        every { pipelines.findByNameIncludingDeleted("monthly_revenue") } returns childRecord()
-        every { pipelines.findVersionBody(childRecordId, 4) } returns childBody
+        every { executionRepository.workspaceOfExecution(parentExecutionId) } returns workspaceId
+        every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns childRecord()
+        every { pipelines.findVersionBody(any(), childRecordId, 4) } returns childBody
     }
 
     private fun pipelineNode(
@@ -195,7 +199,7 @@ class SubPipelineExecutionRunnerTest {
         metrics: ExecutorMetrics = ExecutorMetrics.inMemory(),
     ) = SubPipelineExecutionRunner(
         pipelines = pipelines,
-        templateEngine = mockk(),
+        templateEngines = mockk(),
         datasourceRegistry = mockk(),
         stagingFactory = mockk(),
         writebackRunner = writebackRunner,
@@ -211,7 +215,7 @@ class SubPipelineExecutionRunnerTest {
         streams = mockk(),
         eventLog = mockk(relaxed = true),
         eventRepository = mockk(relaxed = true),
-        executionRepository = mockk(relaxed = true),
+        executionRepository = executionRepository,
         executorFactory = { stub.executor },
     )
 
@@ -387,7 +391,8 @@ class SubPipelineExecutionRunnerTest {
     @Test
     fun `a pinned reference that vanished from the registry fails as a child failure, not an NPE`() =
         runTest {
-            every { pipelines.findByNameIncludingDeleted("monthly_revenue") } returns null
+            every { executionRepository.workspaceOfExecution(parentExecutionId) } returns workspaceId
+            every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns null
 
             val thrown =
                 shouldThrow<DatapipelinesException> {

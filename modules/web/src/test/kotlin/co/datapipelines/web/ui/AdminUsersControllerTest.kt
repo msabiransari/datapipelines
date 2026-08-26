@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceContext
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -24,6 +25,7 @@ class AdminUsersControllerTest {
     private val controller = AdminUsersController(themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val adminPrincipal =
         AuthenticatedPrincipal(
@@ -32,6 +34,7 @@ class AdminUsersControllerTest {
             displayName = "Admin",
             scopes = setOf(Scope.ADMIN),
             authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
     @AfterEach
@@ -56,6 +59,7 @@ class AdminUsersPartialControllerTest {
     private val partialController = AdminUsersPartialController(userService)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val adminPrincipal =
         AuthenticatedPrincipal(
@@ -64,6 +68,7 @@ class AdminUsersPartialControllerTest {
             displayName = "Admin",
             scopes = setOf(Scope.ADMIN),
             authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
     @AfterEach

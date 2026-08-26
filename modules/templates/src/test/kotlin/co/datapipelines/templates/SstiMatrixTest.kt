@@ -37,7 +37,8 @@ import java.io.StringWriter
  * it uses `java.lang.String`, never `Execute`, so the control itself never runs a command.
  */
 class SstiMatrixTest {
-    private val validator = TemplateValidator(LibraryResolver(InMemoryTemplateRegistry()))
+    private val workspaceId = java.util.UUID.randomUUID()
+    private val validator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
     private val engines = mutableListOf<TemplateEngine>()
 
     @AfterEach
@@ -53,7 +54,7 @@ class SstiMatrixTest {
     fun `every advisory vector is rejected at save`() {
         SAVE_VECTORS.forEach { vector ->
             withClue("save must reject: $vector") {
-                validator.validate(TemplateFixtures.draft(body = vector)).codes shouldContain
+                validator.validate(TemplateFixtures.draft(body = vector), workspaceId).codes shouldContain
                     PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -124,7 +125,7 @@ class SstiMatrixTest {
         outcome.shouldBeInstanceOf<RenderOutcome.Success>().sql shouldBe "INJECTED"
 
         // …and the save-time scan is what stops such a body ever being stored.
-        validator.validate(TemplateFixtures.draft(body = "<@\"\${payload}\"?interpret />")).codes shouldContain
+        validator.validate(TemplateFixtures.draft(body = "<@\"\${payload}\"?interpret />"), workspaceId).codes shouldContain
             PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
     }
 
@@ -155,7 +156,7 @@ class SstiMatrixTest {
         //      reports something while the payload still runs).
         HIDDEN_PAYLOAD_VECTORS.forEach { (body, rendersTo) ->
             withClue("save must reject the hidden payload: $body") {
-                validator.validate(TemplateFixtures.draft(body = body)).codes shouldContain
+                validator.validate(TemplateFixtures.draft(body = body), workspaceId).codes shouldContain
                     PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
             withClue("and the payload must be live — it renders to '$rendersTo' when unguarded: $body") {
@@ -177,7 +178,7 @@ class SstiMatrixTest {
         // refuses `[#` / `[=` outright rather than relying on the pin.
         SQUARE_BRACKET_VECTORS.forEach { body ->
             withClue("save must reject: $body") {
-                validator.validate(TemplateFixtures.draft(body = body)).codes shouldContain
+                validator.validate(TemplateFixtures.draft(body = body), workspaceId).codes shouldContain
                     PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -193,7 +194,7 @@ class SstiMatrixTest {
         // `?evalJson` is Freemarker's camel-case spelling of the forbidden `?eval_json`, and the
         // canonical AST rendering preserves whichever the author wrote — so a check keyed on the
         // snake_case name alone (as the old regex was) misses it.
-        validator.validate(TemplateFixtures.draft(body = "\${payload?evalJson}")).codes shouldContain
+        validator.validate(TemplateFixtures.draft(body = "\${payload?evalJson}"), workspaceId).codes shouldContain
             PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
     }
 

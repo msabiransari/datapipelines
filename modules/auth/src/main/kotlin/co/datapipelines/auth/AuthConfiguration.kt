@@ -1,6 +1,8 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -23,12 +25,16 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * behavior is proven at the wire by `AuthHttpBoundaryTest`.
  */
 @Configuration
+@EnableConfigurationProperties(WorkspacesProperties::class)
 class AuthConfiguration {
     @Bean
     fun userRepository(jdbc: NamedParameterJdbcTemplate): UserRepository = UserRepository(jdbc)
 
     @Bean
     fun apiKeyRepository(jdbc: NamedParameterJdbcTemplate): ApiKeyRepository = ApiKeyRepository(jdbc)
+
+    @Bean
+    fun workspaceRepository(jdbc: NamedParameterJdbcTemplate): WorkspaceRepository = WorkspaceRepository(jdbc)
 
     @Bean
     fun authCache(authProperties: AuthProperties): AuthCache = AuthCache(authProperties)
@@ -53,6 +59,22 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
     ): UserService = UserService(userRepository, authCache, authProperties, auditLogger)
 
+    /**
+     * [lastUsedWorkspaceStore] is an `ObjectProvider`: the Redis implementation lives in
+     * `web` (module-structure §3.1 rule 3), so auth-only contexts (the module's own test
+     * slices) legitimately have none — last-used then degrades to first-membership, by
+     * design (see the port's KDoc).
+     */
+    @Bean
+    fun workspaceService(
+        workspaceRepository: WorkspaceRepository,
+        authCache: AuthCache,
+        workspacesProperties: WorkspacesProperties,
+        lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
+        auditLogger: AuditLogger,
+    ): WorkspaceService =
+        WorkspaceService(workspaceRepository, authCache, workspacesProperties, lastUsedWorkspaceStore.getIfAvailable(), auditLogger)
+
     @Bean
     fun apiKeyService(
         apiKeyRepository: ApiKeyRepository,
@@ -61,7 +83,8 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
         secretHasher: SecretHasher,
         authProperties: AuthProperties,
-    ): ApiKeyService = ApiKeyService(apiKeyRepository, userService, authCache, auditLogger, secretHasher, authProperties)
+        workspaceService: WorkspaceService,
+    ): ApiKeyService = ApiKeyService(apiKeyRepository, userService, authCache, auditLogger, secretHasher, authProperties, workspaceService)
 
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)
@@ -81,7 +104,8 @@ class AuthConfiguration {
         jwtService: JwtService,
         auditLogger: AuditLogger,
         authProperties: AuthProperties,
-    ): OidcSuccessHandler = OidcSuccessHandler(userService, jwtService, auditLogger, authProperties)
+        workspaceService: WorkspaceService,
+    ): OidcSuccessHandler = OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService)
 
     @Bean
     fun scopeInterceptor(
@@ -96,9 +120,10 @@ class AuthConfiguration {
     ): CookieOAuth2AuthorizationRequestRepository = CookieOAuth2AuthorizationRequestRepository(jwtService, objectMapper)
 
     /**
-     * The three servlet filters the auth chain installs (auth.md §8.2), built as
-     * plain objects — deliberately NOT exposed as individual beans (see class KDoc).
+     * The servlet filters the auth chain installs (auth.md §8.2), built as plain
+     * objects — deliberately NOT exposed as individual beans (see class KDoc).
      */
+    @Suppress("LongParameterList")
     @Bean
     fun authFilters(
         apiKeyService: ApiKeyService,
@@ -108,10 +133,14 @@ class AuthConfiguration {
         userService: UserService,
         authProperties: AuthProperties,
         authErrorWriter: AuthErrorWriter,
+        workspaceService: WorkspaceService,
+        lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
     ): AuthFilters =
         AuthFilters(
             apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger),
             jwt = JwtAuthenticationFilter(jwtService, userService),
             loginRateLimit = LoginRateLimitFilter(authProperties, authErrorWriter),
+            workspaceResolution =
+                WorkspaceResolutionFilter(workspaceService, lastUsedWorkspaceStore.getIfAvailable(), authErrorWriter, auditLogger),
         )
 }

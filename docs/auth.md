@@ -105,7 +105,15 @@ The `provider` field stores the **OIDC registration name** as configured by the 
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
 3. Checks the email domain allowlist (if configured — see §4.3).
    - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
-4. Issues internal JWT, sets cookie, redirects to `/`.
+4. **Workspace resolution (design §5.1/§7):** determines the active workspace the JWT stamps
+   — the user's **last-used** workspace when it is still a live membership, else their
+   **first membership**, else — under `auto-per-user` provisioning only — the **freshly
+   provisioned personal workspace** created at this step (`is_personal = TRUE`, name from the
+   lowercased email local-part sanitized to `[a-z0-9_-]+`, collision-suffixed, creator enters
+   as `owner`). A user with zero memberships (possible under `self-serve` before first
+   creation, and under `closed`) stamps nothing: they authenticate fine and every
+   workspace-scoped operation answers `403 workspace.membership_required` (§5.6).
+5. Issues internal JWT (stamping `active_workspace` when step 4 resolved one), sets cookie, redirects to `/`.
 
 **Subsequent logins:** Same flow — user record updated, JWT reissued.
 
@@ -349,6 +357,30 @@ The success handler is **fully provider-agnostic.** It reads `authorizedClientRe
 
 ---
 
+### 5.6 Workspace resolution & the `DP-Workspace` header
+
+Every authenticated request resolves exactly **one** active workspace (design §5); all
+authored-content operations (pipelines, templates, executions) are scoped to it.
+
+- **Session (JWT) principals:** the active workspace comes from the JWT's
+  `active_workspace` claim (stamped at login, §4.2 step 4), membership re-checked per
+  request through the same 60s liveness cache as `users.is_active` (§6.3) — workspace
+  revocation takes effect within the identical ~1-minute window. A claim whose membership
+  is gone falls back to the first live membership.
+- **`DP-Workspace: <workspace name>`** switches the active workspace for that request.
+  A name the principal is not a member of is refused `403 workspace.membership_required` —
+  indistinguishable from an unknown name, so the header cannot probe workspace existence.
+  A successful switch is remembered as the user's last-used workspace (drives the next
+  login's stamp). Global `is_admin` bypasses the membership check (design D4).
+- **API-key / MCP principals:** the key's **pinned** `workspace_id` (chosen at issuance,
+  §7.4) IS the context — no override exists. `DP-Workspace` on an API-key request is
+  **rejected** (`400 workspace.header_forbidden`), never silently ignored: a header-
+  switchable agent key would make every leaked key a skeleton key across the user's
+  workspaces (design D3), and a quietly dropped header would train agents on a lie.
+- **Zero memberships** (possible under `closed` provisioning): the request proceeds with
+  no workspace; every workspace-scoped operation then answers
+  `403 workspace.membership_required`.
+
 ## 6. Session Tokens (Internal JWT)
 
 ### 6.1 JWT format
@@ -364,11 +396,14 @@ After OIDC login, the server issues its own JWT:
     "email": "alice@company.com",
     "name": "Alice Wang",
     "scopes": ["read", "execute", "author"],
+    "active_workspace": "acme",
     "iat": 1691234567,
     "exp": 1691263367,
     "iss": "datapipelines"
   }
   ```
+  `active_workspace` is present only when login resolved one (§4.2 step 4); it is the
+  workspace *name*, the same value `DP-Workspace` carries (§5.6).
 - **Signing secret:** `DATAPIPELINES_JWT_SECRET` env var (≥ 32 bytes random, base64). Required at startup.
 
 **Scope derivation at token issue (v1 rule):** the `scopes` claim is derived from the user record at login: `is_admin = true` → `["read", "execute", "author", "admin"]`; every other active user → `["read", "execute", "author"]`. Finer per-user scope assignment and IdP group sync are future work (§15). API-key scopes are chosen at key creation (§7.4) and are independent of this rule, bounded by the creator's scopes.
@@ -491,7 +526,7 @@ In-memory cache (`datapipelines.auth.api-keys.cache-ttl-seconds`, default 60s) f
 
 User logs in via OIDC → navigates to API Keys page → clicks "Generate new key" → names it, selects scopes, optionally sets expiration → server generates key, hashes it, stores hash, returns plaintext **once**.
 
-A key's scopes MUST be a subset of its creator's scopes at issue time — a `read`-scoped session cannot mint an `author` key (privilege escalation guard). The HTTP surface for key management is defined in [REST API §16](rest-api.md#16-auth--user-admin-endpoints).
+A key's scopes MUST be a subset of its creator's scopes at issue time — a `read`-scoped session cannot mint an `author` key (privilege escalation guard). The same guard extends to workspaces: a key is **pinned to a workspace its creator is a member of** (design §5.2) — v1 pins the creator's active workspace at issuance, and the pin is the key's request context for its entire lifetime (§5.6). The HTTP surface for key management is defined in [REST API §16](rest-api.md#16-auth--user-admin-endpoints).
 
 ### 7.5 Scopes
 
@@ -608,10 +643,11 @@ class SecurityConfig(
 2. CSRF filter                     — validates CSRF token on state-changing requests (UI only; API paths excluded)
 3. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
 4. JwtAuthenticationFilter         — checks dp_session cookie; if present, validates and sets SecurityContext
-5. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
-6. AuthorizationFilter             — checks authenticated() for protected paths
-7. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods
-8. Controller                      — handles the request
+5. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
+6. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
+7. AuthorizationFilter             — checks authenticated() for protected paths
+8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods
+9. Controller                      — handles the request
 ```
 
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter returns `401`. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
@@ -666,6 +702,8 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 
 Rate limiting uses the single system-wide `rate_limit.exceeded` code ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — there is no separate auth-layer rate-limit code. The login rate limit is `datapipelines.auth.rate-limit.login-per-minute` ([Configuration §3.4](configuration.md#34-auth)).
 
+Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace.membership_required` (403), `workspace.header_forbidden` (400), `workspace.creation_forbidden` (403) — catalogued in [Pipeline Contract §13.12](pipeline-contract.md#1312-workspace-resolution).
+
 ---
 
 ## 10. Audit Log
@@ -688,6 +726,9 @@ Rate limiting uses the single system-wide `rate_limit.exceeded` code ([Pipeline 
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
 | `auth.user.admin_revoked` | Admin revoked admin scope from user |
+| `auth.workspace.provisioned` | Personal workspace auto-created on first login (`auto-per-user` mode) |
+| `auth.workspace.created` | Workspace created through the service path |
+| `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request (§5.6) |
 
 ### 10.2 Log shape
 
@@ -726,11 +767,16 @@ datapipelines:
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
 
-        - name: microsoft
-          client-id: ${MICROSOFT_CLIENT_ID}
-          client-secret: ${MICROSOFT_CLIENT_SECRET}
-          issuer-uri: https://login.microsoftonline.com/common/v2.0
-          display-name: "Sign in with Microsoft"
+        # Microsoft (Entra ID) — SINGLE-TENANT only in v1: the issuer-uri MUST name
+        # your tenant. Multi-tenant `/common` is NOT supported: its discovery metadata
+        # carries the `{tenantid}` issuer template, which the OIDC discovery client
+        # (Nimbus, via Spring's ClientRegistrations.fromIssuerLocation) refuses, so a
+        # `/common` issuer fails startup — no request flow can ever succeed behind it.
+        # - name: microsoft
+        #   client-id: ${MICROSOFT_CLIENT_ID}
+        #   client-secret: ${MICROSOFT_CLIENT_SECRET}
+        #   issuer-uri: https://login.microsoftonline.com/{tenant-id}/v2.0
+        #   display-name: "Sign in with Microsoft"
 
         # Add any OIDC provider the company uses:
         # - name: okta
@@ -772,8 +818,8 @@ datapipelines:
 | Provider | issuer-uri |
 |---|---|
 | Google | `https://accounts.google.com` |
-| Microsoft (multi-tenant) | `https://login.microsoftonline.com/common/v2.0` |
 | Microsoft (single tenant) | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
+| ~~Microsoft (multi-tenant)~~ | `/common` — **unsupported in v1** (§11.1: the `{tenantid}` discovery metadata is refused at startup) |
 | Okta | `https://{your-org}.okta.com` |
 | Auth0 | `https://{your-tenant}.auth0.com` |
 | Keycloak | `https://{host}/realms/{realm}` |
@@ -886,6 +932,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-26 | v2.8 | workspaces slice 2 | **Workspace resolution (design §5/§7):** §4.2 step 4 — login stamps `active_workspace` (last-used, else first membership, else freshly provisioned personal workspace under `auto-per-user`); §5.6 — `DP-Workspace` per-request switch, membership-checked (`403 workspace.membership_required`), API-key requests pin the key's workspace and refuse the header (`400 workspace.header_forbidden`); §7.4 — issuance restricted to the creator's workspaces; `workspace.*` codes catalogued in pipeline-contract §13.12. **§11.1:** stock config ships Google only; Microsoft becomes a commented single-tenant example — multi-tenant `/common` documented as unsupported in v1 (Nimbus refuses its `{tenantid}` discovery metadata at startup). |
 | 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |
 | 2026-08-05 | v2.0 | OIDC migration | Replaced local auth with Google/Microsoft OIDC. No passwords stored. Internal JWT issued after OIDC login. Added email domain allowlist. Added Spring Security filter chain configuration. Added OIDC success handler. Users provisioned automatically on first login. |
 | 2026-08-05 | v2.1 | generic OIDC | Replaced hardcoded Google/Microsoft with **generic OIDC provider model**. Any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, AWS Cognito, Ping, etc.). Deployment configures a provider list in `application.yml`; login page renders buttons dynamically. `provider` column in users table is free text (not constrained to GOOGLE/MICROSOFT). OIDC discovery auto-configures all endpoints from `issuer-uri`. |

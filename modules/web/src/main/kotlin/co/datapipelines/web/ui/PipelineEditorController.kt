@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineResponses
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.servlet.http.HttpServletRequest
@@ -23,11 +24,12 @@ class PipelineEditorController(
         model: Model,
         request: HttpServletRequest,
     ): String {
+        val workspaceId = currentPrincipal().requireWorkspace().id
         val record =
-            pipelines.findById(id)
+            pipelines.findById(workspaceId, id)
                 ?: throw NoSuchElementException("Pipeline $id not found")
         val body =
-            pipelines.findVersionBody(record.id, record.currentVersion)
+            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
                 ?: throw NoSuchElementException("Pipeline $id version ${record.currentVersion} body not found")
         val fullTree = PipelineResponses.full(record, body)
         val pipelineJson = mapper.writeValueAsString(fullTree)

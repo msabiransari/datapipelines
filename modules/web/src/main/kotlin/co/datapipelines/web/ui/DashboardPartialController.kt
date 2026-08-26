@@ -21,16 +21,17 @@ class DashboardPartialController(
     @GetMapping("/dashboard-stats")
     fun stats(model: Model): String {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
 
-        val totalPipelines = pipelines.countAll()
+        val totalPipelines = pipelines.countAll(workspaceId)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
         val recentBatch =
             if (isAdmin) {
-                executions.findAll(limit = STATS_SAMPLE_SIZE, offset = 0)
+                executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
             } else {
-                executions.findByUser(principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
+                executions.findByUser(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
             }
 
         val executionsToday = recentBatch.count { it.startedAt >= todayStart }
@@ -46,13 +47,14 @@ class DashboardPartialController(
     @GetMapping("/recent-executions")
     fun recentExecutions(model: Model): String {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
 
         val executions =
             if (isAdmin) {
-                executions.findAll(limit = RECENT_COUNT, offset = 0)
+                executions.findAll(workspaceId, limit = RECENT_COUNT, offset = 0)
             } else {
-                executions.findByUser(principal.userId, limit = RECENT_COUNT, offset = 0)
+                executions.findByUser(workspaceId, principal.userId, limit = RECENT_COUNT, offset = 0)
             }
 
         model.addAttribute("executions", executions)

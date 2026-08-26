@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.Dialect
+import java.util.UUID
 
 /**
  * The pipeline validator's view of the template registry and the Freemarker engine
@@ -20,8 +21,11 @@ import co.datapipelines.typesystem.Dialect
  * present, type-appropriate sample values otherwise)".
  */
 interface TemplateDryRenderer {
-    /** Resolves a `{id, version}` reference against the registry. */
-    fun lookup(ref: TemplateRef): TemplateLookup
+    /** Resolves a `{id, version}` reference against the registry, within [workspaceId] (design §3: refs are workspace-local). */
+    fun lookup(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): TemplateLookup
 
     /**
      * Renders [ref] against [context] and reports whether it succeeded.
@@ -34,6 +38,7 @@ interface TemplateDryRenderer {
      * template is one §12 failure among possibly many, and §17.2 requires them collected.
      */
     fun dryRender(
+        workspaceId: UUID,
         ref: TemplateRef,
         context: Map<String, Any?>,
     ): DryRenderOutcome

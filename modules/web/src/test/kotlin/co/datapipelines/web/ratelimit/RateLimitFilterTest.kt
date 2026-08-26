@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -27,7 +28,15 @@ import java.util.UUID
  */
 class RateLimitFilterTest {
     private val principal =
-        AuthenticatedPrincipal(UUID.randomUUID(), "a@b.c", "A", setOf(Scope.READ), AuthMethod.API_KEY, "dpk_x")
+        AuthenticatedPrincipal(
+            UUID.randomUUID(),
+            "a@b.c",
+            "A",
+            setOf(Scope.READ),
+            AuthMethod.API_KEY,
+            "dpk_x",
+            workspace = WorkspaceContext(UUID.randomUUID(), "acme"),
+        )
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()

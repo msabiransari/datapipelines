@@ -5,10 +5,12 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** pipeline-contract §12.4 — the node-type ↔ output-block rules. */
 class NodeTypeRulesTest {
     private val validator = Fixtures.validator()
+    private val workspaceId = UUID.randomUUID()
 
     @Test
     fun `a DML node with an output block is rejected`() {
@@ -17,7 +19,7 @@ class NodeTypeRulesTest {
                 nodes = listOf(dqlSink(), Fixtures.node(id = "b", type = NodeType.DML).copy(output = NodeOutput.Caller)),
             )
 
-        validator.validate(pipeline).codes shouldContain Validation.DML_HAS_OUTPUT
+        validator.validate(pipeline, workspaceId).codes shouldContain Validation.DML_HAS_OUTPUT
     }
 
     @Test
@@ -31,7 +33,7 @@ class NodeTypeRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).codes shouldContain Validation.DDL_HAS_OUTPUT
+        validator.validate(pipeline, workspaceId).codes shouldContain Validation.DDL_HAS_OUTPUT
     }
 
     @Test
@@ -46,14 +48,14 @@ class NodeTypeRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).failures shouldContainExactly emptyList()
+        validator.validate(pipeline, workspaceId).failures shouldContainExactly emptyList()
     }
 
     @Test
     fun `a tempdb output with no table is rejected`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(output = NodeOutput.Tempdb(""))))
 
-        validator.validate(pipeline).codes shouldContainExactly listOf(Validation.OUTPUT_TABLE_MISSING)
+        validator.validate(pipeline, workspaceId).codes shouldContainExactly listOf(Validation.OUTPUT_TABLE_MISSING)
     }
 
     @Test
@@ -63,7 +65,7 @@ class NodeTypeRulesTest {
                 nodes = listOf(Fixtures.node(output = NodeOutput.Datasource("", "", WriteMode.APPEND))),
             )
 
-        val failure = validator.validate(pipeline).withCode(Validation.OUTPUT_DATASOURCE_MISSING).single()
+        val failure = validator.validate(pipeline, workspaceId).withCode(Validation.OUTPUT_DATASOURCE_MISSING).single()
 
         @Suppress("UNCHECKED_CAST")
         (failure.details["missing"] as List<String>) shouldContainExactly listOf("datasource", "table")
@@ -76,7 +78,7 @@ class NodeTypeRulesTest {
                 nodes = listOf(dqlSink(), Fixtures.node(id = "b", type = NodeType.DML).copy(output = NodeOutput.Caller)),
             )
 
-        validator.validate(pipeline).codes.contains(Validation.NON_DQL_CALLER_TARGET) shouldBe false
+        validator.validate(pipeline, workspaceId).codes.contains(Validation.NON_DQL_CALLER_TARGET) shouldBe false
     }
 
     private fun dqlSink() = Fixtures.node(id = "a", output = NodeOutput.Tempdb("stg_orders"))

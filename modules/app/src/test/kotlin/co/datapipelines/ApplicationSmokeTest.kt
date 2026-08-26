@@ -175,10 +175,11 @@ class ApplicationSmokeTest {
             // source that contains any element of it, so overriding just the issuer-uri
             // would shadow application.yml's entries and leave their names blank; and
             // BOTH indices must be redeclared, because an Environment lookup for index 1
-            // otherwise falls through to application.yml's `microsoft` entry whose
-            // ${MICROSOFT_CLIENT_ID} placeholder cannot resolve here. Both entries
-            // discover from the in-process stub; the base-url the redirect URIs are
-            // built from is set explicitly.
+            // otherwise falls through to application.yml's `${GOOGLE_CLIENT_ID}`
+            // placeholder, which cannot resolve here. (application.yml ships google
+            // only; the second entry merely exercises multi-provider discovery.)
+            // Both entries discover from the in-process stub; the base-url the
+            // redirect URIs are built from is set explicitly.
             listOf("google", "microsoft").forEachIndexed { index, name ->
                 registry.add("datapipelines.auth.oidc.providers[$index].name") { name }
                 registry.add("datapipelines.auth.oidc.providers[$index].client-id") { "test-$name-client-id" }

@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionResult
@@ -104,11 +105,12 @@ class PipelineExecuteTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspace = ctx.principal.requireWorkspace()
         val id = args.requiredUuid("id")
-        val record = pipelines.findById(id) ?: throw McpNotFound.pipeline(id)
+        val record = pipelines.findById(workspace.id, id) ?: throw McpNotFound.pipeline(id)
         // B1: never clamped — `{version: 0}` is refused, not silently run as version 1.
         val version = args.version() ?: record.currentVersion
-        val body = pipelines.findVersionBody(id, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val body = pipelines.findVersionBody(workspace.id, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
 
         val request =
             ExecuteRequest(
@@ -120,14 +122,17 @@ class PipelineExecuteTool(
                 correlationId = ctx.correlationId,
                 triggeredVia = ExecutionTrigger.MCP,
             )
-        val result = execute(request)
+        val result = execute(request, workspace)
         return payload(request, result)
     }
 
     /** Runs the execution, translating the one cancellation path that is not a [DatapipelinesException]. */
-    private fun execute(request: ExecuteRequest): ExecutionResult =
+    private fun execute(
+        request: ExecuteRequest,
+        workspace: WorkspaceContext,
+    ): ExecutionResult =
         try {
-            runBlocking { executionRunner?.run(request) ?: executor.execute(request) }
+            runBlocking { executionRunner?.run(request, workspace) ?: executor.execute(request) }
         } catch (e: ExecutionAbortedException) {
             // §8.1: abortion extends CancellationException and maps to no executor error code, so
             // the dispatcher's DatapipelinesException path cannot see it. The agent still has to

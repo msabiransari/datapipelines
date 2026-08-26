@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionResult
 
@@ -22,6 +23,13 @@ import co.datapipelines.executor.ExecutionResult
  * acceptable only outside the assembled application.
  */
 fun interface McpExecutionRunner {
-    /** Runs [request] to its terminal state through the recording emitter. */
-    suspend fun run(request: ExecuteRequest): ExecutionResult
+    /**
+     * Runs [request] to its terminal state through the recording emitter. [workspace] is the
+     * key's pinned workspace the tool resolved (D3): the execution rows and the run's
+     * template/pipeline resolution are scoped to it.
+     */
+    suspend fun run(
+        request: ExecuteRequest,
+        workspace: WorkspaceContext,
+    ): ExecutionResult
 }

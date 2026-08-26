@@ -488,7 +488,7 @@ fun executeDql(node, context, staging) {
 
 ### 8.5 PIPELINE nodes
 
-A PIPELINE node executes the pipeline pinned by its `pipeline` reference as a **child execution**: a real, separate execution with its own execution record, own tempdb, own stats, and own SSE stream, started through the internal execution service (never HTTP). The child runs under the parent's principal; authorization is checked on the parent only. Dispatch happens before render/source resolution — a PIPELINE node carries neither a `template` nor a `source`.
+A PIPELINE node executes the pipeline pinned by its `pipeline` reference as a **child execution**: a real, separate execution with its own execution record, own tempdb, own stats, and own SSE stream, started through the internal execution service (never HTTP). The child runs under the parent's principal; authorization is checked on the parent only. The `{name, version}` reference resolves **within the active workspace** — cross-workspace references do not exist in v1. Dispatch happens before render/source resolution — a PIPELINE node carries neither a `template` nor a `source`.
 
 - **Parameters.** The node's `parameters` map becomes the child's execution parameters: literals pass through as supplied; each `"${parent_param}"` reference resolves to the parent execution's bound value for that parameter.
 - **Result.** The child's caller-node ResultSet streams **directly** to the parent executor (`direct` delivery — nothing is materialized to the result store, and the result is not re-fetchable afterwards; re-running is the recovery path) and lands per the node's `output` block, exactly like a DQL node's ResultSet (§8.1). A zero-caller child produces no stream: the parent waits for child completion, and success/failure is the node's outcome.
@@ -853,6 +853,16 @@ Defined and described in [REST API §7](rest-api.md#7-result-delivery).
 |---|---|---|
 | `rate_limit.exceeded` | 429 | Per-user rate limit hit (single code for all layers — REST, MCP, login) |
 | `idempotency.key_reused_for_different_request` | 409 | Same `Idempotency-Key` submitted with a different request body |
+
+### 13.12 Workspace resolution
+
+Raised by the workspace resolution layer (auth §5): the per-request `DP-Workspace` switch and API-key pinning. The workspace CRUD codes (`workspace.not_found`, `workspace.validation.*`, `workspace.in_use`) are catalogued with the REST surface that raises them.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `workspace.membership_required` | 403 | Principal is not a member of the addressed workspace (or has zero memberships); also covers unknown names, so the switch cannot probe existence |
+| `workspace.creation_forbidden` | 403 | The provisioning mode forbids this caller creating a workspace |
+| `workspace.header_forbidden` | 400 | `DP-Workspace` sent on an API-key request; a key's workspace is pinned at issuance and cannot switch |
 
 ---
 

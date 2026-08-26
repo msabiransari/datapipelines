@@ -8,11 +8,11 @@ import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraft
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -48,7 +48,7 @@ import org.springframework.web.bind.annotation.RestController
 class TemplatesController(
     private val templates: TemplateRepository,
     private val validator: TemplateValidator,
-    private val engine: TemplateEngine,
+    private val templateEngines: WorkspaceTemplateEngines,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 (and the id when the body omits one). */
@@ -58,8 +58,10 @@ class TemplatesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<Template> {
-        val draft = validator.validateOrThrow(deserializer.readOrThrow(body))
-        return ApiResponse.of(templates.create(draft, currentPrincipal().userId))
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
+        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId))
     }
 
     /** §8.2 — the latest version. */
@@ -67,7 +69,10 @@ class TemplatesController(
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun get(
         @PathVariable id: String,
-    ): ApiResponse<Template> = ApiResponse.of(templates.findLatest(id) ?: throw ApiErrors.templateNotFound(id))
+    ): ApiResponse<Template> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        return ApiResponse.of(templates.findLatest(workspaceId, id) ?: throw ApiErrors.templateNotFound(id))
+    }
 
     /** §8.3 — a specific version, including of a soft-deleted template (templates.md §5.1). */
     @GetMapping("/{id}/versions/{version}")
@@ -75,11 +80,21 @@ class TemplatesController(
     fun getVersion(
         @PathVariable id: String,
         @PathVariable version: Int,
-    ): ApiResponse<Template> =
-        ApiResponse.of(
-            templates.findVersion(id, version)
-                ?: throw if (templates.existsId(id)) ApiErrors.templateNotFound(id, version) else ApiErrors.templateNotFound(id),
+    ): ApiResponse<Template> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        return ApiResponse.of(
+            templates.findVersion(workspaceId, id, version)
+                ?: throw if (templates.existsId(
+                        workspaceId,
+                        id,
+                    )
+                ) {
+                    ApiErrors.templateNotFound(id, version)
+                } else {
+                    ApiErrors.templateNotFound(id)
+                },
         )
+    }
 
     /** §8.5 — the listing; the repository paginates in SQL, `total` is the honest lower bound. */
     @GetMapping
@@ -90,10 +105,11 @@ class TemplatesController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<PagedData<Template>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val filter = dialect?.let { parseDialect(it) }
-        val raw = templates.list(dialect = filter, q = q, offset = page, limit = size + 1)
+        val raw = templates.list(workspaceId, dialect = filter, q = q, offset = page, limit = size + 1)
         val items = raw.take(size)
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
     }
@@ -105,9 +121,11 @@ class TemplatesController(
         @PathVariable id: String,
         @RequestBody body: String,
     ): ApiResponse<Template> {
-        val draft = validator.validateOrThrow(deserializer.readOrThrow(body))
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
         return ApiResponse.of(
-            templates.update(id, draft, currentPrincipal().userId) ?: throw ApiErrors.templateNotFound(id),
+            templates.update(workspaceId, id, draft, principal.userId) ?: throw ApiErrors.templateNotFound(id),
         )
     }
 
@@ -118,7 +136,8 @@ class TemplatesController(
     fun delete(
         @PathVariable id: String,
     ) {
-        if (!templates.softDelete(id)) throw ApiErrors.templateNotFound(id)
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        if (!templates.softDelete(workspaceId, id)) throw ApiErrors.templateNotFound(id)
     }
 
     /**
@@ -132,11 +151,12 @@ class TemplatesController(
         @PathVariable version: Int,
         @RequestBody body: String,
     ): ApiResponse<String> {
-        if (templates.lookupVersion(id, version) == null) {
-            throw if (templates.existsId(id)) ApiErrors.templateNotFound(id, version) else ApiErrors.templateNotFound(id)
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        if (templates.lookupVersion(workspaceId, id, version) == null) {
+            throw if (templates.existsId(workspaceId, id)) ApiErrors.templateNotFound(id, version) else ApiErrors.templateNotFound(id)
         }
         val context = contextOf(body)
-        return ApiResponse.of(engine.render(TemplateRef(id, version), context))
+        return ApiResponse.of(templateEngines.engineFor(workspaceId).render(TemplateRef(id, version), context))
     }
 
     /**
@@ -151,15 +171,16 @@ class TemplatesController(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val entries = importEntries(body)
         val stored =
             entries.map { entry ->
-                val draft = validator.validateOrThrow(entry)
+                val draft = validator.validateOrThrow(entry, workspaceId)
                 val id = draft.id
-                if (id != null && templates.existsId(id)) {
-                    templates.update(id, draft, principal.userId) ?: throw ApiErrors.templateNotFound(id)
+                if (id != null && templates.existsId(workspaceId, id)) {
+                    templates.update(workspaceId, id, draft, principal.userId) ?: throw ApiErrors.templateNotFound(id)
                 } else {
-                    templates.create(draft, principal.userId)
+                    templates.create(workspaceId, draft, principal.userId)
                 }
             }
         return ApiResponse.of(mapOf("imported" to stored.size, "templates" to stored))

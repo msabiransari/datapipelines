@@ -12,9 +12,9 @@ import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -112,7 +112,7 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun templateValidator(): TemplateValidator = mockk()
 
-        @Bean fun templateEngine(): TemplateEngine = mockk()
+        @Bean fun workspaceTemplateEngines(): WorkspaceTemplateEngines = mockk()
 
         @Bean fun auditLogger(): AuditLogger = mockk(relaxed = true)
 

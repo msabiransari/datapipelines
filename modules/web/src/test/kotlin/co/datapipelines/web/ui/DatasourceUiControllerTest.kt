@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
@@ -26,6 +27,7 @@ class DatasourceUiControllerTest {
     private val controller = DatasourceUiController(registry, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private fun datasource(name: String = "pg-prod") =
         Datasource(
@@ -135,6 +137,7 @@ class DatasourceUiControllerTest {
                 "A",
                 setOf(Scope.ADMIN),
                 AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())

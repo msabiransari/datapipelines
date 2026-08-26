@@ -61,6 +61,14 @@ data class ExecutionRecord(
  *
  * The repository lives in `dag` because `dag` owns the entity; schema creation belongs to `app`'s
  * Flyway alone (§3.1 rule 2) and nothing here creates or alters a table.
+ *
+ * ## Workspace scoping (slice 2, design §5.3)
+ *
+ * Executions have no `workspace_id` column — visibility scopes **via a join to the execution's
+ * pipeline** (`executions inherit their pipeline's workspace`). Every read takes the active
+ * workspace explicitly as `workspaceId` — no default anywhere — so an execution UUID from
+ * another workspace simply does not resolve (404 at the surface, never a cross-workspace read).
+ * Writes take no workspace: the row's workspace is already implied by its pipeline.
  */
 class ExecutionRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -173,34 +181,71 @@ class ExecutionRepository(
             ),
         ) == 1
 
-    /** One execution's metadata — `GET /api/v1/executions/{id}` (rest-api §10.2). */
-    fun findById(executionId: UUID): ExecutionRecord? =
+    /**
+     * One execution's metadata — `GET /api/v1/executions/{id}` (rest-api §10.2). Scoped to
+     * [workspaceId] via its pipeline (design §5.3).
+     */
+    fun findById(
+        workspaceId: UUID,
+        executionId: UUID,
+    ): ExecutionRecord? =
         jdbc
-            .query("$SELECT_COLUMNS WHERE execution_id = :executionId", mapOf("executionId" to executionId), MAPPER)
+            .query(
+                "$SELECT_COLUMNS WHERE execution_id = :executionId AND $WORKSPACE_PREDICATE",
+                mapOf("executionId" to executionId, "workspaceId" to workspaceId),
+                MAPPER,
+            ).singleOrNull()
+
+    /**
+     * The workspace an execution belongs to — its pipeline's `workspace_id` (design §5.3).
+     * The composition runner resolves a PIPELINE node's child reference in the PARENT
+     * execution's workspace, and `dag`'s frozen request/context types cannot carry it down.
+     */
+    fun workspaceOfExecution(executionId: UUID): UUID? =
+        jdbc
+            .query(
+                """
+                SELECT p.workspace_id
+                  FROM pipeline_executions e
+                  JOIN pipelines p ON p.id = e.pipeline_id
+                 WHERE e.execution_id = :executionId
+                """.trimIndent(),
+                mapOf("executionId" to executionId),
+            ) { rs, _ -> rs.getObject("workspace_id", UUID::class.java) }
             .singleOrNull()
 
-    /** Executions for one pipeline, newest first — the `idx_executions_pipeline` access path. */
+    /** Executions for one pipeline, newest first — the `idx_executions_pipeline` access path. Scoped to [workspaceId]. */
     fun findByPipeline(
+        workspaceId: UUID,
         pipelineId: UUID,
         limit: Int = DEFAULT_PAGE,
         offset: Int = 0,
     ): List<ExecutionRecord> =
         jdbc.query(
-            "$SELECT_COLUMNS WHERE pipeline_id = :pipelineId ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
-            mapOf("pipelineId" to pipelineId, "limit" to limit, "offset" to offset),
-            MAPPER,
-        )
-
-    /** The whole execution family (root + descendants), newest first — the `idx_executions_root` access path. */
-    fun findByRoot(rootExecutionId: UUID): List<ExecutionRecord> =
-        jdbc.query(
-            "$SELECT_COLUMNS WHERE root_execution_id = :root ORDER BY started_at DESC",
-            mapOf("root" to rootExecutionId),
+            "$SELECT_COLUMNS WHERE pipeline_id = :pipelineId AND $WORKSPACE_PREDICATE" +
+                " ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+            mapOf("pipelineId" to pipelineId, "workspaceId" to workspaceId, "limit" to limit, "offset" to offset),
             MAPPER,
         )
 
     /**
-     * Executions triggered by one user, newest first — the `idx_executions_user` access path.
+     * The whole execution family (root + descendants), newest first — the `idx_executions_root`
+     * access path. A composition family lives entirely in its root pipeline's workspace (a
+     * PIPELINE node's child resolves in the parent's workspace), so one predicate scopes it.
+     */
+    fun findByRoot(
+        workspaceId: UUID,
+        rootExecutionId: UUID,
+    ): List<ExecutionRecord> =
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE root_execution_id = :root AND $WORKSPACE_PREDICATE ORDER BY started_at DESC",
+            mapOf("root" to rootExecutionId, "workspaceId" to workspaceId),
+            MAPPER,
+        )
+
+    /**
+     * Executions triggered by one user within [workspaceId], newest first — the
+     * `idx_executions_user` access path.
      *
      * The optional predicates are evaluated **in SQL**: a surface that paginates (rest-api §10.1)
      * must cut the page after filtering, or `has_more` and page fullness are wrong — filtering in
@@ -210,6 +255,7 @@ class ExecutionRepository(
      */
     @Suppress("LongParameterList")
     fun findByUser(
+        workspaceId: UUID,
         userId: UUID,
         pipelineId: UUID? = null,
         status: ExecutionStatus? = null,
@@ -220,8 +266,8 @@ class ExecutionRepository(
     ): List<ExecutionRecord> {
         val (where, params) =
             filteredQuery(
-                "triggered_by = :userId",
-                mapOf("userId" to userId),
+                "triggered_by = :userId AND $WORKSPACE_PREDICATE",
+                mapOf("userId" to userId, "workspaceId" to workspaceId),
                 pipelineId,
                 status,
                 startedAfter,
@@ -235,11 +281,13 @@ class ExecutionRepository(
     }
 
     /**
-     * Every execution, newest first — the **admin** listing behind `GET /executions` (rest-api
-     * §10.1) when the principal holds `admin` and is therefore not confined to their own runs
-     * (auth §7.6). Deliberately a separate method rather than a nullable `userId` on [findByUser]:
-     * "list across all users" is an authorization decision, and a method whose scoping vanishes
-     * when an argument happens to be null is one null away from leaking another user's history.
+     * Every execution **in [workspaceId]**, newest first — the **admin** listing behind
+     * `GET /executions` (rest-api §10.1) when the principal holds `admin` and is therefore not
+     * confined to their own runs (auth §7.6). Deliberately a separate method rather than a
+     * nullable `userId` on [findByUser]: "list across all users" is an authorization decision,
+     * and a method whose scoping vanishes when an argument happens to be null is one null away
+     * from leaking another user's history. The workspace scope, by contrast, is never nullable —
+     * an admin's listing spans the workspace's users, never other workspaces (design §5.3).
      *
      * @param pipelineId when set, the same `pipeline_id` filter §10.1 documents — served by
      *   `idx_executions_pipeline (pipeline_id, started_at DESC)`. Unfiltered, this sorts on
@@ -252,6 +300,7 @@ class ExecutionRepository(
      */
     @Suppress("LongParameterList")
     fun findAll(
+        workspaceId: UUID,
         pipelineId: UUID? = null,
         status: ExecutionStatus? = null,
         startedAfter: Instant? = null,
@@ -259,7 +308,15 @@ class ExecutionRepository(
         limit: Int = DEFAULT_PAGE,
         offset: Int = 0,
     ): List<ExecutionRecord> {
-        val (where, params) = filteredQuery(null, emptyMap(), pipelineId, status, startedAfter, startedBefore)
+        val (where, params) =
+            filteredQuery(
+                WORKSPACE_PREDICATE,
+                mapOf("workspaceId" to workspaceId),
+                pipelineId,
+                status,
+                startedAfter,
+                startedBefore,
+            )
         return jdbc.query(
             "$SELECT_COLUMNS $where ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
             params + mapOf("limit" to limit, "offset" to offset),
@@ -335,6 +392,14 @@ class ExecutionRepository(
 
     private companion object {
         const val DEFAULT_PAGE = 50
+
+        /**
+         * Executions inherit their pipeline's workspace (design §5.3) — the scoping predicate
+         * every read shares. An EXISTS subquery rather than a JOIN, so the unchanged,
+         * unqualified `SELECT_COLUMNS` above keeps working and no column can become ambiguous.
+         */
+        const val WORKSPACE_PREDICATE =
+            "EXISTS(SELECT 1 FROM pipelines p WHERE p.id = pipeline_executions.pipeline_id AND p.workspace_id = :workspaceId)"
 
         /** The one place the crash sweep's error envelope is written (F2). */
         val INSTANCE_LOST_JSON = """{"code":"${PipelineErrorCodes.Execution.INSTANCE_LOST}"}"""

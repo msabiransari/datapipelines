@@ -3,6 +3,7 @@ package co.datapipelines.web.executions
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -35,12 +36,21 @@ class ResultCursorTest {
 
     private val owner = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
     private val key = "dp:result:$executionId"
 
     private fun principal(
         userId: UUID = owner,
         scopes: Set<Scope> = setOf(Scope.READ),
-    ) = AuthenticatedPrincipal(userId, "a@b.c", "A", scopes, AuthMethod.API_KEY, "dpk_x")
+    ) = AuthenticatedPrincipal(
+        userId,
+        "a@b.c",
+        "A",
+        scopes,
+        AuthMethod.API_KEY,
+        "dpk_x",
+        workspace = WorkspaceContext(workspaceId, "acme"),
+    )
 
     private fun record(
         status: ExecutionStatus,
@@ -59,35 +69,35 @@ class ResultCursorTest {
 
     @Test
     fun `an unknown or non-owned execution is the same 404`() {
-        every { executions.findById(executionId) } returns null
+        every { executions.findById(any(), executionId) } returns null
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_not_found"
 
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_not_found"
     }
 
     @Test
     fun `admin reads any execution`() {
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
         cursor.readable(executionId, principal(userId = UUID.randomUUID(), scopes = setOf(Scope.ADMIN))).status shouldBe
             ExecutionStatus.SUCCESS
     }
 
     @Test
     fun `running is 409-incomplete and failed is 410-failed`() {
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_incomplete"
 
-        every { executions.findById(executionId) } returns record(ExecutionStatus.FAILED)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.FAILED)
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_failed"
 
-        every { executions.findById(executionId) } returns record(ExecutionStatus.ABORTED)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.ABORTED)
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_failed"
     }
 
     @Test
     fun `a successful zero-caller execution yields the empty page, not an error`() {
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS, rows = null)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, rows = null)
         val page = cursor.jsonPage(cursor.readable(executionId, principal()), 0L, null)
         page["total_rows"] shouldBe 0L
         page["has_more"] shouldBe false
@@ -95,7 +105,7 @@ class ResultCursorTest {
 
     @Test
     fun `an expired result is 410 expired`() {
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns key
         every { resultStore.page(key, 0L, 3) } returns null
         shouldThrow<ApiException> { cursor.jsonPage(cursor.readable(executionId, principal()), 0L, null) }
@@ -106,7 +116,7 @@ class ResultCursorTest {
     fun `json page shape matches section 7-3`() {
         val expires = Instant.parse("2026-08-05T14:35:02Z")
         val schema = listOf(ColumnSchema("customer_id", LogicalType.INTEGER))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns key
         every { resultStore.page(key, 0L, 3) } returns
             ResultPage(executionId, schema, listOf(listOf(1), listOf(2)), 0L, 3, 5, expires)
@@ -127,7 +137,7 @@ class ResultCursorTest {
                 ColumnSchema("total", LogicalType.BIGDECIMAL, 18, 2),
                 ColumnSchema("note", LogicalType.STRING),
             )
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns key
         every { resultStore.page(key, 0L, 10) } returns
             ResultPage(executionId, schema, listOf(listOf(1, "12345.67", "a,b"), listOf(2, "9.10", null)), 0L, 10, 3, expires)
@@ -149,7 +159,7 @@ class ResultCursorTest {
                 ColumnSchema("label", LogicalType.STRING),
                 ColumnSchema("amount", LogicalType.BIGDECIMAL, 18, 2),
             )
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns key
         every { resultStore.page(key, 0L, 10) } returns
             ResultPage(

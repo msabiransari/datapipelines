@@ -28,7 +28,9 @@ class ForbiddenConstructScannerTest {
     private fun flagged(body: String): Boolean = ForbiddenConstructScanner.scan(body).isNotEmpty()
 
     private fun rejected(body: String): List<String> =
-        TemplateValidator(LibraryResolver(InMemoryTemplateRegistry())).validate(TemplateFixtures.draft(body = body)).codes
+        TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+            .validate(TemplateFixtures.draft(body = body), java.util.UUID.randomUUID())
+            .codes
 
     @Test
     fun `plain forbidden builtins are flagged`() {

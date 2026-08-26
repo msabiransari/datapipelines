@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * pipeline-contract §12.9 — the composition rules for PIPELINE nodes, one test per table row.
@@ -15,14 +16,16 @@ import org.junit.jupiter.api.Test
  * must produce, so a green suite proves each row of §12.9 individually.
  */
 class CompositionRulesTest {
+    private val workspaceId = UUID.randomUUID()
+
     @Test
     fun `a valid PIPELINE node passes`() {
-        validatorWith(resolver(child())).validate(parent()).failures shouldContainExactly emptyList()
+        validatorWith(resolver(child())).validate(parent(), workspaceId).failures shouldContainExactly emptyList()
     }
 
     @Test
     fun `a pipeline that does not exist is pipeline_not_found`() {
-        val result = validatorWith(PipelineResolver { _, _ -> null }).validate(parent())
+        val result = validatorWith(PipelineResolver { _, _, _ -> null }).validate(parent(), workspaceId)
 
         val failure = result.withCode(Validation.PIPELINE_NOT_FOUND).single()
         failure.path shouldBe "nodes[0].pipeline"
@@ -33,7 +36,7 @@ class CompositionRulesTest {
     fun `a missing pipeline reference on a PIPELINE node is pipeline_not_found`() {
         // Mirrors absent-`template` reporting `template_not_found`: the field is required, and
         // §12.9 carries no separate "missing" code — the empty reference resolves to nothing.
-        val result = validatorWith(resolver(child())).validate(parent(ref = null))
+        val result = validatorWith(resolver(child())).validate(parent(ref = null), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_NOT_FOUND)
     }
@@ -42,7 +45,7 @@ class CompositionRulesTest {
     fun `an unknown pinned version of a known name is pipeline_version_not_found`() {
         // The name resolves at version 1 (every registered pipeline has one), so the resolver
         // returning null for the pinned 99 means the VERSION is what is missing.
-        val result = validatorWith(resolver(child())).validate(parent(ref = PipelineNodeRef(CHILD, 99)))
+        val result = validatorWith(resolver(child())).validate(parent(ref = PipelineNodeRef(CHILD, 99)), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_VERSION_NOT_FOUND)
     }
@@ -50,9 +53,9 @@ class CompositionRulesTest {
     @Test
     fun `referencing the containing pipeline by name is pipeline_self_reference`() {
         // The resolver answers every name here so the ONLY defect in play is the self-reference.
-        val resolveAny = PipelineResolver { _, version -> if (version == 1) ResolvedPipeline(child(), false) else null }
+        val resolveAny = PipelineResolver { _, _, version -> if (version == 1) ResolvedPipeline(child(), false) else null }
 
-        val result = validatorWith(resolveAny).validate(parent(ref = PipelineNodeRef(PARENT, 1)))
+        val result = validatorWith(resolveAny).validate(parent(ref = PipelineNodeRef(PARENT, 1)), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_SELF_REFERENCE)
     }
@@ -60,28 +63,28 @@ class CompositionRulesTest {
     @Test
     fun `a soft-deleted reference blocks the new save with pipeline_reference_deleted`() {
         // D7: soft-delete blocks NEW references only — existing pinned references still resolve.
-        val result = validatorWith(resolver(child(), deleted = true)).validate(parent())
+        val result = validatorWith(resolver(child(), deleted = true)).validate(parent(), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_REFERENCE_DELETED)
     }
 
     @Test
     fun `a PIPELINE node carrying a source is pipeline_node_has_source`() {
-        val result = validatorWith(resolver(child())).validate(parent(source = "pg-prod"))
+        val result = validatorWith(resolver(child())).validate(parent(source = "pg-prod"), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_NODE_HAS_SOURCE)
     }
 
     @Test
     fun `a PIPELINE node carrying a template is pipeline_node_has_template`() {
-        val result = validatorWith(resolver(child())).validate(parent(template = TemplateRef("t.sql", 1)))
+        val result = validatorWith(resolver(child())).validate(parent(template = TemplateRef("t.sql", 1)), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_NODE_HAS_TEMPLATE)
     }
 
     @Test
     fun `an unsupplied required-without-default child parameter is pipeline_parameter_unmapped`() {
-        val result = validatorWith(resolver(child())).validate(parent(parameters = null))
+        val result = validatorWith(resolver(child())).validate(parent(parameters = null), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_UNMAPPED)
     }
@@ -90,7 +93,7 @@ class CompositionRulesTest {
     fun `a supplied key the child does not declare is pipeline_parameter_unknown`() {
         val supplied = mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "bogus" to Fixtures.json("1"))
 
-        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied))
+        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_UNKNOWN)
     }
@@ -99,7 +102,7 @@ class CompositionRulesTest {
     fun `a literal failing the child parameter's wire encoding is pipeline_parameter_type_mismatch`() {
         val supplied = mapOf("start_date" to Fixtures.json("\"not a date\""))
 
-        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied))
+        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
     }
@@ -108,7 +111,7 @@ class CompositionRulesTest {
     fun `a reference naming no parent parameter is pipeline_parameter_type_mismatch`() {
         val supplied = mapOf("start_date" to Fixtures.json("\"\${missing}\""))
 
-        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied))
+        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
     }
@@ -120,7 +123,7 @@ class CompositionRulesTest {
 
         val result =
             validatorWith(resolver(child()))
-                .validate(parent(parameters = supplied, parentParameters = parentParameters))
+                .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
     }
@@ -131,7 +134,7 @@ class CompositionRulesTest {
         val parentParameters = mapOf("start_date" to Parameter(LogicalType.DATE, required = true))
 
         validatorWith(resolver(child()))
-            .validate(parent(parameters = supplied, parentParameters = parentParameters))
+            .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
             .failures shouldContainExactly emptyList()
     }
 
@@ -139,7 +142,7 @@ class CompositionRulesTest {
     fun `an output block on a zero-caller child is pipeline_output_on_sideeffect_child`() {
         val result =
             validatorWith(resolver(child(caller = false)))
-                .validate(parent(output = NodeOutput.Caller))
+                .validate(parent(output = NodeOutput.Caller), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_OUTPUT_ON_SIDEEFFECT_CHILD)
     }
@@ -155,7 +158,7 @@ class CompositionRulesTest {
                 nodes = listOf(pipelineNode(ref = PipelineNodeRef(GRANDCHILD, 1))),
             )
         val resolver =
-            PipelineResolver { name, version ->
+            PipelineResolver { _, name, version ->
                 when (name to version) {
                     CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, deleted = false)
                     GRANDCHILD to 1 -> ResolvedPipeline(grandchild, deleted = false)
@@ -163,7 +166,7 @@ class CompositionRulesTest {
                 }
             }
 
-        val result = validatorWith(resolver, maxDepth = 2).validate(parent())
+        val result = validatorWith(resolver, maxDepth = 2).validate(parent(), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.COMPOSITION_TOO_DEEP)
     }
@@ -178,7 +181,7 @@ class CompositionRulesTest {
                 nodes = listOf(pipelineNode(ref = PipelineNodeRef(GRANDCHILD, 1))),
             )
         val resolver =
-            PipelineResolver { name, version ->
+            PipelineResolver { _, name, version ->
                 when (name to version) {
                     CHILD to 1, CHILD to CHILD_VERSION -> ResolvedPipeline(intermediate, deleted = false)
                     GRANDCHILD to 1 -> ResolvedPipeline(grandchild, deleted = false)
@@ -186,15 +189,15 @@ class CompositionRulesTest {
                 }
             }
 
-        validatorWith(resolver, maxDepth = 3).validate(parent()).failures shouldContainExactly emptyList()
+        validatorWith(resolver, maxDepth = 3).validate(parent(), workspaceId).failures shouldContainExactly emptyList()
     }
 
     @Test
     fun `a pipeline without PIPELINE nodes never consults the resolver`() {
         val resolver =
-            PipelineResolver { _, _ -> error("resolver consulted for a pipeline with no PIPELINE nodes") }
+            PipelineResolver { _, _, _ -> error("resolver consulted for a pipeline with no PIPELINE nodes") }
 
-        validatorWith(resolver).validate(Fixtures.pipeline()).failures shouldContainExactly emptyList()
+        validatorWith(resolver).validate(Fixtures.pipeline(), workspaceId).failures shouldContainExactly emptyList()
     }
 
     // ------------------------------------------------------------------ helpers
@@ -221,7 +224,7 @@ class CompositionRulesTest {
         body: Pipeline,
         deleted: Boolean = false,
     ): PipelineResolver =
-        PipelineResolver { name, version ->
+        PipelineResolver { _, name, version ->
             if (name == CHILD && (version == 1 || version == CHILD_VERSION)) {
                 ResolvedPipeline(body, deleted)
             } else {

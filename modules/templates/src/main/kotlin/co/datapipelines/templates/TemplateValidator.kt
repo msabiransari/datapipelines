@@ -40,8 +40,15 @@ class TemplateValidator(
     private val libraryResolver: LibraryResolver,
     private val maxBodyChars: Int = DEFAULT_MAX_BODY_CHARS,
 ) {
-    /** Runs §7 against [draft] and returns every failure. */
-    fun validate(draft: TemplateDraft): TemplateValidationResult {
+    /**
+     * Runs §7 against [draft] and returns every failure. Imports resolve within
+     * [workspaceId] (design 2026-08-16-workspaces §3 — cross-workspace references do not
+     * exist in v1); no default, so validation without an explicit workspace does not compile.
+     */
+    fun validate(
+        draft: TemplateDraft,
+        workspaceId: java.util.UUID,
+    ): TemplateValidationResult {
         val failures = mutableListOf<TemplateValidationFailure>()
 
         if (draft.id != null && !TEMPLATE_ID.matches(draft.id)) {
@@ -56,14 +63,17 @@ class TemplateValidator(
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
         addBodyFailures(draft, failures)
-        libraryResolver.validate(draft.imports, failures)
+        libraryResolver.validate(workspaceId, draft.imports, failures)
 
         return TemplateValidationResult(failures)
     }
 
     /** Runs §7 and throws [TemplateValidationException] if anything failed; returns [draft] otherwise. */
-    fun validateOrThrow(draft: TemplateDraft): TemplateDraft {
-        validate(draft).orThrow()
+    fun validateOrThrow(
+        draft: TemplateDraft,
+        workspaceId: java.util.UUID,
+    ): TemplateDraft {
+        validate(draft, workspaceId).orThrow()
         return draft
     }
 

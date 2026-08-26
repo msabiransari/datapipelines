@@ -8,14 +8,16 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** pipeline-contract §12.2 (DAG) and §12.3 (caller node). */
 class DagRulesTest {
     private val validator = Fixtures.validator()
+    private val workspaceId = UUID.randomUUID()
 
     @Test
     fun `an empty node list is rejected`() {
-        validator.validate(Fixtures.pipeline(nodes = emptyList())).codes shouldContainExactly
+        validator.validate(Fixtures.pipeline(nodes = emptyList()), workspaceId).codes shouldContainExactly
             listOf(Validation.EMPTY_PIPELINE)
     }
 
@@ -23,7 +25,7 @@ class DagRulesTest {
     fun `a dependency on a node that does not exist is rejected`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(id = "a", dependsOn = listOf("ghost"))))
 
-        val failure = validator.validate(pipeline).withCode(Validation.DANGLING_DEPENDENCY).single()
+        val failure = validator.validate(pipeline, workspaceId).withCode(Validation.DANGLING_DEPENDENCY).single()
 
         failure.details["missing"] shouldBe "ghost"
     }
@@ -41,7 +43,7 @@ class DagRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).failures shouldContainExactly emptyList()
+        validator.validate(pipeline, workspaceId).failures shouldContainExactly emptyList()
     }
 
     @Test
@@ -56,7 +58,7 @@ class DagRulesTest {
                     ),
             )
 
-        val failure = validator.validate(pipeline).withCode(Validation.CYCLE_DETECTED).single()
+        val failure = validator.validate(pipeline, workspaceId).withCode(Validation.CYCLE_DETECTED).single()
 
         // The path, not just the fact — an author with fifteen nodes cannot act on "there is a
         // cycle somewhere".
@@ -69,7 +71,7 @@ class DagRulesTest {
     fun `a self-dependency is a cycle`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(id = "a", dependsOn = listOf("a"))))
 
-        validator.validate(pipeline).codes shouldContain Validation.CYCLE_DETECTED
+        validator.validate(pipeline, workspaceId).codes shouldContain Validation.CYCLE_DETECTED
     }
 
     @Test
@@ -85,7 +87,7 @@ class DagRulesTest {
                     ),
             )
 
-        val failure = validator.validate(pipeline).withCode(Validation.CYCLE_DETECTED).single()
+        val failure = validator.validate(pipeline, workspaceId).withCode(Validation.CYCLE_DETECTED).single()
 
         // The reported cycle is exactly {a, b} — not the path that reached it. Asserting only
         // `size == 1` let a mutation that reported `[x, a, b]` (the whole DFS path, roots
@@ -115,7 +117,7 @@ class DagRulesTest {
         // the old code died at depth 2000 from a ~60 KB payload.
         val nodes = chain(DEEP, cycleAtEnd = false)
 
-        val result = onSmallStack { validator.validate(Fixtures.pipeline(nodes = nodes)) }
+        val result = onSmallStack { validator.validate(Fixtures.pipeline(nodes = nodes), workspaceId) }
 
         // Survived — no StackOverflowError — and correctly found no cycle in a chain.
         result.codes shouldNotContain Validation.CYCLE_DETECTED
@@ -128,7 +130,7 @@ class DagRulesTest {
         // bottom of a 5000-node chain, on the same small stack, and report the loop it closes.
         val nodes = chain(DEEP, cycleAtEnd = true)
 
-        val result = onSmallStack { validator.validate(Fixtures.pipeline(nodes = nodes)) }
+        val result = onSmallStack { validator.validate(Fixtures.pipeline(nodes = nodes), workspaceId) }
         val failure = result.withCode(Validation.CYCLE_DETECTED).single()
 
         @Suppress("UNCHECKED_CAST")
@@ -174,7 +176,7 @@ class DagRulesTest {
         val nodes = (0..DagRules.MAX_NODES).map { Fixtures.node(id = "n$it", output = NodeOutput.Tempdb("t$it")) }
 
         val failure =
-            validator.validate(Fixtures.pipeline(nodes = nodes)).withCode(Validation.PIPELINE_TOO_LARGE).single()
+            validator.validate(Fixtures.pipeline(nodes = nodes), workspaceId).withCode(Validation.PIPELINE_TOO_LARGE).single()
 
         failure.details["max"] shouldBe DagRules.MAX_NODES
         failure.details["nodes"] shouldBe DagRules.MAX_NODES + 1
@@ -187,14 +189,14 @@ class DagRulesTest {
                 Fixtures.node(id = "n$it", output = if (it == 0) NodeOutput.Caller else NodeOutput.Tempdb("t$it"))
             }
 
-        validator.validate(Fixtures.pipeline(nodes = nodes)).codes shouldNotContain Validation.PIPELINE_TOO_LARGE
+        validator.validate(Fixtures.pipeline(nodes = nodes), workspaceId).codes shouldNotContain Validation.PIPELINE_TOO_LARGE
     }
 
     @Test
     fun `a dangling dependency does not also manufacture a cycle`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(id = "a", dependsOn = listOf("ghost"))))
 
-        validator.validate(pipeline).codes shouldNotContain Validation.CYCLE_DETECTED
+        validator.validate(pipeline, workspaceId).codes shouldNotContain Validation.CYCLE_DETECTED
     }
 
     @Test
@@ -213,7 +215,7 @@ class DagRulesTest {
                     ),
             )
 
-        val failure = validator.validate(pipeline).withCode(Validation.MULTIPLE_CALLER_NODES).single()
+        val failure = validator.validate(pipeline, workspaceId).withCode(Validation.MULTIPLE_CALLER_NODES).single()
 
         @Suppress("UNCHECKED_CAST")
         (failure.details["nodes"] as List<String>) shouldContainExactly listOf("a", "b")
@@ -234,7 +236,7 @@ class DagRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).failures shouldContainExactly emptyList()
+        validator.validate(pipeline, workspaceId).failures shouldContainExactly emptyList()
     }
 
     private companion object {

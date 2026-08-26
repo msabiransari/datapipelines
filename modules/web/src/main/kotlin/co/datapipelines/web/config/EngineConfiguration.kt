@@ -25,7 +25,7 @@ import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.staging.StagingFactory
-import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -171,7 +171,7 @@ class EngineConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun pipelineExecutorBean(
-        templateEngine: TemplateEngine,
+        templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
         writebackRunner: WritebackRunner,
@@ -186,7 +186,12 @@ class EngineConfiguration {
         subPipelineRunner: SubPipelineRunner,
     ): PipelineExecutor =
         pipelineExecutor(
-            templateEngine = templateEngine,
+            // The shared bean is a bean-of-record (mcp-server's @ConditionalOnBean); no
+            // production run goes through it — the per-run executors above carry the run's
+            // own workspace engine. Binding its engine to the NIL UUID (deliberately no
+            // workspace) keeps an accidental render fail-closed: it resolves nothing rather
+            // than reading any real workspace's templates.
+            templateEngine = templateEngines.engineFor(INERT_BEAN_WORKSPACE),
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,
@@ -239,5 +244,12 @@ class EngineConfiguration {
          * how many executions can be mid-bookkeeping rather than how fast any one of them is.
          */
         const val EVENT_PERSISTENCE_THREADS = 4
+
+        /**
+         * The deliberately-workspace-less binding of the shared executor bean's engine (see
+         * [pipelineExecutorBean]): the NIL UUID is no workspace, so template resolution through
+         * it finds nothing and fails closed.
+         */
+        val INERT_BEAN_WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000")
     }
 }

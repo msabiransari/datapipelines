@@ -1,5 +1,9 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateEngine
@@ -7,6 +11,7 @@ import co.datapipelines.templates.TemplateRenderException
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.templates.TemplateVersionSummary
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -14,7 +19,10 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import java.time.Instant
 import java.util.UUID
@@ -22,10 +30,32 @@ import java.util.UUID
 class TemplateEditorControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val engine = mockk<TemplateEngine>()
+    private val engines =
+        mockk<WorkspaceTemplateEngines> {
+            every { engineFor(any()) } returns engine
+        }
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = TemplateEditorController(templates, engine, themeResolver)
+    private val controller = TemplateEditorController(templates, engines, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
+
+    @AfterEach
+    fun clearContext() = SecurityContextHolder.clearContext()
+
+    private fun authenticate() {
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.AUTHOR),
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
 
     private val sampleTemplate =
         Template(
@@ -47,8 +77,9 @@ class TemplateEditorControllerTest {
 
     @Test
     fun `editor page returns editor view with template and versions`() {
-        every { templates.findLatest("my_template.sql") } returns sampleTemplate
-        every { templates.listVersions("my_template.sql") } returns sampleVersions
+        authenticate()
+        every { templates.findLatest(any(), "my_template.sql") } returns sampleTemplate
+        every { templates.listVersions(any(), "my_template.sql") } returns sampleVersions
         every { themeResolver.resolve(any()) } returns "saas"
 
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -63,7 +94,8 @@ class TemplateEditorControllerTest {
 
     @Test
     fun `render preview returns rendered output HTML`() {
-        every { templates.lookupVersion("my_template.sql", 1) } returns
+        authenticate()
+        every { templates.lookupVersion(any(), "my_template.sql", 1) } returns
             TemplateVersion(
                 id = "my_template.sql",
                 version = 1,
@@ -83,8 +115,9 @@ class TemplateEditorControllerTest {
 
     @Test
     fun `render preview returns error on missing template`() {
-        every { templates.lookupVersion("nope.sql", 1) } returns null
-        every { templates.existsId("nope.sql") } returns false
+        authenticate()
+        every { templates.lookupVersion(any(), "nope.sql", 1) } returns null
+        every { templates.existsId(any(), "nope.sql") } returns false
 
         val html = controller.renderPreview("nope.sql", 1, "body", """{}""")
 
@@ -93,7 +126,8 @@ class TemplateEditorControllerTest {
 
     @Test
     fun `render preview returns error on engine failure`() {
-        every { templates.lookupVersion("my_template.sql", 1) } returns
+        authenticate()
+        every { templates.lookupVersion(any(), "my_template.sql", 1) } returns
             TemplateVersion(
                 id = "my_template.sql",
                 version = 1,

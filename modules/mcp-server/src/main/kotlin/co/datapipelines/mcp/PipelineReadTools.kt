@@ -35,6 +35,7 @@ class PipelinesListTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val owner = args.uuid("owner")
         val query = args.string("q")?.lowercase()
         val datasource = args.string("datasource")
@@ -42,9 +43,9 @@ class PipelinesListTool(
 
         val records =
             if (datasource != null) {
-                pipelines.findAllByDatasource(datasource, owner)
+                pipelines.findAllByDatasource(workspaceId, datasource, owner)
             } else {
-                pipelines.findAll(owner)
+                pipelines.findAll(workspaceId, owner)
             }
 
         return records
@@ -110,16 +111,18 @@ class PipelinesGetTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
-        val record = pipelines.findById(id) ?: throw McpNotFound.pipeline(id)
-        return body(id, args.version() ?: record.currentVersion)
+        val record = pipelines.findById(workspaceId, id) ?: throw McpNotFound.pipeline(id)
+        return body(workspaceId, id, args.version() ?: record.currentVersion)
     }
 
     private fun body(
+        workspaceId: UUID,
         id: UUID,
         version: Int,
     ): JsonNode {
-        val json = pipelines.findVersionBody(id, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val json = pipelines.findVersionBody(workspaceId, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
         return McpTools.readTree(json)
     }
 }

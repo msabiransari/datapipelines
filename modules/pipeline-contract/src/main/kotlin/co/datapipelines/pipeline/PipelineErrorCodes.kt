@@ -328,4 +328,24 @@ object PipelineErrorCodes {
         const val RATE_LIMIT_EXCEEDED = "rate_limit.exceeded"
         const val IDEMPOTENCY_KEY_REUSED = "idempotency.key_reused_for_different_request"
     }
+
+    /**
+     * §13.12 — workspace resolution (design 2026-08-16-workspaces §5/§7/§8). Raised by the
+     * `auth` module's resolution layer; the `auth`-side constants mirror these exactly and
+     * `AuthErrorSpecDriftTest` asserts both against the doc — the same duplication pattern
+     * as [Auth] vs §13.7.
+     *
+     * The CRUD codes (`workspace.not_found`, `workspace.validation.*`, `workspace.in_use`)
+     * land with the REST surface slice that raises them (021).
+     */
+    object Workspace {
+        /** §13.12 — the principal is not a member of the addressed workspace (or has zero memberships). */
+        const val MEMBERSHIP_REQUIRED = "workspace.membership_required"
+
+        /** §13.12 — the provisioning mode forbids this caller creating a workspace. */
+        const val CREATION_FORBIDDEN = "workspace.creation_forbidden"
+
+        /** §13.12 — `DP-Workspace` on an API-key request; a key's workspace is pinned at issuance (D3). */
+        const val HEADER_FORBIDDEN = "workspace.header_forbidden"
+    }
 }

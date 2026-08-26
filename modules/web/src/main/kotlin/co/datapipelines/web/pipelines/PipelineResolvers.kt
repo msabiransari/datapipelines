@@ -21,8 +21,8 @@ fun repositoryPipelineResolver(
     repository: PipelineRepository,
     deserializer: PipelineDeserializer = PipelineDeserializer(),
 ): PipelineResolver =
-    PipelineResolver { name, version ->
-        val record = repository.findByNameIncludingDeleted(name) ?: return@PipelineResolver null
-        val body = repository.findVersionBody(record.id, version) ?: return@PipelineResolver null
+    PipelineResolver { workspaceId, name, version ->
+        val record = repository.findByNameIncludingDeleted(workspaceId, name) ?: return@PipelineResolver null
+        val body = repository.findVersionBody(workspaceId, record.id, version) ?: return@PipelineResolver null
         ResolvedPipeline(pipeline = deserializer.readOrThrow(body), deleted = record.isDeleted)
     }

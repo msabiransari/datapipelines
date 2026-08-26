@@ -22,6 +22,7 @@ import java.math.BigDecimal
  * now asserted verbatim apart from the presentational whitespace noted on [EXPECTED_SQL].
  */
 class TemplateSpecExamplesTest {
+    private val workspaceId = java.util.UUID.randomUUID()
     private val engines = mutableListOf<TemplateEngine>()
 
     @AfterEach
@@ -32,9 +33,13 @@ class TemplateSpecExamplesTest {
 
     @Test
     fun `the Appendix A library validates as a library`() {
-        val validator = TemplateValidator(LibraryResolver(InMemoryTemplateRegistry()))
+        val registry = InMemoryTemplateRegistry()
+        val validator = TemplateValidator(LibraryResolver { _ -> registry })
 
-        validator.validate(TemplateFixtures.draft(id = "lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE)).isValid.shouldBeTrue()
+        validator
+            .validate(TemplateFixtures.draft(id = "lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE), workspaceId)
+            .isValid
+            .shouldBeTrue()
     }
 
     @Test
@@ -50,7 +55,7 @@ class TemplateSpecExamplesTest {
                 body = MONTHLY_REVENUE,
             )
 
-        TemplateValidator(LibraryResolver(registry)).validate(draft).isValid.shouldBeTrue()
+        TemplateValidator(LibraryResolver { _ -> registry }).validate(draft, workspaceId).isValid.shouldBeTrue()
 
         registry.put(
             TemplateFixtures.version(
@@ -110,7 +115,7 @@ class TemplateSpecExamplesTest {
         val registry = InMemoryTemplateRegistry(listOf(v1, v2))
         val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 2, "newer")))
 
-        TemplateValidator(LibraryResolver(registry)).validate(draft).isValid.shouldBeTrue()
+        TemplateValidator(LibraryResolver { _ -> registry }).validate(draft, workspaceId).isValid.shouldBeTrue()
     }
 
     private companion object {

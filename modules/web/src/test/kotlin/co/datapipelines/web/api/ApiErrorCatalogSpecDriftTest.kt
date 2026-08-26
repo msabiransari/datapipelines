@@ -50,7 +50,7 @@ class ApiErrorCatalogSpecDriftTest {
         }
     }
 
-    /** §13.2–§13.11 rows: `| \`code\` | HTTP | … |` with a numeric or em-dash HTTP cell. */
+    /** §13.2–§13.12 rows: `| \`code\` | HTTP | … |` with a numeric or em-dash HTTP cell. */
     private fun parseStatusRows(spec: String): List<Pair<String, Int?>> =
         spec
             .lineSequence()
@@ -70,8 +70,8 @@ class ApiErrorCatalogSpecDriftTest {
         val STATUS_ROW_REGEX = Regex("""^\|\s*`([a-z][a-z0-9_.]+)`\s*\|\s*([0-9]{3}|—)\s*\|""")
         val VALIDATION_ROW_REGEX = Regex("""^\| `(pipeline\.validation\.[a-z_]+)`\s*\|""")
 
-        /** §13.2–§13.11's row count on 2026-08-17 (pipeline composition added the two §13.4 node codes). */
-        const val SECTION_13_ROW_COUNT = 74
+        /** §13.2–§13.12's row count on 2026-08-26 (workspaces slice 2 added §13.12's three workspace codes). */
+        const val SECTION_13_ROW_COUNT = 77
 
         /** §12's distinct validation codes on 2026-08-17 (pipeline composition added §12.9's 11). */
         const val SECTION_12_CODE_COUNT = 46

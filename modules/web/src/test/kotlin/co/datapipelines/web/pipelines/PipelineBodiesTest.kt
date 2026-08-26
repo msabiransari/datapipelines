@@ -13,6 +13,7 @@ import java.util.UUID
 class PipelineBodiesTest {
     private val repository = mockk<PipelineRepository>()
     private val bodies = PipelineBodies(repository)
+    private val workspaceId = UUID.randomUUID()
 
     private fun record(
         name: String,
@@ -33,33 +34,33 @@ class PipelineBodiesTest {
     fun `scan without datasource queries findAll`() {
         val first = record("a")
         val second = record("b")
-        every { repository.findAll(null) } returns listOf(first, second)
+        every { repository.findAll(any(), null) } returns listOf(first, second)
 
-        val scan = bodies.scan()
+        val scan = bodies.scan(workspaceId)
         scan.records.size shouldBe 2
         scan.records shouldBe listOf(first, second)
 
-        verify(exactly = 1) { repository.findAll(null) }
+        verify(exactly = 1) { repository.findAll(any(), null) }
     }
 
     @Test
     fun `scan with datasource pushes filter to SQL`() {
         val rec = record("p")
-        every { repository.findAllByDatasource("pg-prod", null) } returns listOf(rec)
+        every { repository.findAllByDatasource(any(), "pg-prod", null) } returns listOf(rec)
 
-        val scan = bodies.scan(datasourceName = "pg-prod")
+        val scan = bodies.scan(workspaceId, datasourceName = "pg-prod")
         scan.records.size shouldBe 1
         scan.records[0].name shouldBe "p"
 
-        verify(exactly = 1) { repository.findAllByDatasource("pg-prod", null) }
+        verify(exactly = 1) { repository.findAllByDatasource(any(), "pg-prod", null) }
     }
 
     @Test
     fun `the q filter matches name, display name and description, case-insensitively`() {
         val rec = record("monthly_revenue")
-        every { repository.findAll(null) } returns listOf(rec)
+        every { repository.findAll(any(), null) } returns listOf(rec)
 
-        val scan = bodies.scan()
+        val scan = bodies.scan(workspaceId)
         scan.matchesQuery(rec, "REVENUE") shouldBe true
         scan.matchesQuery(rec, "display monthly") shouldBe true
         scan.matchesQuery(rec, "about monthly") shouldBe true
@@ -70,8 +71,8 @@ class PipelineBodiesTest {
     fun `pipelinesReferencing delegates to findAllByDatasource`() {
         val a = record("a")
         val b = record("b")
-        every { repository.findAllByDatasource("pg-prod") } returns listOf(a, b)
+        every { repository.findAllByDatasource(any(), "pg-prod") } returns listOf(a, b)
 
-        bodies.pipelinesReferencing("pg-prod") shouldBe listOf("a", "b")
+        bodies.pipelinesReferencing(workspaceId, "pg-prod") shouldBe listOf("a", "b")
     }
 }

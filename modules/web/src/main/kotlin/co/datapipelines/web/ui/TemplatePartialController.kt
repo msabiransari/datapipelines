@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.api.currentPrincipal
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -27,7 +28,16 @@ class TemplatePartialController(
             dialect?.trim()?.takeIf { it.isNotEmpty() }?.let { d ->
                 Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
             }
-        val raw = templates.list(dialect = dialectFilter, q = q?.trim()?.takeIf { it.isNotEmpty() }, offset = page, limit = size + 1)
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val raw =
+            templates.list(
+                workspaceId,
+                dialect = dialectFilter,
+                q = q?.trim()?.takeIf { it.isNotEmpty() },
+                offset = page,
+                limit =
+                    size + 1,
+            )
         val items = raw.take(size)
         model.addAttribute("templates", items)
         model.addAttribute("q", q ?: "")

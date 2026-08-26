@@ -107,11 +107,16 @@ datapipelines:
           client-secret: ${GOOGLE_CLIENT_SECRET}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
-        - name: microsoft
-          client-id: ${MICROSOFT_CLIENT_ID}
-          client-secret: ${MICROSOFT_CLIENT_SECRET}
-          issuer-uri: https://login.microsoftonline.com/common/v2.0
-          display-name: "Sign in with Microsoft"
+        # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the
+        # issuer-uri MUST name your tenant, because the multi-tenant `/common`
+        # endpoint cannot work via OIDC discovery — its metadata carries the
+        # `{tenantid}` template, which Nimbus (Spring's discovery client) refuses.
+        # Uncomment and set MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET to enable:
+        # - name: microsoft
+        #   client-id: ${MICROSOFT_CLIENT_ID}
+        #   client-secret: ${MICROSOFT_CLIENT_SECRET}
+        #   issuer-uri: https://login.microsoftonline.com/{tenant-id}/v2.0
+        #   display-name: "Sign in with Microsoft"
         # Add more providers as needed (Okta, Auth0, Keycloak, etc.)
     jwt:
       ttl-hours: ${DATAPIPELINES_AUTH_JWT_TTL_HOURS:8}
@@ -132,6 +137,14 @@ datapipelines:
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
+
+  # §3.17 — workspace provisioning (design 2026-08-16-workspaces §7). `auto-per-user`
+  # mints a personal workspace on first OIDC login; `self-serve` lets any authenticated
+  # user create workspaces; `closed` is admin-only creation.
+  workspaces:
+    provisioning-mode: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}
+    open-join: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:false}
+    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
 
   staging:
     h2:

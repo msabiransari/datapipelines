@@ -35,6 +35,13 @@ data class ExecutionContext(
     val triggeredVia: ExecutionTrigger,
     val parametersJson: String,
     /**
+     * The workspace this execution runs in — its pipeline's workspace (design §5.3). Carried
+     * explicitly because `dag`'s frozen request/context types cannot: the emitter needs it for
+     * its workspace-scoped execution-row reads, and the composition runner derives a child's
+     * workspace from the parent execution's row instead.
+     */
+    val workspaceId: UUID,
+    /**
      * Composition lineage (metadata-db §4.6, V3): set only on a child execution spawned by a
      * PIPELINE node — null on roots, which persist `root_execution_id = execution_id`.
      */
@@ -247,7 +254,7 @@ class WebEventEmitter(
         event: ExecutionEvent,
     ): Long =
         runCatching {
-            executionRepository.findById(executionId)?.let {
+            executionRepository.findById(context.workspaceId, executionId)?.let {
                 java.time.Duration
                     .between(it.startedAt, event.timestamp)
                     .toMillis()

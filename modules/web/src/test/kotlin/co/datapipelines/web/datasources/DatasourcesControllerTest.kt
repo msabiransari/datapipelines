@@ -3,6 +3,7 @@ package co.datapipelines.web.datasources
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
@@ -52,7 +53,15 @@ class DatasourcesControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     private fun authenticate(scopes: Set<Scope> = setOf(Scope.ADMIN)) {
-        val principal = AuthenticatedPrincipal(userId, "a@b.c", "A", scopes, AuthMethod.OIDC)
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                scopes,
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(UUID.randomUUID(), "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }

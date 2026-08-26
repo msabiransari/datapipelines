@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.auth.LastUsedWorkspaceStore
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
@@ -20,7 +21,7 @@ import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
-import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
@@ -32,6 +33,7 @@ import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.SseLogStreamer
+import co.datapipelines.web.workspace.RedisLastUsedWorkspaceStore
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +61,14 @@ class WebSurfaceConfiguration {
         redis: StringRedisTemplate,
         properties: RateLimitProperties,
     ): RateLimiter = RedisRateLimiter(redis, properties)
+
+    /**
+     * The last-used-workspace store `auth`'s resolution reads at login and writes on
+     * `DP-Workspace` switches (design §5.1). The port is `auth`'s; the Redis implementation
+     * lives here (module-structure §3.1 rule 3).
+     */
+    @Bean
+    fun lastUsedWorkspaceStore(redis: StringRedisTemplate): LastUsedWorkspaceStore = RedisLastUsedWorkspaceStore(redis)
 
     /**
      * Actuator resolves `HealthIndicator` beans by name; `h2_factory` is the health-path
@@ -137,7 +147,7 @@ class WebSurfaceConfiguration {
     @Bean
     fun subPipelineRunner(
         pipelines: PipelineRepository,
-        templateEngine: TemplateEngine,
+        templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
         writebackRunner: WritebackRunner,
@@ -157,7 +167,7 @@ class WebSurfaceConfiguration {
     ): SubPipelineRunner =
         SubPipelineExecutionRunner(
             pipelines = pipelines,
-            templateEngine = templateEngine,
+            templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,
@@ -179,7 +189,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun executionLauncher(
-        templateEngine: TemplateEngine,
+        templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
         writebackRunner: WritebackRunner,
@@ -204,7 +214,7 @@ class WebSurfaceConfiguration {
         subPipelineRunner: SubPipelineRunner,
     ): ExecutionLauncher =
         ExecutionLauncher(
-            templateEngine = templateEngine,
+            templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,
@@ -239,7 +249,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun mcpExecutionRunner(
-        templateEngine: TemplateEngine,
+        templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
         writebackRunner: WritebackRunner,
@@ -259,7 +269,7 @@ class WebSurfaceConfiguration {
         subPipelineRunner: SubPipelineRunner,
     ): McpExecutionRunner =
         McpRecordingExecutionRunner(
-            templateEngine = templateEngine,
+            templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,

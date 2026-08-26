@@ -43,6 +43,7 @@ class ConfigValidatorTest {
             resultTtlMinSeconds = 60,
             resultTtlDefaultSeconds = 300,
             resultTtlMaxSeconds = 3600,
+            workspacesProvisioningMode = "self-serve",
             activeProfiles = emptySet(),
             vendoredThemes = setOf("saas", "high-contrast"),
         )
@@ -213,6 +214,15 @@ class ConfigValidatorTest {
     }
 
     @Test
+    fun `an unknown workspaces provisioning mode is refused`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(workspacesProvisioningMode = "free-for-all"))
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("provisioning-mode")
+        report.violations.single().shouldContain("free-for-all")
+    }
+
+    @Test
     fun `passwordless redis off loopback warns but does not refuse`() {
         val report = ConfigValidator.validate(validSnapshot().copy(redisPassword = ""))
 
@@ -246,6 +256,7 @@ class ConfigValidatorTest {
                 resultTtlMinSeconds = 60,
                 resultTtlDefaultSeconds = 300,
                 resultTtlMaxSeconds = 3600,
+                workspacesProvisioningMode = "self-serve",
                 activeProfiles = emptySet(),
                 vendoredThemes = setOf("saas"),
             )

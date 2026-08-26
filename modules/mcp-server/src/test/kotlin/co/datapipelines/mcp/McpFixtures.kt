@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
@@ -26,6 +27,8 @@ object McpFixtures {
     val PIPELINE_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111")
     val EXECUTION_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
     val CORRELATION_ID: UUID = UUID.fromString("33333333-3333-3333-3333-333333333333")
+    val WORKSPACE_ID: UUID = UUID.fromString("44444444-4444-4444-4444-444444444444")
+    val WORKSPACE: WorkspaceContext = WorkspaceContext(WORKSPACE_ID, "acme")
 
     fun principal(
         vararg scopes: Scope,
@@ -39,6 +42,8 @@ object McpFixtures {
             scopes = scopes.toSet(),
             authMethod = method,
             keyId = "dpk_ABCDEFGHIJKL",
+            // Every tool/catalog/reader path resolves the workspace through requireWorkspace().
+            workspace = WORKSPACE,
         )
 
     fun ctx(
