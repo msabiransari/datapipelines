@@ -24,10 +24,16 @@
 #     file is missing from dist/, a copied file's hash does not match its
 #     source, or the manifest cannot be parsed/validated. Any failure exits
 #     non-zero — there is no fail-soft path in a vendoring step.
-#   * --check additionally asserts the manifest's sha256 KEY SET equals the
-#     curated list in BOTH directions (014/F3): a list addition that was
-#     never synced, or a stale manifest entry after a removal, is drift —
-#     the per-file hash loop alone cannot see either.
+#   * --check additionally asserts the manifest's sha256 KEY SET *and* files
+#     ARRAY each equal the curated list in BOTH directions (014/F3, 018/F6):
+#     a list addition that was never synced, a stale manifest entry after a
+#     removal, or a hand-edit/bad merge that leaves design-system.files out
+#     of step with VENDED_FILES is drift — the per-file hash loop alone
+#     cannot see any of these. Both sides are compared under LC_ALL=C
+#     ordering (018/F4): the shell's `sort` uses the locale collation
+#     (en_US.UTF-8 orders themes/auto.css BEFORE themes/Auto.css) while
+#     Python's sorted() is codepoint (the reverse), so equal sets could
+#     compare unequal and feed comm mismatched orderings.
 #
 # The vendored surface is a CURATED SUBSET of dist/ (the files the app
 # actually serves): classless.css, base-scoped.css, adapters/, and the icon
@@ -94,8 +100,8 @@ CHECK_ONLY=false
 # visible, so new dist files are a DECISION, not a silent gap).
 announce_not_vendored() {
   local listed sorted_dist extra
-  listed=$(printf '%s\n' "${VENDED_FILES[@]}" | sort)
-  sorted_dist=$(cd "$SRC_DIST" && find . -type f ! -path './.*' | sed 's|^\./||' | sort)
+  listed=$(printf '%s\n' "${VENDED_FILES[@]}" | LC_ALL=C sort)
+  sorted_dist=$(cd "$SRC_DIST" && find . -type f ! -path './.*' | sed 's|^\./||' | LC_ALL=C sort)
   extra=$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$sorted_dist") || true)
   if [ -n "$extra" ]; then
     echo "sync-design-system: note — present in dist/ but NOT vendored (curated surface):"
@@ -120,7 +126,13 @@ if $CHECK_ONLY; then
   # looked at (proven: classless.css added to the list → "check OK — 15
   # vendored file(s)", exit 0). Missing keys = unsynced addition; extra
   # keys = stale manifest entry after a list removal.
-  listed=$(printf '%s\n' "${VENDED_FILES[@]}" | sort)
+  # LC_ALL=C (018/F4): `sort` under the locale collation and Python's
+  # codepoint sorted() disagree on case-differing names (verified:
+  # themes/auto.css vs themes/Auto.css), so equal sets could compare
+  # unequal and hand comm mismatched orderings. The `|| true`s on the
+  # comm calls (the :99 precedent) keep a residual ordering surprise from
+  # aborting the script before either DRIFT message prints.
+  listed=$(printf '%s\n' "${VENDED_FILES[@]}" | LC_ALL=C sort)
   in_manifest=$(python3 - "$MANIFEST" <<'PY'
 import json, sys
 block = json.load(open(sys.argv[1])).get("design-system", {})
@@ -128,8 +140,8 @@ print("\n".join(sorted(block.get("sha256", {}).keys())))
 PY
 )
   if [ "$in_manifest" != "$listed" ]; then
-    unsynced=$(comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest"))
-    stale_key=$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest"))
+    unsynced=$(comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest") || true)
+    stale_key=$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest") || true)
     if [ -n "$unsynced" ]; then
       echo "sync-design-system: DRIFT — in the curated list but NOT in the manifest (run a full sync):" >&2
       printf '%s\n' "$unsynced" | sed 's/^/    /' >&2
@@ -137,6 +149,32 @@ PY
     if [ -n "$stale_key" ]; then
       echo "sync-design-system: DRIFT — in the manifest but NOT in the curated list (stale entry):" >&2
       printf '%s\n' "$stale_key" | sed 's/^/    /' >&2
+    fi
+    status=1
+  fi
+  # The manifest's "files" ARRAY must equal the curated list too, both
+  # directions (018/F6): a full sync writes both the files array and the
+  # sha256 map from the same VENDED_FILES, so any divergence is a hand-edit
+  # or bad merge — and it passed --check while every sha256 key stayed
+  # intact (proven: files array with one entry swapped → "check OK", exit 0).
+  # Same LC_ALL=C comparison; order is NOT asserted (the sync writes curated
+  # order, but drift means CONTENT, not sequence).
+  in_manifest_files=$(python3 - "$MANIFEST" <<'PY'
+import json, sys
+block = json.load(open(sys.argv[1])).get("design-system", {})
+print("\n".join(sorted(block.get("files", []))))
+PY
+)
+  if [ "$in_manifest_files" != "$listed" ]; then
+    files_unsynced=$(comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest_files") || true)
+    files_stale=$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$in_manifest_files") || true)
+    if [ -n "$files_unsynced" ]; then
+      echo "sync-design-system: DRIFT — files array: in the curated list but NOT in the manifest (run a full sync):" >&2
+      printf '%s\n' "$files_unsynced" | sed 's/^/    /' >&2
+    fi
+    if [ -n "$files_stale" ]; then
+      echo "sync-design-system: DRIFT — files array: in the manifest but NOT in the curated list (stale entry):" >&2
+      printf '%s\n' "$files_stale" | sed 's/^/    /' >&2
     fi
     status=1
   fi
@@ -196,7 +234,7 @@ for f in "${VENDED_FILES[@]}"; do
 done
 
 # Announce (never delete) stale vendored files no longer on the list.
-stale=$(cd "$DEST" && find . -type f -name '*.css' ! -name 'vendor-manifest.json' | sed 's|^\./||' | sort \
+stale=$(cd "$DEST" && find . -type f -name '*.css' ! -name 'vendor-manifest.json' | sed 's|^\./||' | LC_ALL=C sort \
   | while IFS= read -r rel; do
       printf '%s\n' "${VENDED_FILES[@]}" | grep -qx "$rel" || echo "$rel"
     done)
