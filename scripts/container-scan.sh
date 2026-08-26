@@ -52,7 +52,15 @@ TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir trivy)"
 
 os=$(uname -s)                    # Darwin | Linux
-arch=$(scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
+# trap - ERR inside the substitution (018/F3): errtrace makes the
+# command-substitution subshell inherit this script's ERR trap, so
+# scan_tools_arch's HANDLED `return 1` (unsupported arch) fires it and prints
+# the spurious "unexpected tooling failure" line on exactly the path this
+# guard exists to name. NB `set +E` there is NOT enough — the trap is
+# inherited at fork time and stays SET in the subshell (proven: still fires;
+# the parent's -E only governs further inheritance). Removing it in the
+# subshell silences the line; the parent's trap is untouched; EXIT stays 2.
+arch=$(trap - ERR; scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 # trivy's asset names conflate OS and arch (macOS-ARM64, Linux-64bit, …): the
 # ARCH token comes from scan_tools_arch (one map for all scanners, 012/F10);
 # only the OS token is mapped here.
