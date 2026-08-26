@@ -464,10 +464,14 @@ never run automatically: `./gradlew -p buildSrc test` runs them, and
 the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
 The stage is attempted even when the network preflight says offline (a warm
-TestKit cache passes offline); only a dependency-resolution failure in the
-log while genuinely offline skips it fail-soft, and skipped stages are
-counted and named in the gate's summary line — a PASS never hides an unrun
-guard (014/F4).
+TestKit cache passes offline). The fail-soft offline skip is earned only by
+a dependency-resolution failure — evidenced in the stage log **or the JUnit
+XML test results** (Gradle's default `SHORT` console format never prints
+the exception message, which is where the TestKit probes' resolution errors
+surface) — with **no other genuine test failure** among the results; a
+tooling crash (OOM, dead daemon) classifies as "no verdict, re-run" *ahead*
+of any skip, and skipped stages are counted and named in the gate's summary
+line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
 
 #### Dependency vulnerabilities (OSV-Scanner)
 

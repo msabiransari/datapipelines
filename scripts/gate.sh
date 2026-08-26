@@ -19,9 +19,15 @@
 #      every quality pass (012/F6). Failures are crash-classified like every
 #      other stage (013/F3); the tests are forced to execute via cleanTest
 #      (013/F4). The stage is ATTEMPTED even when the preflight says
-#      offline — a warm TestKit cache passes offline — and only a dependency-
-#      resolution failure while genuinely offline is the fail-soft skip;
-#      skipped stages are counted and named in the summary (014/F4).
+#      offline — a warm TestKit cache passes offline. The fail-soft skip is
+#      earned only by a dependency-resolution failure while genuinely
+#      offline, evidenced in the stage log OR the JUnit XML results (Gradle's
+#      default SHORT console format never prints the exception message where
+#      the probes' resolution errors live — 018/F1), with no other genuine
+#      test failure among the results (018/F2); a tooling crash classifies as
+#      no-verdict BEFORE any skip (018/F2). Skipped stages are counted and
+#      named in the summary (014/F4). The verdict branches live in
+#      scripts/lib/gate-stages.sh so they are drivable by fixtures.
 #   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
 #      fails the gate on real findings and warns without failing when the
 #      network is unreachable (fail-soft by design).
@@ -93,12 +99,16 @@ run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   echo $?
 }
 
-# A crash is not a test failure. Detect the signatures we have actually seen.
-crashed() {
-  grep -qE 'NoSuchFileException|EOFException|OutOfMemoryError|finished with non-zero exit value|Gradle build daemon disappeared' "$1" 2>/dev/null
-}
+# A crash is not a test failure — gate_crashed() detects the signatures we
+# have actually seen (scripts/lib/gate-stages.sh, shared with the buildSrc
+# stage below).
 
 fails=0; crashes=0; skips=0
+
+# Stage verdict branches shared with the buildSrc stage below (018/F1+F2):
+# sourced so the branches are drivable by fixtures without running the gate.
+source "$ROOT/scripts/lib/gate-stages.sh"
+
 for i in $(seq 1 "$CYCLES"); do
   c=$(run "$LOGDIR/cycle${i}-1-clean.log" clean)
   b=$(run "$LOGDIR/cycle${i}-2-build.log" build)
@@ -110,7 +120,7 @@ for i in $(seq 1 "$CYCLES"); do
     name="${pair%%:*}"; logf="$LOGDIR/cycle${i}-${pair##*:}.log"
     if [ "$code" -ne 0 ]; then
       fails=$((fails + 1)); status="FAIL"
-      if crashed "$logf"; then
+      if gate_crashed "$logf"; then
         crashes=$((crashes + 1))
         echo "  cycle $i  $name  EXIT=$code  ** TOOLING CRASH — no verdict, not a test failure **"
         grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$logf" | sed 's/^/        /'
@@ -129,7 +139,8 @@ done
 # The convention-plugin guards (COVERAGE_FLOORS fail-loud, -Pkover.off skip)
 # live in buildSrc, and a main build never executes buildSrc:test — only its
 # jar. Run them here so every gate pass exercises them. Same no-pipe rule:
-# routed through run() and classified by crashed() like every other stage
+# routed through run() and classified by gate_crashed()/gate_classify_buildsrc
+# (scripts/lib/gate-stages.sh) like every other stage
 # (013/F3 — the old inline form reported an OOM-killed daemon as a genuine
 # failure with the re-run advice suppressed).
 #
@@ -140,36 +151,45 @@ done
 # CONTENT is also declared a test input in buildSrc/build.gradle.kts, so a
 # bare `-p buildSrc test` re-executes on a libs.versions.toml edit too.
 #
-# Offline (013/F6 → 014/F4): the stage is ATTEMPTED regardless of the
-# network preflight — the old classification-only skip left the guard
+# Offline (013/F6 → 014/F4 → 018/F1+F2): the stage is ATTEMPTED regardless
+# of the network preflight — the old classification-only skip left the guard
 # unexercised whenever the preflight said offline, even with a WARM TestKit
 # cache that would have passed offline, and a slow-but-online box (double
 # curl-28 → "offline") silently lost the guard too. The TestKit probes
 # resolve real dependencies from Maven Central only when their cache is
-# cold, so the fail-soft skip is earned ONLY by a failure whose log shows
-# dependency resolution AND an offline preflight; a resolution failure on
-# any other preflight verdict fails the gate loudly (consistent with
-# vuln-scan: online-but-unreachable fails, never silently skips). A PASS
-# line therefore never hides an unrun guard; skips are counted and named.
+# cold, so the fail-soft skip is earned ONLY by a resolution failure —
+# evidenced in the stage log OR the JUnit XML results, because Gradle's
+# default SHORT console format never prints the exception message where the
+# probes' resolution errors live (018/F1) — with NO other genuine test
+# failure among the results, while the preflight says offline (018/F2); a
+# crash classifies as no-verdict BEFORE the skip is considered (018/F2). A
+# resolution failure on any other preflight verdict fails the gate loudly
+# (consistent with vuln-scan: online-but-unreachable fails, never silently
+# skips). A PASS line therefore never hides an unrun guard; skips are
+# counted and named. The branches live in gate_classify_buildsrc
+# (scripts/lib/gate-stages.sh) and are fixture-driven per release round.
 source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 bnet="$(scan_tools_classify_network gate https://repo.maven.apache.org/maven2/)"
 btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test)
-if [ "$btest" -eq 0 ]; then
-  echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
-else
-  if grep -qE 'Could not resolve|Could not GET|Could not HEAD' "$LOGDIR/buildsrc-test.log" 2>/dev/null && [ "$bnet" = "offline" ]; then
-    skips=$((skips + 1))
-    echo "  buildSrc tests  SKIPPED — dependency resolution failed and the network preflight says offline (cold TestKit cache; fail-soft by design — re-run online). log: $LOGDIR/buildsrc-test.log"
-  elif crashed "$LOGDIR/buildsrc-test.log"; then
+case "$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/buildSrc/build/test-results/test" "$bnet")" in
+  pass)
+    echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+    ;;
+  crash)
     fails=$((fails + 1)); crashes=$((crashes + 1))
     echo "  buildSrc tests  EXIT=$btest  ** TOOLING CRASH — no verdict, not a test failure **"
     grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$LOGDIR/buildsrc-test.log" | sed 's/^/        /'
-  else
+    ;;
+  skip)
+    skips=$((skips + 1))
+    echo "  buildSrc tests  SKIPPED — dependency resolution failed (log or JUnit XML evidence) and the network preflight says offline, with no other genuine test failure (cold TestKit cache; fail-soft by design — re-run online). log: $LOGDIR/buildsrc-test.log"
+    ;;
+  fail)
     fails=$((fails + 1))
     echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
-  fi
-fi
+    ;;
+esac
 
 # ---- dependency vulnerability scan (OSV-Scanner) -----------------------------
 # Scans the committed lockfiles (DEVELOPMENT.md §10.2). Needs network: when
