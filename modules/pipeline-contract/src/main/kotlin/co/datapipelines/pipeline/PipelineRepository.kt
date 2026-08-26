@@ -32,6 +32,13 @@ import java.util.UUID
  * repository that quietly depends on a caller remembering to open one is a repository with a
  * corruption path.
  *
+ * ## Workspace pinning (slice 1)
+ *
+ * Since V4 every pipeline belongs to a workspace and `name` is unique per workspace
+ * (metadata-db §4.4). Until workspace resolution lands (slice 2), every read below resolves
+ * within the seeded `default` workspace and every write pins it — via [DEFAULT_WORKSPACE_ID]
+ * in code, never a column DEFAULT, so slice 2 finds every pin by grepping the constant.
+ *
  * ## `updated_at`
  *
  * metadata-db §2: there are no triggers in this schema; every `UPDATE` sets
@@ -43,13 +50,21 @@ class PipelineRepository(
 ) {
     /** The pipeline's metadata row, or null when it does not exist or is soft-deleted. */
     fun findById(id: UUID): PipelineRecord? =
-        jdbc.query("$SELECT_COLUMNS WHERE id = :id AND is_deleted = FALSE", mapOf("id" to id), MAPPER).singleOrNull()
+        jdbc
+            .query(
+                "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE",
+                mapOf("id" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                MAPPER,
+            ).singleOrNull()
 
     /** As [findById], by machine name — the identifier MCP and cross-pipeline references use (§3.2). */
     fun findByName(name: String): PipelineRecord? =
         jdbc
-            .query("$SELECT_COLUMNS WHERE name = :name AND is_deleted = FALSE", mapOf("name" to name), MAPPER)
-            .singleOrNull()
+            .query(
+                "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
+                mapOf("name" to name, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                MAPPER,
+            ).singleOrNull()
 
     /**
      * As [findByName], but **including soft-deleted rows** — the read composition needs.
@@ -62,8 +77,11 @@ class PipelineRepository(
      */
     fun findByNameIncludingDeleted(name: String): PipelineRecord? =
         jdbc
-            .query("$SELECT_COLUMNS WHERE name = :name", mapOf("name" to name), MAPPER)
-            .singleOrNull()
+            .query(
+                "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId",
+                mapOf("name" to name, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                MAPPER,
+            ).singleOrNull()
 
     /** Every live pipeline, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
     fun findAll(
@@ -73,14 +91,15 @@ class PipelineRepository(
     ): List<PipelineRecord> {
         val ownerFilter = if (ownerId == null) "" else " AND owner_id = :ownerId"
         val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
-        val params = mutableMapOf<String, Any?>()
+        val params = mutableMapOf<String, Any?>("workspaceId" to DEFAULT_WORKSPACE_ID)
         if (ownerId != null) params["ownerId"] = ownerId
         if (limit != null) {
             params["limit"] = limit
             params["offset"] = offset
         }
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE is_deleted = FALSE$ownerFilter ORDER BY created_at DESC$limitClause",
+            "$SELECT_COLUMNS WHERE is_deleted = FALSE AND workspace_id = :workspaceId$ownerFilter" +
+                " ORDER BY created_at DESC$limitClause",
             params,
             MAPPER,
         )
@@ -97,6 +116,7 @@ class PipelineRepository(
         val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
         val params = mutableMapOf<String, Any?>()
         params["datasourceName"] = datasourceName
+        params["workspaceId"] = DEFAULT_WORKSPACE_ID
         if (ownerId != null) params["ownerId"] = ownerId
         if (limit != null) {
             params["limit"] = limit
@@ -107,7 +127,7 @@ class PipelineRepository(
             SELECT p.*
               FROM pipelines p
               JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
-             WHERE p.is_deleted = FALSE$ownerFilter
+             WHERE p.is_deleted = FALSE AND p.workspace_id = :workspaceId$ownerFilter
                AND (v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('source', :datasourceName)))
                     OR v.body_json @> jsonb_build_object('nodes', jsonb_build_array(jsonb_build_object('output', jsonb_build_object('datasource', :datasourceName)))))
              ORDER BY p.created_at DESC
@@ -121,8 +141,9 @@ class PipelineRepository(
     /** Count of live pipelines. */
     fun countAll(): Int =
         checkNotNull(
-            jdbc.jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM pipelines WHERE is_deleted = FALSE",
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pipelines WHERE is_deleted = FALSE AND workspace_id = :workspaceId",
+                mapOf("workspaceId" to DEFAULT_WORKSPACE_ID),
                 Int::class.java,
             ),
         )
@@ -194,6 +215,7 @@ class PipelineRepository(
                         "displayName" to pipeline.displayName,
                         "description" to pipeline.description,
                         "ownerId" to pipeline.ownerId,
+                        "workspaceId" to DEFAULT_WORKSPACE_ID,
                         "bodyJson" to bodyJson,
                         "createdBy" to createdBy,
                     ),
@@ -262,8 +284,8 @@ class PipelineRepository(
      * import re-uses an id (§11.3), and `pipeline_versions_pkey` on a concurrent update of the
      * same pipeline. Mapping every `DuplicateKeyException` to `duplicate_name` would report
      * "that name is taken" for both, sending the caller to rename something that is not the
-     * problem. `pipelines_name_key` is the implicit index metadata-db §4.4 names explicitly;
-     * anything else is rethrown untouched.
+     * problem. `uq_pipelines_workspace_name` is the per-workspace constraint metadata-db §4.4
+     * names explicitly; anything else is rethrown untouched.
      */
     private fun <T> mappingDuplicateName(
         name: String,
@@ -283,13 +305,22 @@ class PipelineRepository(
 
     private companion object {
         /**
-         * The implicit index behind `pipelines.name UNIQUE` (metadata-db §4.4).
+         * The seeded `default` workspace every slice-1 read resolves within and every slice-1
+         * write pins (metadata-db §4.11, R2). A code constant — never a column DEFAULT — so
+         * slice 2's real workspace resolution finds every pin by grepping the value.
+         */
+        val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
+
+        /**
+         * The per-workspace name constraint behind `UNIQUE (workspace_id, name)` (metadata-db
+         * §4.4, V4).
          *
          * Note it is a plain UNIQUE constraint, **not** a partial index on `is_deleted = FALSE`:
-         * a soft-deleted pipeline's name stays taken until the row is hard-deleted, which §4.4
-         * states is deliberate because execution history references the name.
+         * a soft-deleted pipeline's name stays taken within its workspace until the row is
+         * hard-deleted, which §4.4 states is deliberate because execution history references
+         * the name.
          */
-        const val NAME_CONSTRAINT = "pipelines_name_key"
+        const val NAME_CONSTRAINT = "uq_pipelines_workspace_name"
 
         const val COLUMNS =
             "id, name, display_name, description, owner_id, current_version, is_deleted, created_at, updated_at"
@@ -299,8 +330,8 @@ class PipelineRepository(
         val INSERT_PIPELINE_SQL =
             """
             WITH new_pipeline AS (
-                INSERT INTO pipelines (id, name, display_name, description, owner_id, current_version)
-                VALUES (:id, :name, :displayName, :description, :ownerId, 1)
+                INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version)
+                VALUES (:id, :name, :displayName, :description, :ownerId, :workspaceId, 1)
                 RETURNING $COLUMNS
             ), new_version AS (
                 INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by)

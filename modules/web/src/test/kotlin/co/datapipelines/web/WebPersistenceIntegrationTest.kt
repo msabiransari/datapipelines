@@ -85,7 +85,13 @@ class WebPersistenceIntegrationTest {
     fun setUp() {
         executions = ExecutionRepository(jdbc)
         events = ExecutionEventRepository(jdbc)
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
         TestRedis.flush(redis)
         userId =
             UUID.randomUUID().also { id ->
@@ -97,7 +103,10 @@ class WebPersistenceIntegrationTest {
         pipelineId =
             UUID.randomUUID().also { id ->
                 jdbc.update(
-                    "INSERT INTO pipelines (id, name, display_name, owner_id, current_version) VALUES (:id, :name, 'P', :owner, 1)",
+                    """
+                    INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)
+                    VALUES (:id, :name, 'P', :owner, 1, 'defa0000-0000-0000-0000-000000000001')
+                    """.trimIndent(),
                     mapOf("id" to id, "name" to "p_${id.toString().replace("-", "")}", "owner" to userId),
                 )
                 jdbc.update(

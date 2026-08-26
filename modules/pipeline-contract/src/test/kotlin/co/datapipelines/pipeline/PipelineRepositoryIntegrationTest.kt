@@ -33,10 +33,10 @@ import java.util.concurrent.TimeUnit
  * tables; they never create or alter them." Adding Flyway here — even as a test dependency —
  * would put a schema-creation tool in a module the rule says must not have one.
  *
- * So the test reads `app`'s real `V1__initial_schema.sql` off disk and executes it. It is the
- * same file the application migrates with: change the DDL and this test runs the new DDL, or
- * fails because the file moved. What it deliberately does *not* prove is that Flyway can
- * apply it (checksums, transactional wrapping, the advisory lock) — that belongs to `app`'s
+ * So the test reads `app`'s real migrations off disk and executes them in version order. They
+ * are the same files the application migrates with: change the DDL and this test runs the new
+ * DDL, or fails because a file moved. What it deliberately does *not* prove is that Flyway can
+ * apply them (checksums, transactional wrapping, the advisory lock) — that belongs to `app`'s
  * own suite, where the dependency lives.
  *
  * ## Container lifetime
@@ -65,14 +65,20 @@ class PipelineRepositoryIntegrationTest {
     @BeforeAll
     fun createSchema() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        jdbc.jdbcTemplate.execute(Fixtures.repoFile(MIGRATION_PATH).readText())
+        MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(Fixtures.repoFile(it).readText()) }
     }
 
     @BeforeEach
     fun setUp() {
         repository = PipelineRepository(jdbc)
         // pipeline_versions cascades from pipelines; users is the FK parent of both.
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace the repository pins is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE pipelines, users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
         owner = insertUser()
     }
 
@@ -429,7 +435,17 @@ class PipelineRepositoryIntegrationTest {
         checkNotNull(jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
 
     private companion object {
-        const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
+        /**
+         * The shipped migrations in version order — V1 alone would miss the `workspaces`
+         * re-key (V4) the repository now writes against.
+         */
+        val MIGRATION_PATHS =
+            listOf(
+                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
+                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
+                "modules/app/src/main/resources/db/migration/V3__execution_lineage.sql",
+                "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
+            )
 
         /** Generous: the assertion is about the outcome, not about how fast Postgres is. */
         const val CONCURRENCY_TIMEOUT_SECONDS = 30L

@@ -51,7 +51,13 @@ class RepositoryPipelineResolverTest {
     @BeforeEach
     fun setUp() {
         pipelines = PipelineRepository(jdbc)
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace the repository pins is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
         jdbc.update(
             "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (:id, :email, 'T', 'google', :sub)",
             mapOf("id" to userId, "email" to "u$userId@example.com", "sub" to "sub-$userId"),

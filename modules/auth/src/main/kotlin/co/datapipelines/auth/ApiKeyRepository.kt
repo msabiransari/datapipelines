@@ -10,6 +10,13 @@ import java.util.UUID
  * `api_keys` persistence (metadata-db §4.2) via `NamedParameterJdbcTemplate`.
  * `scopes` is a Postgres `TEXT[]`; revocation is a soft flag (never a DELETE) so
  * `audit_log.key_id` keeps resolving (metadata-db §4.2 note).
+ *
+ * Workspace pinning (slice 1): since V4 every key carries `workspace_id` (D3 — the pinned
+ * workspace IS the key's context once slice 2 resolves it). [insert] pins the seeded
+ * `default` workspace via [DEFAULT_WORKSPACE_ID] in code, never a column DEFAULT, so slice 2
+ * finds every pin by grepping the constant. Read paths need no workspace filter: the key id
+ * is globally unique and, in the one-workspace slice-1 world, per-user listings are
+ * unaffected — slice 2 derives the context from the key row itself, not from a request scope.
  */
 class ApiKeyRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -57,11 +64,12 @@ class ApiKeyRepository(
                 .addValue("key_hash", keyHash)
                 .addValue("scopes", scopes.map { it.wire }.toTypedArray())
                 .addValue("expires_at", expiresAt?.let { java.sql.Timestamp.from(it) })
+                .addValue("workspace_id", DEFAULT_WORKSPACE_ID)
         return jdbc
             .query(
                 """
-                INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at)
-                VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at)
+                INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id)
+                VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id)
                 RETURNING *
                 """.trimIndent(),
                 params,
@@ -98,6 +106,15 @@ class ApiKeyRepository(
                 .addValue("ip", sourceIp)
                 .addValue("ua", userAgent),
         )
+    }
+
+    private companion object {
+        /**
+         * The seeded `default` workspace every slice-1 key issuance pins (metadata-db §4.11,
+         * R2). A code constant — never a column DEFAULT — so slice 2's issuance restriction
+         * finds every pin by grepping the value.
+         */
+        val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
     }
 
     private fun map(

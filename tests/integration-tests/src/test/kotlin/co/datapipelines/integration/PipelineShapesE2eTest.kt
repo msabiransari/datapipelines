@@ -351,8 +351,8 @@ class PipelineShapesE2eTest {
                 }
             }
             val insertSql =
-                "INSERT INTO api_keys (id, user_id, name, key_hash, scopes)" +
-                    " VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
+                "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                    " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING"
             connection.prepareStatement(insertSql).use { ps ->
                 val keyUsers =
                     listOf(

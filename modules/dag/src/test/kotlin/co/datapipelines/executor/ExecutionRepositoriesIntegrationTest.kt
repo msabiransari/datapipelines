@@ -56,7 +56,13 @@ class ExecutionRepositoriesIntegrationTest {
     fun setUp() {
         executions = ExecutionRepository(jdbc)
         events = ExecutionEventRepository(jdbc)
+        // The CASCADE also reaches workspaces (created_by), so the V4-seeded `default`
+        // workspace is re-seeded after every truncate.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        jdbc.jdbcTemplate.execute(
+            "INSERT INTO workspaces (id, name, display_name)" +
+                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+        )
         userId = insertUser()
         pipelineId = insertPipelineWithVersion(userId)
     }
@@ -368,8 +374,8 @@ class ExecutionRepositoriesIntegrationTest {
         UUID.randomUUID().also { id ->
             jdbc.update(
                 """
-                INSERT INTO pipelines (id, name, display_name, owner_id, current_version)
-                VALUES (:id, :name, 'Test Pipeline', :owner, 1)
+                INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)
+                VALUES (:id, :name, 'Test Pipeline', :owner, 1, 'defa0000-0000-0000-0000-000000000001')
                 """.trimIndent(),
                 mapOf("id" to id, "name" to "p_${id.toString().replace("-", "")}", "owner" to owner),
             )
