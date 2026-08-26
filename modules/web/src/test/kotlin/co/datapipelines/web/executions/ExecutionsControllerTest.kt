@@ -138,4 +138,45 @@ class ExecutionsControllerTest {
             executions.findByUser(owner, null, ExecutionStatus.SUCCESS, after, null, limit = 51, offset = 0)
         }
     }
+
+    /**
+     * T1 — V3 added the three lineage columns, the repository selects them and the history UI
+     * renders them; only this projection dropped them, so an API client could see a child execution
+     * and never learn it was one. `GET /executions/{id}` is where a client goes after a
+     * `node_completed` names a `child_execution_id`, and it could not answer "whose child?".
+     */
+    @Test
+    fun `execution metadata exposes the composition lineage a child execution carries`() {
+        authenticate(owner, setOf(Scope.READ))
+        val parentExecutionId = UUID.randomUUID()
+        every { executions.findById(executionId) } returns
+            record(ExecutionStatus.SUCCESS).copy(
+                triggeredVia = ExecutionTrigger.PIPELINE,
+                parentExecutionId = parentExecutionId,
+                parentNodeId = "run_leaf",
+                rootExecutionId = parentExecutionId,
+            )
+
+        val data = controller.get(executionId).data
+
+        data["parent_execution_id"] shouldBe parentExecutionId.toString()
+        data["parent_node_id"] shouldBe "run_leaf"
+        data["root_execution_id"] shouldBe parentExecutionId.toString()
+    }
+
+    /** A root's lineage is present and honest: no parent, and it is its own family root. */
+    @Test
+    fun `a root execution reports a null parent and itself as the family root`() {
+        authenticate(owner, setOf(Scope.READ))
+        every { executions.findById(executionId) } returns
+            record(ExecutionStatus.SUCCESS).copy(rootExecutionId = executionId)
+
+        val data = controller.get(executionId).data
+
+        // Present-and-null, not absent: a client can tell "root" from "field not implemented".
+        data.containsKey("parent_execution_id") shouldBe true
+        data["parent_execution_id"] shouldBe null
+        data["parent_node_id"] shouldBe null
+        data["root_execution_id"] shouldBe executionId.toString()
+    }
 }

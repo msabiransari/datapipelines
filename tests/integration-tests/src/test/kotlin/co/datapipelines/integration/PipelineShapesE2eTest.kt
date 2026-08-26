@@ -11,6 +11,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -483,7 +484,25 @@ class PipelineShapesE2eTest {
         return response.jsonPath().getString("data.id")
     }
 
+    /**
+     * T2 — the SSE stream is read to EOF, and EOF is the *only* completion signal: nothing here
+     * bounds the wait. `SseEmitter` is created with `NEVER_TIMEOUT`, so a regression that never
+     * emits a terminal event hangs this thread until the CI job itself is killed — a build that
+     * times out at the outer level and reports nothing about which test wedged.
+     * [assertTimeoutPreemptively] interrupts the read instead, so the regression FAILS, by name,
+     * against a budget an order of magnitude above the real runtime (these executions finish in
+     * seconds; the cancellation test's own `pg_sleep` is 15s).
+     */
     private fun consumeExecutionStream(
+        pipelineId: String,
+        apiKey: String,
+        correlationId: String,
+    ): List<Pair<String, JsonNode>> =
+        assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+            readExecutionStream(pipelineId, apiKey, correlationId)
+        }
+
+    private fun readExecutionStream(
         pipelineId: String,
         apiKey: String,
         correlationId: String,
@@ -518,6 +537,14 @@ class PipelineShapesE2eTest {
      * closes with `execution_aborted`. Returns the execution id.
      */
     private fun executeAndCancel(
+        pipelineId: String,
+        correlationId: String,
+    ): String =
+        assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+            readAndCancelExecutionStream(pipelineId, correlationId)
+        }
+
+    private fun readAndCancelExecutionStream(
         pipelineId: String,
         correlationId: String,
     ): String {
@@ -602,6 +629,13 @@ class PipelineShapesE2eTest {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private const val CANCEL_SLEEP_SECONDS = 15
+
+        /**
+         * The bound on every SSE read here (T2). Generous against the real runtimes — seconds, and
+         * 15s for the cancellation test's `pg_sleep` — so it can only fire on a stream that has
+         * genuinely stopped producing, never on a slow container.
+         */
+        private const val SSE_BUDGET_MINUTES = 2L
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val EXECUTOR_USER_ID: String = UUID.randomUUID().toString()

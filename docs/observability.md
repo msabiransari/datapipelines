@@ -84,6 +84,7 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 | SSE | **Every** event payload emitted on an execution stream carries `correlation_id` — the correlation ID of the request that started the execution — for all event types in [REST API §6.4](rest-api.md#64-event-types), including `execution_aborted`. A client that only ever sees the stream can still quote an ID to an operator. |
 | MCP | Every tool result, success or error, carries `correlation_id` in its `_meta` — already normative in [MCP Server §6.3](mcp-server.md#63-tool-result-schema); not restated here. |
 | Traces | Same value appears as the `correlation_id` span attribute (§5.2), which is what joins logs to traces. |
+| Composition | A child execution spawned by a `PIPELINE` node inherits its parent's correlation ID — it is **not** regenerated per execution. One `SELECT … WHERE correlation_id = ?` over `pipeline_executions` therefore returns the whole family, and every descendant's logs and SSE payloads quote the same ID as the request that started it ([Pipeline Contract §8.5](pipeline-contract.md#85-pipeline-nodes)). `root_execution_id` joins one family; correlation ID joins everything one *request* caused, which is the wider question an operator actually starts from. |
 
 ### 3.4 What's logged per module
 

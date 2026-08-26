@@ -118,6 +118,13 @@ class PipelineCompositionE2eTest {
         // Exactly TWO execution rows in the family, with the lineage links of §5.
         val childExecutionId = assertFamilyOfTwo(parentExecutionId)
 
+        // F5 — the whole family is joinable by the id of the request that started it (rest-api
+        // §3.4, observability §3.3). The child used to carry a fresh random id, which made
+        // correlation id the one field that could not do the one job it exists for.
+        queryExecutions(
+            "SELECT correlation_id::text FROM pipeline_executions WHERE root_execution_id = '$parentExecutionId'",
+        ) { it.getString(1) }.toSet() shouldBe setOf(correlationId)
+
         // The parent's node stats carry the child execution id — both the durable
         // node_stats_json and the SSE node_completed event (design §5/§7).
         assertNodeStatsCarryChild(parentExecutionId, childExecutionId)
@@ -209,6 +216,73 @@ class PipelineCompositionE2eTest {
                 }
             }
         }
+
+    /**
+     * F1 at the level a user sees it: the child's `pipeline_executions` row.
+     *
+     * ## The machinery, named
+     *
+     * The child execution runs inside the parent PIPELINE node's coroutine. When the parent's
+     * `withTimeout(datapipelines.executor.execution-timeout-seconds)` fires, **structured
+     * concurrency** cancels the child's own `coroutineScope`, and it throws a
+     * `JobCancellationException` — a type none of `PipelineExecutor.runExecution`'s catch clauses
+     * match. So `emitTerminal` never ran, `WebEventEmitter.completeExecutionRow` never fired, and
+     * the child's row stayed `status = RUNNING`, `completed_at = NULL` **permanently**, invisible
+     * to every event-level assertion because no event was ever emitted to assert on.
+     *
+     * The parent-timeout case is the deterministic one: no cancel flag is ever set, so the child's
+     * own `pollCancelFlag` cannot rescue it. This test therefore asserts on the ROW, not on events.
+     */
+    @Test
+    @Order(4)
+    fun `a child killed by the parent's timeout ends terminal in pipeline_executions, not RUNNING`() {
+        createTemplate("comp_slow.sql", "H2", "Composition Slow", SLOW_H2_SQL)
+        createPipeline(
+            "comp_slow_leaf",
+            "Composition Slow Leaf",
+            listOf(
+                mapOf(
+                    "id" to "slow_scan",
+                    "description" to "A query H2 really iterates, so the parent's deadline lands mid-flight",
+                    "type" to "DQL",
+                    "source" to H2_DATASOURCE,
+                    "template" to mapOf("id" to "comp_slow.sql", "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to emptyList<String>(),
+                ),
+            ),
+        )
+        val parentId =
+            createPipeline(
+                "comp_slow_parent",
+                "Composition Slow Parent",
+                listOf(pipelineNode("run_slow_leaf", "comp_slow_leaf", 1)),
+            )
+
+        val events =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+            }
+        // The parent's own outcome is unchanged by this fix: a timeout is a FAILURE (§8.1).
+        events.last().first shouldBe "pipeline_failed"
+        events.last().second["error"]["code"].asText() shouldBe "pipeline.execution.timeout"
+        val parentExecutionId = events.first().second["execution_id"].asText()
+
+        val child =
+            queryExecutions(
+                "SELECT execution_id::text, status, completed_at FROM pipeline_executions " +
+                    "WHERE parent_execution_id = '$parentExecutionId'",
+            ) { rs -> Triple(rs.getString(1), rs.getString(2), rs.getTimestamp(3)) }.single()
+
+        // The whole finding: without the structural-cancellation handler this row reads
+        // ("<id>", "RUNNING", null) forever — a child a user sees as still running, hours later.
+        child.second shouldBe "ABORTED"
+        child.third shouldNotBe null
+
+        queryExecutions("SELECT status FROM pipeline_executions WHERE execution_id = '$parentExecutionId'") {
+            it.getString(1)
+        }.single() shouldBe "FAILED"
+    }
 
     @Test
     @Order(3)
@@ -514,6 +588,25 @@ class PipelineCompositionE2eTest {
         private const val H2_USER = "sa"
         private const val H2_PASSWORD = "sa"
 
+        /**
+         * The execution deadline for this app context, lowered so the parent-timeout scenario is a
+         * test rather than a ten-minute wait. Comfortably above scenarios 1–3 (milliseconds of H2
+         * work each) and comfortably below `node-query-timeout-seconds` (60, unchanged), so the
+         * child is killed by the PARENT's deadline and not by its own statement timeout.
+         */
+        private const val EXECUTION_TIMEOUT_SECONDS = 15
+
+        /**
+         * A query H2 genuinely iterates — the `Fixtures.SLOW_SQL` shape from `dag`'s cancellation
+         * suite, scaled up. `SELECT COUNT(*) FROM SYSTEM_RANGE(...)` alone is answered from the
+         * range's cardinality without visiting a row; the cross join plus a predicate forces ~3.6·10⁹
+         * row visits (minutes), so the parent's 15-second deadline always lands mid-flight.
+         * `a."X"` is quoted because `SYSTEM_RANGE`'s column is `X`.
+         */
+        private const val SLOW_H2_SQL =
+            """SELECT COUNT(*) AS n FROM SYSTEM_RANGE(1, 60000) a, SYSTEM_RANGE(1, 60000) b """ +
+                """WHERE MOD(a."X" + b."X", 7) = 0"""
+
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
         /** Seed rows in `id` order, the order the template returns them. */
@@ -569,6 +662,7 @@ class PipelineCompositionE2eTest {
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             registry.add("management.server.port") { "0" }
+            registry.add("datapipelines.executor.execution-timeout-seconds") { EXECUTION_TIMEOUT_SECONDS }
 
             registry.add("spring.datasource.url") { postgres.jdbcUrl }
             registry.add("spring.datasource.username") { postgres.username }

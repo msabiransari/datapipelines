@@ -906,11 +906,19 @@ Returns the execution record (without rows — use §7 for result data):
     "node_stats": [...],
     "result_url": "...",            // present while the result is unexpired (absent for zero-caller pipelines)
     "result_expires_at": "...",
+    "result_row_count": 1204,       // null for a zero-caller pipeline, and for a `direct`-delivered child
+    "result_size_bytes": 48213,
     "triggered_by": "user-uuid",
-    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE"
+    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE",
+
+    "parent_execution_id": "exec-uuid",   // the execution whose PIPELINE node spawned this one; null for a root
+    "parent_node_id": "run_leaf",         // that node's id; null for a root
+    "root_execution_id": "exec-uuid"      // the family's top ancestor; equals execution_id for a root
   }
 }
 ```
+
+**Composition lineage.** The three lineage fields are the composition family's links ([Pipeline Contract §8.5](pipeline-contract.md#85-pipeline-nodes), [Metadata DB §4.6](metadata-db.md#46-pipeline_executions)) and are always present — `null` on a root rather than omitted, so "this is a root" and "this server does not report lineage" stay distinguishable. They answer the question a client is left with when a `node_completed` names a `child_execution_id` (§6.4.3): fetch that id here, and `parent_execution_id` / `parent_node_id` say where it came from. `root_execution_id` is never null (it is the execution's own id for a root), so grouping a family needs no special case. §10.1's listing carries the same fields — it is the same projection, minus `result_url` / `result_expires_at`.
 
 ### 10.3 Replay SSE stream
 

@@ -104,6 +104,13 @@ class H2Staging internal constructor(
         rows: Sequence<List<Any?>>,
     ): StageResult =
         mutex.withLock {
+            // §4.5, exactly as stage() applies it (F2). These names have the same provenance one
+            // execution removed: they are the CHILD's caller-node result labels, read by
+            // `ResultRowReader.schemaOf` off a `SELECT … AS "whatever the author typed"`. Skipping
+            // the check here made the identical statement legal through a PIPELINE node and illegal
+            // through a DQL node — and `total` + `TOTAL` survived as two distinct quoted columns
+            // that no downstream unquoted `source: tempdb` SQL can tell apart.
+            StagingIdentifiers.validateColumnNames(columns.map { it.name })
             createTable(tableName, columns)
             // Same partial-table rollback as stage(): a failure mid-stream leaves no table and
             // no claimed name behind, so the parent node never treats a half-written tempdb
