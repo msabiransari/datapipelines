@@ -52,7 +52,15 @@ TRIVY_VERSION="0.74.0"       # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir trivy)"
 
 os=$(uname -s)                    # Darwin | Linux
-arch=$(scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
+# trap - ERR inside the substitution (018/F3): errtrace makes the
+# command-substitution subshell inherit this script's ERR trap, so
+# scan_tools_arch's HANDLED `return 1` (unsupported arch) fires it and prints
+# the spurious "unexpected tooling failure" line on exactly the path this
+# guard exists to name. NB `set +E` there is NOT enough — the trap is
+# inherited at fork time and stays SET in the subshell (proven: still fires;
+# the parent's -E only governs further inheritance). Removing it in the
+# subshell silences the line; the parent's trap is untouched; EXIT stays 2.
+arch=$(trap - ERR; scan_tools_arch trivy) || { echo "container-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 # trivy's asset names conflate OS and arch (macOS-ARM64, Linux-64bit, …): the
 # ARCH token comes from scan_tools_arch (one map for all scanners, 012/F10);
 # only the OS token is mapped here.
@@ -103,14 +111,19 @@ trivy_verdict() {
 
 echo "== trivy $TRIVY_VERSION — config scan (Dockerfile, deploy/) =="
 # Verdicts are CAPTURED and re-exited deliberately (014/F1) — never bare
-# under set -e. Second scan only runs while the first is clean (the
-# pre-013 set -e semantics), so a finding names its stage.
+# under set -e. Each target gets its own verdict WITH THE TARGET NAMED in
+# the label (018/F5: both scans used to funnel into one "config scan"
+# verdict, so a finding could not say which target produced it — while
+# the comment claimed it could). The second scan only runs while the
+# first is clean (trivy_verdict exits on any non-zero), preserving the
+# pre-013 set -e semantics.
 scan_rc=0
 "$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/Dockerfile" || scan_rc=$?
-if [ "$scan_rc" -eq 0 ]; then
-  "$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/deploy" || scan_rc=$?
-fi
-trivy_verdict "config scan" "$scan_rc"
+trivy_verdict "config scan (Dockerfile)" "$scan_rc"
+
+scan_rc=0
+"$BIN" config --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$ROOT/deploy" || scan_rc=$?
+trivy_verdict "config scan (deploy/)" "$scan_rc"
 
 if [ "${1:-}" = "--config-only" ]; then
   echo "container-scan: --config-only given; image scan skipped."

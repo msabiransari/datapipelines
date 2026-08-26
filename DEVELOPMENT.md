@@ -160,7 +160,7 @@ cd ../datapipelines
 ./scripts/sync-design-system.sh   # copies dist/ → modules/web/src/main/resources/static/vendor/design-system/
 ```
 
-Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift — including the manifest's sha256 key set drifting from the curated file list in either direction, 014/F3).
+Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift — including the manifest's sha256 key set *or* `files` array drifting from the curated file list in either direction, 014/F3 + 018/F6).
 
 ---
 
@@ -464,10 +464,14 @@ never run automatically: `./gradlew -p buildSrc test` runs them, and
 the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
 The stage is attempted even when the network preflight says offline (a warm
-TestKit cache passes offline); only a dependency-resolution failure in the
-log while genuinely offline skips it fail-soft, and skipped stages are
-counted and named in the gate's summary line — a PASS never hides an unrun
-guard (014/F4).
+TestKit cache passes offline). The fail-soft offline skip is earned only by
+a dependency-resolution failure — evidenced in the stage log **or the JUnit
+XML test results** (Gradle's default `SHORT` console format never prints
+the exception message, which is where the TestKit probes' resolution errors
+surface) — with **no other genuine test failure** among the results; a
+tooling crash (OOM, dead daemon) classifies as "no verdict, re-run" *ahead*
+of any skip, and skipped stages are counted and named in the gate's summary
+line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
 
 #### Dependency vulnerabilities (OSV-Scanner)
 

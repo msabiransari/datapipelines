@@ -41,7 +41,15 @@ GITLEAKS_VERSION="8.30.1"    # verified latest release, 2026-08-15
 TOOL_DIR="$(scan_tools_dir gitleaks)"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
-arch=$(scan_tools_arch x64) || { echo "secret-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
+# trap - ERR inside the substitution (018/F3): errtrace makes the
+# command-substitution subshell inherit this script's ERR trap, so
+# scan_tools_arch's HANDLED `return 1` (unsupported arch) fires it and prints
+# the spurious "unexpected tooling failure" line on exactly the path this
+# guard exists to name. NB `set +E` there is NOT enough — the trap is
+# inherited at fork time and stays SET in the subshell (proven: still fires;
+# the parent's -E only governs further inheritance). Removing it in the
+# subshell silences the line; the parent's trap is untouched; EXIT stays 2.
+arch=$(trap - ERR; scan_tools_arch x64) || { echo "secret-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 BIN="$TOOL_DIR/gitleaks-${GITLEAKS_VERSION}-${os}-${arch}"
 
 install_gitleaks() {
