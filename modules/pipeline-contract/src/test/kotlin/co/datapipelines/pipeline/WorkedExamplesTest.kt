@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * The spec's own worked examples, as golden fixtures: deserialize → validate → assert.
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test
 class WorkedExamplesTest {
     private val deserializer = PipelineDeserializer()
     private val validator = Fixtures.validator(templates = StubTemplates(lookups = TEMPLATE_DIALECTS))
+    private val workspaceId = UUID.randomUUID()
 
     @Test
     fun `§16-1 minimal pipeline - a DQL node with no output block IS the caller node`() {
@@ -29,15 +31,15 @@ class WorkedExamplesTest {
 
         pipeline.nodes.single().output shouldBe NodeOutput.Caller
         CallerNodeResolver.resolve(pipeline)?.id shouldBe "active_users"
-        validator.validate(pipeline).failures shouldContainExactly emptyList()
+        validator.validate(pipeline, workspaceId).failures shouldContainExactly emptyList()
     }
 
     @Test
     fun `§3-1 monthly revenue report validates, with one caller node among four other sinks`() {
         val pipeline = parse("spec-3.1-monthly-revenue-report.json")
 
-        withClue(validator.validate(pipeline).failures.toString()) {
-            validator.validate(pipeline).isValid shouldBe true
+        withClue(validator.validate(pipeline, workspaceId).failures.toString()) {
+            validator.validate(pipeline, workspaceId).isValid shouldBe true
         }
         CallerNodeResolver.resolve(pipeline)?.id shouldBe "final_report"
         pipeline.node("cache_to_warehouse")?.output shouldBe
@@ -75,8 +77,8 @@ class WorkedExamplesTest {
     fun `§16-3 write-back plus caller return is legal - two sinks, one caller`() {
         val pipeline = parse("spec-16.3-writeback.json")
 
-        withClue(validator.validate(pipeline).failures.toString()) {
-            validator.validate(pipeline).isValid shouldBe true
+        withClue(validator.validate(pipeline, workspaceId).failures.toString()) {
+            validator.validate(pipeline, workspaceId).isValid shouldBe true
         }
         CallerNodeResolver.resolve(pipeline)?.id shouldBe "return_report"
     }
@@ -87,8 +89,8 @@ class WorkedExamplesTest {
 
         pipeline.node("create_idx")?.output.shouldBeNull()
         pipeline.node("record_execution")?.output.shouldBeNull()
-        withClue(validator.validate(pipeline).failures.toString()) {
-            validator.validate(pipeline).isValid shouldBe true
+        withClue(validator.validate(pipeline, workspaceId).failures.toString()) {
+            validator.validate(pipeline, workspaceId).isValid shouldBe true
         }
     }
 
@@ -96,8 +98,8 @@ class WorkedExamplesTest {
     fun `§9-4 zero caller nodes is legal`() {
         val pipeline = parse("spec-9.4-zero-caller.json")
 
-        withClue(validator.validate(pipeline).failures.toString()) {
-            validator.validate(pipeline).isValid shouldBe true
+        withClue(validator.validate(pipeline, workspaceId).failures.toString()) {
+            validator.validate(pipeline, workspaceId).isValid shouldBe true
         }
         CallerNodeResolver.resolve(pipeline).shouldBeNull()
         CallerNodeResolver.hasCallerNode(pipeline) shouldBe false

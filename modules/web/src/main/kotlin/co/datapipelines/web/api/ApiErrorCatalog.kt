@@ -69,6 +69,7 @@ object ApiErrorCatalog {
             "datasource.validation." to HttpStatus.BAD_REQUEST,
             "template.validation." to HttpStatus.BAD_REQUEST,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
+            "workspace." to HttpStatus.FORBIDDEN,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -98,6 +99,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Result.FORMAT_UNSUPPORTED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
         )
 
     /**
@@ -152,6 +154,7 @@ object ApiErrorCatalog {
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",
             "result." to "The results for this run aren't available.",
+            "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace owner for access.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =

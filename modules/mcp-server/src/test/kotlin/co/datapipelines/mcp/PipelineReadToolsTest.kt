@@ -30,7 +30,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `list returns metadata only, never the body`() {
-        every { pipelines.findAll(null) } returns listOf(revenue)
+        every { pipelines.findAll(any(), null) } returns listOf(revenue)
 
         val payload = PipelinesListTool(pipelines).call(McpArguments(emptyMap()), ctx)
         val first = (payload as List<*>).first() as Map<*, *>
@@ -46,7 +46,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `q searches name, display name and description case-insensitively`() {
-        every { pipelines.findAll(null) } returns listOf(revenue, churn)
+        every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
         val hits = PipelinesListTool(pipelines).call(McpArguments(mapOf("q" to "CHURN")), ctx) as List<*>
 
@@ -55,7 +55,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `owner is pushed down to the repository`() {
-        every { pipelines.findAll(McpFixtures.OTHER_USER) } returns emptyList()
+        every { pipelines.findAll(any(), McpFixtures.OTHER_USER) } returns emptyList()
 
         val hits =
             PipelinesListTool(pipelines).call(McpArguments(mapOf("owner" to McpFixtures.OTHER_USER.toString())), ctx) as List<*>
@@ -65,7 +65,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `the datasource filter is pushed down to SQL`() {
-        every { pipelines.findAllByDatasource("mysql-prod", null) } returns listOf(churn)
+        every { pipelines.findAllByDatasource(any(), "mysql-prod", null) } returns listOf(churn)
 
         val hits = PipelinesListTool(pipelines).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
 
@@ -74,7 +74,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `limit caps the page`() {
-        every { pipelines.findAll(null) } returns listOf(revenue, churn)
+        every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
         val hits = PipelinesListTool(pipelines).call(McpArguments(mapOf("limit" to 1)), ctx) as List<*>
 
@@ -83,8 +83,8 @@ class PipelineReadToolsTest {
 
     @Test
     fun `get returns the stored body of the current version`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns revenue
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val body = PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
 
@@ -93,8 +93,8 @@ class PipelineReadToolsTest {
 
     @Test
     fun `get honours an explicit version`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 4)
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "v2")
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 4)
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "v2")
 
         val body =
             PipelinesGetTool(pipelines).call(
@@ -107,7 +107,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `an unknown pipeline is a catalogued not-found`() {
-        every { pipelines.findById(any()) } returns null
+        every { pipelines.findById(any(), any()) } returns null
 
         val error =
             shouldThrow<DatapipelinesException> {
@@ -118,8 +118,8 @@ class PipelineReadToolsTest {
 
     @Test
     fun `an unknown version of a known pipeline is a catalogued not-found`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns revenue
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 9) } returns null
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 9) } returns null
 
         val error =
             shouldThrow<DatapipelinesException> {
@@ -133,7 +133,7 @@ class PipelineReadToolsTest {
 
     @Test
     fun `a version below 1 is refused, never silently read as version 1`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
 
         assertAll(
             {
@@ -153,7 +153,7 @@ class PipelineReadToolsTest {
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },
         )
-        verify(exactly = 0) { pipelines.findVersionBody(any(), any()) }
+        verify(exactly = 0) { pipelines.findVersionBody(any(), any(), any()) }
     }
 
     @Test

@@ -1,8 +1,8 @@
 package co.datapipelines.auth
 
 /**
- * The three servlet filters the auth chain installs (auth.md §8.2), grouped so
- * [SecurityConfig] takes one collaborator instead of three.
+ * The servlet filters the auth chain installs (auth.md §8.2), grouped so
+ * [SecurityConfig] takes one collaborator instead of four.
  *
  * These are PLAIN objects, constructed inside the `authFilters` `@Bean`
  * ([AuthConfiguration]) and never top-level beans themselves. A `Filter` that is
@@ -19,4 +19,5 @@ data class AuthFilters(
     val apiKey: ApiKeyFilter,
     val jwt: JwtAuthenticationFilter,
     val loginRateLimit: LoginRateLimitFilter,
+    val workspaceResolution: WorkspaceResolutionFilter,
 )

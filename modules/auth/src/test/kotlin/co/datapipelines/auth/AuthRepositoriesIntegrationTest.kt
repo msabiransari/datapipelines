@@ -101,7 +101,7 @@ class AuthRepositoriesIntegrationTest {
     fun `api key scopes round-trip through the TEXT array column`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
 
-        val key = keys.insert("dpk_ABCDEFGHIJKL", owner.id, "Claude", "hash", setOf(Scope.READ, Scope.AUTHOR), null)
+        val key = keys.insert("dpk_ABCDEFGHIJKL", owner.id, "Claude", "hash", setOf(Scope.READ, Scope.AUTHOR), null, DEFAULT_WORKSPACE_ID)
 
         val found = checkNotNull(keys.findById("dpk_ABCDEFGHIJKL"))
         found shouldBe key
@@ -111,7 +111,7 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `revoke hides the key from active listing but keeps the row`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_KEY000000001", owner.id, "k", "hash", setOf(Scope.READ), null)
+        keys.insert("dpk_KEY000000001", owner.id, "k", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
         keys.findActiveByUser(owner.id) shouldHaveSize 1
 
         keys.revoke("dpk_KEY000000001", owner.id).shouldBeTrue()
@@ -125,7 +125,7 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `touchUsage records last_used_ip as INET and the user agent`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_KEY000000002", owner.id, "k", "hash", setOf(Scope.READ), null)
+        keys.insert("dpk_KEY000000002", owner.id, "k", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
 
         keys.touchUsage("dpk_KEY000000002", "10.0.0.5", "Claude/1.0")
 
@@ -141,7 +141,7 @@ class AuthRepositoriesIntegrationTest {
     fun `expired key is readable with its expiry so validation can reject it`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
         val past = Instant.now().minusSeconds(3600)
-        keys.insert("dpk_KEY000000003", owner.id, "k", "hash", setOf(Scope.READ), past)
+        keys.insert("dpk_KEY000000003", owner.id, "k", "hash", setOf(Scope.READ), past, DEFAULT_WORKSPACE_ID)
 
         checkNotNull(keys.findById("dpk_KEY000000003")).expiresAt.shouldNotBeNull()
     }
@@ -180,3 +180,6 @@ class AuthRepositoriesIntegrationTest {
                 .withPassword("dp")
     }
 }
+
+/** The V4-seeded `default` workspace (metadata-db §4.11) — a legitimate test pin: these suites seed the default world. */
+private val DEFAULT_WORKSPACE_ID: java.util.UUID = java.util.UUID.fromString("defa0000-0000-0000-0000-000000000001")

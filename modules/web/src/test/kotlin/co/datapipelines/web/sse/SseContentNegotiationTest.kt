@@ -36,7 +36,7 @@ class SseContentNegotiationTest {
         MockMvcBuilders
             .standaloneSetup(
                 PipelineExecuteController(
-                    pipelines = mockk<PipelineRepository> { every { findById(pipelineId) } returns null },
+                    pipelines = mockk<PipelineRepository> { every { findById(any(), pipelineId) } returns null },
                     launcher = mockk<ExecutionLauncher>(),
                 ),
             ).setControllerAdvice(ApiExceptionHandler())
@@ -46,7 +46,7 @@ class SseContentNegotiationTest {
         MockMvcBuilders
             .standaloneSetup(
                 ExecutionsController(
-                    executions = mockk<ExecutionRepository> { every { findById(executionId) } returns null },
+                    executions = mockk<ExecutionRepository> { every { findById(any(), executionId) } returns null },
                     cancellation = mockk<ExecutionCancellationService>(),
                     cursor = mockk<ResultCursor>(),
                     resultStore = mockk<ResultStore>(),
@@ -56,8 +56,11 @@ class SseContentNegotiationTest {
             ).setControllerAdvice(ApiExceptionHandler())
             .build()
 
-    @Test
-    fun `execute with an unknown pipeline and an SSE Accept header returns the 404 envelope`() {
+    /**
+     * The workspace-scoped controllers resolve the principal's workspace before any repository
+     * read, so both endpoints need an authenticated principal carrying one.
+     */
+    private fun authenticate() {
         val principal =
             co.datapipelines.auth.AuthenticatedPrincipal(
                 UUID.randomUUID(),
@@ -66,12 +69,20 @@ class SseContentNegotiationTest {
                 setOf(co.datapipelines.auth.Scope.EXECUTE),
                 co.datapipelines.auth.AuthMethod.API_KEY,
                 "dpk_x",
+                workspace =
+                    co.datapipelines.auth
+                        .WorkspaceContext(UUID.randomUUID(), "acme"),
             )
         org.springframework.security.core.context.SecurityContextHolder
             .getContext()
             .authentication =
             org.springframework.security.authentication
                 .UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
+    @Test
+    fun `execute with an unknown pipeline and an SSE Accept header returns the 404 envelope`() {
+        authenticate()
         try {
             executeMvc()
                 .perform(
@@ -90,11 +101,17 @@ class SseContentNegotiationTest {
 
     @Test
     fun `events replay with an unknown execution and an SSE Accept header returns the 404 envelope`() {
-        eventsMvc()
-            .perform(
-                get("/api/v1/executions/{id}/events", executionId)
-                    .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE),
-            ).andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.error.code").value("result.execution_not_found"))
+        authenticate()
+        try {
+            eventsMvc()
+                .perform(
+                    get("/api/v1/executions/{id}/events", executionId)
+                        .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE),
+                ).andExpect(status().isNotFound)
+                .andExpect(jsonPath("$.error.code").value("result.execution_not_found"))
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder
+                .clearContext()
+        }
     }
 }

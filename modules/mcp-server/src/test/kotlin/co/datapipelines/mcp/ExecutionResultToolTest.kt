@@ -52,7 +52,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `a json page carries the REST cursor body`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { resultStore.page("dp:result:${McpFixtures.EXECUTION_ID}", 0, 1000) } returns page(listOf(listOf("1")))
 
         @Suppress("UNCHECKED_CAST")
@@ -71,7 +71,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `offset and limit map one-to-one onto the cursor's parameters`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         val offset = slot<Long>()
         val limit = slot<Int>()
         every { resultStore.page(any(), capture(offset), capture(limit)) } returns page(emptyList())
@@ -86,7 +86,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `a limit above the server maximum is clamped, not rejected`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         val limit = slot<Int>()
         every { resultStore.page(any(), any(), capture(limit)) } returns page(emptyList())
 
@@ -97,13 +97,13 @@ class ExecutionResultToolTest {
 
     @Test
     fun `a running execution is incomplete, a failed one has no result`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(status = ExecutionStatus.RUNNING, resultRowCount = null)
 
         shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }.code shouldBe
             PipelineErrorCodes.Result.EXECUTION_INCOMPLETE
 
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(status = ExecutionStatus.FAILED, resultRowCount = null)
 
         shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }.code shouldBe
@@ -112,7 +112,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `an expired result is unrecoverable and says so`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { resultStore.page(any(), any(), any()) } returns null
 
         shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }.code shouldBe PipelineErrorCodes.Result.EXPIRED
@@ -120,7 +120,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `an unknown format is a tool error, not a protocol error`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
 
         shouldThrow<DatapipelinesException> { tool.call(args("format" to "parquet"), ctx) }.code shouldBe
             PipelineErrorCodes.Result.FORMAT_UNSUPPORTED
@@ -128,7 +128,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `another user's result is invisible`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
 
         shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }.code shouldBe
@@ -137,7 +137,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `arrow and csv are never inlined - the cursor URL is returned instead`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { resultStore.page(any(), any(), any()) } returns page(listOf(listOf("1")))
 
         @Suppress("UNCHECKED_CAST")
@@ -154,7 +154,7 @@ class ExecutionResultToolTest {
     @Test
     fun `a json payload over 1 MB is replaced by the cursor URL`() {
         val wide = List(600) { listOf("x".repeat(2_000)) }
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { resultStore.page(any(), any(), any()) } returns page(wide)
 
         @Suppress("UNCHECKED_CAST")
@@ -172,7 +172,7 @@ class ExecutionResultToolTest {
      */
     @Test
     fun `a non-json format never materializes the page`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord(resultRowCount = 5_000_000)
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord(resultRowCount = 5_000_000)
         val limits = mutableListOf<Int>()
         every { resultStore.page(any(), any(), capture(limits)) } returns page(listOf(listOf("1")))
 
@@ -187,7 +187,7 @@ class ExecutionResultToolTest {
     /** B3: the stored `result_size_bytes` already proves this page cannot be inlined. */
     @Test
     fun `a json page the stored metadata says is over the cap is not materialized either`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(resultRowCount = 100_000).copy(resultSizeBytes = 500L * 1024 * 1024)
         val limits = mutableListOf<Int>()
         every { resultStore.page(any(), any(), capture(limits)) } returns page(listOf(listOf("1")))
@@ -204,7 +204,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `a small json page is still fetched and inlined`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         val limits = mutableListOf<Int>()
         every { resultStore.page(any(), any(), capture(limits)) } returns page(listOf(listOf("1")))
 
@@ -219,7 +219,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `an offset past the end is an empty page, not an error`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
         every { resultStore.page(any(), 9_000L, any()) } returns
             ResultPage(
                 executionId = McpFixtures.EXECUTION_ID,
@@ -243,7 +243,7 @@ class ExecutionResultToolTest {
 
     @Test
     fun `a successful pipeline with no caller result returns an empty page, not an error`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord(resultRowCount = null)
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord(resultRowCount = null)
 
         @Suppress("UNCHECKED_CAST")
         val payload = tool.call(args(), ctx) as Map<String, Any?>

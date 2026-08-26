@@ -16,6 +16,7 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import org.springframework.beans.factory.annotation.Value
@@ -73,10 +74,16 @@ class DomainConfiguration {
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
      * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
      * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
+     *
+     * The port is frozen in `datasources` and carries no workspace, so the workspace comes from
+     * the request's own security context: every invocation is a datasource-surface request
+     * (delete/get referencing check), always on a request thread with the resolved principal
+     * present. That is the one place workspace resolution is contextual rather than explicit —
+     * recorded in the slice-2 sweep statement.
      */
     @Bean
     fun datasourceReferences(bodies: PipelineBodies): DatasourceReferences =
-        DatasourceReferences { name -> bodies.pipelinesReferencing(name) }
+        DatasourceReferences { name -> bodies.pipelinesReferencing(currentPrincipal().requireWorkspace().id, name) }
 
     @Bean
     fun datasourceRegistry(

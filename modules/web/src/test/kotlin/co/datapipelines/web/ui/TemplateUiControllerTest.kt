@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
@@ -24,6 +25,7 @@ class TemplateUiControllerTest {
     private val controller = TemplateUiController(repository, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private fun template(id: String = "fetch_orders.sql") =
         Template(
@@ -40,10 +42,25 @@ class TemplateUiControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
+    private fun authenticate() {
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.READ),
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
     @Test
     fun `list page returns templates view with theme and templates`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(null, null, 0, 26) } returns
+        every { repository.list(any(), null, null, 0, 26) } returns
             listOf(
                 template(),
                 template("orders_v2.sql"),
@@ -61,8 +78,9 @@ class TemplateUiControllerTest {
 
     @Test
     fun `list page passes filters to repository`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(Dialect.POSTGRES, "orders", 0, 26) } returns listOf(template())
+        every { repository.list(any(), Dialect.POSTGRES, "orders", 0, 26) } returns listOf(template())
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "orders", "POSTGRES", null)
@@ -76,7 +94,8 @@ class TemplateUiControllerTest {
 
     @Test
     fun `partial returns fragment view`() {
-        every { repository.list(null, null, 0, 26) } returns listOf(template())
+        authenticate()
+        every { repository.list(any(), null, null, 0, 26) } returns listOf(template())
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -89,8 +108,9 @@ class TemplateUiControllerTest {
 
     @Test
     fun `partial handles pagination hasMore detection`() {
+        authenticate()
         val many = (1..26).map { template("t$it.sql") }
-        every { repository.list(null, null, 0, 26) } returns many
+        every { repository.list(any(), null, null, 0, 26) } returns many
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -104,19 +124,10 @@ class TemplateUiControllerTest {
 
     @Test
     fun `scopes are populated from authenticated principal`() {
-        val principal =
-            AuthenticatedPrincipal(
-                userId,
-                "a@b.c",
-                "A",
-                setOf(Scope.READ),
-                AuthMethod.OIDC,
-            )
-        SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+        authenticate()
 
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(null, null, 0, 26) } returns emptyList()
+        every { repository.list(any(), null, null, 0, 26) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)
@@ -128,8 +139,9 @@ class TemplateUiControllerTest {
 
     @Test
     fun `empty list renders correctly`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(null, null, 0, 26) } returns emptyList()
+        every { repository.list(any(), null, null, 0, 26) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)

@@ -1,5 +1,9 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import io.kotest.matchers.shouldBe
@@ -7,7 +11,10 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import java.time.Instant
 import java.util.UUID
@@ -18,6 +25,25 @@ class PipelineEditorControllerTest {
     private val controller = PipelineEditorController(repository, themeResolver)
 
     private val pipelineId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
+
+    @AfterEach
+    fun clearContext() = SecurityContextHolder.clearContext()
+
+    private fun authenticate() {
+        val principal =
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "a@b.c",
+                "A",
+                setOf(Scope.AUTHOR),
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+    }
+
     private val record =
         PipelineRecord(
             id = pipelineId,
@@ -61,8 +87,9 @@ class PipelineEditorControllerTest {
 
     @Test
     fun `editor returns editor view with pipeline json and theme`() {
-        every { repository.findById(pipelineId) } returns record
-        every { repository.findVersionBody(pipelineId, 1) } returns bodyJson
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
         every { themeResolver.resolve(any()) } returns "saas"
 
         val model = ExtendedModelMap()
@@ -80,8 +107,9 @@ class PipelineEditorControllerTest {
 
     @Test
     fun `editor includes server-assigned fields in pipeline json`() {
-        every { repository.findById(pipelineId) } returns record
-        every { repository.findVersionBody(pipelineId, 1) } returns bodyJson
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
         every { themeResolver.resolve(any()) } returns "dark"
 
         val model = ExtendedModelMap()

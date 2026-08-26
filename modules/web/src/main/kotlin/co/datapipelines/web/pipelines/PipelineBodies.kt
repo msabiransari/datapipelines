@@ -10,27 +10,35 @@ import java.util.UUID
  * Datasource filtering is pushed down to SQL via [PipelineRepository.findAllByDatasource]; the
  * per-request memoization stopgap (carry-forward #6) is removed. The `q` search remains
  * in-memory because it matches across `name`, `display_name` and `description` columns.
+ *
+ * Every entry point takes the request's active workspace explicitly (design §5) — listings and
+ * reference scans see exactly one workspace's pipelines.
  */
 class PipelineBodies(
     private val repository: PipelineRepository,
 ) {
     fun scan(
+        workspaceId: UUID,
         ownerId: UUID? = null,
         datasourceName: String? = null,
-    ): Scan = Scan(repository, ownerId, datasourceName)
+    ): Scan = Scan(repository, workspaceId, ownerId, datasourceName)
 
-    fun pipelinesReferencing(datasourceName: String): List<String> = repository.findAllByDatasource(datasourceName).map { it.name }
+    fun pipelinesReferencing(
+        workspaceId: UUID,
+        datasourceName: String,
+    ): List<String> = repository.findAllByDatasource(workspaceId, datasourceName).map { it.name }
 
     class Scan(
         private val repository: PipelineRepository,
+        private val workspaceId: UUID,
         private val ownerId: UUID?,
         private val datasourceName: String?,
     ) {
         val records: List<PipelineRecord> by lazy {
             if (datasourceName != null) {
-                repository.findAllByDatasource(datasourceName, ownerId)
+                repository.findAllByDatasource(workspaceId, datasourceName, ownerId)
             } else {
-                repository.findAll(ownerId)
+                repository.findAll(workspaceId, ownerId)
             }
         }
 

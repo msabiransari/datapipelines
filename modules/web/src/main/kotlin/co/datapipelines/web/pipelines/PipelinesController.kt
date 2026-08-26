@@ -56,8 +56,10 @@ class PipelinesController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
-        val (pipeline, canonical) = validated(body)
-        val record = pipelines.create(NewPipeline.from(pipeline, ownerId = principal.userId), canonical, principal.userId)
+        val workspaceId = principal.requireWorkspace().id
+        val (pipeline, canonical) = validated(body, workspaceId)
+        val record =
+            pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = principal.userId), canonical, principal.userId)
         return ApiResponse.of(PipelineResponses.full(record, canonical))
     }
 
@@ -67,9 +69,10 @@ class PipelinesController(
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<JsonNode> {
-        val record = pipelines.findById(id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val body =
-            pipelines.findVersionBody(record.id, record.currentVersion)
+            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
                 ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(record, body))
     }
@@ -81,9 +84,10 @@ class PipelinesController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ): ApiResponse<JsonNode> {
-        val record = pipelines.findById(id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val body =
-            pipelines.findVersionBody(id, version)
+            pipelines.findVersionBody(workspaceId, id, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
         return ApiResponse.of(PipelineResponses.full(record.copy(currentVersion = version), body))
     }
@@ -94,8 +98,9 @@ class PipelinesController(
     fun versions(
         @PathVariable id: UUID,
     ): ApiResponse<List<Map<String, Any?>>> {
-        pipelines.findById(id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        return ApiResponse.of(pipelines.listVersions(id).map(PipelineResponses::versionSummary))
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        return ApiResponse.of(pipelines.listVersions(workspaceId, id).map(PipelineResponses::versionSummary))
     }
 
     /** §5.5 — update, creating the next version. */
@@ -106,9 +111,10 @@ class PipelinesController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
-        val (pipeline, canonical) = validated(body)
+        val workspaceId = principal.requireWorkspace().id
+        val (pipeline, canonical) = validated(body, workspaceId)
         val record =
-            pipelines.update(id, pipeline, canonical, principal.userId)
+            pipelines.update(workspaceId, id, pipeline, canonical, principal.userId)
                 ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(record, canonical))
     }
@@ -120,7 +126,8 @@ class PipelinesController(
     fun delete(
         @PathVariable id: UUID,
     ) {
-        if (!pipelines.softDelete(id)) throw ApiErrors.pipelineNotFound(id.toString())
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        if (!pipelines.softDelete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
     }
 
     /**
@@ -140,7 +147,8 @@ class PipelinesController(
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val scan = bodies.scan(owner, datasource)
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val scan = bodies.scan(workspaceId, owner, datasource)
         val filtered =
             scan.records
                 .filter { q == null || scan.matchesQuery(it, q) }
@@ -150,8 +158,11 @@ class PipelinesController(
     }
 
     /** Deserialize → §12 validate → canonical JSON; the one save path (pipeline-contract §17.2). */
-    private fun validated(body: String): Pair<co.datapipelines.pipeline.Pipeline, String> {
-        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(body))
+    private fun validated(
+        body: String,
+        workspaceId: UUID,
+    ): Pair<co.datapipelines.pipeline.Pipeline, String> {
+        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
         return pipeline to serializer.write(pipeline)
     }
 }

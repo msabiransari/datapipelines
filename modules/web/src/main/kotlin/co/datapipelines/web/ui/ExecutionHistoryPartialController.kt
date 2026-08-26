@@ -27,6 +27,7 @@ class ExecutionHistoryPartialController(
         model: Model,
     ): String {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val isAdmin = Scope.satisfies(principal.scopes, Scope.ADMIN)
         val wanted = status?.let { runCatching { ExecutionStatus.valueOf(it.trim().uppercase()) }.getOrNull() }
         val after = startedAfter?.let { Instant.parse(it) }
@@ -35,9 +36,18 @@ class ExecutionHistoryPartialController(
         val pageSize = DEFAULT_PAGE
         val raw =
             if (isAdmin) {
-                executions.findAll(pipelineId, wanted, after, before, limit = pageSize + 1, offset = offset)
+                executions.findAll(workspaceId, pipelineId, wanted, after, before, limit = pageSize + 1, offset = offset)
             } else {
-                executions.findByUser(principal.userId, pipelineId, wanted, after, before, limit = pageSize + 1, offset = offset)
+                executions.findByUser(
+                    workspaceId,
+                    principal.userId,
+                    pipelineId,
+                    wanted,
+                    after,
+                    before,
+                    limit = pageSize + 1,
+                    offset = offset,
+                )
             }
 
         val items = raw.take(pageSize)

@@ -29,7 +29,7 @@ import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.StagingFactory
-import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -93,7 +93,7 @@ data class ExecuteLaunch(
  */
 @Suppress("LongParameterList")
 class ExecutionLauncher(
-    private val templateEngine: TemplateEngine,
+    private val templateEngines: WorkspaceTemplateEngines,
     private val datasourceRegistry: DatasourceRegistry,
     private val stagingFactory: StagingFactory,
     private val writebackRunner: WritebackRunner,
@@ -211,6 +211,7 @@ class ExecutionLauncher(
         executionId: UUID?,
     ): SseEmitter {
         val sse = SseEmitter(NEVER_TIMEOUT)
+        val workspaceId = request.principal.requireWorkspace().id
         val context =
             ExecutionContext(
                 pipelineId = request.pipelineId,
@@ -219,6 +220,7 @@ class ExecutionLauncher(
                 correlationId = request.correlationId,
                 triggeredVia = ExecutionTrigger.REST,
                 parametersJson = request.parametersJson,
+                workspaceId = workspaceId,
             )
         val emitter =
             WebEventEmitter(
@@ -230,7 +232,7 @@ class ExecutionLauncher(
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
             ) { onExecutionStarted(it, request, sse) }
-        val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter)
+        val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)
 
         scope.launch {
             runExecution(executor, request, emitter, sse, executionId)
@@ -325,10 +327,16 @@ class ExecutionLauncher(
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
-    /** One executor per run — see the class KDoc. */
-    private fun newExecutor(emitter: WebEventEmitter): PipelineExecutor =
+    /**
+     * One executor per run — see the class KDoc. The engine is the workspace's own (T24):
+     * template resolution and the render caches are scoped to it.
+     */
+    private fun newExecutor(
+        emitter: WebEventEmitter,
+        workspaceId: UUID,
+    ): PipelineExecutor =
         pipelineExecutor(
-            templateEngine = templateEngine,
+            templateEngine = templateEngines.engineFor(workspaceId),
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
             writebackRunner = writebackRunner,

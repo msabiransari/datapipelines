@@ -11,6 +11,15 @@ enum class AuthMethod { OIDC, API_KEY }
  * [scopes] is the set of *granted* scopes; hierarchy expansion for enforcement is
  * done at the check site ([Scope.satisfies], [ScopeMatrix]). [keyId] is present
  * only when [authMethod] is [AuthMethod.API_KEY].
+ *
+ * ## Workspace (design §5)
+ * [workspaceName] is the *unresolved* value the credential carries — the JWT's
+ * `active_workspace` claim, or the key's pinned workspace name. [workspace] is the
+ * resolved, membership-checked [WorkspaceContext] the `WorkspaceResolutionFilter`
+ * stamps once per request; before that filter runs it is null, and after it, null
+ * means "principal with zero memberships" (possible under `closed` provisioning —
+ * every workspace-scoped operation must then 403, which is what [requireWorkspace]
+ * raises).
  */
 data class AuthenticatedPrincipal(
     val userId: UUID,
@@ -19,4 +28,17 @@ data class AuthenticatedPrincipal(
     val scopes: Set<Scope>,
     val authMethod: AuthMethod,
     val keyId: String? = null,
-)
+    val workspaceName: String? = null,
+    val workspace: WorkspaceContext? = null,
+) {
+    /** Global admin (D4): bypasses workspace membership checks. Same rule as `ExecutionRecord.visibleTo`. */
+    val isAdmin: Boolean get() = Scope.satisfies(scopes, Scope.ADMIN)
+
+    /**
+     * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)
+     * when the principal has none — the design §7 "zero memberships" refusal every
+     * workspace-scoped operation shares.
+     */
+    fun requireWorkspace(): WorkspaceContext =
+        workspace ?: throw WorkspaceMembershipRequiredException("Principal has no active workspace (zero memberships)")
+}

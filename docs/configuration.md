@@ -196,6 +196,16 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|---|
 | `datapipelines.pipelines.max-composition-depth` | `5` | Deepest admitted chain of pipelines executing pipelines (a PIPELINE node spawning a child execution). Enforced at save time and again at runtime; must be ≥ 1 |
 
+### 3.17 Workspaces
+
+Workspace provisioning mode (design 2026-08-16-workspaces §7, [auth.md §4.2/§5.6](auth.md#56-workspace-resolution--the-dp-workspace-header)): `auto-per-user` mints a personal workspace on first OIDC login; `self-serve` lets any authenticated user create workspaces; `closed` restricts creation to `admin`.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.workspaces.provisioning-mode` | `self-serve` | `auto-per-user` \| `self-serve` \| `closed` |
+| `datapipelines.workspaces.open-join` | `false` | `self-serve` only: `true` lists all workspaces as joinable by any authenticated user; `false` = members are added by a workspace owner |
+| `datapipelines.workspaces.member-datasources-enabled` | `true` | May non-admin members create workspace-bound datasources (datasource visibility gate) |
+
 ---
 
 ## 4. Precedence
@@ -296,6 +306,11 @@ datapipelines:
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
+
+  workspaces:
+    provisioning-mode: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}
+    open-join: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:false}
+    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
 
   staging:
     h2:
@@ -401,6 +416,7 @@ On startup, the app validates:
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
 - At least one OIDC provider with non-empty `client-id`, `client-secret`, and `issuer-uri`.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
+- `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
 - **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
 

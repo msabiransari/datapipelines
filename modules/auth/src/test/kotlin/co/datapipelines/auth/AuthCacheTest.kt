@@ -108,4 +108,48 @@ class AuthCacheTest {
         const val MAX_ENTRIES = 10_000
         const val OVERFLOW = 1
     }
+
+    @Test
+    fun `membership snapshots follow the same TTL and invalidation discipline`() {
+        val workspaceId = UUID.randomUUID()
+        val membership = WorkspaceMembership(workspaceId, "acme", WorkspaceRole.OWNER, Instant.now())
+        val loads = AtomicInteger()
+
+        repeat(3) {
+            cache.memberships(userId) {
+                loads.incrementAndGet()
+                listOf(membership)
+            } shouldBe listOf(membership)
+        }
+        loads.get() shouldBe 1
+
+        cache.invalidateMemberships(userId)
+        cache.memberships(userId) {
+            loads.incrementAndGet()
+            emptyList()
+        } shouldBe emptyList()
+        loads.get() shouldBe 2
+    }
+
+    @Test
+    fun `workspace-by-name is cached per TTL and evicted on mutation`() {
+        val workspace =
+            Workspace(UUID.randomUUID(), "acme", "Acme", false, null, false, Instant.now())
+        val loads = AtomicInteger()
+
+        repeat(2) {
+            cache.workspaceByName("acme") {
+                loads.incrementAndGet()
+                workspace
+            } shouldBe workspace
+        }
+        loads.get() shouldBe 1
+
+        cache.invalidateWorkspace("acme")
+        cache.workspaceByName("acme") {
+            loads.incrementAndGet()
+            null
+        } shouldBe null
+        loads.get() shouldBe 2
+    }
 }

@@ -28,7 +28,13 @@ class OidcSuccessHandlerTest {
 
     private val userId = UUID.randomUUID()
 
-    private fun handler(props: AuthProperties = AuthProperties()) = OidcSuccessHandler(userService, jwtService, auditLogger, props)
+    private val workspaceService =
+        mockk<WorkspaceService> {
+            every { workspaceForLogin(any(), any()) } returns null
+        }
+
+    private fun handler(props: AuthProperties = AuthProperties()) =
+        OidcSuccessHandler(userService, jwtService, auditLogger, props, workspaceService)
 
     private fun user(
         email: String = "alice@company.com",

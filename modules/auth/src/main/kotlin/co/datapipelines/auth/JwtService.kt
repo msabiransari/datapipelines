@@ -63,7 +63,16 @@ class JwtService(
     /** Derives the session scopes from the user record (auth.md §6.1, D14). */
     fun scopesFor(user: User): Set<Scope> = if (user.isAdmin) Scope.ADMIN.expand() else Scope.AUTHOR.expand()
 
-    fun issue(user: User): String {
+    /**
+     * Issues the session JWT (auth.md §6.1). [activeWorkspace], when non-null, is stamped
+     * as the `active_workspace` claim (design §5.1) — the workspace *name*, matching what
+     * `DP-Workspace` carries. Null = principal with zero memberships; resolution then
+     * falls back per-request.
+     */
+    fun issue(
+        user: User,
+        activeWorkspace: String? = null,
+    ): String {
         val now = System.currentTimeMillis()
         return Jwts
             .builder()
@@ -71,6 +80,7 @@ class JwtService(
             .claim("email", user.email)
             .claim("name", user.displayName)
             .claim("scopes", scopesFor(user).map { it.wire })
+            .apply { if (activeWorkspace != null) claim(ACTIVE_WORKSPACE_CLAIM, activeWorkspace) }
             .issuer(ISSUER)
             .issuedAt(Date(now))
             .expiration(Date(now + ttlMillis))
@@ -131,5 +141,8 @@ class JwtService(
         const val PINNED_ALG = "HS256"
         const val MIN_SECRET_BYTES = 32
         const val HMAC_SHA256 = "HmacSHA256"
+
+        /** The `active_workspace` claim (design §5.1, auth.md §6.1) — a workspace *name*. */
+        const val ACTIVE_WORKSPACE_CLAIM = "active_workspace"
     }
 }

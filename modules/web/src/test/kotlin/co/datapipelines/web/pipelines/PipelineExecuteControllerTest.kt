@@ -3,6 +3,7 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.ApiException
@@ -33,6 +34,7 @@ class PipelineExecuteControllerTest {
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
     private val record =
         PipelineRecord(pipelineId, "p", "P", "d", userId, 5, false, Instant.EPOCH, Instant.EPOCH)
 
@@ -44,7 +46,16 @@ class PipelineExecuteControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     private fun authenticate() {
-        val principal = AuthenticatedPrincipal(userId, "a@b.c", "A", setOf(Scope.EXECUTE), AuthMethod.API_KEY, "dpk_x")
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                setOf(Scope.EXECUTE),
+                AuthMethod.API_KEY,
+                "dpk_x",
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -62,7 +73,7 @@ class PipelineExecuteControllerTest {
     @Test
     fun `an unknown pipeline is the catalogued 404 before anything launches`() {
         authenticate()
-        every { pipelines.findById(pipelineId) } returns null
+        every { pipelines.findById(any(), pipelineId) } returns null
 
         shouldThrow<ApiException> { controller.execute(pipelineId, "{}", request()) }
             .code shouldBe "pipeline.execution.not_found"
@@ -72,8 +83,8 @@ class PipelineExecuteControllerTest {
     @Test
     fun `no version defaults to the pipeline's current version`() {
         authenticate()
-        every { pipelines.findById(pipelineId) } returns record
-        every { pipelines.findVersionBody(pipelineId, 5) } returns bodyJson
+        every { pipelines.findById(any(), pipelineId) } returns record
+        every { pipelines.findVersionBody(any(), pipelineId, 5) } returns bodyJson
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
 
@@ -87,8 +98,8 @@ class PipelineExecuteControllerTest {
     @Test
     fun `a pinned version is used, and a non-positive version is a 400`() {
         authenticate()
-        every { pipelines.findById(pipelineId) } returns record
-        every { pipelines.findVersionBody(pipelineId, 2) } returns bodyJson
+        every { pipelines.findById(any(), pipelineId) } returns record
+        every { pipelines.findVersionBody(any(), pipelineId, 2) } returns bodyJson
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
 
@@ -103,8 +114,8 @@ class PipelineExecuteControllerTest {
     @Test
     fun `an unknown pinned version is the version 404`() {
         authenticate()
-        every { pipelines.findById(pipelineId) } returns record
-        every { pipelines.findVersionBody(pipelineId, 9) } returns null
+        every { pipelines.findById(any(), pipelineId) } returns record
+        every { pipelines.findVersionBody(any(), pipelineId, 9) } returns null
 
         shouldThrow<ApiException> { controller.execute(pipelineId, """{"version":9}""", request()) }
             .code shouldBe "pipeline.execution.not_found"
@@ -113,7 +124,7 @@ class PipelineExecuteControllerTest {
     @Test
     fun `a non-object body or parameters is a 400, never a stream`() {
         authenticate()
-        every { pipelines.findById(pipelineId) } returns record
+        every { pipelines.findById(any(), pipelineId) } returns record
 
         shouldThrow<ApiException> { controller.execute(pipelineId, "[1,2]", request()) }
             .code shouldBe "pipeline.execution.invalid_parameter_type"

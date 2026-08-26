@@ -3,6 +3,7 @@ package co.datapipelines.web.executions
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -42,6 +43,7 @@ class ExecutionsControllerTest {
 
     private val owner = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -64,7 +66,16 @@ class ExecutionsControllerTest {
         userId: UUID,
         scopes: Set<Scope>,
     ) {
-        val principal = AuthenticatedPrincipal(userId, "a@b.c", "A", scopes, AuthMethod.API_KEY, "dpk_x")
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "A",
+                scopes,
+                AuthMethod.API_KEY,
+                "dpk_x",
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -72,7 +83,7 @@ class ExecutionsControllerTest {
     @Test
     fun `cancel by the owner requests cancellation and returns 204`() {
         authenticate(owner, setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
         controller.cancel(executionId)
@@ -83,7 +94,7 @@ class ExecutionsControllerTest {
     @Test
     fun `cancel by a non-owner is a 404 and never reaches the cancellation service`() {
         authenticate(UUID.randomUUID(), setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
 
         shouldThrow<ApiException> { controller.cancel(executionId) }.code shouldBe "result.execution_not_found"
         verify(exactly = 0) { cancellation.cancel(any(), any()) }
@@ -92,7 +103,7 @@ class ExecutionsControllerTest {
     @Test
     fun `admin may cancel any execution`() {
         authenticate(UUID.randomUUID(), setOf(Scope.ADMIN))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
         controller.cancel(executionId)
@@ -103,7 +114,7 @@ class ExecutionsControllerTest {
     @Test
     fun `cancelling a terminal execution is 409 not_running`() {
         authenticate(owner, setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
 
         val error = shouldThrow<ApiException> { controller.cancel(executionId) }
         error.code shouldBe "pipeline.execution.not_running"
@@ -113,14 +124,14 @@ class ExecutionsControllerTest {
     @Test
     fun `the user listing reads findByUser, the admin listing findAll`() {
         authenticate(owner, setOf(Scope.READ))
-        every { executions.findByUser(owner, any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), owner, any(), any(), any(), any(), any(), any()) } returns emptyList()
         controller.list(null, null, null, null, null, null)
-        verify(exactly = 1) { executions.findByUser(owner, null, null, null, null, any(), any()) }
+        verify(exactly = 1) { executions.findByUser(any(), owner, null, null, null, null, any(), any()) }
 
         authenticate(UUID.randomUUID(), setOf(Scope.ADMIN))
-        every { executions.findAll(any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findAll(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         controller.list(null, null, null, null, null, null)
-        verify(exactly = 1) { executions.findAll(null, null, null, null, any(), any()) }
+        verify(exactly = 1) { executions.findAll(any(), null, null, null, null, any(), any()) }
     }
 
     @Test
@@ -128,14 +139,14 @@ class ExecutionsControllerTest {
         authenticate(owner, setOf(Scope.READ))
         val after = Instant.parse("2026-08-01T00:00:00Z")
         every {
-            executions.findByUser(owner, any(), ExecutionStatus.SUCCESS, after, any(), any(), any())
+            executions.findByUser(any(), owner, any(), ExecutionStatus.SUCCESS, after, any(), any(), any())
         } returns listOf(record(ExecutionStatus.SUCCESS))
 
         val data = controller.list(null, "SUCCESS", after, null, 0, 50).data
 
         data.items.size shouldBe 1
         verify(exactly = 1) {
-            executions.findByUser(owner, null, ExecutionStatus.SUCCESS, after, null, limit = 51, offset = 0)
+            executions.findByUser(any(), owner, null, ExecutionStatus.SUCCESS, after, null, limit = 51, offset = 0)
         }
     }
 
@@ -149,7 +160,7 @@ class ExecutionsControllerTest {
     fun `execution metadata exposes the composition lineage a child execution carries`() {
         authenticate(owner, setOf(Scope.READ))
         val parentExecutionId = UUID.randomUUID()
-        every { executions.findById(executionId) } returns
+        every { executions.findById(any(), executionId) } returns
             record(ExecutionStatus.SUCCESS).copy(
                 triggeredVia = ExecutionTrigger.PIPELINE,
                 parentExecutionId = parentExecutionId,
@@ -168,7 +179,7 @@ class ExecutionsControllerTest {
     @Test
     fun `a root execution reports a null parent and itself as the family root`() {
         authenticate(owner, setOf(Scope.READ))
-        every { executions.findById(executionId) } returns
+        every { executions.findById(any(), executionId) } returns
             record(ExecutionStatus.SUCCESS).copy(rootExecutionId = executionId)
 
         val data = controller.get(executionId).data

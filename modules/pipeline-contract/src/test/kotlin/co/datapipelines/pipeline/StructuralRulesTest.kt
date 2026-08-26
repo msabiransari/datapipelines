@@ -8,14 +8,16 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** pipeline-contract §12.1 — structural validations, happy path and every failing case. */
 class StructuralRulesTest {
     private val validator = Fixtures.validator()
+    private val workspaceId = UUID.randomUUID()
 
     @Test
     fun `a well-formed pipeline produces no structural failures`() {
-        validator.validate(Fixtures.pipeline()).failures.shouldBeEmpty()
+        validator.validate(Fixtures.pipeline(), workspaceId).failures.shouldBeEmpty()
     }
 
     @Test
@@ -44,7 +46,7 @@ class StructuralRulesTest {
                     ),
             )
 
-        val codes = validator.validate(healthy).codes
+        val codes = validator.validate(healthy, workspaceId).codes
 
         listOf(
             Validation.SCHEMA_VERSION_UNSUPPORTED,
@@ -76,7 +78,7 @@ class StructuralRulesTest {
 
     @Test
     fun `an unsupported schema_version is rejected`() {
-        val codes = validator.validate(Fixtures.pipeline(schemaVersion = 2)).codes
+        val codes = validator.validate(Fixtures.pipeline(schemaVersion = 2), workspaceId).codes
 
         codes shouldContain Validation.SCHEMA_VERSION_UNSUPPORTED
     }
@@ -84,10 +86,10 @@ class StructuralRulesTest {
     @Test
     fun `pipeline names must match the frozen identifier rule`() {
         listOf("Monthly_Revenue", "monthly revenue", "monthly-revenue", "", "a".repeat(64)).forEach { name ->
-            validator.validate(Fixtures.pipeline(name = name)).codes shouldContain Validation.NAME_INVALID
+            validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldContain Validation.NAME_INVALID
         }
         listOf("a", "monthly_revenue_2026", "a".repeat(63)).forEach { name ->
-            validator.validate(Fixtures.pipeline(name = name)).codes shouldNotContain Validation.NAME_INVALID
+            validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldNotContain Validation.NAME_INVALID
         }
     }
 
@@ -95,7 +97,7 @@ class StructuralRulesTest {
     fun `duplicate node ids are rejected`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(id = "a"), Fixtures.node(id = "a", output = null)))
 
-        val failures = validator.validate(pipeline).withCode(Validation.DUPLICATE_NODE_ID)
+        val failures = validator.validate(pipeline, workspaceId).withCode(Validation.DUPLICATE_NODE_ID)
 
         failures.single().details["value"] shouldBe "a"
     }
@@ -110,8 +112,8 @@ class StructuralRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).codes shouldContain Validation.INVALID_IDENTIFIER
-        validator.validate(pipeline).withCode(Validation.INVALID_IDENTIFIER).size shouldBe 2
+        validator.validate(pipeline, workspaceId).codes shouldContain Validation.INVALID_IDENTIFIER
+        validator.validate(pipeline, workspaceId).withCode(Validation.INVALID_IDENTIFIER).size shouldBe 2
     }
 
     @Test
@@ -124,7 +126,7 @@ class StructuralRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).withCode(Validation.RESERVED_IDENTIFIER).size shouldBe 2
+        validator.validate(pipeline, workspaceId).withCode(Validation.RESERVED_IDENTIFIER).size shouldBe 2
     }
 
     @Test
@@ -138,7 +140,7 @@ class StructuralRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).codes shouldContain Validation.DUPLICATE_OUTPUT_TABLE
+        validator.validate(pipeline, workspaceId).codes shouldContain Validation.DUPLICATE_OUTPUT_TABLE
     }
 
     @Test
@@ -161,7 +163,7 @@ class StructuralRulesTest {
                     ),
             )
 
-        validator.validate(pipeline).codes shouldNotContain Validation.DUPLICATE_OUTPUT_TABLE
+        validator.validate(pipeline, workspaceId).codes shouldNotContain Validation.DUPLICATE_OUTPUT_TABLE
     }
 
     @Test
@@ -182,7 +184,7 @@ class StructuralRulesTest {
             )
 
         validator
-            .validate(pipeline)
+            .validate(pipeline, workspaceId)
             .withCode(Validation.DUPLICATE_OUTPUT_TABLE)
             .single()
             .details["namespace"] shouldBe
@@ -193,6 +195,6 @@ class StructuralRulesTest {
     fun `a blank output table draws output_table_missing only, not invalid_identifier as well`() {
         val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(output = NodeOutput.Tempdb(""))))
 
-        validator.validate(pipeline).codes shouldContainExactly listOf(Validation.OUTPUT_TABLE_MISSING)
+        validator.validate(pipeline, workspaceId).codes shouldContainExactly listOf(Validation.OUTPUT_TABLE_MISSING)
     }
 }

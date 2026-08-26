@@ -97,15 +97,16 @@ class ExecutionsListTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
         val status = args.enumString("status", ExecutionStatus.entries.map { it.name }.toSet())
         val pipelineId = args.uuid("pipeline_id")
 
         val candidates =
             if (pipelineId == null) {
-                executions.findByUser(ctx.principal.userId, limit = limit)
+                executions.findByUser(workspaceId, ctx.principal.userId, limit = limit)
             } else {
-                executions.findByPipeline(pipelineId, limit = limit)
+                executions.findByPipeline(workspaceId, pipelineId, limit = limit)
             }
         return candidates
             .filter { it.visibleTo(ctx) }
@@ -145,8 +146,9 @@ class ExecutionsGetTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("execution_id")
-        val record = executions.findById(id)?.takeIf { it.visibleTo(ctx) } ?: throw McpNotFound.execution(id)
+        val record = executions.findById(workspaceId, id)?.takeIf { it.visibleTo(ctx) } ?: throw McpNotFound.execution(id)
         return record.toMcpMetadata()
     }
 }

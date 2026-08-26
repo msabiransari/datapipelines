@@ -6,6 +6,8 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
@@ -22,31 +24,37 @@ class TemplateDryRendererImplTest {
             listOf(TemplateFixtures.version("fetch.sql", version = 1, dialect = Dialect.MYSQL, body = "SELECT \${id}")),
         )
     private val engine = TemplateEngine(registry, 10, 5_000, 1_000_000)
-    private val dryRenderer = TemplateDryRendererImpl(engine, registry)
+    private val workspaceId = java.util.UUID.randomUUID()
+    private val engines =
+        mockk<WorkspaceTemplateEngines> {
+            every { registryFor(any()) } returns registry
+            every { engineFor(any()) } returns engine
+        }
+    private val dryRenderer = TemplateDryRendererImpl(engines)
 
     @AfterEach
     fun tearDown() = engine.close()
 
     @Test
     fun `lookup returns Found with the template's dialect`() {
-        dryRenderer.lookup(TemplateRef("fetch.sql", 1)) shouldBe TemplateLookup.Found(Dialect.MYSQL)
+        dryRenderer.lookup(workspaceId, TemplateRef("fetch.sql", 1)) shouldBe TemplateLookup.Found(Dialect.MYSQL)
     }
 
     @Test
     fun `lookup distinguishes a missing version from a missing id`() {
-        dryRenderer.lookup(TemplateRef("fetch.sql", 2)) shouldBe TemplateLookup.VersionNotFound
-        dryRenderer.lookup(TemplateRef("absent.sql", 1)) shouldBe TemplateLookup.TemplateNotFound
+        dryRenderer.lookup(workspaceId, TemplateRef("fetch.sql", 2)) shouldBe TemplateLookup.VersionNotFound
+        dryRenderer.lookup(workspaceId, TemplateRef("absent.sql", 1)) shouldBe TemplateLookup.TemplateNotFound
     }
 
     @Test
     fun `dryRender succeeds when every referenced variable is supplied`() {
-        dryRenderer.dryRender(TemplateRef("fetch.sql", 1), mapOf("id" to 7)) shouldBe DryRenderOutcome.Success
+        dryRenderer.dryRender(workspaceId, TemplateRef("fetch.sql", 1), mapOf("id" to 7)) shouldBe DryRenderOutcome.Success
     }
 
     @Test
     fun `dryRender reports an undeclared variable as its own outcome`() {
         dryRenderer
-            .dryRender(TemplateRef("fetch.sql", 1), emptyMap())
+            .dryRender(workspaceId, TemplateRef("fetch.sql", 1), emptyMap())
             .shouldBeInstanceOf<DryRenderOutcome.UndeclaredVariable>()
     }
 
@@ -54,14 +62,14 @@ class TemplateDryRendererImplTest {
     fun `dryRender maps any other failure to RenderFailed without throwing`() {
         registry.put(TemplateFixtures.version("api.sql", body = "\${x?api}"))
         dryRenderer
-            .dryRender(TemplateRef("api.sql", 1), mapOf("x" to "s"))
+            .dryRender(workspaceId, TemplateRef("api.sql", 1), mapOf("x" to "s"))
             .shouldBeInstanceOf<DryRenderOutcome.RenderFailed>()
     }
 
     @Test
     fun `dryRender does not throw even for a template the registry cannot resolve`() {
         dryRenderer
-            .dryRender(TemplateRef("does_not_exist.sql", 9), emptyMap())
+            .dryRender(workspaceId, TemplateRef("does_not_exist.sql", 9), emptyMap())
             .shouldBeInstanceOf<DryRenderOutcome.RenderFailed>()
     }
 }

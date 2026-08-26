@@ -11,9 +11,9 @@ import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -161,7 +161,7 @@ class McpToolSurfaceSpecDriftTest {
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesCreateTool(templates, mockk<TemplateValidator>()),
-            TemplatesRenderTool(templates, mockk<TemplateEngine>()),
+            TemplatesRenderTool(templates, mockk<WorkspaceTemplateEngines>()),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),

@@ -32,11 +32,12 @@ class ExecutionDetailController(
         model: Model,
     ): String {
         val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val record =
-            executions.findById(id)?.takeIf { it.visibleTo(principal) }
+            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(principal) }
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found")
 
-        val pipeline = pipelines.findById(record.pipelineId)
+        val pipeline = pipelines.findById(workspaceId, record.pipelineId)
         val resultKey = resultStore.keyFor(record.executionId)
         val resultView = resultStore.describe(resultKey)
 
@@ -56,7 +57,7 @@ class ExecutionDetailController(
 
         // Design D6: children are ordinary execution rows, linked by the lineage columns — the
         // detail page shows the whole family (root + descendants) via the root's index.
-        val family = executions.findByRoot(record.rootExecutionId ?: record.executionId)
+        val family = executions.findByRoot(workspaceId, record.rootExecutionId ?: record.executionId)
         model.addAttribute("family", family)
 
         val errorJson = record.errorJson?.let { ExecutorJson.mapper.readTree(it) }

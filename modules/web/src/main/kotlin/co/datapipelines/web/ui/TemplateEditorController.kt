@@ -2,10 +2,11 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.api.CorrelationId
+import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.core.JsonProcessingException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.ResponseBody
 @Controller
 class TemplateEditorController(
     private val templates: TemplateRepository,
-    private val engine: TemplateEngine,
+    private val templateEngines: WorkspaceTemplateEngines,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/templates/{id}/editor")
@@ -30,9 +31,10 @@ class TemplateEditorController(
         model: Model,
         request: HttpServletRequest,
     ): String {
-        val template = templates.findLatest(id)
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val template = templates.findLatest(workspaceId, id)
         model.addAttribute("template", template)
-        model.addAttribute("versions", templates.listVersions(id))
+        model.addAttribute("versions", templates.listVersions(workspaceId, id))
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "templates/editor"
     }
@@ -45,7 +47,8 @@ class TemplateEditorController(
         @RequestParam("body") @Suppress("UNUSED_PARAMETER") body: String,
         @RequestParam("context") contextJson: String,
     ): String {
-        if (templates.lookupVersion(id, version) == null && !templates.existsId(id)) {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        if (templates.lookupVersion(workspaceId, id, version) == null && !templates.existsId(workspaceId, id)) {
             return renderError("Template '$id' not found.")
         }
         val context =
@@ -60,7 +63,7 @@ class TemplateEditorController(
                 return renderError("Invalid context JSON: ${e.message}")
             }
         return try {
-            val rendered = engine.render(TemplateRef(id, version), context)
+            val rendered = templateEngines.engineFor(workspaceId).render(TemplateRef(id, version), context)
             if (rendered.isBlank()) {
                 RENDER_EMPTY_HTML
             } else {

@@ -3,10 +3,10 @@ package co.datapipelines.mcp
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.modelcontextprotocol.spec.McpSchema
 
 /** §6.2.8 — the `description` field's own description, kept off the schema line for length. */
@@ -63,6 +63,7 @@ class TemplatesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val draft =
             TemplateDraft(
                 id = args.string("id"),
@@ -74,7 +75,7 @@ class TemplatesCreateTool(
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
             )
-        return templates.create(validator.validateOrThrow(draft), ctx.principal.userId)
+        return templates.create(workspaceId, validator.validateOrThrow(draft, workspaceId), ctx.principal.userId)
     }
 
     /** `imports: [{id, version, alias}]` (D12). Shape errors are `-32602`, not validation failures. */
@@ -140,7 +141,7 @@ class TemplatesCreateTool(
  */
 class TemplatesRenderTool(
     private val templates: TemplateRepository,
-    private val engine: TemplateEngine,
+    private val engines: WorkspaceTemplateEngines,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -174,18 +175,20 @@ class TemplatesRenderTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
-        val version = resolveVersion(args, id)
-        return engine.render(TemplateRef(id, version), args.requiredObject("context"))
+        val version = resolveVersion(args, workspaceId, id)
+        return engines.engineFor(workspaceId).render(TemplateRef(id, version), args.requiredObject("context"))
     }
 
     private fun resolveVersion(
         args: McpArguments,
+        workspaceId: java.util.UUID,
         id: String,
     ): Int {
-        val version = args.version() ?: return templates.findLatest(id)?.version ?: throw McpNotFound.template(id)
-        if (templates.lookupVersion(id, version) == null) {
-            throw if (templates.existsId(id)) McpNotFound.templateVersion(id, version) else McpNotFound.template(id)
+        val version = args.version() ?: return templates.findLatest(workspaceId, id)?.version ?: throw McpNotFound.template(id)
+        if (templates.lookupVersion(workspaceId, id, version) == null) {
+            throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, version) else McpNotFound.template(id)
         }
         return version
     }

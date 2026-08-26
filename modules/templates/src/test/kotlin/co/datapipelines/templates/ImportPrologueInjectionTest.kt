@@ -33,7 +33,12 @@ class ImportPrologueInjectionTest {
     @AfterEach
     fun tearDown() = engines.forEach { it.close() }
 
-    private fun validator(): TemplateValidator = TemplateValidator(LibraryResolver(InMemoryTemplateRegistry(listOf(library))))
+    private val workspaceId = java.util.UUID.randomUUID()
+
+    private fun validator(): TemplateValidator {
+        val registry = InMemoryTemplateRegistry(listOf(library))
+        return TemplateValidator(LibraryResolver { _ -> registry })
+    }
 
     private fun engineWith(vararg versions: TemplateVersion): TemplateEngine =
         TemplateEngine(InMemoryTemplateRegistry(versions.toList() + library), 10, 5_000, 1_000_000)
@@ -44,7 +49,7 @@ class ImportPrologueInjectionTest {
         INJECTING_ALIASES.forEach { alias ->
             withClue("save must reject alias: $alias") {
                 validator()
-                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, alias))))
+                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, alias))), workspaceId)
                     .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -53,7 +58,7 @@ class ImportPrologueInjectionTest {
     @Test
     fun `an import id outside the identifier rule is rejected at save`() {
         validator()
-            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql\" as x><#assign a=1>", 1, "d"))))
+            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql\" as x><#assign a=1>", 1, "d"))), workspaceId)
             .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
     }
 
@@ -65,7 +70,7 @@ class ImportPrologueInjectionTest {
         listOf(0, -1, Int.MIN_VALUE).forEach { version ->
             withClue("version must be rejected: $version") {
                 validator()
-                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", version, "d"))))
+                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", version, "d"))), workspaceId)
                     .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -76,7 +81,7 @@ class ImportPrologueInjectionTest {
         // §6.3's rule is `[a-zA-Z_][a-zA-Z0-9_]*`, unbounded. The character class carries the
         // security property; adding a length cap would reject aliases the contract permits.
         validator()
-            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "a".repeat(200)))))
+            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "a".repeat(200)))), workspaceId)
             .isValid
             .shouldBeTrue()
     }
@@ -90,7 +95,7 @@ class ImportPrologueInjectionTest {
         val hostileId = "lib.sql\" as x><#assign pwned=1>"
         val hostileAlias = "d>\${\"PWNED\"}<#assign z=1"
 
-        val result = validator().validate(TemplateFixtures.draft(imports = listOf(TemplateImport(hostileId, 1, hostileAlias))))
+        val result = validator().validate(TemplateFixtures.draft(imports = listOf(TemplateImport(hostileId, 1, hostileAlias))), workspaceId)
 
         // Scanned across EVERY failure, not just the dangerous_construct one (NEW-3). Checking a
         // single failure missed that the traversal also emitted an `import_not_found` for the same
@@ -119,7 +124,7 @@ class ImportPrologueInjectionTest {
     @Test
     fun `a plain alias still passes`() {
         validator()
-            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "dates_1"))))
+            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "dates_1"))), workspaceId)
             .isValid
             .shouldBeTrue()
     }

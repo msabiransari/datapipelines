@@ -129,6 +129,7 @@ class PipelineErrorCodesSpecDriftTest {
                 "result.",
                 "rate_limit.",
                 "idempotency.",
+                "workspace.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -150,6 +151,9 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.TypeMapping.UNKNOWN_SOURCE_TYPE,
                 PipelineErrorCodes.TypeMapping.SQL_VARIANT,
                 PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED,
+                PipelineErrorCodes.Workspace.MEMBERSHIP_REQUIRED,
+                PipelineErrorCodes.Workspace.CREATION_FORBIDDEN,
+                PipelineErrorCodes.Workspace.HEADER_FORBIDDEN,
             )
 
         /** First cell of a markdown table row, when it is a backticked lowercase code. */

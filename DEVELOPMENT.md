@@ -61,14 +61,21 @@ The app uses **generic OIDC** — any OIDC-compliant provider works (Google, Mic
 5. Authorized redirect URIs: `http://localhost:8080/login/oauth2/code/google`
 6. Copy the **Client ID** and **Client Secret**.
 
-### 3.2 Microsoft (Entra ID / Azure AD)
+### 3.2 Microsoft (Entra ID / Azure AD) — optional, single-tenant only in v1
+
+The stock `application.yml` ships **Google only**; Microsoft is a commented-out provider
+block you uncomment to enable. Multi-tenant registrations are **not supported in v1**: the
+`/common` issuer's discovery metadata carries a `{tenantid}` template the OIDC discovery
+client refuses, so it fails startup (auth.md §11.1).
 
 1. Go to [Microsoft Entra admin center](https://entra.microsoft.com/).
 2. **App registrations → New registration**.
-3. Supported account types: **Accounts in any organizational directory (Multitenant)**.
+3. Supported account types: **Accounts in this organizational directory only (Single tenant)**.
 4. Redirect URI (Web): `http://localhost:8080/login/oauth2/code/microsoft`
-5. Copy the **Application (client) ID**.
+5. Copy the **Application (client) ID** — your `{tenant-id}` is on the same page (Directory/tenant ID).
 6. **Certificates & secrets → New client secret** → copy the **Value**.
+7. Uncomment the `microsoft` block in `application.yml` (its issuer-uri already points at
+   `https://login.microsoftonline.com/{tenant-id}/v2.0` — fill in your tenant id).
 
 ### 3.3 Any other OIDC provider (Okta, Auth0, Keycloak, etc.)
 
@@ -82,7 +89,7 @@ Common issuer URIs:
 | Provider | Issuer URI |
 |---|---|
 | Google | `https://accounts.google.com` |
-| Microsoft (multi-tenant) | `https://login.microsoftonline.com/common/v2.0` |
+| Microsoft (single tenant) | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
 | Okta | `https://{your-org}.okta.com` |
 | Auth0 | `https://{your-tenant}.auth0.com` |
 | Keycloak | `https://{host}/realms/{realm}` |
@@ -124,14 +131,13 @@ DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=you@yourdomain.com
 DATAPIPELINES_UI_THEME=saas
 
 # OIDC provider secrets — must match the providers configured in application.yml
-# For Google:
+# For Google (the only provider the stock application.yml ships):
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-# For Microsoft: application.yml declares BOTH providers, so both placeholders must
-# resolve even if you only use Google. Any non-empty value works.
-MICROSOFT_CLIENT_ID=unused
-MICROSOFT_CLIENT_SECRET=unused
+# For Microsoft: only needed if you uncommented the microsoft provider block (§3.2).
+# MICROSOFT_CLIENT_ID=...
+# MICROSOFT_CLIENT_SECRET=...
 
 # For any other OIDC provider, add its env vars here and configure it in application-dev.yml
 # OKTA_CLIENT_ID=...
@@ -139,6 +145,14 @@ MICROSOFT_CLIENT_SECRET=unused
 ```
 
 The provider list itself (names, issuer URIs, display names) is configured in `application.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
+
+**Workspaces:** everything you author (pipelines, templates, executions) lives in exactly one
+workspace. The default provisioning mode is `self-serve` — your first login has no workspace
+until one is created (workspace CRUD lands in the next slice); existing installs already have
+every user in the seeded `default` workspace. For the datapipelines.co demo shape, set
+`DATAPIPELINES_WORKSPACES_PROVISIONING_MODE=auto-per-user` and every first login mints a
+personal workspace. See [configuration.md §3.17](docs/configuration.md#317-workspaces) and
+[auth.md §5.6](docs/auth.md#56-workspace-resolution--the-dp-workspace-header).
 
 Generate secrets:
 ```bash

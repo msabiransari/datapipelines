@@ -90,7 +90,7 @@ class WebPersistenceIntegrationTest {
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         jdbc.jdbcTemplate.execute(
             "INSERT INTO workspaces (id, name, display_name)" +
-                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')",
+                " VALUES ('$DEFAULT_WORKSPACE_ID', 'default', 'Default')",
         )
         TestRedis.flush(redis)
         userId =
@@ -105,7 +105,7 @@ class WebPersistenceIntegrationTest {
                 jdbc.update(
                     """
                     INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)
-                    VALUES (:id, :name, 'P', :owner, 1, 'defa0000-0000-0000-0000-000000000001')
+                    VALUES (:id, :name, 'P', :owner, 1, '$DEFAULT_WORKSPACE_ID')
                     """.trimIndent(),
                     mapOf("id" to id, "name" to "p_${id.toString().replace("-", "")}", "owner" to userId),
                 )
@@ -134,6 +134,7 @@ class WebPersistenceIntegrationTest {
                             correlationId = correlationId,
                             triggeredVia = ExecutionTrigger.REST,
                             parametersJson = "{}",
+                            workspaceId = DEFAULT_WORKSPACE_ID,
                         ),
                     stream = null,
                     streams = mockkRegistry(),
@@ -154,7 +155,7 @@ class WebPersistenceIntegrationTest {
                 DataReady(executionId, pipelineId, emptyList(), emptyList(), 0, false, "http://x/result", started, 300),
             )
 
-            val row = executions.findById(executionId).shouldNotBeNull()
+            val row = executions.findById(DEFAULT_WORKSPACE_ID, executionId).shouldNotBeNull()
             row.status shouldBe ExecutionStatus.SUCCESS
             row.durationMs shouldBe 900L
             row.triggeredVia shouldBe ExecutionTrigger.REST
@@ -222,6 +223,9 @@ class WebPersistenceIntegrationTest {
                 setOf(co.datapipelines.auth.Scope.READ),
                 co.datapipelines.auth.AuthMethod.API_KEY,
                 "dpk_x",
+                workspace =
+                    co.datapipelines.auth
+                        .WorkspaceContext(DEFAULT_WORKSPACE_ID, "default"),
             )
 
         val page = cursor.jsonPage(cursor.readable(executionId, principal), 0L, null)
@@ -262,6 +266,9 @@ class WebPersistenceIntegrationTest {
         )
 
     private companion object {
+        /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
+        val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
+
         @Container
         @JvmStatic
         val postgres: PostgreSQLContainer<*> =

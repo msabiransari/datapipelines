@@ -144,7 +144,9 @@ class ExecutionsGetResultTool(
         executionId: UUID,
         ctx: McpToolContext,
     ): ExecutionRecord {
-        val record = executions.findById(executionId)?.takeIf { it.visibleTo(ctx) } ?: throw McpNotFound.execution(executionId)
+        val record =
+            executions.findById(ctx.principal.requireWorkspace().id, executionId)?.takeIf { it.visibleTo(ctx) }
+                ?: throw McpNotFound.execution(executionId)
         notReadable(record)?.let { throw it }
         return record
     }

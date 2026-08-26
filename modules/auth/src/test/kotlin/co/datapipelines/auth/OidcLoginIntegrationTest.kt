@@ -53,7 +53,8 @@ class OidcLoginIntegrationTest {
 
     @BeforeAll
     fun createSchema() {
-        jdbc.jdbcTemplate.execute(RepoFiles.read(RepoFiles.MIGRATION_PATH))
+        // V1 + V4: the login/session path now resolves workspaces (slice 2).
+        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @Test

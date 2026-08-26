@@ -17,6 +17,7 @@ internal object ReferenceRules {
         pipeline: Pipeline,
         datasources: DatasourceRegistry,
         templates: TemplateDryRenderer,
+        workspaceId: java.util.UUID,
         into: FailureCollector,
     ) {
         val sampleContext = ParameterBinder(pipeline.parameters).sampleContext()
@@ -30,7 +31,7 @@ internal object ReferenceRules {
             }
             val sourceDialect = checkSource(index, node, datasources, pipeline, into)
             checkOutputDatasource(index, node, datasources, into)
-            checkTemplate(index, node, sourceDialect, templates, sampleContext, into)
+            checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, into)
         }
     }
 
@@ -93,11 +94,12 @@ internal object ReferenceRules {
         node: Node,
         sourceDialect: Dialect?,
         templates: TemplateDryRenderer,
+        workspaceId: java.util.UUID,
         sampleContext: Map<String, Any?>,
         into: FailureCollector,
     ) {
         val path = "nodes[$index].template"
-        when (val lookup = templates.lookup(node.template)) {
+        when (val lookup = templates.lookup(workspaceId, node.template)) {
             TemplateLookup.TemplateNotFound -> {
                 into.add(
                     Validation.TEMPLATE_NOT_FOUND,
@@ -118,7 +120,7 @@ internal object ReferenceRules {
 
             is TemplateLookup.Found -> {
                 checkDialect(path, node, lookup.dialect, sourceDialect, into)
-                dryRender(path, node, templates, sampleContext, into)
+                dryRender(path, node, templates, workspaceId, sampleContext, into)
             }
         }
     }
@@ -146,10 +148,11 @@ internal object ReferenceRules {
         path: String,
         node: Node,
         templates: TemplateDryRenderer,
+        workspaceId: java.util.UUID,
         sampleContext: Map<String, Any?>,
         into: FailureCollector,
     ) {
-        when (val outcome = templates.dryRender(node.template, sampleContext)) {
+        when (val outcome = templates.dryRender(workspaceId, node.template, sampleContext)) {
             DryRenderOutcome.Success -> {
                 // The template rendered against the pipeline's declared parameters.
             }

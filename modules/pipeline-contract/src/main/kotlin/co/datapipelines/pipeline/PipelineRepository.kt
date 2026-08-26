@@ -32,12 +32,13 @@ import java.util.UUID
  * repository that quietly depends on a caller remembering to open one is a repository with a
  * corruption path.
  *
- * ## Workspace pinning (slice 1)
+ * ## Workspace scoping (slice 2)
  *
  * Since V4 every pipeline belongs to a workspace and `name` is unique per workspace
- * (metadata-db §4.4). Until workspace resolution lands (slice 2), every read below resolves
- * within the seeded `default` workspace and every write pins it — via [DEFAULT_WORKSPACE_ID]
- * in code, never a column DEFAULT, so slice 2 finds every pin by grepping the constant.
+ * (metadata-db §4.4). Every method below takes the active workspace explicitly as
+ * `workspaceId` — **no default anywhere** (design §5: all authored-content operations are
+ * scoped to the request's resolved workspace). A missing caller is a compile error, never
+ * a silent resolution in some default world.
  *
  * ## `updated_at`
  *
@@ -48,21 +49,27 @@ import java.util.UUID
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
-    /** The pipeline's metadata row, or null when it does not exist or is soft-deleted. */
-    fun findById(id: UUID): PipelineRecord? =
+    /** The pipeline's metadata row, or null when it does not exist, is soft-deleted, or lives in another workspace. */
+    fun findById(
+        workspaceId: UUID,
+        id: UUID,
+    ): PipelineRecord? =
         jdbc
             .query(
                 "$SELECT_COLUMNS WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE",
-                mapOf("id" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                mapOf("id" to id, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
 
     /** As [findById], by machine name — the identifier MCP and cross-pipeline references use (§3.2). */
-    fun findByName(name: String): PipelineRecord? =
+    fun findByName(
+        workspaceId: UUID,
+        name: String,
+    ): PipelineRecord? =
         jdbc
             .query(
                 "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
-                mapOf("name" to name, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                mapOf("name" to name, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
 
@@ -75,23 +82,27 @@ class PipelineRepository(
      * row's `isDeleted` flag to block only NEW references, and the runtime runner reads the
      * pinned body either way. Callers that list or look up live pipelines use [findByName].
      */
-    fun findByNameIncludingDeleted(name: String): PipelineRecord? =
+    fun findByNameIncludingDeleted(
+        workspaceId: UUID,
+        name: String,
+    ): PipelineRecord? =
         jdbc
             .query(
                 "$SELECT_COLUMNS WHERE name = :name AND workspace_id = :workspaceId",
-                mapOf("name" to name, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                mapOf("name" to name, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
 
-    /** Every live pipeline, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
+    /** Every live pipeline in the workspace, newest first; optionally narrowed to one owner (§14 `GET /pipelines`). */
     fun findAll(
+        workspaceId: UUID,
         ownerId: UUID? = null,
         limit: Int? = null,
         offset: Int = 0,
     ): List<PipelineRecord> {
         val ownerFilter = if (ownerId == null) "" else " AND owner_id = :ownerId"
         val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
-        val params = mutableMapOf<String, Any?>("workspaceId" to DEFAULT_WORKSPACE_ID)
+        val params = mutableMapOf<String, Any?>("workspaceId" to workspaceId)
         if (ownerId != null) params["ownerId"] = ownerId
         if (limit != null) {
             params["limit"] = limit
@@ -105,8 +116,9 @@ class PipelineRepository(
         )
     }
 
-    /** Live pipelines whose current body references [datasourceName] in any node; newest first. */
+    /** Live pipelines in the workspace whose current body references [datasourceName] in any node; newest first. */
     fun findAllByDatasource(
+        workspaceId: UUID,
         datasourceName: String,
         ownerId: UUID? = null,
         limit: Int? = null,
@@ -116,7 +128,7 @@ class PipelineRepository(
         val limitClause = if (limit != null) " LIMIT :limit OFFSET :offset" else ""
         val params = mutableMapOf<String, Any?>()
         params["datasourceName"] = datasourceName
-        params["workspaceId"] = DEFAULT_WORKSPACE_ID
+        params["workspaceId"] = workspaceId
         if (ownerId != null) params["ownerId"] = ownerId
         if (limit != null) {
             params["limit"] = limit
@@ -138,51 +150,61 @@ class PipelineRepository(
         )
     }
 
-    /** Count of live pipelines. */
-    fun countAll(): Int =
+    /** Count of live pipelines in the workspace. */
+    fun countAll(workspaceId: UUID): Int =
         checkNotNull(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM pipelines WHERE is_deleted = FALSE AND workspace_id = :workspaceId",
-                mapOf("workspaceId" to DEFAULT_WORKSPACE_ID),
+                mapOf("workspaceId" to workspaceId),
                 Int::class.java,
             ),
         )
 
     /**
-     * The stored body JSON of one version, or null when that version does not exist.
+     * The stored body JSON of one version, or null when that version does not exist or the
+     * pipeline lives in another workspace.
      *
      * Read as `body_json::TEXT` and deserialized by Jackson (metadata-db §6.2): binding a
      * `JsonNode` or a `PGobject` directly would move serialization into the driver and make
      * the code Postgres-specific for no gain.
      */
     fun findVersionBody(
+        workspaceId: UUID,
         pipelineId: UUID,
         version: Int,
     ): String? =
         jdbc
             .query(
                 """
-                SELECT body_json::TEXT AS body_json
-                  FROM pipeline_versions
-                 WHERE pipeline_id = :pipelineId AND version = :version
+                SELECT v.body_json::TEXT AS body_json
+                  FROM pipeline_versions v
+                  JOIN pipelines p ON p.id = v.pipeline_id
+                 WHERE v.pipeline_id = :pipelineId AND v.version = :version AND p.workspace_id = :workspaceId
                 """.trimIndent(),
-                mapOf("pipelineId" to pipelineId, "version" to version),
+                mapOf("pipelineId" to pipelineId, "version" to version, "workspaceId" to workspaceId),
             ) { rs, _ -> rs.getString("body_json") }
             .singleOrNull()
 
     /** The body of the pipeline's current version — `GET /pipelines/{id}` (§14). */
-    fun findLatestBody(pipelineId: UUID): String? = findById(pipelineId)?.let { findVersionBody(it.id, it.currentVersion) }
+    fun findLatestBody(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): String? = findById(workspaceId, pipelineId)?.let { findVersionBody(workspaceId, it.id, it.currentVersion) }
 
     /** Version metadata, newest first — `GET /pipelines/{id}/versions` (§14). */
-    fun listVersions(pipelineId: UUID): List<PipelineVersionRecord> =
+    fun listVersions(
+        workspaceId: UUID,
+        pipelineId: UUID,
+    ): List<PipelineVersionRecord> =
         jdbc.query(
             """
-            SELECT pipeline_id, version, created_at, created_by
-              FROM pipeline_versions
-             WHERE pipeline_id = :pipelineId
-             ORDER BY version DESC
+            SELECT v.pipeline_id, v.version, v.created_at, v.created_by
+              FROM pipeline_versions v
+              JOIN pipelines p ON p.id = v.pipeline_id
+             WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
+             ORDER BY v.version DESC
             """.trimIndent(),
-            mapOf("pipelineId" to pipelineId),
+            mapOf("pipelineId" to pipelineId, "workspaceId" to workspaceId),
         ) { rs, _ ->
             PipelineVersionRecord(
                 pipelineId = rs.getObject("pipeline_id", UUID::class.java),
@@ -201,6 +223,7 @@ class PipelineRepository(
      * CHECK becomes invisible to the caller (metadata-db §6.1's "why this shape").
      */
     fun create(
+        workspaceId: UUID,
         pipeline: NewPipeline,
         bodyJson: String,
         createdBy: UUID,
@@ -215,7 +238,7 @@ class PipelineRepository(
                         "displayName" to pipeline.displayName,
                         "description" to pipeline.description,
                         "ownerId" to pipeline.ownerId,
-                        "workspaceId" to DEFAULT_WORKSPACE_ID,
+                        "workspaceId" to workspaceId,
                         "bodyJson" to bodyJson,
                         "createdBy" to createdBy,
                     ),
@@ -226,11 +249,12 @@ class PipelineRepository(
     /**
      * Appends a new version and bumps `current_version`, in one statement.
      *
-     * Returns null when no live pipeline has this id — the caller decides whether that is a
-     * 404 (`pipeline.execution.not_found`) or something else; the repository does not raise
-     * catalog errors for control flow.
+     * Returns null when no live pipeline has this id in [workspaceId] — the caller decides
+     * whether that is a 404 (`pipeline.execution.not_found`) or something else; the
+     * repository does not raise catalog errors for control flow.
      */
     fun update(
+        workspaceId: UUID,
         id: UUID,
         pipeline: Pipeline,
         bodyJson: String,
@@ -242,6 +266,7 @@ class PipelineRepository(
                     UPDATE_PIPELINE_SQL,
                     mapOf(
                         "id" to id,
+                        "workspaceId" to workspaceId,
                         "name" to pipeline.name,
                         "displayName" to pipeline.displayName,
                         "description" to pipeline.description,
@@ -254,16 +279,20 @@ class PipelineRepository(
 
     /**
      * Soft-deletes the pipeline (§14: "Soft delete"). Returns false when nothing was live to
-     * delete.
+     * delete in [workspaceId].
      *
      * The row stays, so its name stays taken — metadata-db §4.4 makes that explicit and
      * deliberate: execution history references the name, so reusing it would re-point old
      * records at a different pipeline.
      */
-    fun softDelete(id: UUID): Boolean =
+    fun softDelete(
+        workspaceId: UUID,
+        id: UUID,
+    ): Boolean =
         jdbc.update(
-            "UPDATE pipelines SET is_deleted = TRUE, updated_at = NOW() WHERE id = :id AND is_deleted = FALSE",
-            mapOf("id" to id),
+            "UPDATE pipelines SET is_deleted = TRUE, updated_at = NOW()" +
+                " WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE",
+            mapOf("id" to id, "workspaceId" to workspaceId),
         ) > 0
 
     /**
@@ -304,13 +333,6 @@ class PipelineRepository(
         }
 
     private companion object {
-        /**
-         * The seeded `default` workspace every slice-1 read resolves within and every slice-1
-         * write pins (metadata-db §4.11, R2). A code constant — never a column DEFAULT — so
-         * slice 2's real workspace resolution finds every pin by grepping the value.
-         */
-        val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
-
         /**
          * The per-workspace name constraint behind `UNIQUE (workspace_id, name)` (metadata-db
          * §4.4, V4).
@@ -353,7 +375,7 @@ class PipelineRepository(
                        display_name = :displayName,
                        description = :description,
                        updated_at = NOW()
-                 WHERE id = :id AND is_deleted = FALSE
+                 WHERE id = :id AND workspace_id = :workspaceId AND is_deleted = FALSE
                 RETURNING $COLUMNS
             ), new_version AS (
                 INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by)

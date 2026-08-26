@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
+import co.datapipelines.auth.WorkspaceContext
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -28,6 +29,7 @@ class UserSettingsControllerTest {
     private val controller = UserSettingsController(userRepository, themeResolver)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private val principal =
         AuthenticatedPrincipal(
@@ -36,6 +38,7 @@ class UserSettingsControllerTest {
             displayName = "Test User",
             scopes = setOf(Scope.READ, Scope.EXECUTE),
             authMethod = AuthMethod.OIDC,
+            workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
     @AfterEach

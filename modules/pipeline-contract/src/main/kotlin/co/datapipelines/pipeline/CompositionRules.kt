@@ -41,12 +41,13 @@ internal object CompositionRules {
         pipeline: Pipeline,
         pipelines: PipelineResolver,
         maxDepth: Int,
+        workspaceId: java.util.UUID,
         into: FailureCollector,
     ) {
         pipeline.nodes.forEachIndexed { index, node ->
-            if (node.type == NodeType.PIPELINE) checkNode(pipeline, index, node, pipelines, into)
+            if (node.type == NodeType.PIPELINE) checkNode(pipeline, index, node, pipelines, workspaceId, into)
         }
-        checkDepth(pipeline, pipelines, maxDepth, into)
+        checkDepth(pipeline, pipelines, maxDepth, workspaceId, into)
     }
 
     private fun checkNode(
@@ -54,6 +55,7 @@ internal object CompositionRules {
         index: Int,
         node: Node,
         pipelines: PipelineResolver,
+        workspaceId: java.util.UUID,
         into: FailureCollector,
     ) {
         checkNodeShape(index, node, into)
@@ -76,7 +78,7 @@ internal object CompositionRules {
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )
         }
-        val resolved = resolve(ref, pipelines, index, into) ?: return
+        val resolved = resolve(ref, pipelines, workspaceId, index, into) ?: return
         if (resolved.deleted) {
             into.add(
                 Validation.PIPELINE_REFERENCE_DELETED,
@@ -130,11 +132,12 @@ internal object CompositionRules {
     private fun resolve(
         ref: PipelineNodeRef,
         pipelines: PipelineResolver,
+        workspaceId: java.util.UUID,
         index: Int,
         into: FailureCollector,
     ): ResolvedPipeline? {
-        pipelines.resolve(ref.name, ref.version)?.let { return it }
-        val nameKnown = ref.version != 1 && pipelines.resolve(ref.name, 1) != null
+        pipelines.resolve(workspaceId, ref.name, ref.version)?.let { return it }
+        val nameKnown = ref.version != 1 && pipelines.resolve(workspaceId, ref.name, 1) != null
         if (nameKnown) {
             into.add(
                 Validation.PIPELINE_VERSION_NOT_FOUND,
@@ -269,10 +272,11 @@ internal object CompositionRules {
         pipeline: Pipeline,
         pipelines: PipelineResolver,
         maxDepth: Int,
+        workspaceId: java.util.UUID,
         into: FailureCollector,
     ) {
         if (pipeline.nodes.none { it.type == NodeType.PIPELINE }) return
-        val depth = referenceDepth(pipeline, pipelines, maxDepth)
+        val depth = referenceDepth(pipeline, pipelines, maxDepth, workspaceId)
         if (depth <= maxDepth) return
         into.add(
             Validation.COMPOSITION_TOO_DEEP,
@@ -298,6 +302,7 @@ internal object CompositionRules {
         root: Pipeline,
         pipelines: PipelineResolver,
         maxDepth: Int,
+        workspaceId: java.util.UUID,
     ): Int {
         var deepest = 1
         val expandedAt = HashMap<PipelineNodeRef, Int>()
@@ -310,7 +315,7 @@ internal object CompositionRules {
             body.nodes.forEach { node ->
                 if (node.type != NodeType.PIPELINE) return@forEach
                 val ref = node.pipeline ?: return@forEach
-                val child = pipelines.resolve(ref.name, ref.version)?.pipeline ?: return@forEach
+                val child = pipelines.resolve(workspaceId, ref.name, ref.version)?.pipeline ?: return@forEach
                 if ((expandedAt[ref] ?: 0) >= depth + 1) return@forEach
                 expandedAt[ref] = depth + 1
                 stack.addLast(child to depth + 1)

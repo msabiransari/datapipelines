@@ -73,7 +73,7 @@ class ExecutionRepositoriesIntegrationTest {
 
         executions.create(record)
 
-        val found = executions.findById(record.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
         found.pipelineId shouldBe pipelineId
         found.pipelineVersion shouldBe 1
         found.status shouldBe ExecutionStatus.RUNNING
@@ -104,7 +104,7 @@ class ExecutionRepositoriesIntegrationTest {
             )
 
         updated.shouldBeTrue()
-        val found = executions.findById(record.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
         found.status shouldBe ExecutionStatus.SUCCESS
         found.durationMs shouldBe 1_234
         found.resultRowCount shouldBe 4_500
@@ -129,7 +129,7 @@ class ExecutionRepositoriesIntegrationTest {
 
         executions.recordResult(record.executionId, 2, 1_024).shouldBeTrue()
 
-        val found = executions.findById(record.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
         found.resultRowCount shouldBe 2
         found.resultSizeBytes shouldBe 1_024
         // Nothing else moved: status and timings are the terminal update's values.
@@ -153,7 +153,7 @@ class ExecutionRepositoriesIntegrationTest {
             errorJson = """{"code": "pipeline.node.query_execution_failed"}""",
         )
 
-        val found = executions.findById(record.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
         found.status shouldBe ExecutionStatus.FAILED
         found.failedNodeId shouldBe "final_report"
         found.errorJson.shouldNotBeNull()
@@ -168,7 +168,7 @@ class ExecutionRepositoriesIntegrationTest {
         // execution's own id for roots — family queries never special-case NULL.
         val record = running().also(executions::create)
 
-        val found = executions.findById(record.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
         found.rootExecutionId shouldBe record.executionId
         found.parentExecutionId.shouldBeNull()
         found.parentNodeId.shouldBeNull()
@@ -186,7 +186,7 @@ class ExecutionRepositoriesIntegrationTest {
                     rootExecutionId = parent.executionId,
                 ).also(executions::create)
 
-        val found = executions.findById(child.executionId).shouldNotBeNull()
+        val found = executions.findById(WORKSPACE_ID, child.executionId).shouldNotBeNull()
         found.triggeredVia shouldBe ExecutionTrigger.PIPELINE
         found.parentExecutionId shouldBe parent.executionId
         found.parentNodeId shouldBe "revenue"
@@ -207,10 +207,10 @@ class ExecutionRepositoriesIntegrationTest {
                 ).also(executions::create)
         val unrelated = running().also(executions::create)
 
-        executions.findByRoot(root.executionId).map { it.executionId } shouldContainExactly
+        executions.findByRoot(WORKSPACE_ID, root.executionId).map { it.executionId } shouldContainExactly
             listOf(child.executionId, root.executionId)
         // A standalone execution is a family of one.
-        executions.findByRoot(unrelated.executionId).map { it.executionId } shouldContainExactly
+        executions.findByRoot(WORKSPACE_ID, unrelated.executionId).map { it.executionId } shouldContainExactly
             listOf(unrelated.executionId)
     }
 
@@ -233,11 +233,11 @@ class ExecutionRepositoriesIntegrationTest {
         val b = running().also(executions::create)
         val elsewhere = running().copy(executionId = UUID.randomUUID(), pipelineId = other).also(executions::create)
 
-        executions.findByPipeline(pipelineId).map { it.executionId } shouldContainExactly listOf(b.executionId, a.executionId)
-        executions.findByPipeline(other).map { it.executionId } shouldContainExactly listOf(elsewhere.executionId)
-        executions.findByUser(userId).size shouldBe 3
-        executions.findByUser(UUID.randomUUID()).size shouldBe 0
-        executions.findByPipeline(pipelineId, limit = 1).size shouldBe 1
+        executions.findByPipeline(WORKSPACE_ID, pipelineId).map { it.executionId } shouldContainExactly listOf(b.executionId, a.executionId)
+        executions.findByPipeline(WORKSPACE_ID, other).map { it.executionId } shouldContainExactly listOf(elsewhere.executionId)
+        executions.findByUser(WORKSPACE_ID, userId).size shouldBe 3
+        executions.findByUser(WORKSPACE_ID, UUID.randomUUID()).size shouldBe 0
+        executions.findByPipeline(WORKSPACE_ID, pipelineId, limit = 1).size shouldBe 1
     }
 
     @Test
@@ -252,16 +252,16 @@ class ExecutionRepositoriesIntegrationTest {
                 .copy(executionId = UUID.randomUUID(), pipelineId = otherPipeline, triggeredBy = otherUser)
                 .also(executions::create)
 
-        val all = executions.findAll()
+        val all = executions.findAll(WORKSPACE_ID)
 
         // Newest first, and the user-scoped listing sees only half of what admin sees.
         all.map { it.executionId } shouldContainExactly listOf(theirs.executionId, mine.executionId)
-        executions.findByUser(userId).map { it.executionId } shouldContainExactly listOf(mine.executionId)
-        executions.findAll(pipelineId = otherPipeline).map { it.executionId } shouldContainExactly
+        executions.findByUser(WORKSPACE_ID, userId).map { it.executionId } shouldContainExactly listOf(mine.executionId)
+        executions.findAll(WORKSPACE_ID, pipelineId = otherPipeline).map { it.executionId } shouldContainExactly
             listOf(theirs.executionId)
         // Pagination is over the same newest-first order, so page 2 resumes where page 1 stopped.
-        executions.findAll(limit = 1).map { it.executionId } shouldContainExactly listOf(theirs.executionId)
-        executions.findAll(limit = 1, offset = 1).map { it.executionId } shouldContainExactly listOf(mine.executionId)
+        executions.findAll(WORKSPACE_ID, limit = 1).map { it.executionId } shouldContainExactly listOf(theirs.executionId)
+        executions.findAll(WORKSPACE_ID, limit = 1, offset = 1).map { it.executionId } shouldContainExactly listOf(mine.executionId)
     }
 
     @Test
@@ -276,7 +276,7 @@ class ExecutionRepositoriesIntegrationTest {
         val swept = executions.sweepStaleRunning(Instant.now().minus(1, ChronoUnit.HOURS))
 
         swept shouldBe 1
-        val sweptRow = executions.findById(stale.executionId).shouldNotBeNull()
+        val sweptRow = executions.findById(WORKSPACE_ID, stale.executionId).shouldNotBeNull()
         sweptRow.status shouldBe ExecutionStatus.ABORTED
         // F1: a swept row is shaped like every other terminal row — `completed_at` AND a duration.
         sweptRow.completedAt.shouldNotBeNull()
@@ -284,8 +284,8 @@ class ExecutionRepositoriesIntegrationTest {
         // F2: the envelope is written by the repository, so there is exactly one spelling of it.
         sweptRow.errorJson.shouldNotBeNull() shouldContain PipelineErrorCodes.Execution.INSTANCE_LOST
 
-        executions.findById(fresh.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.RUNNING
-        executions.findById(finished.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.SUCCESS
+        executions.findById(WORKSPACE_ID, fresh.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.RUNNING
+        executions.findById(WORKSPACE_ID, finished.executionId).shouldNotBeNull().status shouldBe ExecutionStatus.SUCCESS
     }
 
     // -------------------------------------------------------------- events
@@ -394,6 +394,9 @@ class ExecutionRepositoriesIntegrationTest {
         }
 
     private companion object {
+        // The V4-seeded `default` workspace re-seeded in setUp — the row every fixture's
+        // pipeline belongs to, so every workspace-scoped read resolves through it.
+        val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         const val SPACING_MS = 5L
         const val NODE_STATS_JSON = """[{"node_id":"a","status":"SUCCESS"}]"""
 

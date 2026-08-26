@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.web.api.currentPrincipal
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -12,7 +13,8 @@ class ExecutionHistoryController(
 ) {
     @GetMapping("/executions")
     fun list(model: Model): String {
-        model.addAttribute("pipelines", pipelines.findAll())
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        model.addAttribute("pipelines", pipelines.findAll(workspaceId))
         model.addAttribute("statuses", ExecutionStatus.entries)
         return "executions/list"
     }

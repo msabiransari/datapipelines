@@ -20,7 +20,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `list returns the caller's own executions`() {
-        every { executions.findByUser(McpFixtures.USER, limit = 50, offset = 0) } returns listOf(McpFixtures.executionRecord())
+        every { executions.findByUser(any(), McpFixtures.USER, limit = 50, offset = 0) } returns listOf(McpFixtures.executionRecord())
 
         val hits = ExecutionsListTool(executions).call(McpArguments(emptyMap()), ctx) as List<*>
 
@@ -29,7 +29,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `list filters by status`() {
-        every { executions.findByUser(McpFixtures.USER, limit = 50, offset = 0) } returns
+        every { executions.findByUser(any(), McpFixtures.USER, limit = 50, offset = 0) } returns
             listOf(
                 McpFixtures.executionRecord(status = ExecutionStatus.SUCCESS),
                 McpFixtures.executionRecord(executionId = UUID.randomUUID(), status = ExecutionStatus.FAILED),
@@ -42,7 +42,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `list by pipeline hides other users' executions from a non-admin`() {
-        every { executions.findByPipeline(McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
+        every { executions.findByPipeline(any(), McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
             listOf(
                 McpFixtures.executionRecord(),
                 McpFixtures.executionRecord(executionId = UUID.randomUUID(), triggeredBy = McpFixtures.OTHER_USER),
@@ -62,7 +62,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `list by pipeline shows every user's executions to an admin`() {
-        every { executions.findByPipeline(McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
+        every { executions.findByPipeline(any(), McpFixtures.PIPELINE_ID, limit = 50, offset = 0) } returns
             listOf(
                 McpFixtures.executionRecord(),
                 McpFixtures.executionRecord(executionId = UUID.randomUUID(), triggeredBy = McpFixtures.OTHER_USER),
@@ -79,7 +79,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `get returns metadata with parsed parameters and node stats, and no rows`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -100,7 +100,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `another user's execution is invisible, reported as not found`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
 
         shouldThrow<DatapipelinesException> {
@@ -110,7 +110,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `an admin may read another user's execution`() {
-        every { executions.findById(McpFixtures.EXECUTION_ID) } returns
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
 
         @Suppress("UNCHECKED_CAST")

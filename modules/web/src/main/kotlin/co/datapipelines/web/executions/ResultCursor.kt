@@ -53,7 +53,7 @@ class ResultCursor(
         executionId: UUID,
         principal: AuthenticatedPrincipal,
     ): ExecutionRecord {
-        val record = executions.findById(executionId)
+        val record = executions.findById(principal.requireWorkspace().id, executionId)
         if (record == null || !record.visibleTo(principal)) {
             metrics.cursorRead(FORMAT_NONE, WebMetrics.OUTCOME_NOT_FOUND)
             throw ApiErrors.executionNotFound(executionId.toString())

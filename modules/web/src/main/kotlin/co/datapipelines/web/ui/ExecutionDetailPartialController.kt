@@ -76,7 +76,7 @@ class ExecutionDetailPartialController(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Execute scope required")
         }
         val record =
-            executions.findById(id)?.takeIf { it.visibleTo(principal) }
+            executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.visibleTo(principal) }
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found")
         if (record.status != ExecutionStatus.RUNNING) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Execution is not running")

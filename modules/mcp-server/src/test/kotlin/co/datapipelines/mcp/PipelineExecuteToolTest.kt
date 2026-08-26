@@ -49,8 +49,8 @@ class PipelineExecuteToolTest {
         )
 
     private fun storedPipeline() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
     }
 
     private fun result(
@@ -192,8 +192,8 @@ class PipelineExecuteToolTest {
 
     @Test
     fun `an explicit version executes that version's stored snapshot`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 7)
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 3) } returns McpFixtures.pipelineBody(name = "v3_snapshot")
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 7)
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 3) } returns McpFixtures.pipelineBody(name = "v3_snapshot")
         val request = slot<ExecuteRequest>()
         coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
 
@@ -223,7 +223,7 @@ class PipelineExecuteToolTest {
 
     @Test
     fun `an unknown pipeline never reaches the executor`() {
-        every { pipelines.findById(any()) } returns null
+        every { pipelines.findById(any(), any()) } returns null
 
         shouldThrow<DatapipelinesException> {
             tool.call(McpArguments(mapOf("id" to UUID.randomUUID().toString(), "parameters" to emptyMap<String, Any?>())), ctx)
@@ -248,7 +248,7 @@ class PipelineExecuteToolTest {
         storedPipeline()
         val runner = mockk<McpExecutionRunner>()
         val request = slot<ExecuteRequest>()
-        coEvery { runner.run(capture(request)) } returns result(resultRef = null)
+        coEvery { runner.run(capture(request), any()) } returns result(resultRef = null)
         val withRunner =
             PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, executionRunner = runner)
 

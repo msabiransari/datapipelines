@@ -10,6 +10,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeInsufficientException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceContext
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -33,6 +34,7 @@ class AuthControllerTest {
     private val controller = AuthController(apiKeyService, apiKeyRepository, userService)
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -42,7 +44,16 @@ class AuthControllerTest {
         method: AuthMethod = AuthMethod.API_KEY,
         keyId: String? = "dpk_abc",
     ) {
-        val principal = AuthenticatedPrincipal(userId, "a@b.c", "Alice", scopes, method, keyId)
+        val principal =
+            AuthenticatedPrincipal(
+                userId,
+                "a@b.c",
+                "Alice",
+                scopes,
+                method,
+                keyId,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -60,6 +71,8 @@ class AuthControllerTest {
         createdAt = Instant.parse("2026-08-01T00:00:00Z"),
         lastUsedAt = null,
         expiresAt = null,
+        workspaceId = workspaceId,
+        workspaceName = "acme",
     )
 
     private fun user(
@@ -96,7 +109,7 @@ class AuthControllerTest {
     @Test
     fun `create returns the plaintext exactly once`() {
         authenticate(setOf(Scope.ADMIN))
-        every { apiKeyService.issue(userId, "claude", setOf(Scope.READ), setOf(Scope.ADMIN), null) } returns
+        every { apiKeyService.issue(userId, "claude", setOf(Scope.READ), setOf(Scope.ADMIN), any(), null) } returns
             IssuedApiKey(key("dpk_new", false), "dpk_new.secret")
 
         val data = controller.createKey(CreateApiKeyRequest(name = "claude", scopes = listOf("read"))).data
@@ -107,7 +120,7 @@ class AuthControllerTest {
     @Test
     fun `scopes outside the caller's own are the 403 the service raises`() {
         authenticate(setOf(Scope.READ))
-        every { apiKeyService.issue(userId, "x", setOf(Scope.ADMIN), setOf(Scope.READ), null) } throws
+        every { apiKeyService.issue(userId, "x", setOf(Scope.ADMIN), setOf(Scope.READ), any(), null) } throws
             ScopeInsufficientException(Scope.ADMIN, setOf(Scope.READ))
 
         val error =
@@ -121,7 +134,7 @@ class AuthControllerTest {
     fun `an unknown scope token is a 400, never minted`() {
         authenticate(setOf(Scope.ADMIN))
         shouldThrow<Exception> { controller.createKey(CreateApiKeyRequest(name = "x", scopes = listOf("superuser"))) }
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

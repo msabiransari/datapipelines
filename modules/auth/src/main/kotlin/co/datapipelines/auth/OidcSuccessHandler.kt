@@ -32,6 +32,7 @@ class OidcSuccessHandler(
     private val jwtService: JwtService,
     private val auditLogger: AuditLogger,
     private val authProperties: AuthProperties,
+    private val workspaceService: WorkspaceService,
 ) : SimpleUrlAuthenticationSuccessHandler() {
     override fun onAuthenticationSuccess(
         request: HttpServletRequest,
@@ -78,14 +79,24 @@ class OidcSuccessHandler(
             return
         }
 
-        response.addCookie(sessionCookie(jwtService.issue(user)))
+        // §4.2 step 4 (design §5.1/§7): resolve the workspace the JWT stamps — last-used,
+        // else first membership, else the freshly provisioned personal workspace
+        // (auto-per-user only; the hook is a no-op in the other modes).
+        val activeWorkspace = workspaceService.workspaceForLogin(user, email)
+
+        response.addCookie(sessionCookie(jwtService.issue(user, activeWorkspace?.name)))
         userService.updateLastLogin(user.id)
         auditLogger.log(
             event = "auth.login.success",
             userId = user.id,
             sourceIp = request.remoteAddr,
             userAgent = request.getHeader("User-Agent"),
-            details = mapOf("email" to email, "provider" to registrationId),
+            details =
+                mapOf(
+                    "email" to email,
+                    "provider" to registrationId,
+                    "active_workspace" to activeWorkspace?.name,
+                ),
         )
         redirectStrategy.sendRedirect(request, response, "/")
     }

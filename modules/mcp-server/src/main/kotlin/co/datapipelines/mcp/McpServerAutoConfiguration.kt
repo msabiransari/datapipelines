@@ -14,9 +14,9 @@ import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.modelcontextprotocol.server.McpStatelessSyncServer
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport
 import org.springframework.beans.factory.ObjectProvider
@@ -60,7 +60,7 @@ class McpServerAutoConfiguration {
         executorConfig: ExecutorConfig,
         pipelineValidator: PipelineValidator,
         templateValidator: TemplateValidator,
-        templateEngine: TemplateEngine,
+        templateEngines: WorkspaceTemplateEngines,
         // P7: the recording execution path `web` supplies in the assembled application.
         // A provider, because `web`'s bean exists only where the engine is fully wired —
         // in a bare module context the tool falls back to the shared executor (records
@@ -86,7 +86,7 @@ class McpServerAutoConfiguration {
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesCreateTool(templates, templateValidator),
-            TemplatesRenderTool(templates, templateEngine),
+            TemplatesRenderTool(templates, templateEngines),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),

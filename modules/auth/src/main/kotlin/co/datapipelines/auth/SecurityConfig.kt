@@ -24,7 +24,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  *
  * Filter order, as actually assembled: Spring's `CsrfFilter` (registered at its own
  * position in the chain, ahead of everything added below) → [LoginRateLimitFilter] →
- * [ApiKeyFilter] → [JwtAuthenticationFilter] → OAuth2 login → authorization, and then
+ * [ApiKeyFilter] → [JwtAuthenticationFilter] → [WorkspaceResolutionFilter] → OAuth2
+ * login → authorization, and then
  * [ScopeInterceptor] on the MVC pipeline once a handler has been resolved. The three
  * `addFilterBefore` calls below read in the reverse of the resulting order, which is
  * why this list is spelled out rather than inferred. The server is STATELESS; the
@@ -114,6 +115,9 @@ class SecurityConfig(
             }.addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
+            // Workspace resolution (design §5) runs once a credential has authenticated:
+            // after the JWT filter, before OAuth2 login / authorization.
+            .addFilterAfter(filters.workspaceResolution, JwtAuthenticationFilter::class.java)
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .exceptionHandling {
                 it.authenticationEntryPoint(authEntryPoint)

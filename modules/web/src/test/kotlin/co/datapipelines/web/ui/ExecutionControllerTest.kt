@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -48,6 +49,7 @@ class ExecutionControllerTest {
     private val owner = UUID.randomUUID()
     private val executionId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -56,7 +58,15 @@ class ExecutionControllerTest {
         id: UUID,
         scopes: Set<Scope>,
     ) {
-        val principal = AuthenticatedPrincipal(id, "u@d.p", "User", scopes, AuthMethod.OIDC)
+        val principal =
+            AuthenticatedPrincipal(
+                id,
+                "u@d.p",
+                "User",
+                scopes,
+                AuthMethod.OIDC,
+                workspace = WorkspaceContext(workspaceId, "acme"),
+            )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
@@ -89,7 +99,8 @@ class ExecutionControllerTest {
 
     @Test
     fun `history page returns pipelines and statuses`() {
-        every { pipelines.findAll() } returns listOf(pipelineRecord())
+        authenticate(owner, setOf(Scope.READ))
+        every { pipelines.findAll(any()) } returns listOf(pipelineRecord())
         val model = ExtendedModelMap()
         val viewName = pageController.list(model)
 
@@ -104,7 +115,7 @@ class ExecutionControllerTest {
     fun `history partial returns paginated executions`() {
         authenticate(owner, setOf(Scope.READ))
         val records = (1..21).map { record() }
-        every { executions.findByUser(owner, null, null, null, null, limit = 21, offset = 0) } returns records
+        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = partialController.listPartial(null, null, null, null, 0, model)
@@ -119,7 +130,7 @@ class ExecutionControllerTest {
     @Test
     fun `history partial empty state when no executions`() {
         authenticate(owner, setOf(Scope.READ))
-        every { executions.findByUser(owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
+        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
         partialController.listPartial(null, null, null, null, 0, model)
@@ -132,9 +143,9 @@ class ExecutionControllerTest {
     @Test
     fun `detail page shows execution data`() {
         authenticate(owner, setOf(Scope.READ))
-        every { executions.findById(executionId) } returns record().copy(resultRowCount = 100)
-        every { executions.findByRoot(executionId) } returns listOf(record())
-        every { pipelines.findById(pipelineId) } returns pipelineRecord()
+        every { executions.findById(any(), executionId) } returns record().copy(resultRowCount = 100)
+        every { executions.findByRoot(any(), executionId) } returns listOf(record())
+        every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
         every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
@@ -151,7 +162,7 @@ class ExecutionControllerTest {
     fun `detail shows 404 for non-owner`() {
         authenticate(UUID.randomUUID(), setOf(Scope.READ))
         val otherRecord = record().copy(triggeredBy = owner)
-        every { executions.findById(executionId) } returns otherRecord
+        every { executions.findById(any(), executionId) } returns otherRecord
 
         shouldThrow<ResponseStatusException> {
             detailController.detail(executionId, ExtendedModelMap())
@@ -161,7 +172,7 @@ class ExecutionControllerTest {
     @Test
     fun `detail shows 404 for missing execution`() {
         authenticate(owner, setOf(Scope.READ))
-        every { executions.findById(executionId) } returns null
+        every { executions.findById(any(), executionId) } returns null
 
         shouldThrow<ResponseStatusException> {
             detailController.detail(executionId, ExtendedModelMap())
@@ -172,9 +183,9 @@ class ExecutionControllerTest {
     fun `admin can view any execution`() {
         val adminId = UUID.randomUUID()
         authenticate(adminId, setOf(Scope.ADMIN))
-        every { executions.findById(executionId) } returns record()
-        every { executions.findByRoot(executionId) } returns listOf(record())
-        every { pipelines.findById(pipelineId) } returns pipelineRecord()
+        every { executions.findById(any(), executionId) } returns record()
+        every { executions.findByRoot(any(), executionId) } returns listOf(record())
+        every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
         every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
@@ -198,9 +209,9 @@ class ExecutionControllerTest {
                 rootExecutionId = executionId,
                 triggeredVia = ExecutionTrigger.PIPELINE,
             )
-        every { executions.findById(executionId) } returns record()
-        every { executions.findByRoot(executionId) } returns listOf(child, record())
-        every { pipelines.findById(pipelineId) } returns pipelineRecord()
+        every { executions.findById(any(), executionId) } returns record()
+        every { executions.findByRoot(any(), executionId) } returns listOf(child, record())
+        every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
         every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
@@ -215,9 +226,9 @@ class ExecutionControllerTest {
     @Test
     fun `detail shows canCancel for running execution with execute scope`() {
         authenticate(owner, setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
-        every { executions.findByRoot(executionId) } returns listOf(record(ExecutionStatus.RUNNING))
-        every { pipelines.findById(pipelineId) } returns pipelineRecord()
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findByRoot(any(), executionId) } returns listOf(record(ExecutionStatus.RUNNING))
+        every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
         every { resultStore.keyFor(executionId) } returns "result:key"
         every { resultStore.describe("result:key") } returns null
         every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
@@ -231,7 +242,7 @@ class ExecutionControllerTest {
     @Test
     fun `cancel by owner requests cancellation`() {
         authenticate(owner, setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.RUNNING)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
         val model = ExtendedModelMap()
@@ -253,7 +264,7 @@ class ExecutionControllerTest {
     @Test
     fun `cancel non-running execution returns conflict`() {
         authenticate(owner, setOf(Scope.EXECUTE))
-        every { executions.findById(executionId) } returns record(ExecutionStatus.SUCCESS)
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
 
         shouldThrow<ResponseStatusException> {
             detailPartialController.cancel(executionId, ExtendedModelMap())

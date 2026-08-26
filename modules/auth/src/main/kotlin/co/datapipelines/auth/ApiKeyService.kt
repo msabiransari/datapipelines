@@ -29,14 +29,18 @@ class ApiKeyService(
     private val auditLogger: AuditLogger,
     private val secretHasher: SecretHasher,
     private val authProperties: AuthProperties,
+    private val workspaceService: WorkspaceService,
 ) {
     private val log = LoggerFactory.getLogger(ApiKeyService::class.java)
     private val random = SecureRandom()
 
     /**
-     * Issues a key for [ownerId]. The requested [scopes] MUST be a subset of the
-     * creator's effective scopes ([creatorScopes]) — the privilege-escalation guard
-     * (§7.4), enforced server-side. Throws [ScopeInsufficientException] otherwise.
+     * Issues a key for [ownerId], pinned to [workspaceId] (D3). Two guards, both
+     * server-side: the requested [scopes] MUST be a subset of the creator's effective
+     * scopes ([creatorScopes]) — the privilege-escalation guard (§7.4) — and the creator
+     * MUST be a member of [workspaceId] (the §7.4 workspace restriction, design §5.2),
+     * else [WorkspaceMembershipRequiredException]. No default on [workspaceId]: issuance
+     * without an explicit workspace decision must not compile.
      *
      * An empty [scopes] falls back to `datapipelines.auth.api-keys.default-scopes`
      * ([Configuration §3.4]) — the operator's default, not a hard-coded `read`.
@@ -46,6 +50,7 @@ class ApiKeyService(
         name: String,
         scopes: Set<Scope>,
         creatorScopes: Set<Scope>,
+        workspaceId: UUID,
         expiresAt: Instant? = null,
     ): IssuedApiKey {
         val requested = scopes.ifEmpty { defaultScopes() }
@@ -53,19 +58,20 @@ class ApiKeyService(
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
             throw ScopeInsufficientException(required = overreach, held = creatorScopes)
         }
+        workspaceService.requireAccess(ownerId, Scope.satisfies(creatorScopes, Scope.ADMIN), workspaceId)
 
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
         val fullKey = "$keyId.$secret"
         val hash = secretHasher.hash(fullKey)
 
-        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt)
+        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId)
         authCache.invalidateKey(keyId)
         auditLogger.log(
             event = "auth.api_key.created",
             userId = ownerId,
             keyId = keyId,
-            details = mapOf("name" to name, "scopes" to requested.map { it.wire }),
+            details = mapOf("name" to name, "scopes" to requested.map { it.wire }, "workspace_id" to workspaceId.toString()),
         )
         return IssuedApiKey(record = record, plaintext = fullKey)
     }
@@ -115,6 +121,10 @@ class ApiKeyService(
             scopes = record.scopes,
             authMethod = AuthMethod.API_KEY,
             keyId = keyId,
+            // D3: the key's pinned workspace IS the context — resolved at validation,
+            // no per-request switch exists (design §5.2).
+            workspaceName = record.workspaceName,
+            workspace = WorkspaceContext(record.workspaceId, record.workspaceName),
         )
     }
 

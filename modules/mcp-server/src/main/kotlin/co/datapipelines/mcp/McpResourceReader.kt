@@ -38,47 +38,53 @@ class McpResourceReader(
         ctx: McpToolContext,
     ): McpSchema.ReadResourceResult {
         requireReadScope(ctx)
+        val workspaceId = ctx.principal.requireWorkspace().id
         val parsed = McpResourceUri.parse(uri) ?: throw notFound(uri)
         val contents =
             when (parsed) {
-                is McpResourceUri.PipelineLatest -> json(uri, pipelineBody(parsed.id, null))
-                is McpResourceUri.PipelineVersion -> json(uri, pipelineBody(parsed.id, parsed.version))
-                is McpResourceUri.PipelineParameters -> json(uri, parameters(parsed.id))
-                is McpResourceUri.TemplateLatest -> template(uri, parsed.id, null)
-                is McpResourceUri.TemplateVersion -> template(uri, parsed.id, parsed.version)
+                is McpResourceUri.PipelineLatest -> json(uri, pipelineBody(workspaceId, parsed.id, null))
+                is McpResourceUri.PipelineVersion -> json(uri, pipelineBody(workspaceId, parsed.id, parsed.version))
+                is McpResourceUri.PipelineParameters -> json(uri, parameters(workspaceId, parsed.id))
+                is McpResourceUri.TemplateLatest -> template(workspaceId, uri, parsed.id, null)
+                is McpResourceUri.TemplateVersion -> template(workspaceId, uri, parsed.id, parsed.version)
                 is McpResourceUri.DatasourceList -> json(uri, ExecutorJson.write(datasources.list().map { it.toMcpMetadata() }))
                 is McpResourceUri.DatasourceByName -> json(uri, datasource(parsed.name, uri))
-                is McpResourceUri.Execution -> json(uri, execution(parsed.executionId, ctx, uri))
-                is McpResourceUri.ExecutionEvents -> text(uri, eventReplay(parsed.executionId, ctx, uri))
+                is McpResourceUri.Execution -> json(uri, execution(workspaceId, parsed.executionId, ctx, uri))
+                is McpResourceUri.ExecutionEvents -> text(uri, eventReplay(workspaceId, parsed.executionId, ctx, uri))
             }
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
     }
 
     private fun pipelineBody(
+        workspaceId: UUID,
         id: UUID,
         version: Int?,
     ): String {
-        val record = pipelines.findById(id) ?: throw notFound(McpResourceUri.pipeline(id))
-        return pipelines.findVersionBody(id, version ?: record.currentVersion)
+        val record = pipelines.findById(workspaceId, id) ?: throw notFound(McpResourceUri.pipeline(id))
+        return pipelines.findVersionBody(workspaceId, id, version ?: record.currentVersion)
             ?: throw notFound(McpResourceUri.pipeline(id))
     }
 
     /** `…/parameters` — the pipeline's parameter declarations only (§7.1). */
-    private fun parameters(id: UUID): String {
-        val body = ExecutorJson.mapper.readTree(pipelineBody(id, null))
+    private fun parameters(
+        workspaceId: UUID,
+        id: UUID,
+    ): String {
+        val body = ExecutorJson.mapper.readTree(pipelineBody(workspaceId, id, null))
         return ExecutorJson.write(body.path("parameters"))
     }
 
     private fun template(
+        workspaceId: UUID,
         uri: String,
         id: String,
         version: Int?,
     ): McpSchema.TextResourceContents {
         val body =
             if (version == null) {
-                templates.findLatest(id)?.body
+                templates.findLatest(workspaceId, id)?.body
             } else {
-                templates.lookupVersion(id, version)?.body
+                templates.lookupVersion(workspaceId, id, version)?.body
             } ?: throw notFound(uri)
         return McpSchema.TextResourceContents(uri, McpResourceCatalog.MIME_FREEMARKER_SQL, body, null)
     }
@@ -92,11 +98,12 @@ class McpResourceReader(
     }
 
     private fun execution(
+        workspaceId: UUID,
         executionId: UUID,
         ctx: McpToolContext,
         uri: String,
     ): String {
-        val record = executions.findById(executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
+        val record = executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
         return ExecutorJson.write(record.toMcpMetadata())
     }
 
@@ -110,11 +117,12 @@ class McpResourceReader(
      * itself still exists.
      */
     private fun eventReplay(
+        workspaceId: UUID,
         executionId: UUID,
         ctx: McpToolContext,
         uri: String,
     ): String {
-        executions.findById(executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
+        executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
         return events.findByExecution(executionId).joinToString(separator = "\n") { record ->
             "id: ${record.eventId}\nevent: ${record.eventType}\ndata: ${record.payloadJson}\n"
         }

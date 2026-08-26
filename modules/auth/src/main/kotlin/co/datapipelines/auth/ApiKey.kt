@@ -6,6 +6,9 @@ import java.util.UUID
 /**
  * A row of `api_keys` (metadata-db §4.2). [id] is the public `dpk_<key_id>`
  * handle (not a UUID); [keyHash] is the Argon2id hash of the *full* key.
+ *
+ * [workspaceId]/[workspaceName] are the key's pinned workspace (D3): since slice 2 the
+ * pin IS the key's request context — no `DP-Workspace` override exists for keys.
  */
 data class ApiKey(
     val id: String,
@@ -17,6 +20,8 @@ data class ApiKey(
     val createdAt: Instant,
     val lastUsedAt: Instant?,
     val expiresAt: Instant?,
+    val workspaceId: UUID,
+    val workspaceName: String,
 )
 
 /**

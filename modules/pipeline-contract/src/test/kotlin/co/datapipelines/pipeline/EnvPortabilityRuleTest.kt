@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * pipeline-contract §11.4 / §12.1 — `forbidden_env_specific_value`, both the heuristics and
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.Test
  * must pass.
  */
 class EnvPortabilityRuleTest {
+    private val workspaceId = UUID.randomUUID()
+
     @Test
     fun `each documented heuristic fires on its own shape`() {
         val cases =
@@ -160,5 +163,5 @@ class EnvPortabilityRuleTest {
     private fun validate(
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
-    ) = PipelineValidator(datasources, StubTemplates(), PipelineResolver { _, _ -> null }, 5).validate(pipeline)
+    ) = PipelineValidator(datasources, StubTemplates(), PipelineResolver { _, _, _ -> null }, 5).validate(pipeline, workspaceId)
 }

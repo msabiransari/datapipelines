@@ -494,8 +494,9 @@ class FlywayMigrationIntegrationTest {
          * the provider list is re-declared in full — Spring takes a bound list wholesale
          * from the highest-precedence source containing any element of it, and BOTH
          * indices must be covered because a lookup for an index absent here falls
-         * through to application.yml's `${GOOGLE_CLIENT_ID}`/`${MICROSOFT_CLIENT_ID}`
-         * placeholders, which resolve to nothing in tests.
+         * through to application.yml's `${GOOGLE_CLIENT_ID}` placeholder, which
+         * resolves to nothing in tests. (application.yml ships google only; the
+         * second entry here merely exercises multi-provider discovery against the stub.)
          */
         internal fun oidcProperties(registry: DynamicPropertyRegistry) {
             listOf("google", "microsoft").forEachIndexed { index, name ->

@@ -127,11 +127,22 @@ class AuthHttpBoundaryTest {
         // V1 + V4: apiKeyService.issue writes api_keys.workspace_id (the V4 pin).
         RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = false)
-        readKey = apiKeyService.issue(user.id, "read-key", setOf(Scope.READ), setOf(Scope.ADMIN)).plaintext
+        // Keys pin the seeded `default` workspace; the ADMIN creator scope bypasses the
+        // membership check (D4), so no workspace_members row is needed for this user.
+        readKey =
+            apiKeyService
+                .issue(user.id, "read-key", setOf(Scope.READ), setOf(Scope.ADMIN), DEFAULT_WORKSPACE_ID)
+                .plaintext
         expiredKey =
             apiKeyService
-                .issue(user.id, "expired-key", setOf(Scope.READ), setOf(Scope.ADMIN), Instant.now().minusSeconds(3600))
-                .plaintext
+                .issue(
+                    user.id,
+                    "expired-key",
+                    setOf(Scope.READ),
+                    setOf(Scope.ADMIN),
+                    DEFAULT_WORKSPACE_ID,
+                    Instant.now().minusSeconds(3600),
+                ).plaintext
         session = jwtService.issue(user)
     }
 
@@ -483,3 +494,6 @@ class AuthHttpBoundaryTest {
         }
     }
 }
+
+/** The V4-seeded `default` workspace (metadata-db §4.11) — a legitimate test pin: these suites seed the default world. */
+private val DEFAULT_WORKSPACE_ID: java.util.UUID = java.util.UUID.fromString("defa0000-0000-0000-0000-000000000001")

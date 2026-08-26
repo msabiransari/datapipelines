@@ -40,22 +40,32 @@ class PipelineValidator(
     private val pipelines: PipelineResolver,
     private val maxCompositionDepth: Int,
 ) {
-    /** Runs §12 against [pipeline] and returns every failure. */
-    fun validate(pipeline: Pipeline): ValidationResult {
+    /**
+     * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
+     * the pipeline is being saved into: its template and PIPELINE-node references resolve
+     * there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist in v1).
+     */
+    fun validate(
+        pipeline: Pipeline,
+        workspaceId: java.util.UUID,
+    ): ValidationResult {
         val collector = FailureCollector()
         StructuralRules.check(pipeline, datasources, collector)
         DagRules.check(pipeline, collector)
         NodeTypeRules.check(pipeline, collector)
-        ReferenceRules.check(pipeline, datasources, templates, collector)
+        ReferenceRules.check(pipeline, datasources, templates, workspaceId, collector)
         ParameterRules.check(pipeline, collector)
         SettingsRules.check(pipeline, collector)
-        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, collector)
+        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, collector)
         return collector.toResult()
     }
 
     /** Runs §12 and throws [PipelineValidationException] if anything failed. */
-    fun validateOrThrow(pipeline: Pipeline): Pipeline {
-        validate(pipeline).orThrow()
+    fun validateOrThrow(
+        pipeline: Pipeline,
+        workspaceId: java.util.UUID,
+    ): Pipeline {
+        validate(pipeline, workspaceId).orThrow()
         return pipeline
     }
 }

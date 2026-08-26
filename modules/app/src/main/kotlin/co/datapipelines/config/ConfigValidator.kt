@@ -42,7 +42,10 @@ class ConfigValidator(
     }
 
     companion object {
-        private const val CHECK_COUNT = 8
+        private const val CHECK_COUNT = 9
+
+        /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
+        private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
 
         /** §3.10 — the directory the UI theme is validated against, on the classpath. */
         internal const val THEME_ROOT = "static/vendor/design-system"
@@ -59,6 +62,7 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkDevProfileGuard(snapshot, violations)
+            checkWorkspacesProvisioningMode(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             return ValidationReport(violations, warnings)
         }
@@ -182,6 +186,23 @@ class ConfigValidator(
             }
         }
 
+        /**
+         * §7 — `datapipelines.workspaces.provisioning-mode` names a real mode (§3.17). A typo
+         * here fails enum binding anyway; this names the offending value in the §7 format
+         * instead of as a binder stack trace.
+         */
+        private fun checkWorkspacesProvisioningMode(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase() ?: return
+            if (mode !in PROVISIONING_MODES) {
+                violations +=
+                    "datapipelines.workspaces.provisioning-mode '$mode' is not one of " +
+                    "${PROVISIONING_MODES.sorted()} (§3.17)."
+            }
+        }
+
         /** §7 — passwordless Redis off loopback is a WARNING, not a refusal. */
         private fun checkRedisAuthWarning(
             snapshot: ConfigSnapshot,
@@ -211,6 +232,7 @@ class ConfigValidator(
                 resultTtlMinSeconds = environment.getProperty("datapipelines.result.ttl-min-seconds", Long::class.java),
                 resultTtlDefaultSeconds = environment.getProperty("datapipelines.result.ttl-default-seconds", Long::class.java),
                 resultTtlMaxSeconds = environment.getProperty("datapipelines.result.ttl-max-seconds", Long::class.java),
+                workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -314,6 +336,7 @@ internal data class ConfigSnapshot(
     val resultTtlMinSeconds: Long?,
     val resultTtlDefaultSeconds: Long?,
     val resultTtlMaxSeconds: Long?,
+    val workspacesProvisioningMode: String?,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -332,6 +355,7 @@ internal data class ConfigSnapshot(
             "resultTtlMinSeconds=$resultTtlMinSeconds, " +
             "resultTtlDefaultSeconds=$resultTtlDefaultSeconds, " +
             "resultTtlMaxSeconds=$resultTtlMaxSeconds, " +
+            "workspacesProvisioningMode=$workspacesProvisioningMode, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes)"
 }

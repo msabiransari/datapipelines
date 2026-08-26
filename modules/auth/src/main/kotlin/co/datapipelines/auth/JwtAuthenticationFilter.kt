@@ -71,6 +71,9 @@ class JwtAuthenticationFilter(
                     scopes = scopes,
                     authMethod = AuthMethod.OIDC,
                     keyId = null,
+                    // The stamped claim (design §5.1) — unresolved at this point; the
+                    // WorkspaceResolutionFilter membership-checks it into `workspace`.
+                    workspaceName = claims["active_workspace"] as String?,
                 )
             SecurityContextHolder.getContext().authentication =
                 UsernamePasswordAuthenticationToken(

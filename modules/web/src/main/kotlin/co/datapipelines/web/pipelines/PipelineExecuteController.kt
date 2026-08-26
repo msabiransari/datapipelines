@@ -61,14 +61,15 @@ class PipelineExecuteController(
         request: HttpServletRequest,
     ): SseEmitter {
         val principal = currentPrincipal()
-        val record = pipelines.findById(id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val workspaceId = principal.requireWorkspace().id
+        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val tree = parseBody(body)
         val version = versionOf(tree, record.currentVersion)
         val parametersNode = parametersOf(tree)
 
         val bodyJson =
-            pipelines.findVersionBody(id, version)
+            pipelines.findVersionBody(workspaceId, id, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
         val pipeline = deserializer.readOrThrow(bodyJson)
         val parameters: Map<String, JsonNode> = parametersNode.properties().associate { it.key to it.value }

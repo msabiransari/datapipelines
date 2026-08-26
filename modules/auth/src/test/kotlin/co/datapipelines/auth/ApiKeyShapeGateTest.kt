@@ -29,7 +29,8 @@ class ApiKeyShapeGateTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val cache = AuthCache(AuthProperties())
     private val hasher = mockk<SecretHasher>(relaxed = true)
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, hasher, AuthProperties())
+    private val workspaceService = mockk<WorkspaceService>(relaxed = true)
+    private val service = ApiKeyService(repo, userService, cache, auditLogger, hasher, AuthProperties(), workspaceService)
 
     private val garbage =
         listOf(

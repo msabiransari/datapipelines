@@ -112,8 +112,8 @@ class McpProtocolIntegrationTest {
 
     @Test
     fun `a tool call reaches the tool and comes back in the §6_3 envelope`() {
-        every { pipelines.findById(McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
-        every { pipelines.findVersionBody(McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
 
         val response =
             call(
@@ -137,10 +137,10 @@ class McpProtocolIntegrationTest {
 
     @Test
     fun `resources list is served by this module, not by the SDK's empty registry`() {
-        every { pipelines.findAll(null) } returns listOf(McpFixtures.pipelineRecord())
-        every { templates.list(any(), any(), any(), any()) } returns emptyList()
+        every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
+        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val result = call(McpSchema.METHOD_RESOURCES_LIST, emptyMap<String, Any>()).result() as McpSchema.ListResourcesResult
 
@@ -161,7 +161,7 @@ class McpProtocolIntegrationTest {
 
     @Test
     fun `an uncatalogued fault reaches the agent sanitized, over the real protocol`() {
-        every { pipelines.findById(any()) } throws IllegalStateException("Redis down at redis-master.internal:6379")
+        every { pipelines.findById(any(), any()) } throws IllegalStateException("Redis down at redis-master.internal:6379")
 
         val response =
             call(

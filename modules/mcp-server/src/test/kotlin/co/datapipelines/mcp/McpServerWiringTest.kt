@@ -15,9 +15,9 @@ import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -50,7 +50,7 @@ class McpServerWiringTest {
         val deserializer = PipelineDeserializer()
         val validator = mockk<PipelineValidator>()
         val templateValidator = mockk<TemplateValidator>()
-        val engine = mockk<TemplateEngine>()
+        val engines = mockk<WorkspaceTemplateEngines>()
         val introspector = mockk<SchemaIntrospector>()
         return listOf(
             PipelinesListTool(pipelines),
@@ -61,7 +61,7 @@ class McpServerWiringTest {
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesCreateTool(templates, templateValidator),
-            TemplatesRenderTool(templates, engine),
+            TemplatesRenderTool(templates, engines),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),
             DatasourcesTestTool(datasources),
@@ -149,10 +149,10 @@ class McpServerWiringTest {
     @Test
     fun `resources are served here and every other method is delegated`() {
         val delegate = mockk<McpStatelessServerHandler>()
-        every { pipelines.findAll(null) } returns emptyList()
-        every { templates.list(any(), any(), any(), any()) } returns emptyList()
+        every { pipelines.findAll(any(), null) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { delegate.handleRequest(any(), any()) } returns
             Mono.just(McpSchema.JSONRPCResponse.result("1", mapOf("delegated" to true)))
 

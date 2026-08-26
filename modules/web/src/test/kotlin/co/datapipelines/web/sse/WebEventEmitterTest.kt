@@ -47,6 +47,7 @@ class WebEventEmitterTest {
     private val pipelineId = UUID.randomUUID()
     private val userId = UUID.randomUUID()
     private val correlationId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private fun emitter(): WebEventEmitter =
         WebEventEmitter(
@@ -58,6 +59,7 @@ class WebEventEmitterTest {
                     correlationId = correlationId,
                     triggeredVia = ExecutionTrigger.REST,
                     parametersJson = """{"start_date":"2026-01-01"}""",
+                    workspaceId = workspaceId,
                 ),
             stream = null,
             streams = registry,
@@ -104,6 +106,7 @@ class WebEventEmitterTest {
                         correlationId = correlationId,
                         triggeredVia = ExecutionTrigger.PIPELINE,
                         parametersJson = """{"region":"EU"}""",
+                        workspaceId = workspaceId,
                         parentExecutionId = parentExecutionId,
                         parentNodeId = "revenue",
                         rootExecutionId = rootExecutionId,
@@ -183,7 +186,7 @@ class WebEventEmitterTest {
             var hooked: UUID? = null
             val withHook =
                 WebEventEmitter(
-                    ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}"),
+                    ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}", workspaceId),
                     null,
                     registry,
                     eventLog,

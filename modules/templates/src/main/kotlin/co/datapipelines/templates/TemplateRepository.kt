@@ -31,38 +31,42 @@ data class TemplateVersionSummary(
  * transaction — a `templates` row whose `current_version` names a version row that was never
  * inserted is unrepresentable. There is deliberately **no `params_schema` column** (D3).
  *
- * ## Surrogate key and workspace pinning (slice 1)
+ * ## Surrogate key and workspace scoping (slice 2)
  *
  * Since V4 `templates` has a surrogate `id UUID` PK and the human id is the `name` column,
  * unique per workspace (metadata-db §4.8); `template_versions` references the surrogate.
  * Every method below keeps taking the human id as a `String` — pipeline-JSON and
- * `imports_json` `{id, version}` refs mean `name`, never the surrogate. Until workspace
- * resolution lands (slice 2), reads resolve within the seeded `default` workspace and writes
- * pin it — via [DEFAULT_WORKSPACE_ID] in code, never a column DEFAULT, so slice 2 finds
- * every pin by grepping the constant.
+ * `imports_json` `{id, version}` refs mean `name`, never the surrogate — and takes the
+ * active workspace explicitly as `workspaceId` (design §5: resolution happens in the
+ * request pipeline). **No default anywhere**: a missed caller is a compile error, never a
+ * silent resolution in some default world.
  */
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
-    /** The current-version projection of a live template, or null when absent/soft-deleted. */
-    fun findLatest(id: String): Template? =
+    /** The current-version projection of a live template in [workspaceId], or null when absent/soft-deleted. */
+    fun findLatest(
+        workspaceId: UUID,
+        id: String,
+    ): Template? =
         jdbc
             .query(
                 "$SELECT_JOINED WHERE t.name = :name AND t.workspace_id = :workspaceId" +
                     " AND t.is_deleted = FALSE AND v.version = t.current_version",
-                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+                mapOf("name" to id, "workspaceId" to workspaceId),
                 MAPPER,
             ).singleOrNull()
 
     /** A specific stored version's full record, including of a soft-deleted template (§5.1). */
     fun findVersion(
+        workspaceId: UUID,
         id: String,
         version: Int,
     ): Template? =
         jdbc
             .query(
                 "$SELECT_JOINED WHERE t.name = :name AND t.workspace_id = :workspaceId AND v.version = :version",
-                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID, "version" to version),
+                mapOf("name" to id, "workspaceId" to workspaceId, "version" to version),
                 MAPPER,
             ).singleOrNull()
 
@@ -73,22 +77,26 @@ class TemplateRepository(
      * to work (templates.md §5.1), so the registry must still resolve it.
      */
     fun lookupVersion(
+        workspaceId: UUID,
         id: String,
         version: Int,
     ): TemplateVersion? =
         jdbc
             .query(
                 "$SELECT_VERSION WHERE t.name = :name AND t.workspace_id = :workspaceId AND v.version = :version",
-                mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID, "version" to version),
+                mapOf("name" to id, "workspaceId" to workspaceId, "version" to version),
                 VERSION_MAPPER,
             ).singleOrNull()
 
-    /** True when any version of [id] exists — the `template_not_found` vs `version_not_found` split. */
-    fun existsId(id: String): Boolean =
+    /** True when any version of [id] exists in [workspaceId] — the `template_not_found` vs `version_not_found` split. */
+    fun existsId(
+        workspaceId: UUID,
+        id: String,
+    ): Boolean =
         jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM template_versions v JOIN templates t ON t.id = v.template_id" +
                 " WHERE t.name = :name AND t.workspace_id = :workspaceId)",
-            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+            mapOf("name" to id, "workspaceId" to workspaceId),
             Boolean::class.java,
         ) == true
 
@@ -107,6 +115,7 @@ class TemplateRepository(
      * partial index that exists for exactly this listing.
      */
     fun list(
+        workspaceId: UUID,
         dialect: Dialect? = null,
         q: String? = null,
         offset: Int = 0,
@@ -133,7 +142,7 @@ class TemplateRepository(
                 // type to infer and the statement will not even prepare.
                 "dialect" to dialect?.wire,
                 "pattern" to q?.let { "%${escapeLike(it)}%" },
-                "workspaceId" to DEFAULT_WORKSPACE_ID,
+                "workspaceId" to workspaceId,
                 "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT),
                 "offset" to maxOf(0, offset),
             ),
@@ -141,7 +150,10 @@ class TemplateRepository(
         )
 
     /** Version metadata, newest first (§9 list-versions). */
-    fun listVersions(id: String): List<TemplateVersionSummary> =
+    fun listVersions(
+        workspaceId: UUID,
+        id: String,
+    ): List<TemplateVersionSummary> =
         jdbc.query(
             """
             SELECT t.name AS template_id, v.version, v.created_at, v.created_by
@@ -150,7 +162,7 @@ class TemplateRepository(
              WHERE t.name = :name AND t.workspace_id = :workspaceId
              ORDER BY v.version DESC
             """.trimIndent(),
-            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+            mapOf("name" to id, "workspaceId" to workspaceId),
         ) { rs, _ ->
             TemplateVersionSummary(
                 id = rs.getString("template_id"),
@@ -161,13 +173,15 @@ class TemplateRepository(
         }
 
     /**
-     * Inserts the template and its version 1 together, returning what the database stored.
+     * Inserts the template and its version 1 together in [workspaceId], returning what the
+     * database stored.
      *
      * [draft] `id` is auto-generated when omitted (templates.md §3.2). The final `SELECT` reads
      * back server-assigned `created_at` / `updated_at`, never a hand-built value (metadata-db
      * §6.1).
      */
     fun create(
+        workspaceId: UUID,
         draft: TemplateDraft,
         createdBy: UUID,
     ): Template {
@@ -175,7 +189,7 @@ class TemplateRepository(
         return jdbc
             .query(
                 INSERT_SQL,
-                params(id, draft, createdBy),
+                params(workspaceId, id, draft, createdBy),
                 MAPPER,
             ).single()
     }
@@ -183,10 +197,11 @@ class TemplateRepository(
     /**
      * Appends a new version and bumps `current_version`, in one statement.
      *
-     * Returns null when no live template has this id — the caller decides whether that is a
-     * 404; the repository does not raise catalog errors for control flow.
+     * Returns null when no live template has this id in [workspaceId] — the caller decides
+     * whether that is a 404; the repository does not raise catalog errors for control flow.
      */
     fun update(
+        workspaceId: UUID,
         id: String,
         draft: TemplateDraft,
         updatedBy: UUID,
@@ -194,26 +209,30 @@ class TemplateRepository(
         jdbc
             .query(
                 UPDATE_SQL,
-                params(id, draft, updatedBy),
+                params(workspaceId, id, draft, updatedBy),
                 MAPPER,
             ).singleOrNull()
 
-    /** Soft-deletes the template (§9). Returns false when nothing live was there to delete. */
-    fun softDelete(id: String): Boolean =
+    /** Soft-deletes the template (§9). Returns false when nothing live was there to delete in [workspaceId]. */
+    fun softDelete(
+        workspaceId: UUID,
+        id: String,
+    ): Boolean =
         jdbc.update(
             "UPDATE templates SET is_deleted = TRUE, updated_at = NOW()" +
                 " WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE",
-            mapOf("name" to id, "workspaceId" to DEFAULT_WORKSPACE_ID),
+            mapOf("name" to id, "workspaceId" to workspaceId),
         ) > 0
 
     private fun params(
+        workspaceId: UUID,
         id: String,
         draft: TemplateDraft,
         actor: UUID,
     ): Map<String, Any?> =
         mapOf(
             "name" to id,
-            "workspaceId" to DEFAULT_WORKSPACE_ID,
+            "workspaceId" to workspaceId,
             "displayName" to draft.displayName,
             "description" to draft.description,
             "engine" to draft.engine,
@@ -253,13 +272,6 @@ class TemplateRepository(
                     .toString()
                     .replace("-", "")
                     .take(GENERATED_ID_HEX_LENGTH)
-
-        /**
-         * The seeded `default` workspace every slice-1 read resolves within and every slice-1
-         * write pins (metadata-db §4.11, R2). A code constant — never a column DEFAULT — so
-         * slice 2's real workspace resolution finds every pin by grepping the value.
-         */
-        private val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
         /**
          * `created_by` comes from `template_versions`, never from `templates` (TPL-API-2).

@@ -11,17 +11,28 @@ import org.junit.jupiter.api.Test
  *
  * The HTTP status each auth exception carries is also asserted against the doc's
  * status column, so a code cannot silently drift to the wrong status.
+ *
+ * The same gate covers the `workspace.*` codes this module raises (§13.12): the
+ * constants here mirror `PipelineErrorCodes.Workspace` (auth cannot depend on
+ * pipeline-contract), and both sides are asserted against the doc — transitively
+ * equal, with the document as the single authority.
  */
 class AuthErrorSpecDriftTest {
     @Test
     fun `AuthErrorCodes ALL equals the auth codes in pipeline-contract §13-7`() {
-        val fromDoc = parseSection().keys
+        val fromDoc = parseSection("### 13.7", "### 13.8", "auth").keys
         AuthErrorCodes.ALL shouldContainExactlyInAnyOrder fromDoc
     }
 
     @Test
+    fun `WorkspaceErrorCodes ALL equals the workspace codes in pipeline-contract §13-12`() {
+        val fromDoc = parseSection("### 13.12", "## 14", "workspace").keys
+        WorkspaceErrorCodes.ALL shouldContainExactlyInAnyOrder fromDoc
+    }
+
+    @Test
     fun `each code's HTTP status matches the exception it maps to`() {
-        val docStatus = parseSection()
+        val docStatus = parseSection("### 13.7", "### 13.8", "auth")
         val exceptionStatus =
             mapOf(
                 AuthErrorCodes.API_KEY_MISSING to ApiKeyMissingException().status,
@@ -39,14 +50,33 @@ class AuthErrorSpecDriftTest {
         }
     }
 
-    private fun parseSection(): Map<String, Int> {
+    @Test
+    fun `each workspace code's HTTP status matches the exception it maps to`() {
+        val docStatus = parseSection("### 13.12", "## 14", "workspace")
+        val exceptionStatus =
+            mapOf(
+                WorkspaceErrorCodes.MEMBERSHIP_REQUIRED to WorkspaceMembershipRequiredException().status,
+                WorkspaceErrorCodes.CREATION_FORBIDDEN to
+                    WorkspaceCreationForbiddenException(WorkspaceProvisioningMode.CLOSED).status,
+                WorkspaceErrorCodes.HEADER_FORBIDDEN to WorkspaceHeaderForbiddenException().status,
+            )
+        exceptionStatus.forEach { (code, status) ->
+            (code to status) shouldBe (code to docStatus.getValue(code))
+        }
+    }
+
+    private fun parseSection(
+        startMarker: String,
+        endMarker: String,
+        domain: String,
+    ): Map<String, Int> {
         val doc = RepoFiles.read(RepoFiles.PIPELINE_CONTRACT_PATH)
-        val start = doc.indexOf("### 13.7")
-        require(start >= 0) { "§13.7 not found in ${RepoFiles.PIPELINE_CONTRACT_PATH}" }
-        val end = doc.indexOf("### 13.8", start)
+        val start = doc.indexOf(startMarker)
+        require(start >= 0) { "$startMarker not found in ${RepoFiles.PIPELINE_CONTRACT_PATH}" }
+        val end = doc.indexOf(endMarker, start)
         val section = doc.substring(start, if (end >= 0) end else doc.length)
 
-        val rowRegex = Regex("""\|\s*`(auth\.[a-z_.]+)`\s*\|\s*(\d{3})\s*\|""")
+        val rowRegex = Regex("""\|\s*`($domain\.[a-z_.]+)`\s*\|\s*(\d{3})\s*\|""")
         return rowRegex.findAll(section).associate { it.groupValues[1] to it.groupValues[2].toInt() }
     }
 }

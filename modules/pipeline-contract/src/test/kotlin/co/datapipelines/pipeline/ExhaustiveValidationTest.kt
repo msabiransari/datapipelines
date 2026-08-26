@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * §17.2 — "Validation is exhaustive: all checks run, all failures collected, returned
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.Test
  * chain, which is the single most likely way this promise stops being true.
  */
 class ExhaustiveValidationTest {
+    private val workspaceId = UUID.randomUUID()
+
     /**
      * One pipeline, defects spanning all six rule groups plus the deserializer's pre-scan:
      *
@@ -91,7 +94,7 @@ class ExhaustiveValidationTest {
 
     @Test
     fun `every rule group reports, in one pass`() {
-        val codes = validator.validate(broken).codes
+        val codes = validator.validate(broken, workspaceId).codes
 
         withClue("codes = $codes") {
             codes shouldContainAll
@@ -128,7 +131,7 @@ class ExhaustiveValidationTest {
     fun `the failure count far exceeds the group count - nothing is collapsed`() {
         // A validator that returned one failure per group would satisfy the assertion above.
         // Sixteen distinct codes across six groups is what "all failures collected" means.
-        val result = validator.validate(broken)
+        val result = validator.validate(broken, workspaceId)
 
         result.codes.size shouldBeGreaterThanOrEqual 16
         result.failures.size shouldBeGreaterThanOrEqual result.codes.size
@@ -141,7 +144,7 @@ class ExhaustiveValidationTest {
         val onlyParameterDefect =
             Fixtures.pipeline(parameters = mapOf("Bad Key" to Parameter(LogicalType.STRING)))
 
-        Fixtures.validator().validate(onlyParameterDefect).codes shouldBe
+        Fixtures.validator().validate(onlyParameterDefect, workspaceId).codes shouldBe
             listOf(Validation.PARAMETER_NAME_INVALID)
     }
 
