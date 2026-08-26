@@ -160,7 +160,7 @@ cd ../datapipelines
 ./scripts/sync-design-system.sh   # copies dist/ → modules/web/src/main/resources/static/vendor/design-system/
 ```
 
-Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift — including the manifest's sha256 key set drifting from the curated file list in either direction, 014/F3).
+Run this whenever the design system changes. The script records the version and SHA-256 of every vendored asset in `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json` — one manifest for all vendored assets (design system CSS, Cytoscape, dagre, Alpine). See [Pipeline Editor §12.1](docs/pipeline-editor.md#121-file-structure). `./scripts/sync-design-system.sh --check` verifies the committed assets and the manifest's hashes against `dist/` without writing anything (exit 1 on any drift — including the manifest's sha256 key set *or* `files` array drifting from the curated file list in either direction, 014/F3 + 018/F6).
 
 ---
 
