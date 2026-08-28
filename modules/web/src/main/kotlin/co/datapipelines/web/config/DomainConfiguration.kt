@@ -9,6 +9,7 @@ import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
@@ -101,13 +102,19 @@ class DomainConfiguration {
         )
 
     /**
-     * The `pipeline-contract` port for "what dialect is this datasource" — the same registry,
-     * narrowed. Declared explicitly because the two interfaces share a name across two packages
-     * and Spring would otherwise have no bean of the contract-side type at all.
+     * The `pipeline-contract` port for "what do we know about this datasource" — the same
+     * registry, narrowed. Declared explicitly because the two interfaces share a name across two
+     * packages and Spring would otherwise have no bean of the contract-side type at all.
+     *
+     * Supplies BOTH facts the validator asks for (workspaces design §6): the dialect AND the
+     * readonly flag, from the same registry lookup — so `pipeline.validation.datasource_readonly`
+     * fires at save time on every write-shaped use of a flagged datasource.
      */
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
-        ContractDatasourceRegistry { name -> registry.dialectOf(name) }
+        ContractDatasourceRegistry { name ->
+            registry.get(name)?.let { DatasourceFacts(it.dialect, it.isReadonly) }
+        }
 
     /** The §7A introspector — reads JDBC metadata through the same registry pool (§5.2). */
     @Bean

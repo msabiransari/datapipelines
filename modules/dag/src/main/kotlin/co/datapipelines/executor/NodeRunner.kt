@@ -368,6 +368,16 @@ class NodeRunner(
         startedAt: Instant,
     ): NodeResult {
         val datasource = phase(NodePhase.CONNECT, node.id) { datasourceRegistry.get(name) ?: throw datasourceNotFound(name) }
+        // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
+        // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
+        // node execution time, so a datasource flipped readonly after this version was saved
+        // fails HERE instead of shipping its DML/DDL. DQL reads are untouched — the check is
+        // on the node type, never on the datasource alone.
+        if (node.type == NodeType.DML || node.type == NodeType.DDL) {
+            phase(NodePhase.CONNECT, node.id) {
+                if (datasourceRegistry.getLive(name)?.isReadonly == true) throw datasourceReadonly(name, node.type)
+            }
+        }
         val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
         val connection =
             phase(NodePhase.CONNECT, node.id) {
@@ -565,6 +575,22 @@ class NodeRunner(
             message = "Datasource '$name' is not registered in this environment.",
             details = mapOf("datasource" to name),
         )
+
+    /**
+     * §13.4 sibling of `datasource_not_found`: the datasource resolved at write-time, but its
+     * live entry is readonly now — the stored version predates the flag, or the flag flipped
+     * between save and run (D10). Same HTTP class and shape as its sibling.
+     */
+    private fun datasourceReadonly(
+        name: String,
+        type: NodeType,
+    ) = DatapipelinesException(
+        code = PipelineErrorCodes.Node.DATASOURCE_READONLY,
+        message =
+            "Datasource '$name' is readonly — its ${type.wire} use is forbidden " +
+                "(the flag was set after this pipeline version was saved, or the version predates it).",
+        details = mapOf("datasource" to name, "node_type" to type.wire),
+    )
 
     /** Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code. */
     private suspend fun <T> phase(

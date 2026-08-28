@@ -65,6 +65,14 @@ abstract class AbstractDialectAdapter(
         config.password = password
         config.driverClassName = jdbcDriverClassName
         config.poolName = "ds-${datasource.name}"
+        // Workspaces design §6 layer 2b (D6): a readonly datasource's pools are built with
+        // Hikari `readOnly = true`. Defense in depth, not containment — JDBC read-only
+        // enforcement varies by driver, and even pool→connection propagation is not guaranteed
+        // (verified against the pinned HikariCP 6.3.0 + H2: the flag reaches the pool, not the
+        // leased connection) — and `properties.hikari.readOnly` is §5.6-refused so an operator
+        // cannot flip it either way. The flag's real boundary is the SELECT-only DB user of
+        // datasources.md §5.7.
+        if (datasource.isReadonly) config.isReadOnly = true
         // Note: queryTimeoutSeconds is an execution-layer policy (§5.5), applied per-statement
         // by the executor — deliberately NOT a pool or connection property here.
 

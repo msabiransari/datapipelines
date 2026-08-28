@@ -90,7 +90,8 @@ internal object Fixtures {
 }
 
 /**
- * A datasource registry stubbed with a fixed name → dialect map.
+ * A datasource registry stubbed with a fixed name → dialect map, plus an optional readonly set
+ * (workspaces §6 — names in [readonly] report `readonly = true` through [describe]).
  *
  * Defaults cover the names the worked examples use, so an unregistered name in a test is
  * always deliberate.
@@ -103,8 +104,9 @@ internal class StubDatasources(
             "pg-meta" to Dialect.POSTGRES,
             "mysql-prod" to Dialect.MYSQL,
         ),
+    private val readonly: Set<String> = emptySet(),
 ) : DatasourceRegistry {
-    override fun dialectOf(name: String): Dialect? = dialects[name]
+    override fun describe(name: String): DatasourceFacts? = dialects[name]?.let { DatasourceFacts(it, name in readonly) }
 }
 
 /**

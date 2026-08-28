@@ -19,6 +19,7 @@ internal object Fixtures {
         queryTimeoutSeconds: Int? = null,
         properties: DatasourceProperties = DatasourceProperties(),
         introspectionIncludeSchemas: List<String> = emptyList(),
+        isReadonly: Boolean = false,
     ): Datasource =
         Datasource(
             name = name,
@@ -31,6 +32,7 @@ internal object Fixtures {
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
+            isReadonly = isReadonly,
         )
 
     fun postgres(

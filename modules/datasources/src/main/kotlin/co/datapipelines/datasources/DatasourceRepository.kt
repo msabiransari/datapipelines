@@ -19,7 +19,7 @@ import java.util.UUID
  * — [DatasourceRegistry] decrypts them only at pool build (§7.4), and no read path ever
  * surfaces them. `properties_json` is materialized back into [DatasourceProperties].
  *
- * `LongParameterList` is suppressed because the `datasources` table has 14 columns and this
+ * `LongParameterList` is suppressed because the `datasources` table has 15 columns and this
  * object is its 1:1 row projection. Grouping them into sub-objects to satisfy the threshold
  * would put a shape in the code that does not exist in the schema, and the `RowMapper` would
  * then have to translate twice. The rule targets wide *behavioural* constructors; a table row
@@ -37,6 +37,7 @@ class DatasourceRow(
     val properties: DatasourceProperties,
     val queryTimeoutSeconds: Int?,
     val introspectionIncludeSchemas: List<String>,
+    val isReadonly: Boolean,
     val isDeleted: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -55,6 +56,7 @@ class DatasourceRow(
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
+            isReadonly = isReadonly,
         )
 }
 
@@ -184,6 +186,7 @@ class DatasourceRepository(
                 properties = readProperties(rs.getString("properties_json")),
                 queryTimeoutSeconds = rs.getObject("query_timeout_seconds") as? Int,
                 introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas_json")),
+                isReadonly = rs.getBoolean("is_readonly"),
                 isDeleted = rs.getBoolean("is_deleted"),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
@@ -238,7 +241,7 @@ class DatasourceRepository(
         const val COLUMNS =
             "name, display_name, description, dialect, jdbc_url, username, password_encrypted, " +
                 "properties_json, query_timeout_seconds, introspection_include_schemas_json, " +
-                "is_deleted, created_at, updated_at, created_by"
+                "is_readonly, is_deleted, created_at, updated_at, created_by"
 
         const val SELECT_COLUMNS = "SELECT $COLUMNS FROM datasources"
 

@@ -55,6 +55,15 @@ class DefaultDatasourceRegistry(
 
     override fun get(name: String): Datasource? = cache.get(name) { repository.findByName(it)?.toDatasource() }
 
+    /**
+     * The D10 flip window made structural (workspaces §6 layer 2a): one direct indexed PK read
+     * per write-shaped node execution, deliberately past the §6.3 cache — the pool-build path
+     * bypasses it for the same reason (a state the cache may not have seen yet is the state
+     * this question is asking about). Password stays null: this entry is read for its flag,
+     * never for a pool.
+     */
+    override fun getLive(name: String): Datasource? = repository.findByName(name)?.toDatasource()
+
     override fun exists(name: String): Boolean = repository.exists(name)
 
     /**

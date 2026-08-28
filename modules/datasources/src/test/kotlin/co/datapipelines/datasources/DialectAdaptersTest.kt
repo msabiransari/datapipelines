@@ -3,6 +3,7 @@ package co.datapipelines.datasources
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.TypeMappers
 import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
@@ -218,6 +219,25 @@ class DialectAdaptersTest {
 
         config.minimumIdle shouldBe AbstractDialectAdapter.DEFAULT_MINIMUM_IDLE
         config.minimumIdle shouldBe 2
+    }
+
+    @Test
+    fun `a readonly datasource's pool is built with Hikari readOnly - on a REAL pool build`() {
+        // Workspaces design §6 layer 2b (D6), proved on a real HikariConfig AND a real
+        // HikariDataSource constructed from it (assertion on a mocked adapter would prove the
+        // mock): `initializationFailTimeout = -1` keeps the build connect-free.
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2(isReadonly = true))
+        config.isReadOnly shouldBe true
+
+        config.initializationFailTimeout = -1
+        HikariDataSource(config).use { pool -> pool.isReadOnly shouldBe true }
+    }
+
+    @Test
+    fun `a writable datasource's pool is not flagged readOnly`() {
+        val config = DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2())
+
+        config.isReadOnly shouldBe false
     }
 
     @Test
