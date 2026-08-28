@@ -41,10 +41,12 @@ class UserService(
         if (existing != null) {
             userRepository.updateIdentity(
                 id = existing.id,
-                // §6.1 item 3: a row still carrying the pre-provisioning placeholder is being
-                // COMPLETED by this login, so the ID token's name replaces the local-part
-                // placeholder. Every ordinary re-login passes null and leaves the name alone.
-                displayName = displayName.takeIf { existing.provider == BOOTSTRAP_PROVIDER },
+                // display_name refreshes from the ID token on EVERY login (owner-ratified
+                // 2026-08-28, 021 Deviation 3): no profile-edit feature exists, so a stored
+                // name has no user-chosen referent to protect — freezing would leave an IdP
+                // rename unrepresentable. The §6.1 bootstrap placeholder is replaced by this
+                // same refresh at the first real sign-in.
+                displayName = displayName,
                 profilePictureUrl = pictureUrl,
                 provider = provider,
                 providerSubject = providerSubject,

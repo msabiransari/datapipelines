@@ -136,12 +136,14 @@ class BootstrapActorProvisioningIntegrationTest {
     }
 
     @Test
-    fun `a later ordinary re-login does not overwrite display_name`() {
+    fun `a later re-login refreshes display_name from the ID token`() {
+        // Owner-ratified 2026-08-28 (021 Deviation 3): IdP names stay fresh on every login —
+        // the spec's no-clobber clause protected a profile-edit feature that does not exist.
+        // Pinned so the behavior cannot silently flip again.
         val service = service()
         service.provisionBootstrapActor()
         service.findOrCreateByEmail(ADMIN_EMAIL, "Alice Admin", null, "google", "google-sub-1")
 
-        // The provider now sends a different `name` — a re-login must not clobber the stored one.
         val relogin =
             service.findOrCreateByEmail(
                 ADMIN_EMAIL,
@@ -151,20 +153,19 @@ class BootstrapActorProvisioningIntegrationTest {
                 "google-sub-1",
             )
 
-        relogin.displayName shouldBe "Alice Admin"
-        // The other identity fields still refresh; only the name is sticky after completion.
+        relogin.displayName shouldBe "A. Admin (work)"
         relogin.profilePictureUrl shouldBe "https://pictures.example.com/new"
         adminGrantedEvents() shouldBe 1
     }
 
     @Test
-    fun `an ordinary user's display_name is never clobbered by a re-login either`() {
+    fun `an ordinary user's display_name refreshes on re-login too`() {
         val service = service(bootstrapAdmin = null)
         service.findOrCreateByEmail("bob@example.com", "Bob", null, "google", "bob-sub")
 
         val relogin = service.findOrCreateByEmail("bob@example.com", "Robert", null, "okta", "bob-okta")
 
-        relogin.displayName shouldBe "Bob"
+        relogin.displayName shouldBe "Robert"
         relogin.provider shouldBe "okta"
         adminGrantedEvents() shouldBe 0
     }
