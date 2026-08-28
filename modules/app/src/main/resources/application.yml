@@ -194,3 +194,11 @@ datapipelines:
       enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
+
+  # Bootstrap content (configuration.md §3.18). Both are container-filesystem PATHS and both
+  # are OFF when empty — there is no separate enable flag. `datasources-file` additionally
+  # requires datapipelines.auth.bootstrap-admin-email (the actor its rows are created_by);
+  # ConfigValidator refuses startup when one is set without the other.
+  bootstrap:
+    datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
+    examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}

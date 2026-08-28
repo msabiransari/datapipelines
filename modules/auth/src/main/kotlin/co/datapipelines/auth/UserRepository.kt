@@ -70,10 +70,17 @@ class UserRepository(
             ).first()
     }
 
-    /** Links an existing account to a (possibly new) OIDC identity on re-login (§4.2). */
+    /**
+     * Links an existing account to a (possibly new) OIDC identity on re-login (§4.2).
+     *
+     * [displayName] refreshes on every login from the ID token's `name` claim — the
+     * long-standing behavior, owner-ratified 2026-08-28 (021 Deviation 3): no profile-edit
+     * feature exists, so there is no user-chosen name to protect; the §6.1 bootstrap
+     * placeholder is replaced by this same refresh at the first real sign-in.
+     */
     fun updateIdentity(
         id: UUID,
-        displayName: String,
+        displayName: String?,
         profilePictureUrl: String?,
         provider: String,
         providerSubject: String,

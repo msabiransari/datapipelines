@@ -2,24 +2,15 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
-import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
-import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiErrors
-import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ObjectNode
-import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -58,59 +49,25 @@ import java.util.UUID
 class PipelineTransferController(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
-    private val validator: PipelineValidator,
+    private val importService: PipelineImportService,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
-    private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
-    /** §5.8 — import. `201` for a new pipeline, `200` when an existing id gained a version. */
-    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
+    /**
+     * §5.8 — import. `201` for a new pipeline, `200` when an existing id gained a version.
+     *
+     * The act itself lives in [PipelineImportService] so the D9 workspace seeder performs the
+     * SAME import; everything left here is the HTTP edge — principal → (workspace, actor), and
+     * the created/updated distinction → status code.
+     */
     @PostMapping("/import")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun import(
         @RequestBody body: String,
     ): ResponseEntity<ApiResponse<JsonNode>> {
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
-        val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedPipelineBody(IllegalArgumentException("not an object"))
-        val requestedId =
-            tree.remove("id")?.takeIf { it.isTextual }?.let { raw ->
-                runCatching { UUID.fromString(raw.asText()) }.getOrNull()
-                    ?: throw ApiException(
-                        PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                        "The import payload's 'id' is not a UUID.",
-                        mapOf("id" to raw.asText().take(MAX_ECHOED_ID_CHARS)),
-                    )
-            }
-        SERVER_FIELDS.forEach(tree::remove)
-
-        val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
-        importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
-        val canonical = serializer.write(pipeline)
-
-        val existing = requestedId?.let { pipelines.findById(workspaceId, it) }
-        val record =
-            if (existing != null) {
-                pipelines.update(workspaceId, existing.id, pipeline, canonical, principal.userId)
-                    ?: throw ApiErrors.pipelineNotFound(existing.id.toString())
-            } else {
-                try {
-                    pipelines.create(
-                        workspaceId,
-                        NewPipeline.from(pipeline, ownerId = principal.userId, id = requestedId ?: UUID.randomUUID()),
-                        canonical,
-                        principal.userId,
-                    )
-                } catch (e: DuplicateKeyException) {
-                    throw ApiException(
-                        PipelineErrorCodes.Import.VERSION_CONFLICT,
-                        "Pipeline id '$requestedId' collides with a deleted pipeline's retained id.",
-                        mapOf("pipeline_id" to requestedId.toString()),
-                        e,
-                    )
-                }
-            }
-        val status = if (existing != null) HttpStatus.OK else HttpStatus.CREATED
-        return ResponseEntity.status(status).body(ApiResponse.of(PipelineResponses.full(record, canonical)))
+        val imported = importService.import(body, principal.requireWorkspace().id, principal.userId)
+        val status = if (imported.created) HttpStatus.CREATED else HttpStatus.OK
+        return ResponseEntity.status(status).body(ApiResponse.of(PipelineResponses.full(imported.record, imported.canonical)))
     }
 
     /** §5.9 — export bundle: pipeline, referenced template versions, manifest. */
@@ -143,49 +100,6 @@ class PipelineTransferController(
         return ApiResponse.of(data)
     }
 
-    /**
-     * Re-labels environment-dependency failures with the §13.2 import codes; every other failure
-     * keeps its §13.1 code and the exhaustive list (§17.2).
-     *
-     * ## Mixed failures (gate C, F10)
-     * When missing-datasource AND missing-template failures occur together, the primary code is
-     * `pipeline.import.missing_datasource` and `details` carries **both** sets —
-     * `missing_datasources` and `missing_templates` — so one response tells the author everything
-     * the environment lacks. The all-same-kind case keeps the single mapped code with its set in
-     * details under the matching key.
-     */
-    private fun importValidation(
-        name: String,
-        result: ValidationResult,
-    ): ValidationResult {
-        if (result.isValid) return result
-        val missingDatasource = result.withCode(PipelineErrorCodes.Validation.UNKNOWN_DATASOURCE)
-        val missingTemplate =
-            result.withCode(PipelineErrorCodes.Validation.TEMPLATE_NOT_FOUND) +
-                result.withCode(PipelineErrorCodes.Validation.TEMPLATE_VERSION_NOT_FOUND)
-        val rest = result.failures - missingDatasource.toSet() - missingTemplate.toSet()
-        if (rest.isNotEmpty()) return result
-        val primaryCode =
-            if (missingDatasource.isNotEmpty()) {
-                PipelineErrorCodes.Import.MISSING_DATASOURCE
-            } else {
-                PipelineErrorCodes.Import.MISSING_TEMPLATE
-            }
-        throw ApiException(
-            primaryCode,
-            "Imported pipeline '$name' has unmet dependencies in this environment.",
-            buildMap {
-                // `path` is the one field every ValidationFailure guarantees; detail keys vary by rule.
-                if (missingDatasource.isNotEmpty()) put("missing_datasources", missingDatasource.map { it.path })
-                if (missingTemplate.isNotEmpty()) put("missing_templates", missingTemplate.map { it.path })
-                put(
-                    "failures",
-                    (missingDatasource + missingTemplate).map { mapOf("code" to it.code, "path" to it.path, "message" to it.message) },
-                )
-            },
-        )
-    }
-
     /** Direct node references plus the transitive library-import closure, deduplicated. */
     private fun referencedTemplates(
         workspaceId: UUID,
@@ -211,15 +125,5 @@ class PipelineTransferController(
         val version = templates.lookupVersion(workspaceId, ref.id, ref.version) ?: return
         templates.findVersion(workspaceId, ref.id, ref.version)?.let(found::add)
         version.imports.forEach { queue.addLast(TemplateRef(it.id, it.version)) }
-    }
-
-    private companion object {
-        val MAPPER = PipelineJson.objectMapper()
-
-        /** Server-assigned fields an import payload may carry from an export; never authoritative. */
-        val SERVER_FIELDS = listOf("version", "owner", "created_at", "updated_at")
-
-        /** Reflected client input is bounded before it reaches an error message. */
-        const val MAX_ECHOED_ID_CHARS = 64
     }
 }

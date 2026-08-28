@@ -101,7 +101,8 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 **First login:** When a user logs in via OIDC for the first time:
 1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token. The email is **normalized to lowercase** before every lookup and store — provider case differences must not fork one human into two rows (or mint a second bootstrap admin, §4.4). If the ID token carries `email_verified: false`, the login is **rejected** (`auth.login.oidc_error`, audited) — an unverified self-registered account at a provider must never reach the email-keyed linking step below, or it takes over the existing account with that email. A provider omitting the claim is treated as vouching for the address.
 2. Checks if a user with that `email` already exists.
-   - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url`. (The user previously logged in via a different provider — link them.)
+   - **Yes:** Updates `provider`, `provider_subject`, `last_login_at`, `profile_picture_url` — and `display_name`, which refreshes from the ID token's `name` claim on **every** login (owner-ratified 2026-08-28: there is no profile-edit feature, so a stored name has no user-chosen referent to protect, and freezing it would leave an IdP rename unrepresentable; revisit if a profile surface ever ships). The §4.4 bootstrap-completion case needs no special handling — the `provider = 'bootstrap'` placeholder name is replaced by this same refresh at the first real sign-in.
+   Grant-wise this step changes nothing: `is_admin` is decided at row creation and nowhere else (§4.4).
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
 3. Checks the email domain allowlist (if configured — see §4.3).
    - Domain not allowlisted: reject login with `auth.login.domain_not_allowed`.
@@ -136,6 +137,16 @@ A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows
 - When a user row is **created** (first provisioning, §4.2) and its lowercase-normalized email matches the configured value (compared case-insensitively), `is_admin` is set true. The grant fires **only at row creation**: a later login changes nothing, the flag is never *revoked* by this path, and after an admin deliberately revokes admin (`auth.user.admin_revoked`, §10.1) this path never re-grants it — re-instating admin is an explicit §16.3 operation.
 - Audit-logged as `auth.user.admin_granted` with actor `bootstrap` (§10.1).
 - If the key is unset, no bootstrap occurs — the deployment simply has no admin until the key is set and that user logs in.
+
+**Pre-provisioning (design 2026-08-16-sample-data §6.1).** When [`datapipelines.bootstrap.datasources-file`](configuration.md#318-bootstrap) is set, startup needs this user to exist *before* anyone has logged in: `datasources.created_by` is `NOT NULL REFERENCES users(id)`, and bootstrap datasource registration runs before the server accepts traffic. So, when no row exists for the configured address (lowercase-normalized, §4.2), one is created with placeholder identity fields — `provider = 'bootstrap'`, `provider_subject` = the email (together satisfying the NOT NULL columns and the `(provider, provider_subject)` uniqueness), `display_name` from the email local-part, `is_active = TRUE`.
+
+This is **not a second grant path.** It is the rule above firing earlier in time: the row is created, so the grant fires, once, with the `auth.user.admin_granted` / actor `bootstrap` audit event. Everything the rule already promised still holds, and each clause is load-bearing here:
+
+- A **restart** finds the row and touches nothing on it — no re-grant, no identity rewrite, not even `updated_at`. An admin who deliberately revoked admin stays revoked.
+- The admin's **first real OIDC login** completes the placeholder through §4.2's linking step: `provider`, `provider_subject`, `profile_picture_url` and — this case only — `display_name` from the `name` claim. It grants nothing.
+- If that admin logs in **before** registration ever runs, §4.2 creates the row and grants there instead; the later pre-provisioning finds it and adds nothing. Either order, exactly one grant and exactly one audit event.
+
+Startup refuses when `datasources-file` is set and this key is not ([Configuration §3.18](configuration.md#318-bootstrap)) — a missing actor would otherwise surface as a foreign-key error mid-startup naming neither key.
 
 **Explicitly rejected: "first user to log in becomes admin."** Combined with the open-provisioning default (§4.3), that rule is a land-grab race on any reachable instance — whoever hits `/login` first owns every datasource credential. Do not reintroduce it as a convenience.
 
@@ -935,6 +946,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-28 | v2.9 | sample data, slice A | **§4.4 pre-provisioning:** when `datapipelines.bootstrap.datasources-file` is set, startup creates the configured bootstrap admin's row before serving traffic (placeholder `provider = 'bootstrap'` / `provider_subject` = the email, `display_name` from the local-part) so bootstrap-registered datasources have a real `created_by`. Grant-at-creation semantics are unchanged — this is the same single path firing earlier, one audit event across provision → restart → login. **§4.2 linking:** the update no longer rewrites `display_name` on every sign-in; it is set at row creation, and refreshed from the ID token's `name` claim only when the login completes a `provider = 'bootstrap'` placeholder |
 | 2026-08-26 | v2.8 | workspaces slice 2 | **Workspace resolution (design §5/§7):** §4.2 step 4 — login stamps `active_workspace` (last-used, else first membership, else freshly provisioned personal workspace under `auto-per-user`); §5.6 — `DP-Workspace` per-request switch, membership-checked (`403 workspace.membership_required`), API-key requests pin the key's workspace and refuse the header (`400 workspace.header_forbidden`); §7.4 — issuance restricted to the creator's workspaces; `workspace.*` codes catalogued in pipeline-contract §13.12. **§11.1:** stock config ships Google only; Microsoft becomes a commented single-tenant example — multi-tenant `/common` documented as unsupported in v1 (Nimbus refuses its `{tenantid}` discovery metadata at startup). |
 | 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |
 | 2026-08-05 | v2.0 | OIDC migration | Replaced local auth with Google/Microsoft OIDC. No passwords stored. Internal JWT issued after OIDC login. Added email domain allowlist. Added Spring Security filter chain configuration. Added OIDC success handler. Users provisioned automatically on first login. |

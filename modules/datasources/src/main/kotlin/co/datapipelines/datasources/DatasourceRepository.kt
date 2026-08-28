@@ -87,6 +87,20 @@ class DatasourceRepository(
                 Boolean::class.java,
             ) ?: false
 
+    /**
+     * Whether ANY row holds [name] — soft-deleted included. `name` is the primary key
+     * (metadata-db §4.10), so a soft-deleted name is permanently taken; bootstrap registration
+     * (datasources §8A) asks this rather than [exists] so it treats a soft-deleted row as
+     * present and skips it, instead of taking the create branch into a PK violation.
+     */
+    fun existsIncludingDeleted(name: String): Boolean =
+        jdbc
+            .queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM datasources WHERE name = :name)",
+                mapOf("name" to name),
+                Boolean::class.java,
+            ) ?: false
+
     /** Every live datasource, name order; optionally narrowed to one [dialect]. */
     fun findAll(dialect: Dialect? = null): List<DatasourceRow> {
         val filter = if (dialect == null) "" else " AND dialect = :dialect"
@@ -154,6 +168,7 @@ class DatasourceRepository(
         .addValue("propertiesJson", propertiesJson(datasource.properties))
         .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
         .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
+        .addValue("isReadonly", datasource.isReadonly)
         .addValue("createdBy", createdBy)
 
     /**
@@ -245,15 +260,24 @@ class DatasourceRepository(
 
         const val SELECT_COLUMNS = "SELECT $COLUMNS FROM datasources"
 
+        /**
+         * `is_readonly` is written on INSERT only. The REST create path never sets
+         * [Datasource.isReadonly] (it is not in the §3.1 payload vocabulary — flag writes over
+         * the API belong to the surfaces slice), so for an API caller this column takes the
+         * entity default `false`, exactly the value the DB default already gave it. Bootstrap
+         * registration is the one caller that sets it true. UPDATE still never touches it: a
+         * PUT must not be able to flip a readonly datasource writable.
+         */
         val INSERT_SQL =
             """
             INSERT INTO datasources
                 (name, display_name, description, dialect, jdbc_url, username, password_encrypted,
-                 properties_json, query_timeout_seconds, introspection_include_schemas_json, created_by)
+                 properties_json, query_timeout_seconds, introspection_include_schemas_json,
+                 is_readonly, created_by)
             VALUES
                 (:name, :displayName, :description, :dialect, :jdbcUrl, :username, :passwordEncrypted,
                  CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
-                 CAST(:introspectionIncludeSchemas AS jsonb), :createdBy)
+                 CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :createdBy)
             RETURNING $COLUMNS
             """.trimIndent()
 

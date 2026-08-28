@@ -7,6 +7,10 @@ dependencies {
     implementation(libs.hikaricp)
     implementation(libs.spring.boot.starter.jdbc) // DatasourceRepository (§8.1)
     implementation(libs.jackson.module.kotlin) // properties_json (de)serialization (§4.10)
+    // Bootstrap datasources file (§8A). Same Jackson stack, YAML backend — already on the
+    // runtime classpath via spring-boot-starter; declared here because this module now
+    // COMPILES against YAMLFactory (module-structure §4.2: no reliance on transitive leakage).
+    implementation(libs.jackson.dataformat.yaml)
     // No BouncyCastle (removed 2026-08-07, security review MEDIUM-6 — see §5.4).
     // CredentialEncryptor uses the JDK's SunJCE `AES/GCM/NoPadding` directly.
 
