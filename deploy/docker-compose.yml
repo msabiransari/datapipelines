@@ -51,6 +51,17 @@ services:
       # (auth.md §4.3 — set it on any internal deployment).
       DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:-}
       DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:-}
+
+      # Workspace provisioning (configuration.md §3.17). Compose defaults MUST
+      # mirror application.yml's defaults — an empty string here would override
+      # the app default and break enum/boolean binding.
+      # auto-per-user = demo shape: first login provisions a personal workspace.
+      # NOTE (022 owns the workspace-creation surface): under self-serve there is
+      # no UI/API to create a workspace yet, so a fresh deployment that wants
+      # usable workspaces before 022 lands should set auto-per-user.
+      DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:-self-serve}
+      DATAPIPELINES_WORKSPACES_OPEN_JOIN: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:-false}
+      DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:-true}
     volumes:
       - ./application.yml:/application.yml:ro
     depends_on:
