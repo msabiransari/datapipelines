@@ -44,6 +44,13 @@ services:
       # application.yml (auth.md §11.1; multi-tenant /common is unsupported in v1):
       # MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
       # MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
+
+      # Optional (empty = off). Bootstrap admin: this email's user row is created
+      # with is_admin at FIRST login (auth.md §4.4 — a fresh deployment otherwise
+      # has no admin path). Allowlist: restrict login to these email domains
+      # (auth.md §4.3 — set it on any internal deployment).
+      DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:-}
+      DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:-}
     volumes:
       - ./application.yml:/application.yml:ro
     depends_on:
