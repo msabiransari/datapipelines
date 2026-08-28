@@ -135,7 +135,12 @@ class OidcSuccessHandler(
             secure = true
             path = "/"
             maxAge = (authProperties.jwt.ttlHours * SECONDS_PER_HOUR).toInt()
-            setAttribute("SameSite", "Strict")
+            // Lax, NOT Strict: the post-login landing arrives over the cross-site
+            // redirect chain from the IdP, where Strict withholds the cookie — and a
+            // browser reload of that landing re-uses the cross-site initiator, so the
+            // user stays logged out forever (observed live 2026-08-28, T33). Lax still
+            // withholds the cookie on cross-site POSTs; CSRF covers state changes.
+            setAttribute("SameSite", "Lax")
         }
 
     companion object {

@@ -74,7 +74,8 @@ class OidcSuccessHandlerTest {
         cookie.value shouldBe "the.jwt.token"
         cookie.isHttpOnly shouldBe true
         cookie.secure shouldBe true
-        cookie.getAttribute("SameSite") shouldBe "Strict"
+        // Lax, never Strict: Strict breaks the post-IdP landing + its reloads (T33)
+        cookie.getAttribute("SameSite") shouldBe "Lax"
         cookie.path shouldBe "/"
         cookie.maxAge shouldBe 8 * 3600
         response.redirectedUrl shouldBe "/"

@@ -281,7 +281,7 @@ The login page shows **only the providers the deployment configured** — one bu
 5. OidcSuccessHandler (our custom code):
    → user = userService.findOrCreateByEmail(claims, registrationId)
    → jwt = jwtService.issue(user)
-   → response.setCookie("dp_session", jwt, httpOnly=true, secure=true, sameSite="Strict")
+   → response.setCookie("dp_session", jwt, httpOnly=true, secure=true, sameSite="Lax")
    → response.sendRedirect("/")
 ```
 
@@ -338,7 +338,10 @@ class OidcSuccessHandler(
         val cookie = Cookie("dp_session", jwt).apply {
             isHttpOnly = true
             secure = true
-            setAttribute("SameSite", "Strict")
+            // Lax, not Strict: Strict withholds the cookie on the cross-site redirect
+            // chain back from the IdP (and on reloads of that landing), so every login
+            // would end on a 401. CSRF protection covers state-changing requests.
+            setAttribute("SameSite", "Lax")
             maxAge = authConfig.jwt.ttlHours * 3600
             path = "/"
         }
