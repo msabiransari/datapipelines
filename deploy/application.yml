@@ -8,8 +8,14 @@ datapipelines:
           client-secret: ${GOOGLE_CLIENT_SECRET}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
-        - name: microsoft
-          client-id: ${MICROSOFT_CLIENT_ID}
-          client-secret: ${MICROSOFT_CLIENT_SECRET}
-          issuer-uri: https://login.microsoftonline.com/common/v2.0
-          display-name: "Sign in with Microsoft"
+        # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the
+        # issuer-uri MUST name your tenant; the multi-tenant `/common` endpoint
+        # cannot work via OIDC discovery (its metadata carries the `{tenantid}`
+        # template, which the discovery client refuses — startup fails).
+        # Uncomment and set MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET (and
+        # the matching env lines in docker-compose.yml) to enable:
+        # - name: microsoft
+        #   client-id: ${MICROSOFT_CLIENT_ID}
+        #   client-secret: ${MICROSOFT_CLIENT_SECRET}
+        #   issuer-uri: https://login.microsoftonline.com/{tenant-id}/v2.0
+        #   display-name: "Sign in with Microsoft"

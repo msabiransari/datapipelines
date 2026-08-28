@@ -40,9 +40,10 @@ services:
       # REQUIRED: at least one OIDC provider (application.yml below).
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
-      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
-      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      # Microsoft — only with the single-tenant provider block uncommented in
+      # application.yml (auth.md §11.1; multi-tenant /common is unsupported in v1):
+      # MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
+      # MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
     volumes:
       - ./application.yml:/application.yml:ro
     depends_on:
