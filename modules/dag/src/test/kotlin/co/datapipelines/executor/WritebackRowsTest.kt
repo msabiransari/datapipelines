@@ -74,7 +74,6 @@ class WritebackRowsTest {
     fun `a missing target reports writeback_target_missing, as the cursor path does`() {
         val datasource = h2Datasource("wb", emptyList())
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
-
         val thrown =
             shouldThrow<DatapipelinesException> {
                 runner.writebackRows(
@@ -85,6 +84,28 @@ class WritebackRowsTest {
             }
 
         thrown.code shouldBe PipelineErrorCodes.Node.WRITEBACK_TARGET_MISSING
+    }
+
+    @Test
+    fun `a readonly target fails datasource_readonly on the composition path too (workspaces §6 shape 3)`() {
+        // The parent PIPELINE node's rows land here via writebackRows — the backstop lives in
+        // the shared writeAll shell, so BOTH row sources are behind it by construction.
+        val datasource =
+            h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)")).copy(isReadonly = true)
+        val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                runner.writebackRows(
+                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                    sequenceOf(listOf(1)),
+                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                )
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+        thrown.details["datasource"] shouldBe "wb"
+        thrown.details["table"] shouldBe "tgt"
     }
 
     @Test

@@ -27,6 +27,21 @@ interface DatasourceRegistry {
     /** The live datasource under [name], or null when not registered or soft-deleted. */
     fun get(name: String): Datasource?
 
+    /**
+     * The live registry entry for [name] **as of this call**, bypassing the §6.3 metadata
+     * cache: the executor's readonly backstop reads this (workspaces design §6 layer 2a, D10)
+     * so a datasource flagged readonly AFTER a pipeline was saved fails at the NEXT execution,
+     * not at the next cache expiry — a flip that lands by manual SQL or a restore never
+     * crosses the save boundary that invalidates the cache, so the cached entry would
+     * otherwise outlive the flip by up to the 60s TTL. Null when no live datasource has this
+     * name; the caller treats null as "no readonly signal", never as not-found (existence is
+     * [get]'s question).
+     *
+     * Defaults to [get] — correct for caches that are already live-through, and for tests;
+     * [DefaultDatasourceRegistry] overrides it with the direct repository read.
+     */
+    fun getLive(name: String): Datasource? = get(name)
+
     /** Whether a live datasource is registered under [name]. */
     fun exists(name: String): Boolean
 

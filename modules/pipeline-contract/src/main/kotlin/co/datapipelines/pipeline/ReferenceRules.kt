@@ -57,7 +57,8 @@ internal object ReferenceRules {
             }
 
             is NodeSource.Datasource -> {
-                datasources.dialectOf(source.name) ?: run {
+                val facts = datasources.describe(source.name)
+                if (facts == null) {
                     into.add(
                         Validation.UNKNOWN_DATASOURCE,
                         "nodes[$index].source",
@@ -65,8 +66,27 @@ internal object ReferenceRules {
                             "which is not a datasource registered in this environment.",
                         mapOf("node" to node.id.truncateForError(), "datasource" to source.name.truncateForError()),
                     )
-                    null
+                    return null
                 }
+                // Workspaces §6 shape 1/2: a DML or DDL node SOURCING a readonly datasource is
+                // a write-shaped use. DQL reads are untouched — the check is on the node type,
+                // never on the datasource alone.
+                if (facts.readonly && (node.type == NodeType.DML || node.type == NodeType.DDL)) {
+                    into.add(
+                        Validation.DATASOURCE_READONLY,
+                        "nodes[$index].source",
+                        "Node '${node.id.truncateForError()}' is a ${node.type.wire} node sourcing " +
+                            "'${source.name.truncateForError()}', which is a readonly datasource — " +
+                            "write-shaped uses of it are forbidden.",
+                        mapOf(
+                            "node" to node.id.truncateForError(),
+                            "datasource" to source.name.truncateForError(),
+                            // Lowercase wire value, like every other machine-readable detail.
+                            "shape" to "${node.type.wire.lowercase()}_source",
+                        ),
+                    )
+                }
+                facts.dialect
             }
         }
 
@@ -79,14 +99,32 @@ internal object ReferenceRules {
     ) {
         val output = node.output as? NodeOutput.Datasource ?: return
         if (output.datasource.isBlank()) return
-        if (datasources.dialectOf(output.datasource) != null) return
-        into.add(
-            Validation.UNKNOWN_DATASOURCE,
-            "nodes[$index].output.datasource",
-            "Node '${node.id.truncateForError()}' writes back to '${output.datasource.truncateForError()}', " +
-                "which is not a datasource registered in this environment.",
-            mapOf("node" to node.id.truncateForError(), "datasource" to output.datasource.truncateForError()),
-        )
+        val facts =
+            datasources.describe(output.datasource) ?: run {
+                into.add(
+                    Validation.UNKNOWN_DATASOURCE,
+                    "nodes[$index].output.datasource",
+                    "Node '${node.id.truncateForError()}' writes back to '${output.datasource.truncateForError()}', " +
+                        "which is not a datasource registered in this environment.",
+                    mapOf("node" to node.id.truncateForError(), "datasource" to output.datasource.truncateForError()),
+                )
+                return
+            }
+        // Workspaces §6 shape 3: an output.target: "datasource" block names a write target for
+        // ANY node type (DQL write-back and PIPELINE alike) — readonly refuses it regardless.
+        if (facts.readonly) {
+            into.add(
+                Validation.DATASOURCE_READONLY,
+                "nodes[$index].output.datasource",
+                "Node '${node.id.truncateForError()}' writes back to '${output.datasource.truncateForError()}', " +
+                    "which is a readonly datasource — write-shaped uses of it are forbidden.",
+                mapOf(
+                    "node" to node.id.truncateForError(),
+                    "datasource" to output.datasource.truncateForError(),
+                    "shape" to "output_target",
+                ),
+            )
+        }
     }
 
     private fun checkTemplate(

@@ -297,9 +297,15 @@ class InMemoryCancellationFlags : CancellationFlags {
  *
  * Real driver, real pool semantics, real `Statement.cancel()` — the parts a mocked `Connection`
  * would quietly fake.
+ *
+ * [liveEntries] is what [getLive] serves — by default the same map, which is the
+ * "cache-through" shape. A workspaces-D10 test passes a DIFFERENT map so the cached view
+ * ([get]) and the live view ([getLive]) disagree exactly the way a readonly flag flipped in
+ * the DB after a pipeline was saved makes them disagree.
  */
 class FakeDatasourceRegistry(
     private val datasources: Map<String, Datasource>,
+    private val liveEntries: Map<String, Datasource> = datasources,
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -308,6 +314,8 @@ class FakeDatasourceRegistry(
     override fun list(dialect: Dialect?): List<Datasource> = datasources.values.toList()
 
     override fun get(name: String): Datasource? = datasources[name]
+
+    override fun getLive(name: String): Datasource? = liveEntries[name]
 
     override fun exists(name: String): Boolean = name in datasources
 

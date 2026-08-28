@@ -220,6 +220,79 @@ class NodeRunnerTest {
                 PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
         }
 
+    // ------------------------------- readonly backstop (workspaces §6 layer 2a, D10)
+
+    @Test
+    fun `a DML node sourcing a readonly datasource fails datasource_readonly before connecting`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("ro", listOf("CREATE TABLE t (n INT)")).copy(isReadonly = true)
+            val registry = FakeDatasourceRegistry(mapOf("ro" to source))
+            val runner = runner(sql = "INSERT INTO t VALUES (1)", registry = registry)
+
+            val error = failureOf(runner, Fixtures.node("dml", type = NodeType.DML, source = "ro"))
+
+            error.code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+            error.details["datasource"] shouldBe "ro"
+            error.details["node_type"] shouldBe "DML"
+            // The refusal happens before a connection is leased — no pool traffic for a refused write.
+            registry.leased.get() shouldBe 0
+        }
+
+    @Test
+    fun `a DDL node sourcing a readonly datasource fails datasource_readonly`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("roD", listOf("CREATE TABLE t (n INT)")).copy(isReadonly = true)
+            val registry = FakeDatasourceRegistry(mapOf("roD" to source))
+            val runner = runner(sql = "CREATE TABLE made (n INT)", registry = registry)
+
+            failureOf(runner, Fixtures.node("ddl", type = NodeType.DDL, source = "roD")).code shouldBe
+                PipelineErrorCodes.Node.DATASOURCE_READONLY
+        }
+
+    @Test
+    fun `a readonly flag flipped after the save is caught by the LIVE read, not the cached one (D10)`() =
+        runBlocking<Unit> {
+            // get() serves the pre-flip (writable) entry the save validated against; getLive()
+            // serves the post-flip row — the shape of a DB-level flag flip the metadata cache
+            // has not seen. The backstop must act on the live one or the flip window ships the write.
+            val writable = h2Datasource("flipped", listOf("CREATE TABLE t (n INT)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    datasources = mapOf("flipped" to writable),
+                    liveEntries = mapOf("flipped" to writable.copy(isReadonly = true)),
+                )
+            val runner = runner(sql = "INSERT INTO t VALUES (1)", registry = registry)
+
+            failureOf(runner, Fixtures.node("dml", type = NodeType.DML, source = "flipped")).code shouldBe
+                PipelineErrorCodes.Node.DATASOURCE_READONLY
+        }
+
+    @Test
+    fun `DQL reads from a readonly datasource are untouched by the backstop`() =
+        runBlocking<Unit> {
+            val source =
+                h2Datasource("roq", listOf("CREATE TABLE q (n INT)", "INSERT INTO q VALUES (1)"))
+                    .copy(isReadonly = true)
+            val registry = FakeDatasourceRegistry(mapOf("roq" to source))
+            val runner = runner(sql = "SELECT n FROM q", registry = registry)
+
+            runner
+                .run(ExecutableNode.from(Fixtures.node("read", source = "roq")), context())
+                .rowsOut shouldBe 1
+        }
+
+    @Test
+    fun `a write-back naming a readonly datasource fails datasource_readonly`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("wsrc", listOf("CREATE TABLE s (n INT)", "INSERT INTO s VALUES (1)"))
+            val target = h2Datasource("wtgt", listOf("CREATE TABLE tgt (n INT)")).copy(isReadonly = true)
+            val registry = FakeDatasourceRegistry(mapOf("wsrc" to source, "wtgt" to target))
+            val runner = runner(sql = "SELECT n FROM s", registry = registry)
+            val node = Fixtures.node("wb", source = "wsrc", output = NodeOutput.Datasource("wtgt", "tgt", WriteMode.APPEND))
+
+            failureOf(runner, node).code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+        }
+
     @Test
     fun `an unreachable datasource is datasource_connection_failed`() =
         runBlocking<Unit> {

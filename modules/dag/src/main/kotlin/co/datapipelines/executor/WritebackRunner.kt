@@ -98,6 +98,7 @@ class JdbcWritebackRunner(
         val datasource =
             registry.get(output.datasource)
                 ?: throw datasourceNotFound(output.datasource)
+        refuseIfReadonly(output)
         // Both identifier guards report the WRITE-BACK phase code: a bad generated identifier here
         // is a write-back failure, never the save-time `pipeline.validation.invalid_identifier`,
         // which is an HTTP-400 code and must not surface mid-execution (§8.2).
@@ -116,6 +117,18 @@ class JdbcWritebackRunner(
                 throw mapWriteFailure(e, output)
             }
         }
+    }
+
+    /**
+     * Workspaces design §6 layer 2a (D10): the live-entry readonly re-check, in the one shell
+     * BOTH row sources funnel through — the cursor [writeback] path and the composition
+     * [writebackRows] path — so every `output.target: "datasource"` write is behind the
+     * backstop regardless of who produced the rows. Reads the LIVE registry entry (past the
+     * metadata cache), so a flip between save and execution fails here.
+     */
+    private fun refuseIfReadonly(output: NodeOutput.Datasource) {
+        val live = registry.getLive(output.datasource) ?: return
+        if (live.isReadonly) throw datasourceReadonly(output.datasource, output.table)
     }
 
     /**
@@ -290,6 +303,21 @@ class JdbcWritebackRunner(
             message = "Write-back target datasource '$name' is not registered.",
             details = mapOf("datasource" to name),
         )
+
+    /**
+     * §13.4 sibling of `datasource_not_found`: the write-back target resolved at write-time,
+     * but its live entry is readonly now (D10 flip or a stored version that predates the flag).
+     */
+    private fun datasourceReadonly(
+        name: String,
+        table: String,
+    ) = DatapipelinesException(
+        code = PipelineErrorCodes.Node.DATASOURCE_READONLY,
+        message =
+            "Write-back target datasource '$name' is readonly — writing '$table' to it is forbidden " +
+                "(the flag was set after this pipeline version was saved, or the version predates it).",
+        details = mapOf("datasource" to name, "table" to table),
+    )
 
     /**
      * "Relation does not exist", across the dialects v1 supports.

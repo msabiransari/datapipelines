@@ -96,6 +96,126 @@ class ReferenceRulesTest {
         validate(pipeline).codes shouldContainExactly listOf(Validation.UNKNOWN_DATASOURCE)
     }
 
+    // ------------------------------------------- readonly (workspaces design §6, D6)
+
+    /** The one stub every readonly test below uses: `pg-prod` exists and is flagged readonly. */
+    private fun readonlyRegistry() = StubDatasources(readonly = setOf("pg-prod"))
+
+    @Test
+    fun `a DML node sourcing a readonly datasource is rejected with the details triple`() {
+        val pipeline =
+            Fixtures.pipeline(nodes = listOf(Fixtures.node(type = NodeType.DML, source = "pg-prod")))
+
+        val failure =
+            validate(
+                pipeline,
+                datasources = readonlyRegistry(),
+            ).withCode(Validation.DATASOURCE_READONLY).single()
+
+        failure.path shouldBe "nodes[0].source"
+        failure.details["node"] shouldBe "fetch_orders"
+        failure.details["datasource"] shouldBe "pg-prod"
+        failure.details["shape"] shouldBe "dml_source"
+    }
+
+    @Test
+    fun `a DDL node sourcing a readonly datasource is rejected with the ddl_source shape`() {
+        val pipeline =
+            Fixtures.pipeline(nodes = listOf(Fixtures.node(type = NodeType.DDL, source = "pg-prod")))
+
+        val failure =
+            validate(
+                pipeline,
+                datasources = readonlyRegistry(),
+            ).withCode(Validation.DATASOURCE_READONLY).single()
+
+        failure.details["shape"] shouldBe "ddl_source"
+    }
+
+    @Test
+    fun `an output target naming a readonly datasource is rejected regardless of node type`() {
+        val pipeline =
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.node(
+                            output = NodeOutput.Datasource("pg-prod", "cache", WriteMode.APPEND),
+                        ),
+                    ),
+            )
+
+        val failure =
+            validate(
+                pipeline,
+                datasources = readonlyRegistry(),
+            ).withCode(Validation.DATASOURCE_READONLY).single()
+
+        failure.path shouldBe "nodes[0].output.datasource"
+        failure.details["shape"] shouldBe "output_target"
+    }
+
+    @Test
+    fun `a PIPELINE node's datasource output target is registry-checked the same way`() {
+        // §12.9 owns a PIPELINE node's source/template; its `output` block is a standard §4.7
+        // block, so shape 3 fires on it too (the resolver answers null here — the composition
+        // failures are not what this test asserts on).
+        val pipelineNode =
+            Node(
+                id = "run_child",
+                description = "Runs the child pipeline.",
+                type = NodeType.PIPELINE,
+                source = "",
+                template = TemplateRef(),
+                output = NodeOutput.Datasource("pg-prod", "cache", WriteMode.APPEND),
+                dependsOn = emptyList(),
+                pipeline = PipelineNodeRef("child", 1),
+                parameters = null,
+            )
+
+        validate(Fixtures.pipeline(nodes = listOf(pipelineNode)), datasources = readonlyRegistry()).codes shouldContain
+            Validation.DATASOURCE_READONLY
+    }
+
+    @Test
+    fun `a DQL-only pipeline against the same readonly datasource saves clean`() {
+        val pipeline = Fixtures.pipeline(nodes = listOf(Fixtures.node(source = "pg-prod")))
+
+        validate(pipeline, datasources = readonlyRegistry()).failures shouldBe emptyList()
+    }
+
+    @Test
+    fun `a tempdb write against a readonly datasource elsewhere is untouched (D7)`() {
+        // DML into tempdb while a DIFFERENT node reads the readonly datasource: neither is a
+        // write-shaped use of it.
+        val pipeline =
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.node(id = "read", source = "pg-prod", output = NodeOutput.Tempdb("src")),
+                        Fixtures.node(
+                            id = "write_temp",
+                            type = NodeType.DML,
+                            source = "tempdb",
+                            template = TemplateRef("h2_write.sql", 1),
+                            dependsOn = listOf("read"),
+                        ),
+                    ),
+            )
+
+        validate(
+            pipeline,
+            datasources = readonlyRegistry(),
+            templates =
+                StubTemplates(
+                    lookups =
+                        mapOf(
+                            "fetch_orders.sql" to TemplateLookup.Found(Dialect.POSTGRES),
+                            "h2_write.sql" to TemplateLookup.Found(Dialect.H2),
+                        ),
+                ),
+        ).failures shouldBe emptyList()
+    }
+
     @Test
     fun `a dry render that hits an undeclared variable is rejected at save time (D3)`() {
         val templates =

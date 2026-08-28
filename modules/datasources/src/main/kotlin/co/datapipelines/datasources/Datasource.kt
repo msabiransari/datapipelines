@@ -31,6 +31,22 @@ data class Datasource(
     val queryTimeoutSeconds: Int? = null,
     val properties: DatasourceProperties = DatasourceProperties(),
     /**
+     * The V4 `is_readonly` column (metadata-db §4.10; workspaces design §6, D6): forbids the
+     * three write-shaped uses of this datasource in the pipeline contract — a `DML`/`DDL`
+     * node's `source`, and any node's `output.target: "datasource"`. DQL reads and everything
+     * `tempdb` are untouched.
+     *
+     * **Read-path only in this slice**: rows acquire the flag through SQL/fixtures — the
+     * API/UI write surface (flag on create/update, `global`/`readonly` admin gates) is the
+     * surfaces slice, and nothing in this module's save path sets or clears it (a
+     * create/UPDATE statement leaves the column at its stored value).
+     *
+     * Semantics, not containment: JDBC read-only enforcement varies by driver, so a
+     * datasource whose data must not change still gets a SELECT-only DB user regardless
+     * (datasources.md §5.7).
+     */
+    val isReadonly: Boolean = false,
+    /**
      * §7A introspection include-schemas allowlist (§3.3): schema names exempt from the
      * dialect's system-schema exclusion in ALL THREE introspection operations. The escape
      * hatch for the exclusion floors' one known blind spot — a prefix entry like Oracle's
@@ -96,7 +112,7 @@ data class Datasource(
      */
     override fun toString(): String =
         "Datasource(name=$name, dialect=${dialect.wire}, jdbcUrl=$jdbcUrl, username=$username, " +
-            "password_set=${password != null}, queryTimeoutSeconds=$queryTimeoutSeconds)"
+            "password_set=${password != null}, queryTimeoutSeconds=$queryTimeoutSeconds, isReadonly=$isReadonly)"
 }
 // The `password_set` field of a GET response is derived at the web layer from row existence:
 // every persisted datasource has a NOT NULL `password_encrypted` (metadata-db §4.10), so a

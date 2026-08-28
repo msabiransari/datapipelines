@@ -106,6 +106,17 @@ object PipelineErrorCodes {
         /** §12.5 — every `source` (except `tempdb`) and every `output.datasource` is registered. */
         const val UNKNOWN_DATASOURCE = "pipeline.validation.unknown_datasource"
 
+        /**
+         * §12.5 — no write-shaped use names a readonly datasource (workspaces design §6, D6).
+         *
+         * The three and only three write shapes: a `DML` node's `source`, a `DDL` node's
+         * `source`, and any node's `output.target: "datasource"`. `details` carries the node
+         * id, the datasource name, and which shape fired (`dml_source` / `ddl_source` /
+         * `output_target`) — the agent needs the pointer, not three enum values. DQL reads and
+         * everything `tempdb` are untouched.
+         */
+        const val DATASOURCE_READONLY = "pipeline.validation.datasource_readonly"
+
         /** §12.6 — every `template.id` exists in the template registry. */
         const val TEMPLATE_NOT_FOUND = "pipeline.validation.template_not_found"
 
@@ -228,6 +239,15 @@ object PipelineErrorCodes {
         const val TEMPLATE_NOT_FOUND = "pipeline.node.template_not_found"
         const val TEMPLATE_RENDER_FAILED = "pipeline.node.template_render_failed"
         const val DATASOURCE_NOT_FOUND = "pipeline.node.datasource_not_found"
+
+        /**
+         * §13.4 — a write-shaped node reached execution against a datasource whose live
+         * registry entry is readonly (workspaces design §6 layer 2a, D10). Same HTTP class and
+         * shape as [DATASOURCE_NOT_FOUND]: the datasource resolved at write-time, but the flag
+         * flipped (or the stored version predates it) — the backstop re-checks the LIVE entry
+         * at node execution time so the flip window between save and run cannot ship a write.
+         */
+        const val DATASOURCE_READONLY = "pipeline.node.datasource_readonly"
         const val DATASOURCE_CONNECTION_FAILED = "pipeline.node.datasource_connection_failed"
         const val QUERY_EXECUTION_FAILED = "pipeline.node.query_execution_failed"
         const val STAGING_FAILED = "pipeline.node.staging_failed"

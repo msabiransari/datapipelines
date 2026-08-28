@@ -362,6 +362,12 @@ internal object RefusedPropertyKeys {
      *
      * `exceptionOverrideClassName` is here per §5.6: HikariCP instantiates whatever class it
      * names, so it is a class-loading surface, not a tuning knob.
+     *
+     * `readOnly` is here per workspaces design §6 layer 2b (D6): the flag is the server's to
+     * derive from the entity — `config.isReadOnly = datasource.isReadonly` — so an operator
+     * passthrough must not flip it EITHER way on ANY datasource (silently hardening a writable
+     * one would be as much a lie as silently un-hardening a readonly one; both directions are
+     * refused with `datasource.validation.properties_invalid`).
      */
     val SERVER_MANAGED =
         setOf(
@@ -376,6 +382,7 @@ internal object RefusedPropertyKeys {
             "datasource",
             "datasourcejndi",
             "exceptionoverrideclassname",
+            "readonly",
         )
 
     /**

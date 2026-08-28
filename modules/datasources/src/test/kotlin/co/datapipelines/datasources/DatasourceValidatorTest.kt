@@ -182,6 +182,52 @@ class DatasourceValidatorTest {
         result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain "jdbcUrl"
     }
 
+    // --------------------------- readOnly refusal (workspaces design §6 layer 2b, §5.6)
+
+    @Test
+    fun `properties-dot-hikari readOnly is refused BOTH ways - hardening a writable datasource`() {
+        // Direction 1: an operator trying to READONLY-harden a writable datasource from
+        // properties — refused, because the flag is the entity's (the API/admin surface), and a
+        // properties-derived one would be a second source of truth the executor never sees.
+        val result =
+            validator.validate(
+                Fixtures.h2(properties = DatasourceProperties(hikari = mapOf("readOnly" to true))),
+                isCreate = true,
+            )
+
+        result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain "readOnly"
+    }
+
+    @Test
+    fun `properties-dot-hikari readOnly is refused BOTH ways - un-hardening a readonly datasource`() {
+        // Direction 2: the dangerous one — an operator flipping readOnly FALSE on a datasource
+        // the server would otherwise lease read-only connections for.
+        val result =
+            validator.validate(
+                Fixtures.h2(
+                    isReadonly = true,
+                    properties = DatasourceProperties(hikari = mapOf("readOnly" to false)),
+                ),
+                isCreate = true,
+            )
+
+        result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain "readOnly"
+    }
+
+    @Test
+    fun `readOnly is refused under the jdbc namespace too - both carriers, identically`() {
+        // §5.6: the URL and the property map are validated against the same union — the
+        // server-managed set covers both carriers, and the case-insensitive variant is caught
+        // with it.
+        val result =
+            validator.validate(
+                Fixtures.h2(properties = DatasourceProperties(jdbc = mapOf("readonly" to "true"))),
+                isCreate = true,
+            )
+
+        result.errors.single { it.code == DatasourceErrorCodes.PROPERTIES_INVALID }.field shouldContain "readonly"
+    }
+
     @Test
     fun `a server-managed key under jdbc is also rejected`() {
         val result =

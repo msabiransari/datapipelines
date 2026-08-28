@@ -3,6 +3,7 @@ package co.datapipelines.datasources
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -89,6 +90,66 @@ class DatasourceRegistryIntegrationTest {
                 }
             }
         }
+    }
+
+    // ------------------ readonly flag (workspaces design §6; V4 column, read-path this slice)
+
+    @Test
+    fun `is_readonly round-trips from the row and a save neither sets nor clears it`() {
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "flagged", password = "pw"), owner)
+        // The flag arrives by SQL/fixtures in this slice — flip it at the row level.
+        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'flagged'", emptyMap<String, Any>())
+
+        registry.get("flagged").shouldNotBeNull().isReadonly shouldBe true
+
+        // A subsequent save crosses the update path, which has NO is_readonly column — the
+        // stored flag survives an unrelated PUT untouched (the write surface is a later slice).
+        registry.save(Fixtures.h2(name = "flagged", password = "pw2"), owner)
+        jdbc.queryForObject(
+            "SELECT is_readonly FROM datasources WHERE name = 'flagged'",
+            emptyMap<String, Any>(),
+            Boolean::class.java,
+        ) shouldBe true
+    }
+
+    @Test
+    fun `getLive sees a row-level readonly flip immediately - past the metadata cache (D10)`() {
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "flippy", password = "pw"), owner)
+        // Warm the cache with the writable entry — this is exactly what save-time validation
+        // read when the pipeline was saved.
+        registry.get("flippy").shouldNotBeNull().isReadonly shouldBe false
+
+        // A manual SQL flip never crosses the save boundary, so no invalidation fires; within
+        // the 60s TTL the cached get() still serves the pre-flip entry — but the executor's
+        // LIVE read must see the flip NOW, or the D10 flip window ships the write.
+        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'flippy'", emptyMap<String, Any>())
+
+        registry.getLive("flippy").shouldNotBeNull().isReadonly shouldBe true
+    }
+
+    @Test
+    fun `a readonly row builds a read-only pool - real HikariConfig and pool build (layer 2b)`() {
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "ro_pool", password = "pw"), owner)
+        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'ro_pool'", emptyMap<String, Any>())
+
+        // The pool factory reloads exactly this row (past the cache) and re-attaches the
+        // decrypted credential (§7.4 — getLive never carries it); the adapter is where the
+        // flag becomes Hikari's. Proven on a REAL HikariConfig AND a real HikariDataSource
+        // built from it — an assertion on a mocked adapter would prove the mock.
+        val live = registry.getLive("ro_pool").shouldNotBeNull()
+        live.isReadonly shouldBe true
+        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(password = "pw"))
+        config.isReadOnly shouldBe true
+        config.initializationFailTimeout = -1
+        HikariDataSource(config).use { pool -> pool.isReadOnly shouldBe true }
+
+        // Deliberately NOT asserting the leased CONNECTION's isReadOnly: verified against the
+        // pinned HikariCP 6.3.0 + H2 2.3.232, the pool-level flag is not propagated to
+        // `Connection.setReadOnly` on lease — which is exactly why §5.7 claims the pool flag
+        // only, as defense in depth, and puts the real boundary on the SELECT-only DB user.
     }
 
     @Test
