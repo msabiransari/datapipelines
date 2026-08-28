@@ -485,6 +485,99 @@ In v1.1+, the system can poll datasources on a schedule and surface health in th
 
 ---
 
+## 8A. Bootstrap registration (config-declared datasources)
+
+A deployment can declare datasources in a file and have the app register them at startup:
+[`datapipelines.bootstrap.datasources-file`](configuration.md#318-bootstrap), unset = off. The
+mechanism is generic (IaC-style environment setup); the datapipelines.co demo is its first user,
+registering the sample databases as `global` + `readonly`.
+
+### 8A.1 File shape
+
+The `POST /api/v1/datasources` field vocabulary of §3.1, plus two flags. Unknown keys are a
+startup refusal, not a silent skip — a mistyped `jdbc_ur` would otherwise register a datasource
+with no URL that fails at first query.
+
+```yaml
+# /etc/datapipelines/bootstrap-datasources.yml
+datasources:
+  - name: sample-trips
+    display_name: "NYC Taxi Trips (sample)"      # optional; defaults to `name`
+    dialect: POSTGRES
+    jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
+    username: dp_demo_ro
+    password: ${SAMPLE_PG_PASSWORD}
+    readonly: true                               # writes `is_readonly` (§5.7)
+    global: true                                 # required, and must be true in v1
+  - name: sample-reference
+    dialect: SQLITE
+    jdbc_url: jdbc:sqlite:/srv/sample/nyc_reference.db
+    username: ""
+    password: ""
+    properties:
+      jdbc:
+        open_mode: "1"                           # xerial read-only open mode — see §8A.4
+    readonly: true
+    global: true
+```
+
+`readonly: true` writes `datasources.is_readonly`, so every §5.7 enforcement layer applies to a
+bootstrapped datasource exactly as to one created over the API. `global: true` means
+`workspace_id NULL`.
+
+**`global` is required and must be `true`.** The flag is written explicitly rather than defaulted
+because registration runs before any workspace exists, so there is no answer to "which workspace
+does a non-global entry bind to". `global: false` and a missing `global` are both parse-time
+refusals, with different messages; requiring the word means a file written for a later version
+cannot be silently read as global by this one.
+
+### 8A.2 `${ENV_VAR}` resolution
+
+Secrets never live in the file. Every string in the tree — not just `password`; a passphrase is as
+likely to sit in `properties.jdbc` — has its `${NAME}` placeholders resolved against the **process
+environment** at read time. This is the app's own substitution, not Spring's: the file is runtime
+data named by a config key, read from disk after the context is built, so `${...}` in it means
+nothing to Spring's placeholder resolution.
+
+A placeholder whose variable is not set is a startup refusal naming the variable. It is never left
+as a literal, because a datasource registered with `${SAMPLE_PG_PASSWORD}` as its credential fails
+much later, as an unintelligible authentication error against a database nobody suspects.
+
+### 8A.3 Semantics: create-if-absent, never update
+
+Applied once per startup, after Flyway and after the [Auth §4.4](auth.md#44-bootstrap-admin)
+actor is resolved, before the server accepts traffic. `created_by` is that actor for every entry.
+
+- **Create-if-absent by `name`.** An existing row is left byte-untouched and logged at INFO. This
+  is the operator's guarantee: a restart never reverts an edit they made, and a datasource they
+  deleted never resurrects itself. "Existing" includes **soft-deleted** rows — `name` is the
+  primary key (§9 `duplicate_name`), so a soft-deleted name is permanently taken.
+- **Full §9 validation per entry, test pool build (§5.4) included.** Registration goes through the
+  same save path as the REST endpoint; there is no startup-only shortcut. Skipping the pool build
+  because "it is slow at boot" would ship a demo that registers dead connections and discovers it
+  at first query.
+- **One entry at a time, fail-fast.** Entries are applied in file order, each fully validated and
+  written before the next is attempted. The first failure refuses startup: a half-registered demo
+  is worse than a loud one, and create-if-absent makes the operator's retry idempotent.
+
+Failures here are startup refusals, not API errors — nobody submitted a request — so they carry no
+`datasource.validation.*` response code of their own. An entry that fails §9 raises that rule's
+code in the startup log, exactly as it would have in a `400`.
+
+### 8A.4 SQLite read-only open mode
+
+`readonly: true` is a datapipelines-level flag (§5.7); making the SQLite *driver* open the file
+read-only is a `properties.jdbc` key, and the two are independent — set both for a sample database.
+
+The key is **`open_mode: "1"`** (`1` = `SQLiteOpenMode.READONLY`), verified against the pinned
+driver `org.xerial:sqlite-jdbc:3.49.1.0` rather than recalled: with it, `Connection.isReadOnly()`
+is true and both `INSERT` and `CREATE TABLE` fail `SQLITE_READONLY`. The similarly-named
+`jdbc.explicit_readonly` is **not** a read-only switch — with it alone the same writes succeed; it
+only makes an explicit `Connection.setReadOnly(true)` meaningful. Re-verify the key against the
+driver on any xerial upgrade.
+
+---
+
 ## 9. Validation Rules
 
 Every rule below runs on **create and update**, before the row is written (§2 principle 7; [Pipeline Contract §2](pipeline-contract.md#2-design-principles)). All failures are collected, not short-circuited (§6.1 `ValidationResult`). HTTP mappings live in the central catalog, [Pipeline Contract §13.8](pipeline-contract.md#138-datasource).
@@ -647,6 +740,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-28 | v2.15 | sample data, slice A | **§8A new:** bootstrap registration — the `datapipelines.bootstrap.datasources-file` mechanism (§8A.1 file shape incl. the required-and-true `global` flag and `readonly`, §8A.2 `${ENV_VAR}` resolution against the process environment, §8A.3 create-if-absent / never-update / full-§9-validation-per-entry / fail-fast, §8A.4 the xerial `open_mode: "1"` read-only key verified against pinned 3.49.1.0). `is_readonly` is now written on INSERT (from the entity, which the REST bind still never sets — flag writes over the API remain deferred to the surfaces slice); UPDATE still never touches it |
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
 | 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |

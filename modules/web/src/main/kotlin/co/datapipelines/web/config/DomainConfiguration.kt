@@ -17,9 +17,13 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineBodies
+import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
+import co.datapipelines.web.templates.TemplateImportService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -164,4 +168,21 @@ class DomainConfiguration {
     /** Exposed so [PipelineBodies] and the controllers share one repository instance. */
     @Bean
     fun pipelineBodies(repository: PipelineRepository): PipelineBodies = PipelineBodies(repository)
+
+    /**
+     * The import acts, extracted from their controllers so the D9 example seeder performs the
+     * same import the REST endpoints do (see each service's KDoc). The controllers now take
+     * these as collaborators.
+     */
+    @Bean
+    fun pipelineImportService(
+        pipelines: PipelineRepository,
+        validator: PipelineValidator,
+    ): PipelineImportService = PipelineImportService(pipelines, validator)
+
+    @Bean
+    fun templateImportService(
+        templates: TemplateRepository,
+        validator: TemplateValidator,
+    ): TemplateImportService = TemplateImportService(templates, validator)
 }

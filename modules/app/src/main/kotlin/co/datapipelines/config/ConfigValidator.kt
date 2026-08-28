@@ -42,7 +42,7 @@ class ConfigValidator(
     }
 
     companion object {
-        private const val CHECK_COUNT = 9
+        private const val CHECK_COUNT = 10
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -63,6 +63,7 @@ class ConfigValidator(
             checkResultTtlOrdering(snapshot, violations)
             checkDevProfileGuard(snapshot, violations)
             checkWorkspacesProvisioningMode(snapshot, violations)
+            checkBootstrapActorConfigured(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             return ValidationReport(violations, warnings)
         }
@@ -203,6 +204,31 @@ class ConfigValidator(
             }
         }
 
+        /**
+         * §7 / §3.18 — bootstrap datasource registration needs an actor.
+         *
+         * `datasources.created_by` is `NOT NULL REFERENCES users(id)` and registration runs
+         * before anyone has logged in, so `datapipelines.bootstrap.datasources-file` without
+         * `datapipelines.auth.bootstrap-admin-email` cannot work. Silence here would surface as
+         * a foreign-key error mid-startup naming neither key; this names both.
+         *
+         * `examples-file` deliberately has NO such rule: seeding runs at first login, under the
+         * identity of the user logging in, and needs no configured admin.
+         */
+        private fun checkBootstrapActorConfigured(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (snapshot.bootstrapDatasourcesFile.isNullOrBlank()) return
+            if (snapshot.bootstrapAdminEmail.isNullOrBlank()) {
+                violations +=
+                    "datapipelines.bootstrap.datasources-file is set but " +
+                    "datapipelines.auth.bootstrap-admin-email is not (§3.18): bootstrap-registered " +
+                    "datasources are created_by that user, and the row is pre-provisioned from that " +
+                    "address before any login. Set both keys, or neither."
+            }
+        }
+
         /** §7 — passwordless Redis off loopback is a WARNING, not a refusal. */
         private fun checkRedisAuthWarning(
             snapshot: ConfigSnapshot,
@@ -233,6 +259,9 @@ class ConfigValidator(
                 resultTtlDefaultSeconds = environment.getProperty("datapipelines.result.ttl-default-seconds", Long::class.java),
                 resultTtlMaxSeconds = environment.getProperty("datapipelines.result.ttl-max-seconds", Long::class.java),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
+                bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
+                bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
+                bootstrapAdminEmail = environment.getProperty("datapipelines.auth.bootstrap-admin-email"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -337,6 +366,12 @@ internal data class ConfigSnapshot(
     val resultTtlDefaultSeconds: Long?,
     val resultTtlMaxSeconds: Long?,
     val workspacesProvisioningMode: String?,
+    /** §3.18 — unset (or blank) = bootstrap datasource registration is off. */
+    val bootstrapDatasourcesFile: String?,
+    /** §3.18 — unset (or blank) = example seeding is off. Carried so the §7 log reports it. */
+    val bootstrapExamplesFile: String?,
+    /** §3.4 — read here only for the §3.18 cross-key rule; auth owns its semantics. */
+    val bootstrapAdminEmail: String?,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -356,6 +391,9 @@ internal data class ConfigSnapshot(
             "resultTtlDefaultSeconds=$resultTtlDefaultSeconds, " +
             "resultTtlMaxSeconds=$resultTtlMaxSeconds, " +
             "workspacesProvisioningMode=$workspacesProvisioningMode, " +
+            "bootstrapDatasourcesFile=$bootstrapDatasourcesFile, " +
+            "bootstrapExamplesFile=$bootstrapExamplesFile, " +
+            "bootstrapAdminEmail=$bootstrapAdminEmail, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes)"
 }

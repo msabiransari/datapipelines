@@ -70,10 +70,17 @@ class UserRepository(
             ).first()
     }
 
-    /** Links an existing account to a (possibly new) OIDC identity on re-login (§4.2). */
+    /**
+     * Links an existing account to a (possibly new) OIDC identity on re-login (§4.2).
+     *
+     * [displayName] is **opt-in**: `null` leaves the stored name alone (`COALESCE`), which is
+     * what an ordinary re-login passes. Only the §6.1 bootstrap-completion login — the first
+     * real OIDC sign-in of a row still carrying `provider = 'bootstrap'` — passes a name, so
+     * the local-part placeholder is replaced by the ID token's `name` claim exactly once.
+     */
     fun updateIdentity(
         id: UUID,
-        displayName: String,
+        displayName: String?,
         profilePictureUrl: String?,
         provider: String,
         providerSubject: String,
@@ -81,7 +88,7 @@ class UserRepository(
         jdbc.update(
             """
             UPDATE users
-               SET display_name = :display_name,
+               SET display_name = COALESCE(:display_name, display_name),
                    profile_picture_url = :profile_picture_url,
                    provider = :provider,
                    provider_subject = :provider_subject,

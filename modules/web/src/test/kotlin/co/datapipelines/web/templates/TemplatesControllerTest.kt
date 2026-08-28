@@ -36,7 +36,10 @@ class TemplatesControllerTest {
         mockk<WorkspaceTemplateEngines> {
             every { engineFor(any()) } returns engine
         }
-    private val controller = TemplatesController(repository, validator, engines)
+
+    // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
+    // used so the import cases still exercise the shipped parsing and per-entry semantics.
+    private val controller = TemplatesController(repository, validator, engines, TemplateImportService(repository, validator))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

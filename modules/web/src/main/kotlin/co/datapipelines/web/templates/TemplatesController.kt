@@ -5,12 +5,9 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
-import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
-import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
@@ -49,6 +46,7 @@ class TemplatesController(
     private val templates: TemplateRepository,
     private val validator: TemplateValidator,
     private val templateEngines: WorkspaceTemplateEngines,
+    private val importService: TemplateImportService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 (and the id when the body omits one). */
@@ -171,18 +169,7 @@ class TemplatesController(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
-        val entries = importEntries(body)
-        val stored =
-            entries.map { entry ->
-                val draft = validator.validateOrThrow(entry, workspaceId)
-                val id = draft.id
-                if (id != null && templates.existsId(workspaceId, id)) {
-                    templates.update(workspaceId, id, draft, principal.userId) ?: throw ApiErrors.templateNotFound(id)
-                } else {
-                    templates.create(workspaceId, draft, principal.userId)
-                }
-            }
+        val stored = importService.import(body, principal.requireWorkspace().id, principal.userId)
         return ApiResponse.of(mapOf("imported" to stored.size, "templates" to stored))
     }
 
@@ -203,31 +190,6 @@ class TemplatesController(
                     mapOf(ApiErrors.REASON to "context_missing"),
                 )
         return context.properties().associate { (key, value) -> key to MAPPER.treeToValue(value, Any::class.java) }
-    }
-
-    /** The `templates` array of an §8.8 import body, each entry deserialized to a draft. */
-    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
-    private fun importEntries(body: String): List<TemplateDraft> {
-        val tree =
-            MAPPER.readTree(body) as? ObjectNode
-                ?: throw ApiException(
-                    PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
-                    "The import request body must be a JSON object.",
-                    mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
-                )
-        val array =
-            tree.get("templates")?.takeIf { it.isArray }
-                ?: throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "The import request requires a 'templates' array.",
-                    mapOf(ApiErrors.REASON to "templates_missing"),
-                )
-        return array.map { entry ->
-            when (val outcome = deserializer.fromTree(entry)) {
-                is TemplateDeserializationOutcome.Parsed -> outcome.draft
-                is TemplateDeserializationOutcome.Rejected -> throw TemplateValidationException(outcome.result)
-            }
-        }
     }
 
     private fun parseDialect(raw: String): Dialect =

@@ -206,6 +206,17 @@ Workspace provisioning mode (design 2026-08-16-workspaces §7, [auth.md §4.2/§
 | `datapipelines.workspaces.open-join` | `false` | `self-serve` only: `true` lists all workspaces as joinable by any authenticated user; `false` = members are added by a workspace owner |
 | `datapipelines.workspaces.member-datasources-enabled` | `true` | May non-admin members create workspace-bound datasources (datasource visibility gate) |
 
+### 3.18 Bootstrap
+
+Config-declared content applied at startup (design 2026-08-16-sample-data §6/§6.1). Both keys name a **file already on the container's filesystem** — the app never fetches an artifact at runtime; downloading and verifying artifacts is a deployment step (D5) — and for both, **unset (or empty) means the feature is off**. There is no separate enable flag to disagree with the path.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.bootstrap.datasources-file` | (none) | Path to a YAML file of datasource definitions registered **create-if-absent** at startup ([Datasources §8A](datasources.md#8a-bootstrap-registration-config-declared-datasources)). Set-but-unreadable, unparseable, or carrying an entry that fails [§9 validation](datasources.md#9-validation-rules) = fail-fast startup |
+| `datapipelines.bootstrap.examples-file` | (none) | Path to a JSON file of example templates and pipelines seeded into each personal workspace at `auto-per-user` provisioning, through the same import services as `POST /pipelines/import` and `POST /templates/import`. Shape: `{"templates": [...], "pipelines": [...]}`, each array element exactly what its import endpoint takes. Set-but-unreadable or unparseable = fail-fast startup; an entry that fails import validation fails the provisioning login |
+
+**Cross-key rule:** `datasources-file` set while [`datapipelines.auth.bootstrap-admin-email`](#34-auth) is unset is a startup refusal naming both keys. Bootstrap-registered datasources are `created_by` that user, and registration runs before anyone has logged in, so the row is pre-provisioned from that address ([Auth §4.4](auth.md#44-bootstrap-admin)). `examples-file` carries no such rule: seeding runs at first login, under the identity of the user logging in.
+
 ---
 
 ## 4. Precedence
@@ -359,6 +370,10 @@ datapipelines:
       enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
+
+  bootstrap:
+    datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
+    examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -417,6 +432,7 @@ On startup, the app validates:
 - At least one OIDC provider with non-empty `client-id`, `client-secret`, and `issuer-uri`.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
+- `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
 - **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
 
@@ -434,3 +450,4 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-12 | v1.2 | dev infra ports | §6 dev profile now targets host ports 5434 (Postgres) / 6381 (Redis) instead of the colliding defaults 5432/6379; added the dev-host-ports note. Operator-facing keys and production defaults unchanged. |
 | 2026-08-17 | v1.3 | pipeline composition | Added §3.16 `datapipelines.pipelines.max-composition-depth` (default 5) — the depth guard for PIPELINE-node composition |
+| 2026-08-28 | v1.4 | sample data, slice A | Added §3.18 Bootstrap: `datapipelines.bootstrap.datasources-file` and `datapipelines.bootstrap.examples-file` (both unset = off), the cross-key rule pairing `datasources-file` with `datapipelines.auth.bootstrap-admin-email`, and the matching §7 validation bullet and §5 template block. Backfills the §3.17 Workspaces row this log was missing (added 2026-08-26 with slice 019, keys unchanged here) |

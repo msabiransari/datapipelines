@@ -136,6 +136,11 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 # the `jackson` entry under [versions].
 jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+# YAML backend for the SAME Jackson stack (version from jackson-bom above, never pinned
+# separately). Used only by `datasources` to read the bootstrap datasources file
+# (datasources.md §8A) — a second YAML library (snakeyaml direct) would be a second parser
+# with its own escaping and alias semantics for data that config already parses with this one.
+jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml" }
 
 # SECURITY OVERRIDE: netty-bom applied as a third Gradle platform by
 # CommonConventionsPlugin, after jackson-bom. Rationale + retirement condition

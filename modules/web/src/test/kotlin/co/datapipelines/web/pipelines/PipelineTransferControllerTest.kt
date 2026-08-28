@@ -33,7 +33,11 @@ class PipelineTransferControllerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>()
     private val validator = mockk<PipelineValidator>()
-    private val controller = PipelineTransferController(pipelines, templates, validator)
+
+    // The import act now lives in PipelineImportService (extracted so the D9 seeder performs the
+    // SAME import). The real service is used here, not a mock: these cases assert the import's
+    // error mapping, which is exactly what a mock would erase.
+    private val controller = PipelineTransferController(pipelines, templates, PipelineImportService(pipelines, validator))
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()

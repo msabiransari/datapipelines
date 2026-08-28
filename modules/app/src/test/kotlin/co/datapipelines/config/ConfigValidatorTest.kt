@@ -44,6 +44,9 @@ class ConfigValidatorTest {
             resultTtlDefaultSeconds = 300,
             resultTtlMaxSeconds = 3600,
             workspacesProvisioningMode = "self-serve",
+            bootstrapDatasourcesFile = null,
+            bootstrapExamplesFile = null,
+            bootstrapAdminEmail = null,
             activeProfiles = emptySet(),
             vendoredThemes = setOf("saas", "high-contrast"),
         )
@@ -257,6 +260,9 @@ class ConfigValidatorTest {
                 resultTtlDefaultSeconds = 300,
                 resultTtlMaxSeconds = 3600,
                 workspacesProvisioningMode = "self-serve",
+                bootstrapDatasourcesFile = "/etc/datapipelines/bootstrap-datasources.yml",
+                bootstrapExamplesFile = "/etc/datapipelines/examples.json",
+                bootstrapAdminEmail = "admin@example.com",
                 activeProfiles = emptySet(),
                 vendoredThemes = setOf("saas"),
             )
@@ -268,6 +274,11 @@ class ConfigValidatorTest {
         str shouldContain "jwtSecret=<redacted>"
         str shouldContain "dbEncryptionKey=<redacted>"
         str shouldContain "datasourceUrl=jdbc:postgresql://db.internal:5432/dp"
+        // Paths and the admin address are not secrets, and a §7 log that hides them cannot
+        // answer "is bootstrap on?" — the question this snapshot exists to make answerable.
+        str shouldContain "bootstrapDatasourcesFile=/etc/datapipelines/bootstrap-datasources.yml"
+        str shouldContain "bootstrapExamplesFile=/etc/datapipelines/examples.json"
+        str shouldContain "bootstrapAdminEmail=admin@example.com"
     }
 
     @Test
@@ -279,6 +290,52 @@ class ConfigValidatorTest {
         str shouldContain "clientSecret=<redacted>"
         str shouldContain "clientId=id"
         str shouldContain "name=okta"
+    }
+
+    // ------------------------------------------------------------------ §3.18 bootstrap
+
+    @Test
+    fun `a bootstrap datasources file without a bootstrap admin email names BOTH keys`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    bootstrapDatasourcesFile = "/etc/datapipelines/bootstrap-datasources.yml",
+                    bootstrapAdminEmail = null,
+                ),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.bootstrap.datasources-file")
+        report.violations.single().shouldContain("datapipelines.auth.bootstrap-admin-email")
+    }
+
+    @Test
+    fun `an empty bootstrap admin email is treated as unset, not as a configured actor`() {
+        // application.yml gives the key an empty env default, so "" is the shape a deployment
+        // that never set the variable actually presents.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(bootstrapDatasourcesFile = "/etc/dp/ds.yml", bootstrapAdminEmail = "  "),
+            )
+
+        report.violations.shouldHaveSize(1)
+    }
+
+    @Test
+    fun `both keys set together is clean, and so is either one left unset`() {
+        ConfigValidator
+            .validate(validSnapshot().copy(bootstrapDatasourcesFile = "/etc/dp/ds.yml", bootstrapAdminEmail = "admin@example.com"))
+            .violations
+            .shouldBeEmpty()
+
+        // Feature off: no actor needed.
+        ConfigValidator.validate(validSnapshot().copy(bootstrapDatasourcesFile = "  ")).violations.shouldBeEmpty()
+
+        // examples-file seeds at first login, under that user's identity — it needs no admin.
+        ConfigValidator
+            .validate(validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", bootstrapAdminEmail = null))
+            .violations
+            .shouldBeEmpty()
     }
 
     @Test

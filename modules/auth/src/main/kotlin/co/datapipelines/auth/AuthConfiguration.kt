@@ -64,6 +64,10 @@ class AuthConfiguration {
      * `web` (module-structure §3.1 rule 3), so auth-only contexts (the module's own test
      * slices) legitimately have none — last-used then degrades to first-membership, by
      * design (see the port's KDoc).
+     *
+     * [personalWorkspaceSeeder] (D9) is optional for the same layering reason — its
+     * implementation drives `web`'s import services — but for a different operational one:
+     * absent means "this deployment configured no examples file", not "degrade quietly".
      */
     @Bean
     fun workspaceService(
@@ -72,8 +76,16 @@ class AuthConfiguration {
         workspacesProperties: WorkspacesProperties,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         auditLogger: AuditLogger,
+        personalWorkspaceSeeder: ObjectProvider<PersonalWorkspaceSeeder>,
     ): WorkspaceService =
-        WorkspaceService(workspaceRepository, authCache, workspacesProperties, lastUsedWorkspaceStore.getIfAvailable(), auditLogger)
+        WorkspaceService(
+            workspaceRepository,
+            authCache,
+            workspacesProperties,
+            lastUsedWorkspaceStore.getIfAvailable(),
+            auditLogger,
+            personalWorkspaceSeeder.getIfAvailable(),
+        )
 
     @Bean
     fun apiKeyService(

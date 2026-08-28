@@ -28,6 +28,7 @@ class WorkspaceService(
     private val workspacesProperties: WorkspacesProperties,
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val auditLogger: AuditLogger,
+    private val personalWorkspaceSeeder: PersonalWorkspaceSeeder? = null,
 ) {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -97,6 +98,9 @@ class WorkspaceService(
      * creates the user's `is_personal` workspace, or returns the existing personal one
      * when a previous login already did (a crashed login must not mint a second).
      * Creator enters as `owner`.
+     *
+     * On a freshly created workspace the D9 [PersonalWorkspaceSeeder] fires last (see its
+     * KDoc); it is not re-run for a workspace that already existed.
      */
     fun ensurePersonalWorkspace(
         user: User,
@@ -115,6 +119,11 @@ class WorkspaceService(
             userId = user.id,
             details = mapOf("workspace" to created.name, "mode" to WorkspaceProvisioningMode.AUTO_PER_USER.wire),
         )
+        // D9 (sample-data design §6.1): seed the configured examples into the workspace that
+        // now exists. Deliberately AFTER the audit row — the workspace was provisioned either
+        // way — and deliberately NOT guarded: a seeding failure must fail the login loudly
+        // rather than hand the user a workspace that is quietly missing its examples.
+        personalWorkspaceSeeder?.seed(created.id, user.id)
         return created
     }
 
