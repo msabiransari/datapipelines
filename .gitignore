@@ -1,6 +1,9 @@
 .env.local
 .DS_Store
 
+# app.sh runtime state (PID + log)
+.run/
+
 # --- Gradle ---
 .gradle/
 build/

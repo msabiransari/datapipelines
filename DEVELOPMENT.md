@@ -180,6 +180,13 @@ Run this whenever the design system changes. The script records the version and 
 
 ## 6. Build and Run
 
+The one-command path is `./app.sh` at the repo root — it wraps §2, §4 and this
+section: `./app.sh --start` brings up the dev stack, builds the fat jar and runs
+it as a background `java -jar` process (no IDE, no Gradle daemon serving the
+app; PID and log under git-ignored `.run/`), waits for `/health`, and
+`./app.sh --stop` shuts app and stack down (`--status` / `--logs` for
+inspection). The manual steps it wraps:
+
 ```bash
 # Load env vars
 export $(grep -v '^#' .env.local | xargs)
