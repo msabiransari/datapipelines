@@ -1,8 +1,8 @@
 .env.local
 .DS_Store
 
-# app.sh runtime state (PID + log)
-.run/
+# app.sh containerized-build Gradle cache
+.gradle-docker/
 
 # --- Gradle ---
 .gradle/

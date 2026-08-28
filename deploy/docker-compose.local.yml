@@ -1,0 +1,13 @@
+# Local-build override for docker-compose.yml — swaps the published image for
+# one built from this checkout (`./app.sh --start` does the build; or manually:
+# jar via the Gradle wrapper, then `docker build -t datapipelines:local .`).
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up -d
+#
+# Everything else — services, env contract, healthchecks, volumes — is the
+# production shape from docker-compose.yml, unchanged. Secrets still come from
+# deploy/.env (see .env.example).
+services:
+  datapipelines:
+    image: datapipelines:local
+    pull_policy: never

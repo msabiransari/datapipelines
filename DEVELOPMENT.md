@@ -180,12 +180,15 @@ Run this whenever the design system changes. The script records the version and 
 
 ## 6. Build and Run
 
-The one-command path is `./app.sh` at the repo root — it wraps §2, §4 and this
-section: `./app.sh --start` brings up the dev stack, builds the fat jar and runs
-it as a background `java -jar` process (no IDE, no Gradle daemon serving the
-app; PID and log under git-ignored `.run/`), waits for `/health`, and
-`./app.sh --stop` shuts app and stack down (`--status` / `--logs` for
-inspection). The manual steps it wraps:
+The one-command path is `./app.sh` at the repo root — fully Dockerized, no local
+Java or Gradle: `./app.sh --start` builds the jar with the pinned Gradle wrapper
+inside a JDK container (cache in git-ignored `.gradle-docker/`), packages it with
+the repo Dockerfile as `datapipelines:local`, and runs the **production-shape
+stack** (`deploy/docker-compose.yml` + the `docker-compose.local.yml` image
+override — the same stack deployment.md Appendix A describes; secrets in
+`deploy/.env`, scaffolded from `.env.local` on first run). `./app.sh --stop`
+stops it; `--status` / `--logs` inspect it. The rest of this section is the
+Gradle-on-host development flow the IDE path also uses:
 
 ```bash
 # Load env vars
