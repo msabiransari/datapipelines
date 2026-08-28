@@ -7,6 +7,12 @@
 # Dev only: credentials are fixed and public, no passwords on Redis, no TLS.
 # The production shape is deployment.md Appendix A — do not copy this file there.
 # The app itself is NOT in this file; it runs from Gradle (DEVELOPMENT.md §6).
+#
+# Explicit project name: Compose derives project names from the DIRECTORY, so
+# without this the dev stack and deploy/docker-compose.yml would be one project
+# ("deploy") whose same-named postgres/redis services replace each other —
+# starting the dev stack tore down a running production-shape stack (2026-08-28).
+name: datapipelines-dev
 
 services:
   postgres:

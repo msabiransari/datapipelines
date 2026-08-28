@@ -15,6 +15,14 @@
 # at least one fully-configured provider is required, or startup fails
 # (ConfigValidator §7, auth.md §11.1).
 
+# Pinned to the directory-derived default so existing deployments keep their
+# container and volume names (deploy_postgres-data holds the metadata DB —
+# changing the project name would ORPHAN it). The pin exists because Compose
+# derives the project name from the DIRECTORY: without explicit names, this
+# file and docker-compose.dev.yml form the SAME project and their same-named
+# services replace each other (bit us live, 2026-08-28).
+name: deploy
+
 services:
   datapipelines:
     image: ghcr.io/datapipelines/datapipelines:1.0.0
