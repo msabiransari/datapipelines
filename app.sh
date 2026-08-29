@@ -62,10 +62,14 @@ HEALTH_URL="http://localhost:8080/health"
 
 die() { echo "app.sh: $*" >&2; exit 1; }
 
-# Read KEY=value from a dotenv file; empty when absent.
+# Read KEY=value from a dotenv file; empty when absent. The trailing `|| true`
+# is load-bearing under `set -euo pipefail`: grep exits 1 on a key absent from
+# an EXISTING file, and a bare `x=$(env_get …)` assignment then killed the whole
+# script with no message — only on machines where the key was missing, i.e.
+# exactly the clean-machine path (caught by the 2026-08-29 release rehearsal).
 env_get() { # file key
   [[ -f $1 ]] || return 0
-  grep -E "^$2=" "$1" | head -1 | cut -d= -f2-
+  grep -E "^$2=" "$1" | head -1 | cut -d= -f2- || true
 }
 
 scaffold_deploy_env() {
