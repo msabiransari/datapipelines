@@ -1,0 +1,82 @@
+# Demo sample-data datasources, registered create-if-absent at startup
+# (datasources.md §8A; sample-data design §6). Mounted into the app container by
+# the compose `demo` profile and named by
+# DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE.
+#
+# NO SECRETS HERE. Every credential is a ${VAR} placeholder resolved against the
+# app process's environment by the app's OWN substitution (§8A.2) — not Spring's:
+# this file is runtime data read after the context is built. Supply the values in
+# deploy/.env (see deploy/.env.example); deploy/sample-data/load.sh creates the
+# very same login on each engine before the app starts.
+#
+# ONLY the bare ${VAR} form is supported. `${VAR:-default}` is NOT a placeholder
+# to this resolver — the regex is `\$\{[A-Za-z_][A-Za-z0-9_]*}`, so a shell-style
+# default would register the literal string as the password and fail at first
+# query with an authentication error against a database nobody suspects.
+#
+# `global: true` is REQUIRED and must be true: registration runs before any
+# workspace exists (§8A.1). `readonly: true` writes datasources.is_readonly, so
+# every §5.7 enforcement layer applies — that is layer 2 of the three-layer demo
+# posture (design §7); layer 3 is the SELECT-only database login the loader
+# creates, and layer 1 is workspace scoping.
+
+datasources:
+  - name: sample-trips
+    display_name: "NYC Taxi Trips (sample)"
+    description: >-
+      NYC TLC yellow-taxi trips, a hash-sampled 24-month window (~4.9M rows) plus
+      daily and monthly rollups. Tables: trips, trips_daily, trips_monthly.
+    dialect: POSTGRES
+    jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
+    username: ${SAMPLE_DB_USER}
+    password: ${SAMPLE_PG_PASSWORD}
+    readonly: true
+    global: true
+
+  - name: sample-weather
+    display_name: "NYC Weather (sample)"
+    description: >-
+      NOAA GHCN-Daily observations for five NYC-area stations over the same
+      window, melted to one row per station/day/element. Tables: stations,
+      observations.
+    dialect: MYSQL
+    jdbc_url: jdbc:mysql://mysql:3306/dp_sample_weather
+    username: ${SAMPLE_DB_USER}
+    password: ${SAMPLE_MYSQL_PASSWORD}
+    readonly: true
+    global: true
+
+  - name: sample-reference
+    display_name: "NYC Reference Data (sample)"
+    description: >-
+      TLC taxi zones and boroughs, rate-code and payment-type lookups, and a
+      weekend/US-federal-holiday calendar for the window. Tables: zones,
+      rate_codes, payment_types, calendar.
+    dialect: SQLITE
+    # SQLite is a FILE. There is no server, no login, and the xerial driver
+    # ignores both of these values entirely.
+    #
+    # They are non-empty anyway because datasources.md §9
+    # (`datasource.validation.password_missing`) rejects a null-or-EMPTY password
+    # on create, and bootstrap registration goes through that same save path with
+    # no startup-only shortcut (§8A.3). The §8A.1 example in datasources.md shows
+    # `username: "" / password: ""` for exactly this entry; that example does not
+    # register — verified by booting it, which fail-fasts with "A password is
+    # required on create." (recorded for the doc owner; the doc is not this
+    # lane's to amend).
+    #
+    # This is NOT a credential and is NOT a secret: nothing authenticates with
+    # it, and there is nothing it could grant access to.
+    jdbc_url: jdbc:sqlite:/srv/sample/nyc_reference.db
+    username: "sqlite"
+    password: "sqlite-file-datasource-has-no-authentication"
+    properties:
+      jdbc:
+        # 1 = SQLiteOpenMode.READONLY on the pinned org.xerial:sqlite-jdbc
+        # driver (datasources.md §8A.4 — a PROBED fact, re-verify on any driver
+        # upgrade). The similarly named `explicit_readonly` does NOT make the
+        # driver refuse writes. This is the driver-level half; `readonly: true`
+        # below is the datapipelines-level half, and both are set deliberately.
+        open_mode: "1"
+    readonly: true
+    global: true

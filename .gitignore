@@ -66,6 +66,12 @@ secrets.*
 .gate-logs/
 gate-logs/
 
+# --- Sample-data build working directory ---
+# Downloaded sources (~1.2 GB of TLC Parquet), the intermediate CSVs and the
+# built dumps. Reproducible from sources.lock + the scripts, so never committed;
+# the .tools/ entry above already covers the pinned DuckDB CLI.
+scripts/sample-data/work/
+
 # --- Agent worktrees checked out INSIDE the repo ---
 # A `git add -A` from the main checkout must never stage another lane's
 # in-progress tree.

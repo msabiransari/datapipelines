@@ -1,0 +1,17 @@
+# TLC yellow-taxi RatecodeID lookup, transcribed from the published data dictionary.
+#
+# SOURCE (license evidence, design §8 — the owner verifies, this build claims nothing):
+#   https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+#   "Data Dictionary - Yellow Taxi Trip Records" (PDF)
+#
+# Committed rather than parsed: the dictionary is a PDF. transform.sh asserts
+# that every RatecodeID actually present in the sampled trips has a row here,
+# so a code added upstream fails the build instead of producing orphan joins.
+rate_code_id,description
+1,Standard rate
+2,JFK
+3,Newark
+4,Nassau or Westchester
+5,Negotiated fare
+6,Group ride
+99,Unknown

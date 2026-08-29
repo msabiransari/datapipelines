@@ -1,0 +1,163 @@
+# scripts/sample-data/sources.lock — the pins that make the published artifact
+# rebuildable (sample-data design D8, §4.1 stage 1).
+#
+# FORMAT — space-separated, three or more fields, `#` comments:
+#   param  <key>   <value>          human-declared build input (the window, the
+#                                   sampling modulus, the station set). Editing
+#                                   one of these changes the ARTIFACT, so it is
+#                                   a reviewed change and the version directory
+#                                   must be bumped (§4: version dirs are immutable).
+#   url    <id>    <url>            the exact source URL for logical source <id>
+#   sha256 <id>    <hash>           the pinned SHA-256 of that file, verified
+#                                   after download; or `unpinned:<token>` for a
+#                                   source whose upstream file is genuinely not
+#                                   immutable — every such token is explained below.
+#   window <id>    <hash>           CONTENT pin for an `unpinned:` source: the
+#                                   SHA-256 of the canonical extract this build
+#                                   takes out of it. Upstream may append; if it
+#                                   REVISES history, this fails loudly.
+#   tool   <n>-<p> <ver> <url> <sha256>   a pinned build binary, per platform
+#   image  <name>  <ref>            a pinned container image (tag @ digest)
+#
+# Regenerate the derived lines with `./scripts/sample-data/pin.sh` — never by
+# hand, and never as a reflex when a build fails a checksum: a mismatch means
+# the upstream file CHANGED, which changes what we publish.
+#
+# LICENSE EVIDENCE (design §8 — the go-live gate). Every claim below is a
+# research claim recorded for the owner to verify; this build verifies none of
+# them and manifest.json therefore ships `license_verified: null` for all of
+# them. Evidence links:
+#   TLC trip records + zone lookup + data dictionary
+#     https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+#     https://www.nyc.gov/home/terms-of-use.page
+#   NOAA GHCN-Daily (US Government work; NCEI use policy)
+#     https://www.ncei.noaa.gov/products/land-based-station/global-historical-climatology-network-daily
+#     https://www.noaa.gov/information-technology/open-data-dissemination
+#   OPM federal holidays (facts; published schedule)
+#     https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/
+
+# --- build inputs (human-declared) -----------------------------------------
+
+param window_start           2023-01
+param window_end             2024-12
+param trips_sample_modulus   16
+param ghcn_stations          USW00094728,USW00014732,USW00094789,USW00014734,USW00094741
+param duckdb_version         v1.5.5
+param artifact_version       v1
+
+# --- derived pins (regenerate with pin.sh) ---------------------------------
+
+# NYC TLC yellow-taxi trip records — monthly Parquet, the pinned window.
+# Immutable in practice (Last-Modified predates the pin by years) but TLC
+# HAS re-published historical months before; that is precisely what the
+# SHA pin catches.
+url    tlc-yellow-2023-01.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-01.parquet
+sha256 tlc-yellow-2023-01.parquet   32df6f67578fa86c484a6b5ef23a5281992ff085521082340b0f9e5889e9a572
+url    tlc-yellow-2023-02.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-02.parquet
+sha256 tlc-yellow-2023-02.parquet   4809e6aaac64f05a62d16a25d55713be1537ad64fc261e895eaf2d2120fe750a
+url    tlc-yellow-2023-03.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-03.parquet
+sha256 tlc-yellow-2023-03.parquet   e7d44943111b007bf0e7084863511886e0db29f862f9a96239383a1f86c6c26e
+url    tlc-yellow-2023-04.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-04.parquet
+sha256 tlc-yellow-2023-04.parquet   95c01c53c865e06489179bdecce3a59603697a1557c4d5d183c20ae13a144dc6
+url    tlc-yellow-2023-05.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-05.parquet
+sha256 tlc-yellow-2023-05.parquet   9bd7d1c557bb9d0413619ba296b4828b884852a70bd07f2230b83f080d9a8591
+url    tlc-yellow-2023-06.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-06.parquet
+sha256 tlc-yellow-2023-06.parquet   3e60e29b5df45683948b68acbfb503aa459d14162c610622585c6580fdbfc73a
+url    tlc-yellow-2023-07.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-07.parquet
+sha256 tlc-yellow-2023-07.parquet   98504ae351d920e9e0b61241f5707f90ee1588cfb199c378459234b5035805ab
+url    tlc-yellow-2023-08.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-08.parquet
+sha256 tlc-yellow-2023-08.parquet   84ce36a2f84fa14c12fd976c79a7d4f30c871f1782b08ca7c27bb76ab946e66b
+url    tlc-yellow-2023-09.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-09.parquet
+sha256 tlc-yellow-2023-09.parquet   091bf156bea5bb10bd217f5f12375f966f8789349af45d5ee4153e3e1e077a87
+url    tlc-yellow-2023-10.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-10.parquet
+sha256 tlc-yellow-2023-10.parquet   dc5f069476d350df802ed8120f3b39ec321c34cfa905381e87f608c78ca0c645
+url    tlc-yellow-2023-11.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-11.parquet
+sha256 tlc-yellow-2023-11.parquet   af203de0e73a92d640121f02a34326f25037d62380fc406237c87c2a4231ae58
+url    tlc-yellow-2023-12.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-12.parquet
+sha256 tlc-yellow-2023-12.parquet   ab4f4db11cb31484747f62eb507c13fcfaff290aaf59c13e6465dea0b1166b9c
+url    tlc-yellow-2024-01.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
+sha256 tlc-yellow-2024-01.parquet   c4d59da7bbc8abaeeeb1727947ee93d9891a71acb42854bd80db1571b2030510
+url    tlc-yellow-2024-02.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-02.parquet
+sha256 tlc-yellow-2024-02.parquet   c76c43c18c6c6664080dd920baab4928988d5786a6b65980792ca7cd796f9f20
+url    tlc-yellow-2024-03.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-03.parquet
+sha256 tlc-yellow-2024-03.parquet   2d4cdc8fb96726cdd3803b13b02d2e61e71d45720aff0ebc693a8bdd1f249823
+url    tlc-yellow-2024-04.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-04.parquet
+sha256 tlc-yellow-2024-04.parquet   ce37f736c7cf9e92164c850ef2b502a8f7bb590fc1804b6edbcb80293da01b89
+url    tlc-yellow-2024-05.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-05.parquet
+sha256 tlc-yellow-2024-05.parquet   1974230be2b5a3ea92e47b5eb77f32dbf1de896d81ad8df4ab6faba52749ad23
+url    tlc-yellow-2024-06.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-06.parquet
+sha256 tlc-yellow-2024-06.parquet   677cf14c8347f745b583f012fbdba072334c6c4efa17bfd6a64369f2ba30329c
+url    tlc-yellow-2024-07.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-07.parquet
+sha256 tlc-yellow-2024-07.parquet   af12d6b04daeb78550799ae99933d495b27d715b6dbb0fad9bb750a4537d3070
+url    tlc-yellow-2024-08.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-08.parquet
+sha256 tlc-yellow-2024-08.parquet   7315643dd16bafc03e27d9903edbfd35404c2550a695d0da0a3e73852d940cfb
+url    tlc-yellow-2024-09.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-09.parquet
+sha256 tlc-yellow-2024-09.parquet   2f42e4a383a6635de803001462848d0aee2b47f6ce899126805d2d05361fb843
+url    tlc-yellow-2024-10.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-10.parquet
+sha256 tlc-yellow-2024-10.parquet   d19fe05aa0b259af24eb47051735293287f1e6dc263ba04030ec1ab4c6ec2650
+url    tlc-yellow-2024-11.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-11.parquet
+sha256 tlc-yellow-2024-11.parquet   5ef321876de5007a7c147a347389133fc94fd7ac28f82eb1d57d8f2cf05cfd3b
+url    tlc-yellow-2024-12.parquet   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-12.parquet
+sha256 tlc-yellow-2024-12.parquet   41ebf7db80bebde60c58e5143c14cdf38ad04a0f3e3ff44215b3e240d55f6c78
+
+# TLC taxi zone lookup (265 zones -> borough / service zone).
+url    tlc-zone-lookup.csv          https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv
+sha256 tlc-zone-lookup.csv          1a99e105092230f8620f301edcca7f80d3080642ff404d28ed957d3fa222c8ed
+
+# NOAA GHCN-Daily, per-station Daily Summaries.
+#
+# DELIBERATELY UNPINNED FILE (unpinned:appended-daily). NCEI regenerates
+# every access/ CSV nightly to append new observations — its Last-Modified
+# is always yesterday — and NCEI publishes no dated snapshot of this
+# product (the only archive/ asset is 'daily-summaries-latest.tar.gz').
+# A file-level SHA would therefore fail every single day for a reason that
+# is not drift, which trains everyone to re-pin on sight — the exact habit
+# the pin exists to prevent.
+#
+# The determinism claim is kept at the level that actually matters: the
+#  lines below pin the SHA-256 of the CANONICAL EXTRACT this build
+# takes — the pinned elements, for the pinned station, inside the pinned
+# date window, sorted, formatted by transform.sh's ghcn_extract query.
+# Appended future days do not touch it; a REVISION of historical
+# observations (NCEI does re-issue QC'd values) fails the build loudly,
+# which is the event worth failing on.
+url    noaa-ghcn-USW00094728.csv    https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/USW00094728.csv
+sha256 noaa-ghcn-USW00094728.csv    unpinned:appended-daily
+url    noaa-ghcn-USW00014732.csv    https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/USW00014732.csv
+sha256 noaa-ghcn-USW00014732.csv    unpinned:appended-daily
+url    noaa-ghcn-USW00094789.csv    https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/USW00094789.csv
+sha256 noaa-ghcn-USW00094789.csv    unpinned:appended-daily
+url    noaa-ghcn-USW00014734.csv    https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/USW00014734.csv
+sha256 noaa-ghcn-USW00014734.csv    unpinned:appended-daily
+url    noaa-ghcn-USW00094741.csv    https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/access/USW00094741.csv
+sha256 noaa-ghcn-USW00094741.csv    unpinned:appended-daily
+#
+# GHCN station metadata. The per-station Daily Summaries CSVs carry EMPTY
+# LATITUDE/LONGITUDE/ELEVATION/NAME columns (verified against the files, not
+# assumed from the header), so the station table comes from the fixed-width
+# master list. Regenerated nightly like everything else under this product,
+# hence the same unpinned-file + content-pin treatment.
+url    ghcnd-stations.txt           https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-stations.txt
+sha256 ghcnd-stations.txt           unpinned:appended-daily
+#
+# The window pins are written by transform.sh --repin (it owns the extract
+# query, so it is the only thing that can compute them honestly).
+window noaa-ghcn-USW00094728.csv    9fc6eb68ac3bf6033dc6ce894442a71a379429dbbacf824248655af4288c3454
+window noaa-ghcn-USW00014732.csv    ff88bb2fc454683bf8483ae94faf295b903f044554d4583f6b09ecc037430ec8
+window noaa-ghcn-USW00094789.csv    79a77feb1f9aeb6cfe62904202d7644d1d20960f2b446bf1b97c17babfe5b1b3
+window noaa-ghcn-USW00014734.csv    da36b62a5ed74a77f3b53b1daa842f0632f0f8dcfd17f9fa00d12cd430551a17
+window noaa-ghcn-USW00094741.csv    2295d18d46640f6e6538509b11283a0f5e664d83415899299d388c1ecdc7748a
+window ghcnd-stations.txt           fcc0f292d59451634eba38c45927d90a4d293134280fd42e8c3823a9fcf445ac
+
+# DuckDB CLI — BUILD-TIME ETL ONLY. Not a runtime dialect (design D2);
+# it is here because it reads TLC's Parquet natively. Pinned per platform
+# exactly like the scanner binaries (009/F1).
+tool   duckdb-osx-universal         v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-universal.zip 7a4bc3a93f7f92f5b40cd09c21afaf98e415c6cb9d9170064993782e779f4115
+tool   duckdb-linux-amd64           v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip 08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05
+tool   duckdb-linux-arm64           v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip 02163197027a42149147364d31fa67cac82108517a4be43304a1cc226eaef07a
+
+# Throwaway build engines, and the images the demo compose profile runs.
+# Pinned by DIGEST, not just tag: pg_dump's output format is tied to the
+# server major, and the demo restores with the same major.
+image  postgres                     postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+image  mysql                        mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb

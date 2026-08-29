@@ -6,16 +6,24 @@
 # stack an engineer evaluating the project runs.
 #
 #   ./app.sh --start [--no-build]   build image in Docker + start the full stack
-#   ./app.sh --stop                 stop the stack (Postgres data volume kept)
-#   ./app.sh --status               show services + app health
+#   ./app.sh --start --demo         ...plus the published sample databases
+#   ./app.sh --stop [--demo]        stop the stack (Postgres data volume kept)
+#   ./app.sh --status [--demo]      show services + app health
 #   ./app.sh --logs                 follow the app container's logs
 #
 # Secrets live in deploy/.env (git-ignored). If it is missing, --start scaffolds
 # it: values are carried over from .env.local when present (JWT/encryption/OIDC),
 # infra passwords are generated. The Gradle cache persists in ./.gradle-docker
 # (git-ignored), so only the first build is cold.
-# (--demo — bring up the shipped sample databases too — arrives with the
-# sample-data slice; the loader it wraps does not exist yet.)
+#
+# --demo activates the compose `demo` profile: a MySQL service, the two one-shot
+# loaders that download and checksum-verify the published sample artifacts, and
+# the bootstrap/workspace settings of the demo posture. It also builds the jar
+# with -Pmysql, because MySQL Connector/J is NOT in the default build (GPL +
+# FOSS exception, datasources.md §10.2) and the sample-weather datasource would
+# otherwise fail registration with datasource.driver_not_loaded. Missing SAMPLE_*
+# keys are appended to deploy/.env on first use; SAMPLE_BASE_URL must then be
+# pointed at the published bucket (deployment.md Appendix B).
 
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
@@ -23,6 +31,18 @@ cd "$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_ENV="deploy/.env"
 LOCAL_ENV=".env.local"
 COMPOSE=(docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml)
+
+# --demo is a MODE, not a subcommand: it changes the compose invocation for every
+# verb, so it is stripped from the argument list here rather than inside start().
+# Without it on --stop/--status the demo services are invisible to compose and a
+# "stopped" stack keeps a MySQL container running.
+DEMO=0
+ARGS=()
+for arg in "$@"; do
+  if [[ $arg == --demo ]]; then DEMO=1; else ARGS+=("$arg"); fi
+done
+set -- "${ARGS[@]:-}"
+if ((DEMO)); then COMPOSE+=(--profile demo); fi
 IMAGE_TAG="datapipelines:local"
 BUILDER_IMAGE="eclipse-temurin:21-jdk"
 GRADLE_CACHE="$PWD/.gradle-docker"
@@ -64,14 +84,53 @@ EOF
   echo "==> wrote $DEPLOY_ENV — review it; Google creds must be real for login to work"
 }
 
+# Append the demo keys that deploy/.env does not already have. APPEND-ONLY and
+# key-by-key: an existing deploy/.env is the operator's file, and rewriting a
+# value they set (a bucket, a password) would be the kind of "help" that loses
+# work. SAMPLE_BASE_URL is left as a placeholder deliberately — only the owner
+# knows the published bucket, and a guess would silently load someone else's data.
+ensure_demo_env() {
+  local added=0
+  add_key() { # key value
+    grep -qE "^$1=" "$DEPLOY_ENV" && return 0
+    printf '%s=%s\n' "$1" "$2" >> "$DEPLOY_ENV"
+    added=1
+  }
+  add_key SAMPLE_BASE_URL "https://<bucket>.s3.amazonaws.com/sample-data/mobility"
+  add_key SAMPLE_VERSION "v1"
+  add_key SAMPLE_DB_USER "dp_demo_ro"
+  add_key SAMPLE_PG_PASSWORD "$(openssl rand -base64 24)"
+  add_key SAMPLE_MYSQL_PASSWORD "$(openssl rand -base64 24)"
+  add_key SAMPLE_MYSQL_ROOT_PASSWORD "$(openssl rand -base64 24)"
+  add_key DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE "/srv/sample/bootstrap-datasources.yml"
+  add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
+  add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"
+  add_key DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED "false"
+  if ((added)); then echo "==> appended the missing SAMPLE_*/demo keys to $DEPLOY_ENV"; fi
+  if grep -q '^SAMPLE_BASE_URL=https://<bucket>' "$DEPLOY_ENV"; then
+    die "SAMPLE_BASE_URL in $DEPLOY_ENV is still the <bucket> placeholder.
+  The sample artifacts are published to object storage by the owner; point this
+  at that bucket (deployment.md Appendix B), or at a local server for a build
+  you produced yourself:
+    (cd scripts/sample-data/work/artifacts && python3 -m http.server 8099)
+    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=."
+  fi
+}
+
 build() {
-  echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)"
+  local gradle_args=(:modules:app:bootJar)
+  # -Pmysql adds MySQL Connector/J (GPL + FOSS exception; datasources.md §10.2),
+  # which the default build deliberately omits. The demo's sample-weather
+  # datasource is MYSQL, and registration fails with datasource.driver_not_loaded
+  # without it — at STARTUP, which under the bootstrap file is a fail-fast boot.
+  if ((DEMO)); then gradle_args=(-Pmysql "${gradle_args[@]}"); fi
+  echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)${DEMO:+ [-Pmysql]}"
   mkdir -p "$GRADLE_CACHE"
   docker run --rm \
     -v "$PWD":/ws -w /ws \
     -u "$(id -u)":"$(id -g)" \
     -e HOME=/tmp -e GRADLE_USER_HOME=/ws/.gradle-docker \
-    "$BUILDER_IMAGE" ./gradlew :modules:app:bootJar
+    "$BUILDER_IMAGE" ./gradlew "${gradle_args[@]}"
   echo "==> building image $IMAGE_TAG"
   docker build -t "$IMAGE_TAG" .
 }
@@ -80,11 +139,16 @@ start() {
   local do_build=1
   [[ ${1:-} == --no-build ]] && do_build=0
   scaffold_deploy_env
+  if ((DEMO)); then ensure_demo_env; fi
   if ((do_build)); then
     build
   else
     docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 \
       || die "image $IMAGE_TAG not found — run --start without --no-build first"
+    if ((DEMO)); then
+      echo "==> NOTE: --no-build reuses $IMAGE_TAG as built. If it was built without"
+      echo "    -Pmysql, the sample-weather datasource fails registration at startup."
+    fi
   fi
   echo "==> starting the stack (app healthcheck probes /ready; first boot runs migrations)"
   if ! "${COMPOSE[@]}" up -d --wait; then
@@ -95,10 +159,18 @@ start() {
   curl -sf "$HEALTH_URL" >/dev/null 2>&1 \
     || die "stack is up but $HEALTH_URL is not answering"
   echo "==> UP — http://localhost:8080"
+  if ((DEMO)); then
+    cat <<'EOM'
+==> demo data loaded. Log in once (the OIDC provider in deploy/.env) and your
+    personal workspace is provisioned with the example pipelines. To point an
+    agent at it: log in -> mint an API key in the UI -> give the agent
+    http://localhost:8080/mcp with that key. See docs/deployment.md Appendix B.
+EOM
+  fi
 }
 
 stop() {
-  echo "==> stopping the stack (data volume kept; '${COMPOSE[*]} down -v' resets it)"
+  echo "==> stopping the stack (data volumes kept; '${COMPOSE[*]} down -v' resets them)"
   "${COMPOSE[@]}" stop
 }
 
