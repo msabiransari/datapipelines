@@ -7,22 +7,24 @@
     <p style="color: var(--text-secondary); font-size: var(--text-sm);">Overview of your data pipelines</p>
   </div>
 
-  <div th:replace="~{partials/dashboard-stats :: stats(~{::.ds-stats})}">
-    <div class="ds-stats" hx-get="/partials/dashboard-stats" hx-trigger="load" hx-swap="outerHTML">
-      <div class="ds-skeleton ds-skeleton-card"></div>
-      <div class="ds-skeleton ds-skeleton-card"></div>
-      <div class="ds-skeleton ds-skeleton-card"></div>
-    </div>
+  <!--
+    The skeleton loaders (025 B2): each hx-get swaps itself for the real partial once
+    loaded. This used to be a `th:replace` round trip through the partials' (children)
+    fragment signatures — which emitted `children` unchanged AND made the partials
+    unrenderable standalone (the 500 the hx-gets hit); the skeletons live here directly.
+  -->
+  <div class="ds-stats" hx-get="/partials/dashboard-stats" hx-trigger="load" hx-swap="outerHTML">
+    <div class="ds-skeleton ds-skeleton-card"></div>
+    <div class="ds-skeleton ds-skeleton-card"></div>
+    <div class="ds-skeleton ds-skeleton-card"></div>
   </div>
 
   <div style="margin-top: var(--gap-lg);">
     <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Recent Executions</h2>
-    <div th:replace="~{partials/recent-executions :: recent(~{::.ds-recent})}">
-      <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
-      </div>
+    <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
+      <div class="ds-skeleton ds-skeleton-table-row"></div>
+      <div class="ds-skeleton ds-skeleton-table-row"></div>
+      <div class="ds-skeleton ds-skeleton-table-row"></div>
     </div>
   </div>
 </th:block>
