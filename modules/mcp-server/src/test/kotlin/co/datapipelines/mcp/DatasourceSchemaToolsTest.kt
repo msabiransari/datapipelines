@@ -14,11 +14,13 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.mockk
 import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.util.UUID
 
 /**
  * §7A tool DELEGATION over a mocked introspector: each tool parses its arguments, threads them
@@ -31,6 +33,10 @@ class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
     private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
 
+    /** A gate registry where each of [names] is a GLOBAL datasource (visible to every key). */
+    private fun gateRegistry(vararg names: String) =
+        FakeDatasourceRegistry(names.map { McpFixtures.datasource(name = it) })
+
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
     @Test
@@ -38,7 +44,7 @@ class DatasourceSchemaToolsTest {
         val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
         every { introspector.schemas("pg-prod") } returns page
 
-        val payload = DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+        val payload = DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
 
         payload shouldBe page.toWireMap()
     }
@@ -48,7 +54,7 @@ class DatasourceSchemaToolsTest {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page
 
-        val payload = DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx)
+        val payload = DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx)
 
         payload shouldBe page.toWireMap()
     }
@@ -62,7 +68,7 @@ class DatasourceSchemaToolsTest {
             )
         every { introspector.columns("pg-prod", "orders", null) } returns columns
 
-        val payload = DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
+        val payload = DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
 
         payload shouldBe columns.map { it.toWireMap() }
     }
@@ -70,7 +76,7 @@ class DatasourceSchemaToolsTest {
     @Test
     fun `get_columns without a table argument is invalid params`() {
         shouldThrow<McpError> {
-            DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+            DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
         }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
@@ -84,17 +90,17 @@ class DatasourceSchemaToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemasTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
+                    DatasourcesGetSchemasTool(real, gateRegistry()).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "nope")), authorCtx)
+                    DatasourcesGetTablesTool(real, gateRegistry("down")).call(McpArguments(mapOf("name" to "nope")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
+                    DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
         )
@@ -111,7 +117,7 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                DatasourcesGetTablesTool(real, gateRegistry("down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
@@ -167,7 +173,7 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
             }
 
         assertAll(
@@ -190,7 +196,7 @@ class DatasourceSchemaToolsTest {
                 every { connection.catalog } returns null
             }
 
-        val payload = DatasourcesGetTablesTool(real).call(McpArguments(mapOf("name" to "down")), authorCtx)
+        val payload = DatasourcesGetTablesTool(real, gateRegistry("down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
 
         payload shouldBe
             mapOf(
@@ -267,7 +273,7 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
@@ -291,7 +297,7 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real).call(McpArguments(mapOf("name" to "dying", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "dying", "table" to "orders")), authorCtx)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
@@ -311,18 +317,75 @@ class DatasourceSchemaToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemasTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                    DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetTablesTool(introspector).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                    DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetColumnsTool(introspector).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
+                    DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
+            },
+        )
+    }
+
+    @Test
+    fun `a datasource bound to another workspace is not-found on every introspection tool - before any pool opens`() {
+        // F2 (022 review): the three schema tools had no §5.3 visibility gate — a key
+        // pinned to workspace A introspected B's bound datasource (schemas/tables/columns
+        // AND a pool opened on it), while the REST twins 404 via getVisible. Invisible =
+        // not-found, uniformly, and the introspector is never touched. The unstubbed
+        // introspector mock makes any delegation throw — the gate must fire first.
+        val registry =
+            FakeDatasourceRegistry(
+                listOf(McpFixtures.datasource().copy(workspaceId = UUID.randomUUID(), workspaceName = "other")),
+            )
+
+        assertAll(
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetSchemasTool(introspector, registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetTablesTool(introspector, registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+            {
+                shouldThrow<DatapipelinesException> {
+                    DatasourcesGetColumnsTool(introspector, registry)
+                        .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
+                }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+            },
+            { confirmVerified(introspector) },
+        )
+    }
+
+    @Test
+    fun `a global or own-workspace datasource passes the visibility gate on every introspection tool`() {
+        val registry =
+            FakeDatasourceRegistry(
+                listOf(
+                    McpFixtures.datasource(name = "global-pg"),
+                    McpFixtures.datasource(name = "own-pg")
+                        .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
+                ),
+            )
+        every { introspector.schemas(any()) } returns co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
+        every { introspector.tables(any(), any()) } returns TablesPage(emptyList(), truncated = false)
+        every { introspector.columns(any(), any(), any()) } returns emptyList()
+
+        assertAll(
+            { DatasourcesGetSchemasTool(introspector, registry).call(McpArguments(mapOf("name" to "global-pg")), authorCtx) },
+            { DatasourcesGetTablesTool(introspector, registry).call(McpArguments(mapOf("name" to "own-pg")), authorCtx) },
+            {
+                DatasourcesGetColumnsTool(introspector, registry)
+                    .call(McpArguments(mapOf("name" to "own-pg", "table" to "orders")), authorCtx)
             },
         )
     }

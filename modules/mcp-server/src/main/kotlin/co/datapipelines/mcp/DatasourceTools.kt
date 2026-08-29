@@ -116,6 +116,10 @@ class DatasourcesGetTool(
  * The payload is exactly §6.2.12's `{connected, server_version?, error?}`. The failure text is the
  * registry's own scrubbed message (datasources §6.1), which is where credential and URL redaction
  * is implemented — this tool adds nothing to it and echoes nothing else about the connection.
+ *
+ * Visibility (workspaces §5.3): the same [DatasourceRegistry.requireVisible] gate as
+ * `datasources_get` — a datasource bound to another workspace is not-found, and the probe
+ * never runs (022 review F3: this tool used to skip the gate its siblings got).
  */
 class DatasourcesTestTool(
     private val datasources: DatasourceRegistry,
@@ -143,6 +147,7 @@ class DatasourcesTestTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
+        datasources.requireVisible(name, ctx)
         val result = datasources.testConnection(name) ?: throw McpNotFound.datasource(name)
         return mapOf(
             "connected" to result.connected,

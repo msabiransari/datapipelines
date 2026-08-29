@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.toWireMap
@@ -13,7 +14,10 @@ import co.datapipelines.typesystem.DatapipelinesException
  * the SQL needs.
  *
  * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
- * datasource, matching the `datasources_test` precedent. Payloads are the shared §7A wire maps
+ * datasource, matching the `datasources_test` precedent. Every tool first passes the §5.3
+ * visibility gate ([DatasourceRegistry.requireVisible]): a datasource bound to another
+ * workspace resolves as not-found BEFORE any pool opens, uniformly with `datasources_get`
+ * and the REST twins. Payloads are the shared §7A wire maps
  * (`toWireMap`, in `modules/datasources` beside the data classes — the same projections the REST
  * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
  * at all, and the field-by-field maps keep it that way by construction.
@@ -34,6 +38,7 @@ import co.datapipelines.typesystem.DatapipelinesException
  */
 class DatasourcesGetSchemasTool(
     private val introspector: SchemaIntrospector,
+    private val datasources: DatasourceRegistry,
 ) : McpTool {
     override val definition =
         McpTools.tool(
@@ -60,6 +65,7 @@ class DatasourcesGetSchemasTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
+        datasources.requireVisible(name, ctx)
         return introspecting(name) { introspector.schemas(name).toWireMap() }
     }
 }
@@ -67,6 +73,7 @@ class DatasourcesGetSchemasTool(
 /** `datasources_get_tables` (mcp-server.md §6.2.17). Scope: `author`. */
 class DatasourcesGetTablesTool(
     private val introspector: SchemaIntrospector,
+    private val datasources: DatasourceRegistry,
 ) : McpTool {
     override val definition =
         McpTools.tool(
@@ -93,6 +100,7 @@ class DatasourcesGetTablesTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
+        datasources.requireVisible(name, ctx)
         return introspecting(name) { introspector.tables(name, args.string("schema")).toWireMap() }
     }
 }
@@ -100,6 +108,7 @@ class DatasourcesGetTablesTool(
 /** `datasources_get_columns` (mcp-server.md §6.2.18). Scope: `author`. */
 class DatasourcesGetColumnsTool(
     private val introspector: SchemaIntrospector,
+    private val datasources: DatasourceRegistry,
 ) : McpTool {
     override val definition =
         McpTools.tool(
@@ -130,6 +139,7 @@ class DatasourcesGetColumnsTool(
     ): Any {
         val name = args.requiredString("name")
         val table = args.requiredString("table")
+        datasources.requireVisible(name, ctx)
         return introspecting(name) { introspector.columns(name, table, args.string("schema")).map { it.toWireMap() } }
     }
 }
