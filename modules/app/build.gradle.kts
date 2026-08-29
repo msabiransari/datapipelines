@@ -74,3 +74,14 @@ tasks.named<BootRun>("bootRun") {
     // Dev parity: same drop-in directory, no packaging.
     classpath += files("lib")
 }
+
+// -Pmysql / -Poracle add flag-gated drivers to the runtime classpath (datasources
+// §4.1/§10.2), and the ONE committed gradle.lockfile must validate both flag states —
+// so the drivers are excluded from lock state exactly as modules/datasources already
+// does (its comment is the authority). Without this block, `-Pmysql :modules:app:bootJar`
+// failed STRICT lock validation: the ignore is per-project and this module resolves the
+// driver transitively. Found by 023's demo build (T-mysql-lock), fixed 2026-08-29.
+dependencyLocking {
+    ignoredDependencies.add("com.oracle.database.jdbc:ojdbc11")
+    ignoredDependencies.add("com.mysql:mysql-connector-j")
+}

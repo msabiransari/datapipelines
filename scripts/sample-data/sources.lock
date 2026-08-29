@@ -115,7 +115,7 @@ sha256 tlc-zone-lookup.csv          1a99e105092230f8620f301edcca7f80d3080642ff40
 # the pin exists to prevent.
 #
 # The determinism claim is kept at the level that actually matters: the
-#  lines below pin the SHA-256 of the CANONICAL EXTRACT this build
+# `window` lines below pin the SHA-256 of the CANONICAL EXTRACT this build
 # takes — the pinned elements, for the pinned station, inside the pinned
 # date window, sorted, formatted by transform.sh's ghcn_extract query.
 # Appended future days do not touch it; a REVISION of historical

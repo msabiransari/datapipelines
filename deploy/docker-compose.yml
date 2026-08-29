@@ -91,7 +91,10 @@ services:
       # environment" (observed — this is why the demo E2E is a real boot, not a
       # compose-config inspection). Empty without the demo profile, and unread:
       # the bootstrap keys above are empty, so the file is never opened.
-      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-}
+      # The USER defaults to dp_demo_ro, matching the loaders' default below — a
+      # set-but-EMPTY var passes the app's null-only placeholder check and registered
+      # the datasources with username "" on the raw-compose path (023 review F3).
+      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
       SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD:-}
       SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD:-}
     volumes:

@@ -51,7 +51,13 @@ class SseEventLog(
         try {
             redis.opsForList().rightPush(key, mapper.writeValueAsString(event))
             redis.expire(key, RETENTION.seconds, TimeUnit.SECONDS)
-        } catch (e: DataAccessException) {
+        } catch (
+            // Generic ON PURPOSE (class KDoc: the debugging log NEVER fails an execution).
+            // The narrower DataAccessException catch let a JsonProcessingException from an
+            // unserializable payload escape and kill the run (T36); enumerating types here
+            // re-creates that hole for the next unexpected one.
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
             log.warn("SSE event log append failed for execution {} (replay will be incomplete).", executionId, e)
         }
     }

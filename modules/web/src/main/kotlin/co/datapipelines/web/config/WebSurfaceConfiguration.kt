@@ -32,6 +32,7 @@ import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
+import co.datapipelines.web.sse.SseJson
 import co.datapipelines.web.sse.SseLogStreamer
 import co.datapipelines.web.workspace.RedisLastUsedWorkspaceStore
 import io.micrometer.core.instrument.MeterRegistry
@@ -85,13 +86,16 @@ class WebSurfaceConfiguration {
         }
 
     @Bean
-    fun sseEventLog(redis: StringRedisTemplate): SseEventLog = SseEventLog(redis, ExecutorJson.mapper)
+    fun sseEventLog(redis: StringRedisTemplate): SseEventLog =
+        // SseJson, not ExecutorJson: SSE payloads carry resolved java.time parameter
+        // values that dag's mapper deliberately cannot serialize (T36, SseJson KDoc).
+        SseEventLog(redis, SseJson.mapper)
 
     @Bean
     fun sseLogStreamer(
         eventLog: SseEventLog,
         scheduler: ScheduledExecutorService,
-    ): SseLogStreamer = SseLogStreamer(eventLog, ExecutorJson.mapper, scheduler)
+    ): SseLogStreamer = SseLogStreamer(eventLog, SseJson.mapper, scheduler)
 
     @Bean
     fun executionStreamRegistry(

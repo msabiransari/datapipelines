@@ -1,6 +1,14 @@
-FROM eclipse-temurin:21-jre-alpine
+# glibc base (Ubuntu), NOT -alpine: argon2-jvm loads its native library through
+# JNA, which ships glibc binaries. On musl the loader is absent, so API-key
+# minting (Argon2id, auth.md §7.2) died with UnsatisfiedLinkError — and /mcp
+# accepts nothing but API keys, so the whole agent path was down (T37, found by
+# 023's demo E2E). Alpine + gcompat was probed as the smaller fix and REJECTED
+# with evidence: the shim SIGSEGVs the whole JVM inside the JNA temp library
+# (hs_err, "Problematic frame: C [jna….tmp]") — worse than the 500. This image
+# ships wget (healthcheck below) and curl.
+FROM eclipse-temurin:21-jre
 
-RUN addgroup -S datapipelines && adduser -S datapipelines -G datapipelines
+RUN groupadd --system datapipelines && useradd --system --gid datapipelines datapipelines
 
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 

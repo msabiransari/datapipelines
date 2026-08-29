@@ -42,7 +42,16 @@ for arg in "$@"; do
   if [[ $arg == --demo ]]; then DEMO=1; else ARGS+=("$arg"); fi
 done
 set -- "${ARGS[@]:-}"
-if ((DEMO)); then COMPOSE+=(--profile demo); fi
+# Demo keys live in their OWN env file, passed only on demo invocations: appending
+# them to deploy/.env poisoned every later plain --start (compose interpolates env
+# profile-independently, so the non-demo stack inherited the demo bootstrap file
+# and posture — 023 review F1). Order matters: deploy/.env comes LAST so values an
+# operator set there override the scaffolded demo file.
+DEMO_ENV="deploy/.env.demo"
+if ((DEMO)); then
+  touch "$DEMO_ENV" # --stop/--status --demo may run before any --start --demo scaffolded it
+  COMPOSE+=(--env-file "$DEMO_ENV" --env-file "$DEPLOY_ENV" --profile demo)
+fi
 IMAGE_TAG="datapipelines:local"
 BUILDER_IMAGE="eclipse-temurin:21-jdk"
 GRADLE_CACHE="$PWD/.gradle-docker"
@@ -84,16 +93,19 @@ EOF
   echo "==> wrote $DEPLOY_ENV — review it; Google creds must be real for login to work"
 }
 
-# Append the demo keys that deploy/.env does not already have. APPEND-ONLY and
-# key-by-key: an existing deploy/.env is the operator's file, and rewriting a
-# value they set (a bucket, a password) would be the kind of "help" that loses
-# work. SAMPLE_BASE_URL is left as a placeholder deliberately — only the owner
-# knows the published bucket, and a guess would silently load someone else's data.
+# Scaffold missing demo keys into deploy/.env.demo — NEVER into deploy/.env: keys
+# there are interpolated on every invocation, demo or not, and appending them
+# poisoned every later plain --start (023 review F1). Key-by-key and append-only;
+# a value the operator set in EITHER file is respected (deploy/.env wins — it is
+# passed last). SAMPLE_BASE_URL is left as a placeholder deliberately — only the
+# owner knows the published bucket, and a guess would silently load someone
+# else's data.
 ensure_demo_env() {
   local added=0
   add_key() { # key value
     grep -qE "^$1=" "$DEPLOY_ENV" && return 0
-    printf '%s=%s\n' "$1" "$2" >> "$DEPLOY_ENV"
+    grep -qE "^$1=" "$DEMO_ENV" && return 0
+    printf '%s=%s\n' "$1" "$2" >> "$DEMO_ENV"
     added=1
   }
   add_key SAMPLE_BASE_URL "https://<bucket>.s3.amazonaws.com/sample-data/mobility"
@@ -106,14 +118,19 @@ ensure_demo_env() {
   add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
   add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"
   add_key DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED "false"
-  if ((added)); then echo "==> appended the missing SAMPLE_*/demo keys to $DEPLOY_ENV"; fi
-  if grep -q '^SAMPLE_BASE_URL=https://<bucket>' "$DEPLOY_ENV"; then
-    die "SAMPLE_BASE_URL in $DEPLOY_ENV is still the <bucket> placeholder.
+  if ((added)); then echo "==> appended the missing SAMPLE_*/demo keys to $DEMO_ENV"; fi
+  # The EFFECTIVE value: deploy/.env wins over the scaffolded demo file.
+  local base
+  base=$(env_get "$DEPLOY_ENV" SAMPLE_BASE_URL)
+  [[ -n $base ]] || base=$(env_get "$DEMO_ENV" SAMPLE_BASE_URL)
+  if [[ $base == 'https://<bucket>'* ]]; then
+    die "SAMPLE_BASE_URL is still the <bucket> placeholder (set it in $DEPLOY_ENV or $DEMO_ENV).
   The sample artifacts are published to object storage by the owner; point this
   at that bucket (deployment.md Appendix B), or at a local server for a build
-  you produced yourself:
-    (cd scripts/sample-data/work/artifacts && python3 -m http.server 8099)
-    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=."
+  you produced yourself — the loader fetches \$BASE_URL/\$VERSION/manifest.json
+  and the manifest declares v1, so serve the artifacts AS a v1 directory:
+    (cd scripts/sample-data/work && ln -sfn artifacts v1 && python3 -m http.server 8099)
+    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=v1"
   fi
 }
 
@@ -124,7 +141,11 @@ build() {
   # datasource is MYSQL, and registration fails with datasource.driver_not_loaded
   # without it — at STARTUP, which under the bootstrap file is a fail-fast boot.
   if ((DEMO)); then gradle_args=(-Pmysql "${gradle_args[@]}"); fi
-  echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)${DEMO:+ [-Pmysql]}"
+  # NOTE: ((DEMO)) arithmetic, not ${DEMO:+…}: DEMO is always set ("0" or "1"), so
+  # the :+ form claimed [-Pmysql] on every build, demo or not (023 review F10).
+  local flag_note=""
+  ((DEMO)) && flag_note=" [-Pmysql]"
+  echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)${flag_note}"
   mkdir -p "$GRADLE_CACHE"
   docker run --rm \
     -v "$PWD":/ws -w /ws \
