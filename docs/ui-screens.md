@@ -66,6 +66,7 @@ The layout also wires three things once, for every page:
 
 - **Theme resolution.** The active design-system theme is `users.theme_preference` when set, otherwise the deployment default `datapipelines.ui.theme` ([Configuration §3.10](configuration.md#310-ui)). Resolved server-side per request and emitted as the `href` of the `#theme-link` stylesheet element ([Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens)) — see §4.11. The deployment setting is the default, not a ceiling: a user preference overrides it for that user only, and an unset preference is indistinguishable from today's config-only behaviour.
 - **CSRF for htmx.** `hx-headers` on `<body>` carries the `dp_csrf` cookie value as `DP-CSRF-Token`; because `hx-headers` is inherited, every descendant htmx request is covered ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)).
+- **Workspace switcher + context (workspaces design §9).** The navbar carries a `<select>` of the principal's memberships (`UiWorkspaceAdvice` fills it for every screen); choosing one POSTs `/workspace/switch`, which re-stamps the session JWT's `active_workspace` claim and re-issues `dp_session`, so full-page navigations follow the switch. The layout's `hx-headers` ALSO carries `DP-Workspace: <active>` for every htmx partial call — both mechanisms agree because the switcher drives both. A principal with zero memberships sees no switcher and empty states, never an error page (workspaces design §7).
 - **Toast region.** An empty `<div id="toast" aria-live="polite"></div>` and the htmx `response-targets` extension, which together implement the error rule in §5.1.
 
 ```html
@@ -140,15 +141,17 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Not repeated here
 | Attribute | Value |
 |---|---|
 | URL | `GET /datasources` |
-| Auth required | Yes (`read` to browse; `author` to test a connection; `admin` to create/edit/delete) |
-| Purpose | Browse, test, manage datasource connections |
+| Auth required | Yes (`read` to browse; `author` to test a connection; workspace-bound create behind the `member-datasources-enabled` gate, global create/manage `admin` — workspaces D8) |
+| Purpose | Browse, test, register datasource connections in the active workspace |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-modal` |
 | JS | None |
-| htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test" hx-target="#test-result"`), create/edit modal forms (`hx-post`/`hx-put`/`hx-delete` on `/partials/datasources`) |
+| htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test" hx-target="#test-result"`), register modal (`hx-post` on `/partials/datasources`, `HX-Redirect` on success) |
 
-Content: table of datasources (name, display_name, dialect badge, status indicator). Per-row "Test" button (`author` scope) → inline connection test result. "Register Datasource" button (`admin` scope) → modal form with: name, dialect dropdown, JDBC URL, username, password, and the `properties.hikari.*` / `properties.jdbc.*` passthrough maps ([Datasources §5](datasources.md)). Rename is not offered — a datasource name is immutable (delete + re-create, blocked while referenced).
+Content: table of the ACTIVE workspace's datasources (name + `readonly` badge, dialect badge, workspace column — `global` or the bound name, URL, username). Per-row "Test" button (`author` scope) → inline connection test result. "Register Datasource" button → modal form with: name, display name, dialect dropdown, JDBC URL, username, password, description, and two checkboxes — `readonly` (always settable, [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)) and `global` (**admin-only; visible-disabled for everyone else**, workspaces D8: unchecked binds to the active workspace). The register action applies the SAME D8 rules as REST §9.1 (`DatasourceWorkspaceRules` — one component, two surfaces) and crosses the same registry save boundary.
 
-The split — `author` tests, `admin` manages — matches [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative) exactly; the Test button is rendered for authors, the management buttons only for admins.
+The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-bound + global, repository-level); a datasource bound to another workspace is absent, and its by-name test behaves as not-found. Rename is not offered — a datasource name is immutable (delete + re-create, blocked while referenced).
+
+**§4.13's workspaces screen** owns workspace lifecycle; this screen's Register button is hidden entirely when the caller is a non-admin and `member-datasources-enabled` is off (the demo shape — open datasource creation is an SSRF primitive from the server's network position).
 
 ### 4.6 Template List
 
@@ -294,6 +297,21 @@ Content: table of all users (email, display_name, provider, is_active, is_admin,
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s), not instantly and not at JWT expiry.
 - Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
 
+### 4.13 Workspaces (workspaces design §9)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /workspaces` |
+| Auth required | Yes (`read`; ownership/mode gates enforced server-side per [REST §17](rest-api.md#17-workspace-endpoints)) |
+| Purpose | Create/join workspaces per provisioning mode; manage members of owned workspaces; switch the active workspace |
+| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card` |
+| JS | One `onchange` submit on the navbar switcher (`<noscript>` fallback button included) |
+| htmx | No — plain CSRF-protected form posts with `redirect:` outcomes (`?ok=`/`?error=` query state, the login screen's idiom) |
+
+Content, in order: a **create form** (name + display name; hidden under `closed` mode for non-admins — `workspace.creation_forbidden`), a **joinable list** (`open-join: true` only — each card has a Join button; hidden when `open-join` is off), **your workspaces** (name, role badge, active marker, Switch/Delete actions), and per OWNED workspace a **member table** (name/email/role) with add-by-email and remove actions. Removing a member with the `owner` role is refused server-side (`workspace.in_use`, `blocked_by: owner_membership`) — ownership transfer is not a v1 operation. Delete bounces back with the `in_use` counts while content remains.
+
+The **switcher in the navbar** (§3) drives the active workspace; the screen's Switch buttons POST the same `/workspace/switch`. Expected refusals render as the inline error banner — the generic error page is reserved for the unexpected (§6).
+
 ---
 
 ## 5. htmx Usage Pattern
@@ -427,3 +445,4 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | UI screens inventory: 12 screens (login, dashboard, pipeline list/editor, datasource list, template list/editor, execution history/detail, API keys, user settings, admin users), htmx patterns, error pages |
 | 2026-08-07 | v1.1 | consistency campaign | Per [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) §2.12: route convention §2.1 (pages / `/partials/**` / `/api/v1/**`, htmx never calls the JSON API) and all `hx-*` endpoints re-pointed at `/partials/**` incl. §4.10 API keys [1]; template-editor context form replaced with free-form key-value/JSON input — templates no longer declare variables [1b, D3]; §5 htmx example fixed (`hx-include` + `th:attr` `hx-vals` instead of `${q}` interpolation) [2]; §4 scope column declared a view of the authoritative [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative) matrix, datasource test corrected to `author`, key scopes ⊆ creator's scopes [3, D15]; §4.11 theme preference persisted on the `users` row via `PATCH /partials/profile/theme`, not session state [4]; §4.11 provider badge renders the configured provider `display-name` [5]; §4.9 result panel rebuilt on the uniform cursor with the TTL-expired state and `format`-parameter downloads [6, D9]; new §5.1 standard states (empty / loading via `hx-indicator` / errors via the `response-targets` extension into `#toast`) [7]; CSRF via `dp_csrf` cookie + `DP-CSRF-Token` header wired in the layout [D10] |
+| 2026-08-28 | v1.9 | workspaces surfaces slice | New **§4.13 Workspaces** screen (create per mode, open-join, owned-workspace member management, switch) + navbar **workspace switcher** (§3: POST /workspace/switch re-stamps the session claim; hx-headers carries DP-Workspace for partials). §4.5 datasource list re-grounded: workspace-scoped listing, workspace/readonly columns, register modal with the D8-gated `global` (admin-only, visible-disabled) and `readonly` checkboxes, Register hidden for gated-off members. |

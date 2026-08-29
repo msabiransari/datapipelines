@@ -1,7 +1,7 @@
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment">
   <tr th:id="'ds-row-' + ${testName}"
       style="border-bottom: 1px solid var(--border-default);">
-    <td colspan="5" style="padding: var(--gap-sm) var(--gap-md);">
+    <td colspan="6" style="padding: var(--gap-sm) var(--gap-md);">
       <th:block th:if="${testResult != null}">
         <th:block th:if="${testResult.connected}">
           <span style="color: var(--accent-success); font-size: var(--text-sm);">Connected — Server version: <span th:text="${testResult.serverVersion}"></span></span>
@@ -17,7 +17,7 @@
   </tr>
   <tr th:id="'ds-row-' + ${testName} + '-actions'"
       style="border-bottom: 1px solid var(--border-default);">
-    <td colspan="5" style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
+    <td colspan="6" style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
       <button class="ds-button ds-button-ghost ds-button-sm"
               th:attr="hx-get=@{/partials/datasources}, hx-target='#ds-row-' + ${testName} + ', #ds-row-' + ${testName} + '-actions', hx-swap=outerHTML">
         Back to list

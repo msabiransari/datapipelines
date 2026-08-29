@@ -92,20 +92,26 @@ class DatasourceRegistryIntegrationTest {
         }
     }
 
-    // ------------------ readonly flag (workspaces design §6; V4 column, read-path this slice)
+    // ------------------ readonly flag (workspaces design §6; writable via the D8-gated save since the surfaces slice)
 
     @Test
-    fun `is_readonly round-trips from the row and a save neither sets nor clears it`() {
+    fun `is_readonly is persisted by save in both directions - the surfaces slice's writable flag`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "flagged", password = "pw"), owner)
-        // The flag arrives by SQL/fixtures in this slice — flip it at the row level.
-        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'flagged'", emptyMap<String, Any>())
+        registry.save(Fixtures.h2(name = "flagged", password = "pw", isReadonly = true), owner)
 
         registry.get("flagged").shouldNotBeNull().isReadonly shouldBe true
 
-        // A subsequent save crosses the update path, which has NO is_readonly column — the
-        // stored flag survives an unrelated PUT untouched (the write surface is a later slice).
-        registry.save(Fixtures.h2(name = "flagged", password = "pw2"), owner)
+        // A save carrying the flag persists it (the flag write crosses the same save path
+        // that evicts the pool); the WEB layer's absent-flag-keeps-stored rule is enforced
+        // by the controller reading the stored row first — this module persists what it is
+        // handed, by design.
+        registry.save(Fixtures.h2(name = "flagged", password = "pw2", isReadonly = false), owner)
+        jdbc.queryForObject(
+            "SELECT is_readonly FROM datasources WHERE name = 'flagged'",
+            emptyMap<String, Any>(),
+            Boolean::class.java,
+        ) shouldBe false
+        registry.save(Fixtures.h2(name = "flagged", password = "pw3", isReadonly = true), owner)
         jdbc.queryForObject(
             "SELECT is_readonly FROM datasources WHERE name = 'flagged'",
             emptyMap<String, Any>(),

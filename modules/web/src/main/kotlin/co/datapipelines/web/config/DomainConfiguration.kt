@@ -1,5 +1,7 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.auth.WorkspaceContentCheck
+import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
 import co.datapipelines.datasources.DatasourceReferences
@@ -58,6 +60,15 @@ class DomainConfiguration {
     @Bean
     fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
 
+    /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
+    @Bean
+    fun datasourceWorkspaceRules(
+        workspaceService: co.datapipelines.auth.WorkspaceService,
+        workspacesProperties: co.datapipelines.auth.WorkspacesProperties,
+    ): co.datapipelines.web.datasources.DatasourceWorkspaceRules =
+        co.datapipelines.web.datasources
+            .DatasourceWorkspaceRules(workspaceService, workspacesProperties)
+
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)
 
@@ -80,15 +91,26 @@ class DomainConfiguration {
      * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
      * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
      *
-     * The port is frozen in `datasources` and carries no workspace, so the workspace comes from
-     * the request's own security context: every invocation is a datasource-surface request
-     * (delete/get referencing check), always on a request thread with the resolved principal
-     * present. That is the one place workspace resolution is contextual rather than explicit —
-     * recorded in the slice-2 sweep statement.
+     * The guard's scope follows the datasource's BINDING (022 review F5): a **bound** datasource
+     * is referenceable only from its own workspace (§5.3 visibility), so its own workspace's
+     * count is the whole truth; a **global** one is referenceable from EVERY workspace, so the
+     * guard aggregates the per-workspace scans across all of them — the cross-workspace promise
+     * of datasources §6.2 ("any non-deleted pipeline"). Reading the row here also removes the
+     * old contextual `currentPrincipal()` dependency: the answer no longer depends on which
+     * workspace the CALLER happens to be acting from.
      */
     @Bean
-    fun datasourceReferences(bodies: PipelineBodies): DatasourceReferences =
-        DatasourceReferences { name -> bodies.pipelinesReferencing(currentPrincipal().requireWorkspace().id, name) }
+    fun datasourceReferences(
+        bodies: PipelineBodies,
+        repository: DatasourceRepository,
+        workspaces: WorkspaceRepository,
+    ): DatasourceReferences =
+        DatasourceReferences { name ->
+            when (val boundTo = repository.findByName(name)?.workspaceId) {
+                null -> workspaces.findAll().flatMap { bodies.pipelinesReferencing(it.id, name) }
+                else -> bodies.pipelinesReferencing(boundTo, name)
+            }
+        }
 
     @Bean
     fun datasourceRegistry(
@@ -113,12 +135,61 @@ class DomainConfiguration {
      * Supplies BOTH facts the validator asks for (workspaces design §6): the dialect AND the
      * readonly flag, from the same registry lookup — so `pipeline.validation.datasource_readonly`
      * fires at save time on every write-shaped use of a flagged datasource.
+     *
+     * ## Workspace-scoped since the surfaces slice (design §5.3)
+     *
+     * Save-time validation resolves the datasource through the CALLER'S ACTIVE WORKSPACE:
+     * `getVisible(name, activeWorkspace)` — a pipeline in workspace A cannot silently
+     * reference a datasource bound to workspace B. The D9 example seeder runs at login on a
+     * thread whose principal is not yet [AuthenticatedPrincipal]; for that principal-less
+     * path the resolver falls back to GLOBAL-ONLY visibility, which is exactly the seeder's
+     * world (D9: seeded example datasources are global). A future bound-datasource example
+     * would fail loudly at seeding rather than pass validation invisibly.
      */
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
         ContractDatasourceRegistry { name ->
-            registry.get(name)?.let { DatasourceFacts(it.dialect, it.isReadonly) }
+            val principal =
+                runCatching { currentPrincipal() }.getOrNull()
+            val facts =
+                when (val workspaceId = principal?.workspace?.id) {
+                    null -> registry.get(name)?.takeIf { it.workspaceId == null }
+                    else -> registry.getVisible(name, workspaceId)
+                }
+            facts?.let { DatasourceFacts(it.dialect, it.isReadonly) }
         }
+
+    /**
+     * The `workspace.in_use` port (auth's `WorkspaceService.delete`): the non-deleted content
+     * counts of a workspace, by kind. Auth cannot query these tables (module-structure §4.2),
+     * so the aggregation layer answers — `countAll` for pipelines, the active-page listing
+     * without its LIMIT for templates (no count API exists and the templates module's write
+     * window is T23-only), and the registry's rows filtered to the workspace for bound
+     * datasources. Counts are bounded by what a workspace owns; exact beats a UNION across
+     * three modules' private schemas.
+     */
+    @Bean
+    fun workspaceContentCheck(
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+        datasources: DatasourceRegistry,
+    ): WorkspaceContentCheck =
+        WorkspaceContentCheck { workspaceId ->
+            buildMap {
+                pipelines.countAll(workspaceId).takeIf { it > 0 }?.let { put("pipelines", it) }
+                templates.list(workspaceId, offset = 0, limit = UNBOUNDED).takeIf { it.isNotEmpty() }?.let { put("templates", it.size) }
+                datasources
+                    .list()
+                    .count { it.workspaceId == workspaceId }
+                    .takeIf { it > 0 }
+                    ?.let { put("datasources", it) }
+            }
+        }
+
+    private companion object {
+        /** No LIMIT — the listing becomes the exact active count (bounded by workspace content). */
+        const val UNBOUNDED = Int.MAX_VALUE
+    }
 
     /** The §7A introspector — reads JDBC metadata through the same registry pool (§5.2). */
     @Bean

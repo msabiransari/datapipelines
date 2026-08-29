@@ -19,17 +19,32 @@
         media="screen">
 </head>
 <body
-    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;}'"
+    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'"
     hx-target-error="#toast">
   <nav class="ds-surface" style="border-bottom: 1px solid var(--border-default); padding: var(--gap-md)">
     <div style="max-width: var(--container-xl); margin: 0 auto; display: flex; align-items: center; justify-content: space-between;">
-      <a th:href="@{/}" style="font-weight: var(--weight-bold); font-size: var(--text-xl); color: var(--text-primary); text-decoration: none;">datapipelines</a>
+      <div style="display: flex; gap: var(--gap-md); align-items: center;">
+        <a th:href="@{/}" style="font-weight: var(--weight-bold); font-size: var(--text-xl); color: var(--text-primary); text-decoration: none;">datapipelines</a>
+        <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
+              style="display: flex; align-items: center; gap: var(--gap-xs); margin-left: var(--gap-md);">
+          <label for="workspace-switcher" style="color: var(--text-tertiary); font-size: var(--text-xs);">workspace</label>
+          <select id="workspace-switcher" name="name" onchange="this.form.submit()"
+                  style="padding: var(--gap-xs) var(--gap-sm); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
+            <option th:each="membership : ${workspaceOptions}"
+                    th:value="${membership.workspaceName}"
+                    th:text="${membership.workspaceName}"
+                    th:selected="${membership.workspaceName == activeWorkspace}">workspace</option>
+          </select>
+          <noscript><button type="submit" class="ds-button ds-button-ghost ds-button-sm">Go</button></noscript>
+        </form>
+      </div>
       <div style="display: flex; gap: var(--gap-md); align-items: center;">
         <a th:href="@{/}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Dashboard</a>
         <a th:href="@{/pipelines}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Pipelines</a>
         <a th:href="@{/datasources}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Datasources</a>
         <a th:href="@{/templates}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Templates</a>
         <a th:href="@{/executions}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Executions</a>
+        <a th:href="@{/workspaces}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Workspaces</a>
         <a th:href="@{/settings}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Settings</a>
         <a th:href="@{/admin}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Admin</a>
         <form th:action="@{/logout}" method="post" style="display: inline;">

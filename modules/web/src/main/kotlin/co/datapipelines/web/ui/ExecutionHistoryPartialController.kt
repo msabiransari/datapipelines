@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.web.api.currentPrincipal
@@ -18,6 +20,7 @@ class ExecutionHistoryPartialController(
     private val executions: ExecutionRepository,
 ) {
     @GetMapping("/executions")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun listPartial(
         @RequestParam(name = "pipeline_id", required = false) pipelineId: UUID?,
         @RequestParam(required = false) status: String?,

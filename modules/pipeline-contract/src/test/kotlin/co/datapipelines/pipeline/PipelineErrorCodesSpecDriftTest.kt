@@ -154,6 +154,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Workspace.MEMBERSHIP_REQUIRED,
                 PipelineErrorCodes.Workspace.CREATION_FORBIDDEN,
                 PipelineErrorCodes.Workspace.HEADER_FORBIDDEN,
+                PipelineErrorCodes.Workspace.NOT_FOUND,
+                PipelineErrorCodes.Workspace.IN_USE,
             )
 
         /** First cell of a markdown table row, when it is a backticked lowercase code. */

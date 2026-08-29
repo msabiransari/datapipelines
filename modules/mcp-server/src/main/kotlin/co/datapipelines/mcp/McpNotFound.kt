@@ -1,5 +1,7 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import java.util.UUID
@@ -72,3 +74,16 @@ object McpNotFound {
             details = mapOf("execution_id" to id.toString()),
         )
 }
+
+/**
+ * The §5.3 visibility gate every datasource-name-taking tool applies BEFORE touching pools,
+ * connectivity probes or the introspector: a datasource bound to another workspace is
+ * INVISIBLE, so by-name access resolves as the same not-found an unknown name gets — no
+ * existence oracle, and no pool opened on a connection the caller may not see. This is the
+ * gate `datasources_get` and the resource reader already had; the 022 review (F2/F3) caught
+ * the schema tools and `datasources_test` resolving names without it.
+ */
+internal fun DatasourceRegistry.requireVisible(
+    name: String,
+    ctx: McpToolContext,
+): Datasource = getVisible(name, ctx.principal.requireWorkspace().id) ?: throw McpNotFound.datasource(name)

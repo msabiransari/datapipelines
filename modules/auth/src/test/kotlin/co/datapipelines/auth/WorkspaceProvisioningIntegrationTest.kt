@@ -59,7 +59,7 @@ class WorkspaceProvisioningIntegrationTest {
     }
 
     private fun service(mode: WorkspaceProvisioningMode) =
-        WorkspaceService(workspaces, AuthCache(AuthProperties()), WorkspacesProperties(provisioningMode = mode), null, auditLogger)
+        WorkspaceService(workspaces, users, AuthCache(AuthProperties()), WorkspacesProperties(provisioningMode = mode), null, auditLogger)
 
     private fun principal(
         user: User,

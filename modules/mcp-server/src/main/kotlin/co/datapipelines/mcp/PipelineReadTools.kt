@@ -14,9 +14,10 @@ class PipelinesListTool(
         McpTools.tool(
             name = "pipelines_list",
             description =
-                "List pipelines registered on this datapipelines.co instance, filtered by owner, datasource, or text " +
-                    "search. Returns metadata (id, name, display_name, description, version, updated_at) — not the full " +
-                    "body. Use pipelines_get for the body.",
+                "List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns " +
+                    "metadata (id, name, display_name, description, version, updated_at) — not the full body. Use " +
+                    "pipelines_get for the body; pipelines in other workspaces are absent from this listing and " +
+                    "resolve as not-found by id.",
             schema =
                 """
                 {

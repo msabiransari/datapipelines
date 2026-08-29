@@ -46,6 +46,21 @@ object McpServerFactory {
     const val ENDPOINT: String = "/mcp"
 
     /**
+     * §5.1's `instructions` field (workspaces design §9): the workspace context every
+     * agent needs before its first tool call, so it does not reason about invisible
+     * sibling workspaces (mcp-server.md §2).
+     */
+    const val SERVER_INSTRUCTIONS: String =
+        "This server is workspace-scoped: every tool and resource operates inside the workspace " +
+            "the API key is pinned to. Pipelines, templates and executions belong to exactly one " +
+            "workspace; datasources are either bound to that workspace or global (shared). Content " +
+            "in other workspaces does not exist from this connection's point of view — it is not " +
+            "hidden, it is absent: another workspace's pipeline id, template id or datasource name " +
+            "resolves as not-found. Names are per-workspace for pipelines and templates (a name you " +
+            "see is free to reuse only within this workspace), and datasource names are globally " +
+            "unique across the whole server."
+
+    /**
      * Builds the transport servlet. Register it at [ENDPOINT]; [McpAuthFilter] must run in front
      * of it.
      */
@@ -76,6 +91,12 @@ object McpServerFactory {
         McpServer
             .sync(PinnedTransport(transport) { McpResourceRequestHandler(it, catalog, reader) })
             .serverInfo(SERVER_NAME, version)
+            // The initialize result's `instructions` — the workspace context statement every
+            // agent reads first (workspaces design §9): every tool and resource operates
+            // inside the API key's pinned workspace; sibling workspaces are invisible, and
+            // their pipelines/templates/executions/datasources simply do not exist from
+            // this connection's point of view.
+            .instructions(SERVER_INSTRUCTIONS)
             .capabilities(capabilities())
             .tools(toolSpecifications(dispatcher))
             .prompts(promptSpecifications(prompts))

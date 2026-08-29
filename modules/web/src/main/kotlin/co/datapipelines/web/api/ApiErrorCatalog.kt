@@ -100,6 +100,14 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
+            // §13.12's CRUD codes break the workspace.* family default (403, the resolution
+            // codes) — the surfaces slice's rows each carry their own status.
+            PipelineErrorCodes.Workspace.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Workspace.NAME_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Workspace.DUPLICATE_NAME to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Workspace.IN_USE to HttpStatus.CONFLICT,
+            // §13.9 — the T23 mapping: the workspace UNIQUE(name) violation is a 409.
+            PipelineErrorCodes.Template.DUPLICATE_NAME to HttpStatus.CONFLICT,
         )
 
     /**
@@ -179,6 +187,12 @@ object ApiErrorCatalog {
                 "We couldn't find that connection. It may have been deleted.",
             PipelineErrorCodes.Template.NOT_FOUND to
                 "We couldn't find that template. It may have been deleted.",
+            PipelineErrorCodes.Template.DUPLICATE_NAME to
+                "A template with that name already exists in this workspace. Pick a different name.",
+            PipelineErrorCodes.Workspace.DUPLICATE_NAME to
+                "A workspace with that name already exists. Pick a different name.",
+            PipelineErrorCodes.Workspace.IN_USE to
+                "This workspace still has content in it, so it can't be deleted yet.",
             PipelineErrorCodes.Result.EXPIRED to
                 "These results have expired. Run the pipeline again to get fresh ones.",
             PipelineErrorCodes.Result.EXECUTION_INCOMPLETE to

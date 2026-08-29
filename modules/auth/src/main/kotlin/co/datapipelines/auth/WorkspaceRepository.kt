@@ -70,10 +70,113 @@ class WorkspaceRepository(
             Boolean::class.java,
         ) == true
 
+    /** Every live workspace, name order — the `open-join` joinable listing (design §7). */
+    fun findAll(): List<Workspace> = jdbc.query("$SELECT_COLUMNS WHERE is_deleted = FALSE ORDER BY name", MAPPER)
+
+    /** Every member of [workspaceId] with identity columns, oldest membership first (the member listing). */
+    fun findMembersOf(workspaceId: UUID): List<WorkspaceMemberRow> =
+        jdbc.query(
+            """
+            SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+              FROM workspace_members m
+              JOIN users u ON u.id = m.user_id
+             WHERE m.workspace_id = :ws
+             ORDER BY m.joined_at, u.email
+            """.trimIndent(),
+            MapSqlParameterSource("ws", workspaceId),
+            MEMBER_MAPPER,
+        )
+
+    /** [userId]'s role in [workspaceId], or null when not a member. */
+    fun roleOf(
+        workspaceId: UUID,
+        userId: UUID,
+    ): WorkspaceRole? =
+        jdbc
+            .query(
+                "SELECT role FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
+                MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
+            ) { rs, _ -> WorkspaceRole.fromWire(rs.getString("role")) }
+            .firstOrNull()
+
+    /**
+     * Adds [userId] to [workspaceId] as `member` (roles are assigned at creation; owner
+     * transfer is not a v1 operation), then returns the membership row with identity
+     * columns. Idempotent: an existing membership — whatever its role — is returned
+     * unchanged, because "already a member" is success for both the open-join
+     * self-service path and an owner re-adding someone.
+     */
+    fun addMember(
+        workspaceId: UUID,
+        userId: UUID,
+    ): WorkspaceMemberRow? {
+        jdbc.update(
+            """
+            INSERT INTO workspace_members (workspace_id, user_id, role)
+            VALUES (:ws, :uid, 'member')
+            ON CONFLICT (workspace_id, user_id) DO NOTHING
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
+        )
+        return findMemberRow(workspaceId, userId)
+    }
+
+    /** One membership row with identity columns, or null when [userId] is not a member. */
+    fun findMemberRow(
+        workspaceId: UUID,
+        userId: UUID,
+    ): WorkspaceMemberRow? =
+        jdbc
+            .query(
+                """
+                SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+                  FROM workspace_members m
+                  JOIN users u ON u.id = m.user_id
+                 WHERE m.workspace_id = :ws AND m.user_id = :uid
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
+                MEMBER_MAPPER,
+            ).singleOrNull()
+
+    /** Removes [userId]'s membership row; false when there was none. Caller owns the owner-guard. */
+    fun removeMember(
+        workspaceId: UUID,
+        userId: UUID,
+    ): Boolean =
+        jdbc.update(
+            "DELETE FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
+        ) > 0
+
+    /** Renames the display name (the one mutable field — `name` is immutable v1, design §8). */
+    fun updateDisplayName(
+        workspaceId: UUID,
+        displayName: String,
+    ): Workspace? =
+        jdbc
+            .query(
+                """
+                UPDATE workspaces SET display_name = :displayName, updated_at = NOW()
+                 WHERE id = :ws AND is_deleted = FALSE
+                RETURNING id, name, display_name, is_personal, created_by, is_deleted, created_at
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("ws", workspaceId).addValue("displayName", displayName),
+                MAPPER,
+            ).singleOrNull()
+
+    /** Soft-deletes [workspaceId]; false when already gone. The name stays taken (house rule). */
+    fun softDelete(workspaceId: UUID): Boolean =
+        jdbc.update(
+            "UPDATE workspaces SET is_deleted = TRUE, updated_at = NOW() WHERE id = :ws AND is_deleted = FALSE",
+            MapSqlParameterSource("ws", workspaceId),
+        ) > 0
+
     /**
      * Inserts the workspace and its creator's OWNER membership in one data-modifying CTE,
      * so a workspace without a member is unrepresentable without an enclosing transaction
-     * (the PipelineRepository precedent, metadata-db §6.3).
+     * (the PipelineRepository precedent, metadata-db §6.3). A name collision surfaces as the
+     * raw `DuplicateKeyException` — the database is the atomic authority; the service maps
+     * it to `workspace.validation.duplicate_name` (same pattern as `PipelineRepository`).
      */
     fun create(
         name: String,
@@ -127,6 +230,17 @@ class WorkspaceRepository(
                 WorkspaceMembership(
                     workspaceId = rs.getObject("workspace_id", UUID::class.java),
                     workspaceName = rs.getString("workspace_name"),
+                    role = WorkspaceRole.fromWire(rs.getString("role")),
+                    joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
+                )
+            }
+
+        val MEMBER_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                WorkspaceMemberRow(
+                    userId = rs.getObject("user_id", UUID::class.java),
+                    email = rs.getString("email"),
+                    displayName = rs.getString("display_name"),
                     role = WorkspaceRole.fromWire(rs.getString("role")),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
                 )

@@ -1,7 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
 import co.datapipelines.web.api.currentPrincipal
 import org.slf4j.LoggerFactory
@@ -18,6 +20,7 @@ class AdminUsersPartialController(
     private val userService: UserService,
 ) {
     @GetMapping("/partials/admin/users")
+    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun search(
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false, defaultValue = "0") offset: Int,
@@ -32,6 +35,7 @@ class AdminUsersPartialController(
     }
 
     @PatchMapping("/partials/admin/users/{userId}/{action}")
+    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
     fun toggle(
         @PathVariable userId: UUID,
         @PathVariable action: String,

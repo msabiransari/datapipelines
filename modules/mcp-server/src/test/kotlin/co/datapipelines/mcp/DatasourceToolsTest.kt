@@ -15,6 +15,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import java.time.Instant
+import java.util.UUID
 
 class DatasourceToolsTest {
     private val registry = mockk<DatasourceRegistry>()
@@ -23,7 +24,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `list never returns a password`() {
-        every { registry.list(null) } returns listOf(McpFixtures.datasource())
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
 
         val payload = DatasourcesListTool(registry).call(McpArguments(emptyMap()), readCtx)
         val first = (payload as List<*>).first() as Map<*, *>
@@ -41,7 +42,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `list pushes the dialect filter down to the registry`() {
-        every { registry.list(Dialect.MYSQL) } returns emptyList()
+        every { registry.listVisible(Dialect.MYSQL, McpFixtures.WORKSPACE_ID) } returns emptyList()
 
         (DatasourcesListTool(registry).call(McpArguments(mapOf("dialect" to "MYSQL")), readCtx) as List<*>).size shouldBe 0
     }
@@ -53,14 +54,14 @@ class DatasourceToolsTest {
 
         assertAll(
             { hits.size shouldBe 0 },
-            { verify(exactly = 0) { registry.list(any()) } },
+            { verify(exactly = 0) { registry.listVisible(any(), any()) } },
             { DatasourcesListTool(registry).definition.inputSchema().toString() shouldNotContain "enum" },
         )
     }
 
     @Test
     fun `get returns connection metadata without credentials`() {
-        every { registry.get("pg-prod") } returns McpFixtures.datasource()
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
         val payload = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
@@ -78,9 +79,9 @@ class DatasourceToolsTest {
         // allowlist was active when debugging why a schema is or isn't visible — REST
         // returned the field, MCP didn't. Same omitted-when-empty envelope semantics as
         // REST §3.2, on both surfaces that share toMcpMetadata.
-        every { registry.get("pg-prod") } returns
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns
             McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting"))
-        every { registry.list(null) } returns
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
             listOf(McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting")))
 
         @Suppress("UNCHECKED_CAST")
@@ -95,7 +96,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `get omits the introspection allowlist when it is empty - the envelope convention`() {
-        every { registry.get("pg-prod") } returns McpFixtures.datasource()
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
         val payload = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
@@ -105,7 +106,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `an unknown datasource is a catalogued not-found`() {
-        every { registry.get("nope") } returns null
+        every { registry.getVisible("nope", McpFixtures.WORKSPACE_ID) } returns null
 
         shouldThrow<DatapipelinesException> {
             DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "nope")), readCtx)
@@ -114,6 +115,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `test returns exactly connected, server_version and error`() {
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
         every { registry.testConnection("pg-prod") } returns
             TestResult(connected = true, testedAt = Instant.parse("2026-08-09T12:00:00Z"), serverVersion = "PostgreSQL 16.2")
 
@@ -129,6 +131,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `a failed test reports the registry's scrubbed message and nothing else`() {
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
         every { registry.testConnection("pg-prod") } returns
             TestResult(
                 connected = false,
@@ -152,10 +155,50 @@ class DatasourceToolsTest {
 
     @Test
     fun `testing an unknown datasource is a catalogued not-found`() {
-        every { registry.testConnection("nope") } returns null
+        every { registry.getVisible("nope", McpFixtures.WORKSPACE_ID) } returns null
 
         shouldThrow<DatapipelinesException> {
             DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "nope")), authorCtx)
         }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+    }
+
+    @Test
+    fun `testing a datasource bound to another workspace is not-found - and the probe never runs`() {
+        // F3 (022 review): datasources_test skipped the §5.3 visibility gate its siblings
+        // got — a live connectivity probe plus server_version of another workspace's
+        // datasource, and an existence oracle. Through a REAL visibility lookup (never a
+        // stubbed testConnection) the bound row must resolve as not-found BEFORE any probe.
+        val boundElsewhere =
+            McpFixtures.datasource().copy(workspaceId = UUID.randomUUID(), workspaceName = "other")
+        val registry = FakeDatasourceRegistry(listOf(boundElsewhere))
+
+        shouldThrow<DatapipelinesException> {
+            DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+        }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
+        registry.testedNames shouldBe emptyList<String>()
+    }
+
+    @Test
+    fun `testing a global or own-workspace datasource passes the visibility gate`() {
+        val registry =
+            FakeDatasourceRegistry(
+                listOf(
+                    McpFixtures.datasource(name = "global-pg"),
+                    McpFixtures
+                        .datasource(name = "own-pg")
+                        .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
+                ),
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val global = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "global-pg")), authorCtx) as Map<String, Any?>
+
+        @Suppress("UNCHECKED_CAST")
+        val own = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "own-pg")), authorCtx) as Map<String, Any?>
+
+        assertAll(
+            { global["connected"] shouldBe true },
+            { own["connected"] shouldBe true },
+        )
     }
 }

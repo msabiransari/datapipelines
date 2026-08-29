@@ -46,6 +46,8 @@ import javax.crypto.spec.SecretKeySpec
 class CookieOAuth2AuthorizationRequestRepository(
     jwtService: JwtService,
     private val objectMapper: ObjectMapper,
+    /** T33: `Secure` follows the base-url scheme ([AuthProperties.secureCookies]); default secure. */
+    private val secureCookies: Boolean = true,
 ) : AuthorizationRequestRepository<OAuth2AuthorizationRequest> {
     private val log = LoggerFactory.getLogger(CookieOAuth2AuthorizationRequestRepository::class.java)
     private val macKey = SecretKeySpec(jwtService.deriveSubkey(COOKIE), HMAC_ALGORITHM)
@@ -64,7 +66,7 @@ class CookieOAuth2AuthorizationRequestRepository(
         response.addCookie(
             Cookie(COOKIE, encode(authorizationRequest)).apply {
                 isHttpOnly = true
-                secure = true
+                secure = secureCookies
                 path = "/"
                 maxAge = MAX_AGE_SECONDS
                 setAttribute("SameSite", "Lax")
@@ -91,7 +93,7 @@ class CookieOAuth2AuthorizationRequestRepository(
         response.addCookie(
             Cookie(COOKIE, "").apply {
                 isHttpOnly = true
-                secure = true
+                secure = secureCookies
                 path = "/"
                 maxAge = 0
             },

@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
@@ -40,6 +42,7 @@ class TemplateEditorController(
     }
 
     @PostMapping("/partials/templates/{id}/versions/{version}/render")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     @ResponseBody
     fun renderPreview(
         @PathVariable id: String,

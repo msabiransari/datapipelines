@@ -135,6 +135,33 @@ class ScopeInterceptorTest {
     }
 
     @Test
+    fun `an unannotated handler under the partials prefix is denied by default`() {
+        // 022 review F6: the htmx partials are reachable with an API key like any route —
+        // they joined the governed prefixes so a forgotten annotation cannot fail open.
+        authenticate(Scope.ADMIN)
+
+        val (proceed, response) = invoke(ProbeController(), "unannotated", path = "/partials/datasources")
+
+        proceed.shouldBeFalse()
+        response.status shouldBe 403
+        body(response)["code"] shouldBe "auth.scope.insufficient"
+        (body(response)["details"] as Map<*, *>)["reason"] shouldBe "handler_not_annotated"
+    }
+
+    @Test
+    fun `an annotated partial handler enforces its floor - a read key cannot mutate`() {
+        // The F6 pin at the unit level: `adminOnly` carries the admin floor; a read-held
+        // principal on a /partials path is denied exactly like its REST twin.
+        authenticate(Scope.READ)
+
+        val (proceed, response) = invoke(ProbeController(), "adminOnly", path = "/partials/probe")
+
+        proceed.shouldBeFalse()
+        response.status shouldBe 403
+        body(response)["code"] shouldBe "auth.scope.insufficient"
+    }
+
+    @Test
     fun `an unannotated handler outside the matrix-governed surfaces is left alone`() {
         val (proceed, response) = invoke(ProbeController(), "unannotated", path = "/login")
 

@@ -79,7 +79,7 @@ class ExecutionsListTool(
     override val definition: McpSchema.Tool =
         McpTools.tool(
             name = "executions_list",
-            description = "List recent pipeline executions, optionally filtered by pipeline or status.",
+            description = "List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status.",
             schema =
                 """
                 {

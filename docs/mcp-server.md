@@ -28,6 +28,7 @@ This spec defines:
 3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 4. **MCP versioning follows the protocol.** We commit to a specific MCP protocol version per datapipelines.co release, and document upgrade paths when the protocol evolves.
 5. **Fail loudly, never silently.** MCP-level errors (transport, auth) and application errors (pipeline validation, datasource unreachable) both surface as structured errors the agent can act on. No silent fallbacks.
+6. **Workspace-scoped by the key (workspaces design §5.2/§9).** Every tool and resource operates inside the workspace the API key is PINNED to at issuance — `DP-Workspace` is refused on MCP requests (`400 workspace.header_forbidden`), because a header-switchable agent key would make every leaked key a skeleton key across the user's workspaces. Pipelines, templates and executions of other workspaces are ABSENT (not hidden): their ids resolve as not-found. Datasources visible here are exactly the pinned workspace's bound ones plus every global one. The `initialize` result's `instructions` field states this so an agent does not reason about invisible siblings.
 
 ---
 
@@ -141,9 +142,12 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
     "tools": {"listChanged": false},
     "resources": {"listChanged": false, "subscribe": false},
     "prompts": {"listChanged": false}
-  }
+  },
+  "instructions": "This server is workspace-scoped: every tool and resource operates inside the workspace the API key is pinned to. ..."
 }
 ```
+
+- `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
 - `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 18 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
@@ -442,7 +446,7 @@ List registered datasources (without credentials).
 ```json
 {
   "name": "datasources_list",
-  "description": "List datasource connections registered on this instance. Returns name, dialect, and connection metadata — never passwords.",
+  "description": "List the datasource connections visible in the key's pinned workspace: its workspace-bound datasources plus every global one. Returns name, dialect, workspace and connection metadata — never passwords. Datasources bound to other workspaces are absent, not hidden.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -452,7 +456,7 @@ List registered datasources (without credentials).
 }
 ```
 
-**Scope:** `read`. (Creating, editing, and deleting datasources requires `admin` and is UI/REST-only — there is no MCP tool for it in v1.)
+**Scope:** `read`. (Creating, editing, and deleting datasources is UI/REST-only — there is no MCP tool for it in v1; workspace-bound CUD is `author` + the workspaces D8 gates, global CUD is `admin`.) The listing is scoped to the key's pinned workspace exactly like REST §9.2.
 
 #### 6.2.11 `datasources_get`
 
@@ -461,7 +465,7 @@ Fetch a single datasource (without password).
 ```json
 {
   "name": "datasources_get",
-  "description": "Get metadata for a single datasource: name, dialect, JDBC URL, pool settings. Credentials are never returned.",
+  "description": "Get metadata for a single datasource visible in the key's pinned workspace: name, dialect, JDBC URL, workspace, readonly flag, pool settings. Credentials are never returned. A datasource bound to another workspace resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -474,7 +478,7 @@ Fetch a single datasource (without password).
 
 **Scope:** `read`.
 
-**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
+**Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `workspace` (string or null — the bound workspace's name; null = global) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape.
 
 #### 6.2.12 `datasources_test`
 
@@ -719,7 +723,7 @@ Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`
 
 #### 7.2.3 `datapipelines://datasources/{name}`
 
-Returns datasource metadata as JSON, with the password field redacted.
+Returns datasource metadata as JSON, with the password field redacted. Workspace-scoped like every datasource read (§2 principle 6): a name bound to another workspace resolves as not-found; `datapipelines://datasources` lists exactly the pinned workspace's visible set (bound + global).
 
 ### 7.3 Resource discovery
 
@@ -743,7 +747,7 @@ Returns a page of resource descriptors (URI, name, description, MIME type) plus 
 - The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
 - Enumeration order is stable within a paging run (pipelines, then templates, then datasources, then executions; each by id). Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
 
-**Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions), so two agents can see different resource sets on the same server.
+**Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions) **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
 
 **Execution resources are windowed:** only executions from the **last 24 hours** are enumerated. Older executions remain readable by direct URI (`datapipelines://executions/{id}`) as long as their metadata exists in the Metadata DB — they are simply not listed, because an unbounded execution history would make `resources/list` useless (and enormous) on any busy instance. Result rows are governed by the much shorter result TTL regardless (§6.2.15).
 
@@ -973,3 +977,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-16 | v1.11 | hardening round 4 (007 review fix-cycle) | §6.2.11: `datasources_get` (and `datasources_list`, which shares the projection) now returns `introspection_include_schemas` when the allowlist is non-empty — omitted when empty, the same envelope as REST §3.2 — so an agent debugging schema visibility can see an allowlist is active. Output-shape change only; inputSchema untouched. |
 | 2026-08-16 | v1.12 | hardening round 4 (007 review fix-cycle) | §6.2.17: `datasources_get_tables` no longer fails on a datasource reporting no current schema — the parameter_required guard is scoped to `datasources_get_columns` (6.2.18), the only operation with a merge hazard; tool description updated (inputSchema unchanged). |
 | 2026-08-17 | v1.13 | pipeline composition | §6.2.4/§6.2.5: the `nodes` inputSchema description now covers the PIPELINE node type (pipeline ref pinning, parameter literals and `${parent_param}` references, output legality). Runtime behavior is unchanged — composition executes through the internal execution service, not a new tool. |
+| 2026-08-28 | v1.14 | workspaces surfaces slice | §2 principle 6 + §5.1 `instructions`: the workspace context statement (key-pinned scope; other workspaces absent, not hidden). §6.2.10/§6.2.11 descriptions + Returns gain `workspace`/`readonly`; datasource listings/by-name reads are workspace-scoped (bound + global — the REST §9.2/§9.3 predicate). §7.2.3/§7.3: the same scoping for datasource resources and `resources/list`. No new tools, no inputSchema changes. |

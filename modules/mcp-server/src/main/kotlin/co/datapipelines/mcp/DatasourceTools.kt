@@ -11,6 +11,11 @@ import io.modelcontextprotocol.spec.McpSchema
  * Built field by field rather than by serializing [Datasource]: that type carries the decrypted
  * `password` on the paths that need it, and "credentials are never returned" (§6.2.10, §13
  * checklist) must be a property of the code, not of whichever mapper happens to serialize it.
+ *
+ * `workspace` (the bound workspace's name, null = global) and `readonly` are the workspaces
+ * design §9 additive fields — `readonly` is machine-readable feedback (D6) so an agent can
+ * see BEFORE authoring that a DML/DDL/output-datasource use of this connection will be
+ * refused.
  */
 internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
     buildMap {
@@ -24,6 +29,8 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
         // The §3.3 allowlist, so an agent debugging why a schema is or isn't visible can see
         // that one is active — omitted when empty, the same envelope convention as REST §3.2.
         if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
+        put("readonly", isReadonly)
+        put("workspace", workspaceName)
         put("pool", properties.hikari)
     }
 
@@ -35,8 +42,9 @@ class DatasourcesListTool(
         McpTools.tool(
             name = "datasources_list",
             description =
-                "List datasource connections registered on this instance. Returns name, dialect, and connection " +
-                    "metadata — never passwords.",
+                "List the datasource connections visible in the key's pinned workspace: its workspace-bound " +
+                    "datasources plus every global one. Returns name, dialect, workspace and connection " +
+                    "metadata — never passwords. Datasources bound to other workspaces are absent, not hidden.",
             schema =
                 """
                 {
@@ -52,6 +60,9 @@ class DatasourcesListTool(
      * §6.2.10 pins `dialect` as a bare `{"type": "string"}` — deliberately, since §6.2.6 and
      * §6.2.8 *do* carry the enum. So an unrecognized dialect filter is not a protocol error here:
      * it simply matches nothing, which is what a filter for something that does not exist means.
+     *
+     * Visibility (workspaces §5.3): the key's pinned workspace — the same
+     * `visible = bound-to-this-workspace OR global` predicate the REST §9.2 listing applies.
      */
     override fun call(
         args: McpArguments,
@@ -59,7 +70,8 @@ class DatasourcesListTool(
     ): Any {
         val filter = args.string("dialect")
         if (filter != null && Dialect.entries.none { it.wire == filter }) return emptyList<Map<String, Any?>>()
-        return datasources.list(filter?.let { Dialect.fromWire(it) }).map { it.toMcpMetadata() }
+        val workspaceId = ctx.principal.requireWorkspace().id
+        return datasources.listVisible(filter?.let { Dialect.fromWire(it) }, workspaceId).map { it.toMcpMetadata() }
     }
 }
 
@@ -71,8 +83,9 @@ class DatasourcesGetTool(
         McpTools.tool(
             name = "datasources_get",
             description =
-                "Get metadata for a single datasource: name, dialect, JDBC URL, pool settings. Credentials are never " +
-                    "returned.",
+                "Get metadata for a single datasource visible in the key's pinned workspace: name, dialect, JDBC " +
+                    "URL, workspace, readonly flag, pool settings. Credentials are never returned. A datasource " +
+                    "bound to another workspace resolves as not-found.",
             schema =
                 """
                 {
@@ -90,7 +103,8 @@ class DatasourcesGetTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        return (datasources.get(name) ?: throw McpNotFound.datasource(name)).toMcpMetadata()
+        val workspaceId = ctx.principal.requireWorkspace().id
+        return (datasources.getVisible(name, workspaceId) ?: throw McpNotFound.datasource(name)).toMcpMetadata()
     }
 }
 
@@ -102,6 +116,10 @@ class DatasourcesGetTool(
  * The payload is exactly §6.2.12's `{connected, server_version?, error?}`. The failure text is the
  * registry's own scrubbed message (datasources §6.1), which is where credential and URL redaction
  * is implemented — this tool adds nothing to it and echoes nothing else about the connection.
+ *
+ * Visibility (workspaces §5.3): the same [DatasourceRegistry.requireVisible] gate as
+ * `datasources_get` — a datasource bound to another workspace is not-found, and the probe
+ * never runs (022 review F3: this tool used to skip the gate its siblings got).
  */
 class DatasourcesTestTool(
     private val datasources: DatasourceRegistry,
@@ -129,6 +147,7 @@ class DatasourcesTestTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
+        datasources.requireVisible(name, ctx)
         val result = datasources.testConnection(name) ?: throw McpNotFound.datasource(name)
         return mapOf(
             "connected" to result.connected,

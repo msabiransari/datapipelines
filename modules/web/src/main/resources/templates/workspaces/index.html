@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Workspaces</h1>
+  </div>
+
+  <div th:if="${param.error}" class="ds-surface" style="border: 1px solid var(--accent-danger); border-radius: var(--radius-base); padding: var(--gap-md); margin-bottom: var(--gap-lg); color: var(--text-primary); font-size: var(--text-sm);">
+    <span th:if="${param.error[0] == 'duplicate_name'}">A workspace with that name already exists.</span>
+    <span th:if="${param.error[0] == 'name_invalid'}">Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.</span>
+    <span th:if="${param.error[0] == 'creation_forbidden'}">Creating workspaces is not permitted on this server.</span>
+    <span th:if="${param.error[0] == 'in_use'}">This workspace still owns content (pipelines, templates or datasources), or still needs its owner.</span>
+    <span th:if="${param.error[0] == 'membership_required'}">That workspace is not available to you.</span>
+    <span th:if="${param.error[0] == 'switch_refused'}">Switching workspaces was refused — you are not a member of that workspace.</span>
+    <span th:if="${param.error[0] == 'user_not_found'} or ${param.error[0] == 'not_found'}">No user or workspace with that identity exists.</span>
+  </div>
+  <div th:if="${param.ok}" class="ds-surface" style="border: 1px solid var(--accent-success); border-radius: var(--radius-base); padding: var(--gap-md); margin-bottom: var(--gap-lg); color: var(--text-primary); font-size: var(--text-sm);">
+    Done.
+  </div>
+
+  <section th:if="${canCreate}" style="margin-bottom: var(--gap-xl);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Create a workspace</h2>
+    <form th:action="@{/workspaces/create}" method="post" style="display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
+      <input type="text" name="name" class="ds-input" placeholder="team-etl" required
+             style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); width: 220px;">
+      <input type="text" name="displayName" class="ds-input" placeholder="Display name (optional)"
+             style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); width: 260px;">
+      <button type="submit" class="ds-button ds-button-primary">Create</button>
+    </form>
+    <p style="color: var(--text-secondary); font-size: var(--text-xs); margin-top: var(--gap-xs);">
+      Provisioning mode on this server: <code th:text="${provisioningMode}">self-serve</code>
+    </p>
+  </section>
+
+  <section th:if="${openJoin and !#lists.isEmpty(joinable)}" style="margin-bottom: var(--gap-xl);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Joinable workspaces</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: var(--gap-md);">
+      <div class="ds-card" th:each="ws : ${joinable}" style="padding: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
+        <span style="font-weight: var(--weight-medium);" th:text="${ws.displayName}">Team</span>
+        <span style="color: var(--text-secondary); font-size: var(--text-sm);" th:text="${ws.name}">team</span>
+        <form th:action="@{/workspaces/{name}/join(name=${ws.name})}" method="post">
+          <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Join</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom: var(--gap-xl);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Your workspaces</h2>
+    <div th:if="${#lists.isEmpty(own)}" class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
+      <p style="color: var(--text-secondary); font-size: var(--text-base);">You are not a member of any workspace yet.</p>
+    </div>
+    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden;"
+         th:unless="${#lists.isEmpty(own)}">
+      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
+        <thead>
+          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Workspace</th>
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Your role</th>
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="membership : ${own}"
+              style="border-bottom: 1px solid var(--border-default);">
+            <td style="padding: var(--gap-sm) var(--gap-md); font-weight: var(--weight-medium);">
+              <span th:text="${membership.workspaceName}">team</span>
+              <span th:if="${membership.workspaceName == activeWorkspace}"
+                    style="display: inline-block; margin-left: var(--gap-xs); padding: 2px var(--gap-sm); border-radius: var(--radius-base); background: var(--surface-raised); font-size: var(--text-xs); color: var(--text-secondary);">active</span>
+            </td>
+            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary);" th:text="${membership.role.wire}">owner</td>
+            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
+              <form th:action="@{/workspace/switch}" method="post" style="display: inline;">
+                <input type="hidden" name="name" th:value="${membership.workspaceName}">
+                <button type="submit" class="ds-button ds-button-secondary ds-button-sm"
+                        th:disabled="${membership.workspaceName == activeWorkspace}">Switch</button>
+              </form>
+              <form th:action="@{/workspaces/{name}/delete(name=${membership.workspaceName})}" method="post" style="display: inline;"
+                    th:if="${managed.containsKey(membership.workspaceName)}">
+                <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section th:each="entry : ${managed}" style="margin-bottom: var(--gap-xl);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">
+      Members — <span th:text="${entry.key}">team</span>
+    </h2>
+    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden; margin-bottom: var(--gap-md);">
+      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
+        <thead>
+          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Member</th>
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Role</th>
+            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="member : ${entry.value}" style="border-bottom: 1px solid var(--border-default);">
+            <td style="padding: var(--gap-sm) var(--gap-md);">
+              <span th:text="${member.displayName}">Alice</span>
+              <span style="color: var(--text-secondary); font-size: var(--text-xs);" th:text="' ' + ${member.email}">alice@example.com</span>
+            </td>
+            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary);" th:text="${member.role.wire}">member</td>
+            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
+              <form th:if="${member.role.wire != 'owner'}"
+                    th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
+                <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
+              </form>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" style="display: flex; gap: var(--gap-md); align-items: center;">
+      <input type="email" name="email" class="ds-input" placeholder="member@example.com" required
+             style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); width: 280px;">
+      <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Add member</button>
+    </form>
+  </section>
+</th:block>
+</html>

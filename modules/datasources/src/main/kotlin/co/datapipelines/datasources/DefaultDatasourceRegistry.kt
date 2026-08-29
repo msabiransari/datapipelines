@@ -53,7 +53,18 @@ class DefaultDatasourceRegistry(
 
     override fun list(dialect: Dialect?): List<Datasource> = repository.findAll(dialect).map { it.toDatasource() }
 
+    /** Workspaces design §5.3 — the repository's SQL predicate is the single visibility authority. */
+    override fun listVisible(
+        dialect: Dialect?,
+        workspaceId: UUID,
+    ): List<Datasource> = repository.findAllVisible(workspaceId, dialect).map { it.toDatasource() }
+
     override fun get(name: String): Datasource? = cache.get(name) { repository.findByName(it)?.toDatasource() }
+
+    override fun getVisible(
+        name: String,
+        workspaceId: UUID,
+    ): Datasource? = repository.findVisibleByName(name, workspaceId)?.toDatasource()
 
     /**
      * The D10 flip window made structural (workspaces §6 layer 2a): one direct indexed PK read

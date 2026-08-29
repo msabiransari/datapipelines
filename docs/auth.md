@@ -292,7 +292,10 @@ The login page shows **only the providers the deployment configured** — one bu
 5. OidcSuccessHandler (our custom code):
    → user = userService.findOrCreateByEmail(claims, registrationId)
    → jwt = jwtService.issue(user)
-   → response.setCookie("dp_session", jwt, httpOnly=true, secure=true, sameSite="Lax")
+   → response.setCookie("dp_session", jwt, httpOnly=true, secure=base-url-scheme, sameSite="Lax")
+     (T33: `secure` is keyed off datapipelines.auth.base-url's scheme — https (or unset) keeps
+     the flag; an explicit http:// base-url drops it so local login works. Production MUST run
+     https — see §8.4. The same rule applies to the dp_csrf and dp_oauth2_authz cookies.)
    → response.sendRedirect("/")
 ```
 
@@ -570,10 +573,14 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` |
 | Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` |
 | Introspect a datasource schema | `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` |
-| Create / update / delete datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` | `admin` |
+| Create / update / delete workspace-bound datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` (workspaces D8: author is the floor; the `member-datasources-enabled` gate, membership and binding checks are enforced in-handler) | `author` |
+| Create / update / delete global datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for `global` datasources and the `global`/`readonly`-on-global flag writes (workspaces D8) | `admin` |
 | Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
 | Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
+| List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
+| Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | any authenticated |
+| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler | any authenticated |
 
 **MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
@@ -584,9 +591,9 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
 | `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` | `author` |
 
-(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only, `admin`.)
+(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 18 tools operate inside the API key's pinned workspace, design §9.)
 
-**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix.
+**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 
 ---
 
@@ -660,11 +667,11 @@ class SecurityConfig(
 5. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
 6. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
 7. AuthorizationFilter             — checks authenticated() for protected paths
-8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods
+8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods; default-deny for unannotated handlers under /api/**, /partials/** and /mcp
 9. Controller                      — handles the request
 ```
 
-If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter returns `401`. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
+If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
 
 ### 8.3 Public endpoints (no auth required)
 
@@ -684,7 +691,7 @@ All `/api/v1/**` endpoints accept either:
 
 The filter chain tries API key first, then JWT. If both present, API key wins.
 
-CSRF exemption is scoped by **credential type, never by path**: a request is exempt only when it carries an API key (`DP-API-Key` header, or `Authorization: Bearer dpk_` on `/mcp`) — a credential a hostile browser context cannot forge, with no cookie involved. A state-changing request authenticated by the `dp_session` cookie requires the `dp_csrf` double-submit token (`DP-CSRF-Token` header) **wherever it occurs**: `/partials/**` ([UI Screens §3](ui-screens.md#3-common-layout)), `POST /logout`, and cookie-authenticated calls to `/api/v1/**` alike. `/mcp` accepts no cookies at all (§8.5), so CSRF never arises there. `dp_session`'s `SameSite=Strict` (§5.5) is defense-in-depth, not the control — it does not defend against a same-site subdomain attacker. In the §8.1 chain this is a `RequestMatcher` over the credential carrier, not a path glob. A CSRF failure returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). (History: v2.2's prose and sketch contradicted each other; v2.3 briefly resolved toward path-based exemption + `SameSite=Strict`; v2.4 supersedes both after two Gate C seats independently flagged the subdomain gap — exemption follows the credential, not the path.)
+CSRF exemption is scoped by **credential type, never by path**: a request is exempt only when it carries an API key (`DP-API-Key` header, or `Authorization: Bearer dpk_` on `/mcp`) — a credential a hostile browser context cannot forge, with no cookie involved. A state-changing request authenticated by the `dp_session` cookie requires the `dp_csrf` double-submit token (`DP-CSRF-Token` header) **wherever it occurs**: `/partials/**` ([UI Screens §3](ui-screens.md#3-common-layout)), `POST /logout`, and cookie-authenticated calls to `/api/v1/**` alike. `/mcp` accepts no cookies at all (§8.5), so CSRF never arises there. `dp_session`'s `SameSite=Strict` (§5.5) is defense-in-depth, not the control — it does not defend against a same-site subdomain attacker. In the §8.1 chain this is a `RequestMatcher` over the credential carrier, not a path glob. A CSRF failure returns 403 `auth.csrf.invalid` with `details.reason`: `missing` | `mismatch` (§9). All three cookies this module mints (`dp_session`, `dp_csrf`, `dp_oauth2_authz`) carry the `Secure` flag keyed off `datapipelines.auth.base-url`'s scheme (T33): `https://` — or no base-url at all — keeps `Secure`; an explicit `http://` base-url drops it so local development login works over plain HTTP. **Production MUST be https** — the wrong default would silently drop sessions there, so absent configuration fails secure. (History: v2.2's prose and sketch contradicted each other; v2.3 briefly resolved toward path-based exemption + `SameSite=Strict`; v2.4 supersedes both after two Gate C seats independently flagged the subdomain gap — exemption follows the credential, not the path.)
 
 ### 8.5 MCP endpoint (`/mcp`)
 

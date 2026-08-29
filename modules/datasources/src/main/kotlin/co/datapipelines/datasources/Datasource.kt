@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
+import java.util.UUID
 
 /**
  * An environment-specific connection to an external database (datasources.md §3).
@@ -36,16 +37,29 @@ data class Datasource(
      * node's `source`, and any node's `output.target: "datasource"`. DQL reads and everything
      * `tempdb` are untouched.
      *
-     * **Read-path only in this slice**: rows acquire the flag through SQL/fixtures — the
-     * API/UI write surface (flag on create/update, `global`/`readonly` admin gates) is the
-     * surfaces slice, and nothing in this module's save path sets or clears it (a
-     * create/UPDATE statement leaves the column at its stored value).
+     * Writable through the REST surface's D8 gates (workspaces design §6 last paragraph):
+     * whoever may edit the datasource may flip it, except that only `admin` may flip it on a
+     * GLOBAL datasource. Every write crosses the registry's save boundary, which evicts the
+     * pool — a flip takes effect at the next pool build (§5.2).
      *
      * Semantics, not containment: JDBC read-only enforcement varies by driver, so a
      * datasource whose data must not change still gets a SELECT-only DB user regardless
      * (datasources.md §5.7).
      */
     val isReadonly: Boolean = false,
+    /**
+     * The V4 `workspace_id` column (metadata-db §4.10; workspaces design §3/D8): the
+     * workspace this datasource is bound to, or **null = global** (visible to every
+     * workspace — D9's backfill choice, preserving pre-workspaces shared behavior).
+     * Binding is visibility/ownership only; the NAME namespace stays global and flat.
+     */
+    val workspaceId: UUID? = null,
+    /**
+     * The bound workspace's NAME (joined at read time), surfaced as the additive `workspace`
+     * payload field (workspaces design §9) — null exactly when [workspaceId] is null, i.e.
+     * global. Derived, never stored on `datasources`.
+     */
+    val workspaceName: String? = null,
     /**
      * §7A introspection include-schemas allowlist (§3.3): schema names exempt from the
      * dialect's system-schema exclusion in ALL THREE introspection operations. The escape
@@ -112,7 +126,8 @@ data class Datasource(
      */
     override fun toString(): String =
         "Datasource(name=$name, dialect=${dialect.wire}, jdbcUrl=$jdbcUrl, username=$username, " +
-            "password_set=${password != null}, queryTimeoutSeconds=$queryTimeoutSeconds, isReadonly=$isReadonly)"
+            "password_set=${password != null}, queryTimeoutSeconds=$queryTimeoutSeconds, isReadonly=$isReadonly, " +
+            "workspace=${workspaceName ?: "global"})"
 }
 // The `password_set` field of a GET response is derived at the web layer from row existence:
 // every persisted datasource has a NOT NULL `password_encrypted` (metadata-db §4.10), so a

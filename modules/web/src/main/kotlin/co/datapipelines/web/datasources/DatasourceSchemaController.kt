@@ -2,12 +2,14 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.toWireMap
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiResponse
+import co.datapipelines.web.api.currentPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
@@ -23,6 +25,10 @@ import org.springframework.web.bind.annotation.RestController
  * datasource name propagates the introspector's catalogued
  * `datasource.not_found` to [co.datapipelines.web.api.ApiExceptionHandler] (HTTP 404), and an
  * unknown table/schema filter is the introspector's empty list — "no results", not an error.
+ *
+ * Workspace visibility (workspaces design §5.3) is enforced BEFORE the introspector runs:
+ * a datasource bound to another workspace is `datasource.not_found` here too — by-name
+ * access to an invisible datasource behaves as not-found on every surface.
  *
  * A connection failure arrives as the introspector's [DatasourceUnreachableException] — the
  * lease boundary there translates BOTH the SQLException and the RuntimeException pool-build
@@ -43,6 +49,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/datasources")
 class DatasourceSchemaController(
     private val introspector: SchemaIntrospector,
+    private val datasources: DatasourceRegistry,
 ) {
     /**
      * §7A — the schema listing, the introspection flow's entry point (schemas → tables →
@@ -53,7 +60,7 @@ class DatasourceSchemaController(
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun schemas(
         @PathVariable name: String,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.schemas(name).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.schemas(name).toWireMap() })
 
     /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")
@@ -61,7 +68,7 @@ class DatasourceSchemaController(
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(introspecting(name) { introspector.tables(name, schema).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.tables(name, schema).toWireMap() })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -71,7 +78,23 @@ class DatasourceSchemaController(
         @PathVariable table: String,
         @RequestParam(required = false) schema: String?,
     ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(introspecting(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
+        ApiResponse.of(visible(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
+
+    /** §5.3 visibility, then the shared error boundaries: an invisible datasource is not-found, identical to unknown. */
+    private fun <T> visible(
+        name: String,
+        block: () -> T,
+    ): T {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        if (datasources.getVisible(name, workspaceId) == null) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Datasource.NOT_FOUND,
+                message = "Datasource '$name' not found.",
+                details = mapOf("datasource_name" to name),
+            )
+        }
+        return introspecting(name, block)
+    }
 
     /**
      * The §7A error boundaries shared by the three endpoints. The introspector's

@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRepository
@@ -19,6 +21,7 @@ class DashboardPartialController(
     private val pipelines: PipelineRepository,
 ) {
     @GetMapping("/dashboard-stats")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun stats(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
@@ -45,6 +48,7 @@ class DashboardPartialController(
     }
 
     @GetMapping("/recent-executions")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun recentExecutions(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id

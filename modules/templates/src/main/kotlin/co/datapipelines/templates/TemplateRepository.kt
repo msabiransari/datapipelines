@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -186,13 +187,39 @@ class TemplateRepository(
         createdBy: UUID,
     ): Template {
         val id = draft.id ?: generateId()
-        return jdbc
-            .query(
-                INSERT_SQL,
-                params(workspaceId, id, draft, createdBy),
-                MAPPER,
-            ).single()
+        return mappingDuplicateName(id) {
+            jdbc
+                .query(
+                    INSERT_SQL,
+                    params(workspaceId, id, draft, createdBy),
+                    MAPPER,
+                ).single()
+        }
     }
+
+    /**
+     * Translates a `templates` name-UNIQUE violation into §13.9's
+     * `template.validation.duplicate_name` (HTTP 409) — the exact `PipelineRepository`
+     * precedent (same reasoning: the constraint is the only atomic authority, and the
+     * constraint name is matched so a surrogate-PK collision on import cannot masquerade
+     * as a name conflict). Before this mapping the violation surfaced as a raw
+     * `DuplicateKeyException` 500.
+     */
+    private fun <T> mappingDuplicateName(
+        name: String,
+        block: () -> T,
+    ): T =
+        try {
+            block()
+        } catch (e: org.springframework.dao.DuplicateKeyException) {
+            if (e.mostSpecificCause.message?.contains(NAME_CONSTRAINT) != true) throw e
+            throw co.datapipelines.typesystem.DatapipelinesException(
+                code = PipelineErrorCodes.Template.DUPLICATE_NAME,
+                message = "A template named '$name' already exists in this workspace.",
+                details = mapOf("name" to name),
+                cause = e,
+            )
+        }
 
     /**
      * Appends a new version and bumps `current_version`, in one statement.
@@ -244,6 +271,9 @@ class TemplateRepository(
         )
 
     companion object {
+        /** The per-workspace name constraint behind `UNIQUE (workspace_id, name)` (metadata-db §4.8, V4). */
+        private const val NAME_CONSTRAINT = "uq_templates_workspace_name"
+
         /** Page size when the caller names none (rest-api §8.5 shows `limit=50`). */
         const val DEFAULT_PAGE_LIMIT = 50
 

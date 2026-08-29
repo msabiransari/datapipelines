@@ -33,10 +33,17 @@ import java.util.UUID
  */
 class DatasourcesControllerTest {
     private val registry = mockk<DatasourceRegistry>()
-    private val controller = DatasourcesController(registry)
+    private val workspaceService = mockk<co.datapipelines.auth.WorkspaceService>(relaxed = true)
+    private val controller =
+        DatasourcesController(
+            registry,
+            co.datapipelines.web.datasources
+                .DatasourceWorkspaceRules(workspaceService, co.datapipelines.auth.WorkspacesProperties()),
+        )
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     private val userId = UUID.randomUUID()
+    private val workspaceId = UUID.randomUUID()
 
     private fun datasource() =
         Datasource(
@@ -60,7 +67,7 @@ class DatasourcesControllerTest {
                 "A",
                 scopes,
                 AuthMethod.OIDC,
-                workspace = WorkspaceContext(UUID.randomUUID(), "acme"),
+                workspace = WorkspaceContext(workspaceId, "acme"),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -157,7 +164,8 @@ class DatasourcesControllerTest {
 
     @Test
     fun `list paginates with an exact total and projects the two property namespaces`() {
-        every { registry.list(null) } returns (1..3).map { datasource().copy(name = "ds-$it") }
+        authenticate()
+        every { registry.listVisible(null, workspaceId) } returns (1..3).map { datasource().copy(name = "ds-$it") }
 
         val firstPage = controller.list(dialect = null, offset = 0, limit = 2).data
         firstPage.items.size shouldBe 2
@@ -181,32 +189,36 @@ class DatasourcesControllerTest {
 
     @Test
     fun `get returns the redacted entity, and an unknown name is datasource-not_found`() {
-        every { registry.get("pg-prod") } returns datasource()
+        authenticate()
+        every { registry.getVisible("pg-prod", workspaceId) } returns datasource()
         val data = controller.get("pg-prod").data
         data["jdbc_url"] shouldBe "jdbc:postgresql://db:5432/app"
         data.containsKey("password") shouldBe false
 
-        every { registry.get("nope") } returns null
+        every { registry.getVisible("nope", workspaceId) } returns null
         shouldThrow<ApiException> { controller.get("nope") }.code shouldBe "datasource.not_found"
     }
 
     @Test
     fun `update without a password keeps the stored credential, and an unknown name 404s`() {
         authenticate()
-        every { registry.exists("pg-prod") } returns true
+        val bound = datasource().copy(workspaceId = workspaceId, workspaceName = "acme")
+        every { registry.getVisible("pg-prod", workspaceId) } returns bound
         val updateBody = mapper.readTree("""{"dialect":"POSTGRES","jdbc_url":"jdbc:postgresql://db2:5432/app","username":"ro"}""")
         every { registry.save(match { it.password == null && it.jdbcUrl == "jdbc:postgresql://db2:5432/app" }, userId) } returns
-            datasource().copy(jdbcUrl = "jdbc:postgresql://db2:5432/app")
+            bound.copy(jdbcUrl = "jdbc:postgresql://db2:5432/app")
 
         controller.update("pg-prod", updateBody).data["jdbc_url"] shouldBe "jdbc:postgresql://db2:5432/app"
 
-        every { registry.exists("nope") } returns false
+        every { registry.getVisible("nope", workspaceId) } returns null
         shouldThrow<ApiException> { controller.update("nope", updateBody) }.code shouldBe "datasource.not_found"
     }
 
     @Test
     fun `delete is 204, in_use is 409 with the referencing pipelines, unknown is 404`() {
         authenticate()
+        every { registry.getVisible(any(), workspaceId) } answers
+            { datasource().takeIf { firstArg<String>() == "pg-prod" || firstArg<String>() == "busy" } }
         every { registry.delete("pg-prod") } returns DeleteResult(deleted = true, name = "pg-prod")
         controller.delete("pg-prod")
 
@@ -222,6 +234,8 @@ class DatasourcesControllerTest {
 
     @Test
     fun `test-connection failure is 200 with connected false, never an HTTP error`() {
+        authenticate()
+        every { registry.getVisible("pg-prod", workspaceId) } returns datasource()
         every { registry.testConnection("pg-prod") } returns
             TestResult(connected = false, testedAt = Instant.EPOCH, error = "Connection refused")
         val data = controller.test("pg-prod").data
@@ -232,7 +246,7 @@ class DatasourcesControllerTest {
             TestResult(connected = true, testedAt = Instant.EPOCH, serverVersion = "PostgreSQL 16.3")
         controller.test("pg-prod").data["server_version"] shouldBe "PostgreSQL 16.3"
 
-        every { registry.testConnection("nope") } returns null
+        every { registry.getVisible("nope", workspaceId) } returns null
         shouldThrow<ApiException> { controller.test("nope") }.code shouldBe "datasource.not_found"
     }
 }

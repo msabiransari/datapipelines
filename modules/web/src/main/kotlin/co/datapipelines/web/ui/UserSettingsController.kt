@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserRepository
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
@@ -33,6 +35,7 @@ class UserSettingsController(
     }
 
     @PatchMapping("/partials/profile/theme")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun updateTheme(
         @RequestParam theme: String,
     ): ResponseEntity<String> {

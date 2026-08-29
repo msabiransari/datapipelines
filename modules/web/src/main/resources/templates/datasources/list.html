@@ -4,9 +4,8 @@
 <th:block th:fragment="content">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
     <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Datasources</h1>
-    <th:block th:if="${#sets.contains(scopes, 'ADMIN')}">
-      <button class="ds-button ds-button-primary" disabled
-              style="opacity: 0.6;" th:title="${'Register Datasource — Phase 2 modal form'}">Register Datasource</button>
+    <th:block th:if="${canRegister}">
+      <button class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
     </th:block>
   </div>
 
@@ -21,8 +20,109 @@
     </select>
   </div>
 
+  <p th:if="${activeWorkspace} == null" style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-md);">
+    You are not a member of any workspace yet — create or join one on the Workspaces screen.
+  </p>
+
   <div id="datasource-list-wrapper"
        th:replace="~{partials/datasources :: fragment}">
   </div>
+
+  <div id="register-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+    <div class="ds-card" style="max-width:520px;width:100%;padding:var(--gap-lg);position:relative;max-height:90vh;overflow:auto;">
+      <button class="ds-button ds-button-ghost ds-button-sm" onclick="hideRegisterModal()" style="position:absolute;top:var(--gap-sm);right:var(--gap-sm);font-size:var(--text-xl)">&times;</button>
+      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Register Datasource</h2>
+      <form th:attr="hx-post=@{/partials/datasources}"
+            hx-target="#register-result"
+            hx-swap="innerHTML">
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Name</label>
+          <input type="text" name="name" class="ds-input" style="width:100%" placeholder="pg-prod" required>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Display name (optional)</label>
+          <input type="text" name="displayName" class="ds-input" style="width:100%" placeholder="Production Postgres">
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Dialect</label>
+          <select name="dialect" class="ds-input" style="width:100%" required>
+            <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}">POSTGRES</option>
+          </select>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">JDBC URL</label>
+          <input type="text" name="jdbcUrl" class="ds-input" style="width:100%" placeholder="jdbc:postgresql://host:5432/db" required>
+        </div>
+        <div style="display:flex;gap:var(--gap-md);margin-bottom:var(--gap-md);">
+          <div style="flex:1">
+            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Username</label>
+            <input type="text" name="username" class="ds-input" style="width:100%" required>
+          </div>
+          <div style="flex:1">
+            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Password</label>
+            <input type="password" name="password" class="ds-input" style="width:100%" required>
+          </div>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Description (optional)</label>
+          <input type="text" name="description" class="ds-input" style="width:100%">
+        </div>
+        <div style="margin-bottom:var(--gap-md);display:flex;gap:var(--gap-lg);align-items:flex-start;">
+          <label style="display:flex;gap:var(--gap-xs);align-items:center;color:var(--text-secondary);font-size:var(--text-sm);">
+            <input type="checkbox" name="readonly" value="true"> Readonly
+          </label>
+          <label style="display:flex;gap:var(--gap-xs);align-items:center;color:var(--text-secondary);font-size:var(--text-sm);"
+                 th:attr="title=${isAdmin} ? 'Visible to every workspace' : 'Only admins can register global datasources'">
+            <input type="checkbox" name="global" value="true" th:disabled="${!isAdmin}"> Global
+          </label>
+<span style="color:var(--text-tertiary);font-size:var(--text-xs);" th:text="${bindingHint}"></span>
+        </div>
+        <div id="register-result" style="margin-bottom:var(--gap-md);"></div>
+        <button type="submit" class="ds-button ds-button-primary" style="width:100%">Register</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function showRegisterModal() {
+      document.getElementById('register-result').removeAttribute('data-error');
+      document.getElementById('register-result').innerHTML = '';
+      document.getElementById('register-modal').style.display = 'flex';
+    }
+    function hideRegisterModal() {
+      document.getElementById('register-modal').style.display = 'none';
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      var result = document.getElementById('register-result');
+
+      // Refusals arrive as 4xx — htmx does NOT swap those into hx-target (the layout's
+      // hx-target-error is the response-targets extension, which is not loaded). Handle
+      // the failure explicitly: the refusal markup lands in #register-result, tagged so
+      // the observer below does NOT close the modal over it (022 review F9).
+      document.body.addEventListener('htmx:responseError', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
+        result.setAttribute('data-error', 'true');
+        result.innerHTML = event.detail.xhr.responseText;
+      });
+
+      // A fresh attempt clears the previous refusal, so a later success is not masked by it.
+      document.body.addEventListener('htmx:beforeRequest', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
+        result.removeAttribute('data-error');
+        result.innerHTML = '';
+      });
+
+      // Close the modal only on SUCCESS content — never over an error (F9).
+      var observer = new MutationObserver(function() {
+        var modal = document.getElementById('register-modal');
+        if (modal.style.display === 'flex' &&
+            result.children.length > 0 &&
+            result.getAttribute('data-error') !== 'true') {
+          hideRegisterModal();
+        }
+      });
+      if (result) observer.observe(result, {childList: true, subtree: true});
+    });
+  </script>
 </th:block>
 </html>

@@ -42,6 +42,20 @@ data class WorkspaceMembership(
 )
 
 /**
+ * A member of one workspace, as the `/members` listing projects them (metadata-db §4.12 ×
+ * `users`): identity columns plus the role. No `WorkspaceMembership` reuse because that type
+ * answers the reverse question ("which workspaces does THIS user belong to") and carries no
+ * user identity.
+ */
+data class WorkspaceMemberRow(
+    val userId: UUID,
+    val email: String,
+    val displayName: String,
+    val role: WorkspaceRole,
+    val joinedAt: Instant,
+)
+
+/**
  * The resolved active workspace a request pipeline carries (design §5): everything
  * downstream — repositories, execution records, template resolution — is scoped to it.
  *

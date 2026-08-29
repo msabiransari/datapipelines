@@ -20,12 +20,35 @@ import java.util.UUID
  * pipeline-contract's own KDoc anticipates ("the datasources module — or the wiring in app —
  * supplies an implementation"). Reported to the orchestrator as a layering boundary decision.
  */
+@Suppress("TooManyFunctions") // the registry IS the surface; +2 visibility reads (§5.3)
 interface DatasourceRegistry {
     /** Every live datasource, optionally narrowed to one [dialect]. Passwords never included. */
     fun list(dialect: Dialect? = null): List<Datasource>
 
+    /**
+     * Every datasource VISIBLE to [workspaceId] (workspaces design §5.3): its bound rows
+     * plus all global ones. The workspace predicate is pushed to the repository's SQL, so
+     * a caller's paging totals count exactly the visible set. Defaults to the unfiltered
+     * [list] so in-memory test fakes need no workspace model — the production
+     * implementation overrides it, and the isolation E2E proves the real behavior.
+     */
+    fun listVisible(
+        dialect: Dialect? = null,
+        workspaceId: UUID,
+    ): List<Datasource> = list(dialect)
+
     /** The live datasource under [name], or null when not registered or soft-deleted. */
     fun get(name: String): Datasource?
+
+    /**
+     * The live datasource under [name] when VISIBLE to [workspaceId] (bound-to-it or
+     * global), else null — by-name access to another workspace's datasource behaves as
+     * not-found (design §5.3). Same default-and-override contract as [listVisible].
+     */
+    fun getVisible(
+        name: String,
+        workspaceId: UUID,
+    ): Datasource? = get(name)
 
     /**
      * The live registry entry for [name] **as of this call**, bypassing the §6.3 metadata

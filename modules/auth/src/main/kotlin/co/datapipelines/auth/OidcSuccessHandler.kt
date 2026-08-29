@@ -129,22 +129,35 @@ class OidcSuccessHandler(
         redirectStrategy.sendRedirect(request, response, "/login?error=oidc_error")
     }
 
-    private fun sessionCookie(jwt: String): Cookie =
-        Cookie(SESSION_COOKIE, jwt).apply {
-            isHttpOnly = true
-            secure = true
-            path = "/"
-            maxAge = (authProperties.jwt.ttlHours * SECONDS_PER_HOUR).toInt()
-            // Lax, NOT Strict: the post-login landing arrives over the cross-site
-            // redirect chain from the IdP, where Strict withholds the cookie — and a
-            // browser reload of that landing re-uses the cross-site initiator, so the
-            // user stays logged out forever (observed live 2026-08-28, T33). Lax still
-            // withholds the cookie on cross-site POSTs; CSRF covers state changes.
-            setAttribute("SameSite", "Lax")
-        }
+    private fun sessionCookie(jwt: String): Cookie = sessionCookie(jwt, authProperties)
 
     companion object {
         const val SESSION_COOKIE = "dp_session"
-        private const val SECONDS_PER_HOUR = 3600L
     }
 }
+
+/**
+ * The `dp_session` cookie, built once for every minter (login and the UI workspace
+ * switcher re-stamp the same cookie): HttpOnly, path `/`, TTL the JWT's, SameSite=Lax
+ * — and `Secure` keyed off [AuthProperties.secureCookies] (T33): `https` base-url (or
+ * none) keeps the flag, an explicit `http://` base-url drops it so local login works.
+ *
+ * SameSite stays **Lax, not Strict**: the post-login landing arrives over the cross-site
+ * redirect chain from the IdP, where Strict withholds the cookie — and a browser reload
+ * of that landing re-uses the cross-site initiator, so the user stays logged out forever
+ * (observed live 2026-08-28, T33). Lax still withholds the cookie on cross-site POSTs;
+ * CSRF covers state changes (§8.4).
+ */
+private const val SECONDS_PER_HOUR = 3600L
+
+fun sessionCookie(
+    jwt: String,
+    authProperties: AuthProperties,
+): Cookie =
+    Cookie(OidcSuccessHandler.SESSION_COOKIE, jwt).apply {
+        isHttpOnly = true
+        secure = authProperties.secureCookies()
+        path = "/"
+        maxAge = (authProperties.jwt.ttlHours * SECONDS_PER_HOUR).toInt()
+        setAttribute("SameSite", "Lax")
+    }

@@ -48,8 +48,20 @@ object DatasourceErrorCodes {
      * delete keeps the row (metadata-db §4.10), so a deleted datasource's name is never released.
      * That is deliberate — pipelines reference datasources by name, and reusing a retired name
      * would silently repoint every pipeline that still names it at a different database.
+     *
+     * The namespace also stays global ACROSS WORKSPACES (workspaces design §3): datasource
+     * `name` is the PK, the GCM AAD anchor and the pool-registry key, so a collision between
+     * two workspaces is this same code — by design, not an oversight.
      */
     const val DUPLICATE_NAME = "datasource.validation.duplicate_name"
+
+    /**
+     * A D8 refusal (workspaces design §8): a non-admin attempted the `global` flag (create,
+     * flip, or mutating a global datasource), a non-admin attempted to flip `readonly` on a
+     * GLOBAL datasource, or the caller bound the datasource to a workspace they are not in
+     * — including every member CUD when `member-datasources-enabled` is off.
+     */
+    const val WORKSPACE_FORBIDDEN = "datasource.validation.workspace_forbidden"
 
     /** Delete blocked because one or more non-deleted pipelines reference this datasource (§6.2). */
     const val IN_USE = "datasource.in_use"
