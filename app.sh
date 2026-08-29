@@ -93,10 +93,16 @@ ENCRYPTION_KEY=${enc:-$(openssl rand -base64 32)}
 DATAPIPELINES_AUTH_BASE_URL=${base:-http://localhost:8080}
 GOOGLE_CLIENT_ID=${gid:-your-google-client-id}
 GOOGLE_CLIENT_SECRET=${gsec:-your-google-client-secret}
-# This email becomes admin at its FIRST login (auth.md §4.4); empty = no admin
-DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=${admin:-}
+# This email becomes admin at its FIRST login (auth.md §4.4). Deliberately NOT
+# written as an empty assignment when unknown: a later env file could never
+# override an empty value here (compose precedence), and the demo's placeholder
+# actor needs to win when you haven't set one. Add the line yourself to claim admin:
+# DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=you@yourdomain.com
+${admin:+DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=$admin}
 DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=${domains:-}
 EOF
+  # Strip the blank line the empty substitution leaves behind.
+  sed -i.bak '/^$/d' "$DEPLOY_ENV" && rm -f "$DEPLOY_ENV.bak"
   echo "==> wrote $DEPLOY_ENV — review it; Google creds must be real for login to work"
 }
 
@@ -133,8 +139,19 @@ ensure_demo_env() {
   # linking never fires. Want YOUR login to be admin? Set
   # DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL to your email in deploy/.env
   # BEFORE the first start (the grant fires only at row creation).
-  if [[ -z $(env_get "$DEPLOY_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL) ]]; then
-    add_key DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL "demo-admin@demo.local"
+  # Non-empty-aware on BOTH files: an empty `KEY=` line in deploy/.env would make
+  # add_key skip this AND clobber the demo file's value via env-file precedence
+  # (rehearsal catch #3). If the effective value is still empty after this, die
+  # with words rather than letting the app's §3.18 fail-fast print a stack trace.
+  if [[ -z $(env_get "$DEPLOY_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL) &&
+        -z $(env_get "$DEMO_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL) ]]; then
+    printf '%s=%s\n' DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL "demo-admin@demo.local" >> "$DEMO_ENV"
+    added=1
+  fi
+  if grep -qE '^DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=$' "$DEPLOY_ENV"; then
+    die "deploy/.env has an EMPTY DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL= line.
+  The demo needs a bootstrap actor (auth.md §4.4). Set your email there — or delete
+  the line entirely and the demo's placeholder actor takes over."
   fi
   if ((added)); then echo "==> appended the missing SAMPLE_*/demo keys to $DEMO_ENV"; fi
   # The EFFECTIVE value: deploy/.env wins over the scaffolded demo file.
