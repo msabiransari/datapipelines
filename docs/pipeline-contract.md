@@ -871,6 +871,7 @@ otherwise see any workspace and so gets a real 404.
 | `workspace.membership_required` | 403 | Principal is not a member of the addressed workspace (or has zero memberships); also covers unknown names, so the switch cannot probe existence |
 | `workspace.creation_forbidden` | 403 | The provisioning mode forbids this caller creating a workspace |
 | `workspace.header_forbidden` | 400 | `DP-Workspace` sent on an API-key request; a key's workspace is pinned at issuance and cannot switch |
+| `workspace.session_required` | 403 | An API-key principal reached a session-only workspace action (the UI's create/join/members/delete/switch); the key's workspace is pinned at issuance and `switch` mints a session, so the credential class is refused outright |
 | `workspace.not_found` | 404 | Unknown workspace name, for a principal who could otherwise see any workspace (a global admin); members never see this code |
 | `workspace.validation.name_invalid` | 400 | Workspace name fails `[a-z0-9_-]+`, 1–63 |
 | `workspace.validation.duplicate_name` | 409 | Workspace name exists (global namespace, soft-deleted included — house rule) |

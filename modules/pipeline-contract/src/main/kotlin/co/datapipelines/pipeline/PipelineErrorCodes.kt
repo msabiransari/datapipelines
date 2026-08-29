@@ -377,6 +377,15 @@ object PipelineErrorCodes {
         /** §13.12 — `DP-Workspace` on an API-key request; a key's workspace is pinned at issuance (D3). */
         const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
+        /**
+         * §13.12 — an API-key principal reached a session-only workspace action (the UI's
+         * create/join/members/delete/switch). A key cannot hold — let alone mint — a
+         * `dp_session`, and `switch` mints one from the USER's scopes, so the class of
+         * action is refused for the credential outright (025 A2; the 96240ed hotfix
+         * carried `workspace.header_forbidden` as the interim code).
+         */
+        const val SESSION_REQUIRED = "workspace.session_required"
+
         /** §13.12 — unknown workspace name, for a principal who could otherwise see any workspace (an admin). */
         const val NOT_FOUND = "workspace.not_found"
 

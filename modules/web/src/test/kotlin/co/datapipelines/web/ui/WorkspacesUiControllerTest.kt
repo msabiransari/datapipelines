@@ -205,7 +205,7 @@ class WorkspacesUiControllerTest {
     @Test
     fun `an API-key principal cannot create, join, add, remove or delete`() {
         authenticateWithApiKey()
-        val refusal = "redirect:/workspaces?error=header_forbidden"
+        val refusal = "redirect:/workspaces?error=session_required"
 
         controller.create("globex", "Globex") shouldBe refusal
         controller.join("globex") shouldBe refusal

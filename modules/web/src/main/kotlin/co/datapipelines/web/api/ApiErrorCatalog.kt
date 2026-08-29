@@ -102,6 +102,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
             // §13.12's CRUD codes break the workspace.* family default (403, the resolution
             // codes) — the surfaces slice's rows each carry their own status.
+            // SESSION_REQUIRED is 403 like the family default, but wired explicitly so the
+            // code has a row here, not an absorption (025 A2).
+            PipelineErrorCodes.Workspace.SESSION_REQUIRED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Workspace.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Workspace.NAME_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to HttpStatus.CONFLICT,

@@ -12,6 +12,7 @@
     <span th:if="${param.error[0] == 'creation_forbidden'}">Creating workspaces is not permitted on this server.</span>
     <span th:if="${param.error[0] == 'in_use'}">This workspace still owns content (pipelines, templates or datasources), or still needs its owner.</span>
     <span th:if="${param.error[0] == 'membership_required'}">That workspace is not available to you.</span>
+    <span th:if="${param.error[0] == 'session_required'}">Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.</span>
     <span th:if="${param.error[0] == 'switch_refused'}">Switching workspaces was refused — you are not a member of that workspace.</span>
     <span th:if="${param.error[0] == 'user_not_found'} or ${param.error[0] == 'not_found'}">No user or workspace with that identity exists.</span>
   </div>
