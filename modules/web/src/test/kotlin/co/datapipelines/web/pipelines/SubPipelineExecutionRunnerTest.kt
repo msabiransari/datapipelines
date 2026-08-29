@@ -71,6 +71,7 @@ class SubPipelineExecutionRunnerTest {
     private val parentExecutionId = UUID.randomUUID()
     private val parentRootId = UUID.randomUUID()
     private val parentUserId = UUID.randomUUID()
+    private val parentWorkspaceId = UUID.randomUUID()
     private val parentCorrelationId = UUID.randomUUID()
     private val childRecordId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -157,6 +158,7 @@ class SubPipelineExecutionRunnerTest {
             compositionDepth = compositionDepth,
             directSink = directSink,
             correlationId = parentCorrelationId,
+            workspaceId = parentWorkspaceId,
         )
 
     /**
@@ -531,7 +533,7 @@ class SubPipelineExecutionRunnerTest {
                 }
 
             thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
-            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any()) }
+            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any()) }
         }
 
     @Test
@@ -623,7 +625,7 @@ class SubPipelineExecutionRunnerTest {
         runTest {
             stubRegistry()
             val output = NodeOutput.Datasource("warehouse", "revenue", WriteMode.APPEND)
-            every { writebackRunner.writebackRows(any(), any(), output) } answers
+            every { writebackRunner.writebackRows(any(), any(), output, any()) } answers
                 {
                     secondArg<Sequence<List<Any?>>>().count().toLong()
                 }
@@ -636,7 +638,7 @@ class SubPipelineExecutionRunnerTest {
             val result = runner(stub).run(pipelineNode(output = output), context())
 
             result.rowsOut shouldBe 2
-            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output) }
+            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId) }
         }
 
     @Test

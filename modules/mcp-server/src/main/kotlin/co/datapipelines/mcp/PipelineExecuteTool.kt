@@ -118,6 +118,9 @@ class PipelineExecuteTool(
                 pipelineVersion = version,
                 pipeline = deserializer.readOrThrow(body),
                 userId = ctx.principal.userId,
+                // The key's pinned workspace — the record was resolved in it two lines up
+                // (025 A5): the execution runs where the pipeline lives.
+                workspaceId = workspace.id,
                 parameters = parameters(args),
                 correlationId = ctx.correlationId,
                 triggeredVia = ExecutionTrigger.MCP,

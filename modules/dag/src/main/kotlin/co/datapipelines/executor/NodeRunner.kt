@@ -86,6 +86,16 @@ data class NodeExecutionContext(
      * Null only when the surface that built the request supplied none; `web` always does.
      */
     val correlationId: UUID? = null,
+    /**
+     * The workspace this execution runs IN ([ExecuteRequest.workspaceId], design §5.3) —
+     * the pipeline's workspace. Runtime datasource resolution is scoped by it: a node's
+     * `source`/`output.target` datasource resolves through [DatasourceRegistry.getVisible],
+     * so a datasource re-bound away from this workspace after the pipeline was saved fails
+     * at the NEXT execution as `datasource_not_found` — the same answer save-time
+     * validation would give, instead of silently executing against a row the workspace can
+     * no longer see (025 A5).
+     */
+    val workspaceId: UUID,
 )
 
 /**
@@ -201,7 +211,7 @@ class NodeRunner(
             is NodeOutput.Datasource -> {
                 phase(NodePhase.WRITEBACK, node.id) {
                     tempdbCursor(node, sql, ctx, timeout) { rs ->
-                        NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect), startedAt)
+                        NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId), startedAt)
                     }
                 }
             }
@@ -367,12 +377,23 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult {
-        val datasource = phase(NodePhase.CONNECT, node.id) { datasourceRegistry.get(name) ?: throw datasourceNotFound(name) }
+        // Workspaces design §5.3 at EXECUTION time (025 A5): resolve through the
+        // execution's workspace, not by bare name — the same visibility save-time
+        // validation applied. A datasource re-bound away from this workspace after the
+        // pipeline was saved is the same `datasource_not_found` an unknown name gets (no
+        // existence oracle), instead of executing against a row the workspace cannot see.
+        val datasource =
+            phase(NodePhase.CONNECT, node.id) {
+                datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
+            }
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
         // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
-        // node execution time, so a datasource flipped readonly after this version was saved
+        // node execution time, so a datasource flagged readonly after this version was saved
         // fails HERE instead of shipping its DML/DDL. DQL reads are untouched — the check is
-        // on the node type, never on the datasource alone.
+        // on the node type, never on the datasource alone. Deliberately name-keyed, not
+        // visibility-scoped: `name` is the datasource PK, so the row the gate resolved one
+        // line above is the same row this reads — scoping here would duplicate the read for
+        // no new decision.
         if (node.type == NodeType.DML || node.type == NodeType.DDL) {
             phase(NodePhase.CONNECT, node.id) {
                 if (datasourceRegistry.getLive(name)?.isReadonly == true) throw datasourceReadonly(name, node.type)
@@ -453,7 +474,7 @@ class NodeRunner(
 
             is NodeOutput.Datasource -> {
                 phase(NodePhase.WRITEBACK, node.id) {
-                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect), startedAt)
+                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId), startedAt)
                 }
             }
         }

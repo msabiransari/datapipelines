@@ -269,6 +269,9 @@ class SubPipelineExecutionRunner(
         pipelineVersion = ref.version,
         pipeline = child,
         userId = ctx.userId,
+        // Composition inherits the parent's workspace (design §5.3): the child runs where
+        // its invoker runs, so its datasource resolution scopes identically (025 A5).
+        workspaceId = ctx.workspaceId,
         parameters = resolveParameters(node, child, ctx),
         triggeredVia = ExecutionTrigger.PIPELINE,
         executionId = childExecutionId,
@@ -451,7 +454,7 @@ class SubPipelineExecutionRunner(
 
             is NodeOutput.Datasource -> {
                 DirectResultSink { schema, rows ->
-                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output)
+                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId)
                     outcome.delivered = true
                 }
             }

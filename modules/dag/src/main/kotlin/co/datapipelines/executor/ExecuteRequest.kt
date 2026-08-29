@@ -57,6 +57,17 @@ data class ExecuteRequest(
     val pipelineVersion: Int,
     val pipeline: Pipeline,
     val userId: UUID,
+    /**
+     * The workspace the pipeline belongs to — the execution runs IN it (design §5.3, 025
+     * A5). Supplied by the surface that resolved the pipeline (its workspace IS the
+     * execution's workspace) and carried onto [NodeExecutionContext.workspaceId], where
+     * runtime datasource resolution is scoped by it: a datasource the workspace cannot see
+     * is `datasource_not_found` at execution time, exactly as it would be at save time —
+     * closing the gap where a pipeline saved while a datasource was global kept executing
+     * against it after a re-bound. A PIPELINE node's child request carries it verbatim:
+     * composition inherits the parent's workspace.
+     */
+    val workspaceId: UUID,
     val parameters: Map<String, JsonNode> = emptyMap(),
     val idempotencyKey: String? = null,
     val resultTtlSeconds: Long? = null,
