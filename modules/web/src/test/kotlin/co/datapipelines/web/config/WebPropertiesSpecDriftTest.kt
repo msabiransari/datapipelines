@@ -78,7 +78,15 @@ class WebPropertiesSpecDriftTest {
     }
 
     private companion object {
-        /** A `| \`datapipelines.*\` | \`default\` | … |` row in the §3 tables. */
-        val ROW_REGEX = Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9]+)`?\s*\|""")
+        /**
+         * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables
+         * (hardened 025 D3): the description cell runs to end-of-line and may contain
+         * ESCAPED pipes (`\|`), never a bare one — so a row whose column count changes
+         * does not match at all and its key DISAPPEARS from the parse (the `getValue`
+         * calls then fail loudly), instead of the old behavior of silently reading
+         * whichever cell happened to sit in the default position.
+         */
+        val ROW_REGEX =
+            Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""")
     }
 }

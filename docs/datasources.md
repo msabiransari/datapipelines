@@ -532,8 +532,16 @@ datasources:
   - name: sample-reference
     dialect: SQLITE
     jdbc_url: jdbc:sqlite:/srv/sample/nyc_reference.db
-    username: ""
-    password: ""
+    # SQLite is a file: no server, no login, and the xerial driver ignores both
+    # values entirely. They are NON-EMPTY anyway because §9's
+    # `datasource.validation.password_missing` rejects a null-or-empty password on
+    # create, and bootstrap registration runs the full §9 validation with no
+    # startup shortcut (§8A.3) — an empty password here fail-fasts startup with
+    # "A password is required on create." (boot-verified, T38; an earlier revision
+    # of this example showed `username: "" / password: ""` and could not register).
+    # Not a credential: nothing authenticates with it.
+    username: "sqlite"
+    password: "sqlite-file-datasource-has-no-authentication"
     properties:
       jdbc:
         open_mode: "1"                           # xerial read-only open mode — see §8A.4
