@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.auth.WorkspaceContentCheck
+import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
 import co.datapipelines.datasources.DatasourceReferences
@@ -90,15 +91,26 @@ class DomainConfiguration {
      * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
      * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
      *
-     * The port is frozen in `datasources` and carries no workspace, so the workspace comes from
-     * the request's own security context: every invocation is a datasource-surface request
-     * (delete/get referencing check), always on a request thread with the resolved principal
-     * present. That is the one place workspace resolution is contextual rather than explicit —
-     * recorded in the slice-2 sweep statement.
+     * The guard's scope follows the datasource's BINDING (022 review F5): a **bound** datasource
+     * is referenceable only from its own workspace (§5.3 visibility), so its own workspace's
+     * count is the whole truth; a **global** one is referenceable from EVERY workspace, so the
+     * guard aggregates the per-workspace scans across all of them — the cross-workspace promise
+     * of datasources §6.2 ("any non-deleted pipeline"). Reading the row here also removes the
+     * old contextual `currentPrincipal()` dependency: the answer no longer depends on which
+     * workspace the CALLER happens to be acting from.
      */
     @Bean
-    fun datasourceReferences(bodies: PipelineBodies): DatasourceReferences =
-        DatasourceReferences { name -> bodies.pipelinesReferencing(currentPrincipal().requireWorkspace().id, name) }
+    fun datasourceReferences(
+        bodies: PipelineBodies,
+        repository: DatasourceRepository,
+        workspaces: WorkspaceRepository,
+    ): DatasourceReferences =
+        DatasourceReferences { name ->
+            when (val boundTo = repository.findByName(name)?.workspaceId) {
+                null -> workspaces.findAll().flatMap { bodies.pipelinesReferencing(it.id, name) }
+                else -> bodies.pipelinesReferencing(boundTo, name)
+            }
+        }
 
     @Bean
     fun datasourceRegistry(

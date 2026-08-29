@@ -138,6 +138,69 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
+    fun `a global datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
+        ensureSeeded()
+        ensureDatasourcesRegistered()
+        // Bob (globex) authors a pipeline reading the GLOBAL datasource. 022 review F5: the
+        // in_use guard counted only the CALLER'S workspace, so the acme-pinned admin could
+        // delete ds-global out from under globex. The guard now counts every workspace.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, bobKey)
+            .body(
+                """{"id": "globex_tpl", "dialect": "H2", "display_name": "Globex",
+                   "description": "F5", "imports": [], "body": "SELECT 1"}""",
+            ).`when`()
+            .post("/api/v1/templates")
+            .then()
+            .statusCode(201)
+        val pipelineId =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .header(API_KEY_HEADER, bobKey)
+                .body(
+                    """{"schema_version":1,"name":"globex_report","display_name":"G","description":"",""" +
+                        """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"globex_tpl","version":1}}]}""",
+                ).`when`()
+                .post("/api/v1/pipelines")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+
+        try {
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, adminKey)
+                .`when`()
+                .delete("/api/v1/datasources/$DS_GLOBAL")
+                .then()
+                .statusCode(409)
+                .body("error.code", Matchers.equalTo("datasource.in_use"))
+                .body("error.details.referencing_pipelines", Matchers.hasItem("globex_report"))
+        } finally {
+            // Leave globex exactly as seeded — the in_use-count rows above assert its contents.
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, bobKey)
+                .`when`()
+                .delete("/api/v1/pipelines/$pipelineId")
+                .then()
+                .statusCode(204)
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, bobKey)
+                .`when`()
+                .delete("/api/v1/templates/globex_tpl")
+                .then()
+                .statusCode(204)
+        }
+    }
+
+    @Test
     fun `datasource names are a global namespace - a cross-workspace collision is duplicate_name`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
