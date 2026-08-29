@@ -30,7 +30,7 @@
       <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Appearance</h2>
       <div style="display:flex;align-items:center;gap:var(--gap-sm)">
         <label for="themeSelect" style="color:var(--text-secondary);font-size:var(--text-sm);white-space:nowrap">Theme</label>
-        <select id="themeSelect" class="ds-select" style="flex:1" hx-patch="/partials/profile/theme" hx-include="this" name="theme">
+        <select id="themeSelect" class="ds-select" style="flex:1" hx-patch="/partials/profile/theme" hx-include="this" name="theme" hx-target="#theme-status" hx-swap="innerHTML">
           <option value="" th:selected="${user?.themePreference == null}">Default (deployment)</option>
           <th:block th:each="theme : ${themes}">
             <option th:value="${theme}" th:selected="${theme == user?.themePreference}" th:text="${theme}">theme</option>

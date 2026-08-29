@@ -62,6 +62,30 @@ class DashboardPartialsRenderTest {
         html shouldNotContain "Error resolving fragment"
     }
 
+    /**
+     * 025 C1: the theme-swap fragment's OOB link must come out RENDERED — a resolved href
+     * (context-pathed by @{...}), no surviving th: attributes. The old hand-built string
+     * shipped th:href verbatim and htmx swapped it over the layout's stylesheet link.
+     */
+    @Test
+    fun `theme-swap renders a resolved oob stylesheet link with no raw th attributes`() {
+        val application = JakartaServletWebApplication.buildApplication(MockServletContext())
+        val exchange = application.buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
+        val html =
+            engine.process(
+                "partials/theme-swap",
+                WebContext(exchange).apply { setVariable("theme", "ocean") },
+            )
+
+        html shouldContain """id="theme-link" """.trim()
+        html shouldContain """hx-swap-oob="outerHTML" """.trim()
+        // The RESOLVED href — @{...} ran; a hand-built or unprocessed value would still
+        // carry the {theme} placeholder or a th: attribute.
+        html shouldContain """href="/vendor/design-system/themes/ocean.css""".trim()
+        html shouldContain "Theme updated to"
+        html shouldNotContain "th:"
+    }
+
     @Test
     fun `the dashboard page still renders its skeleton loaders`() {
         val application = JakartaServletWebApplication.buildApplication(MockServletContext())

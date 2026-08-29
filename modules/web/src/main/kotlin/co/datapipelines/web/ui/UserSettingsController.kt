@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam
 class UserSettingsController(
     private val userRepository: UserRepository,
     private val themeResolver: ThemeResolver,
+    private val uiProperties: UiProperties,
 ) {
     @GetMapping("/settings")
     fun settings(
@@ -33,11 +34,23 @@ class UserSettingsController(
         return "settings/index"
     }
 
+    /**
+     * The theme swap (025 C1): a RENDERED Thymeleaf fragment (`partials/theme-swap`), never
+     * a hand-built string. The old raw-string response carried an unprocessed `th:href` on
+     * an OOB span, which htmx swapped over the layout's real stylesheet `<link>` — the page
+     * lost its theme CSS until reload. Rendering matters for a second reason: `@{...}` is
+     * what prepends the context path, so a hand-built href breaks under a non-root context
+     * path even when it is processed.
+     *
+     * A blank value CLEARS the preference and swaps to the DEPLOYMENT default
+     * ([UiProperties.theme]) — not a hardcoded name.
+     */
     @PatchMapping("/partials/profile/theme")
     @RequiredScope(ScopeMatrix.RestOperation.PROFILE_PREFERENCE)
     fun updateTheme(
         @RequestParam theme: String,
-    ): ResponseEntity<String> {
+        model: Model,
+    ): Any {
         val principal = requirePrincipal()
         val available = listAvailableThemes()
         if (theme.isNotBlank() && theme !in available) {
@@ -47,14 +60,8 @@ class UserSettingsController(
             )
         }
         userRepository.setThemePreference(principal.userId, theme.ifBlank { null })
-        return ResponseEntity.ok(
-            """<span style="color:var(--accent-success);font-size:var(--text-sm)" """ +
-                """hx-swap-oob="true" id="theme-link" hx-swap="outerHTML" """ +
-                "th:href=\"@{" +
-                "/vendor/design-system/themes/{theme}.css(theme=${
-                    theme.ifBlank { "saas" }
-                })}\">Theme updated to ${theme.ifBlank { "default" }}</span>",
-        )
+        model.addAttribute("theme", theme.ifBlank { uiProperties.theme })
+        return "partials/theme-swap"
     }
 
     companion object {
