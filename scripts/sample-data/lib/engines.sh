@@ -16,7 +16,8 @@
 
 # --- container lifecycle ----------------------------------------------------
 
-# Cleanup is BY NAME PREFIX, not by a list the starters append to.
+# Cleanup removes ONLY THIS INVOCATION'S containers, by the per-run prefix
+# "$SD_PROJECT-$$-".
 #
 # The obvious form — an array the start functions push onto — is silently broken
 # here: every start function is called as `PG=$(engine_start_postgres …)`, i.e.
@@ -25,11 +26,16 @@
 # leaving throwaway Postgres and MySQL containers running on a shared box.
 # (Observed: two orphans after a clean, successful build.)
 #
-# The name prefix is deterministic, survives subshells, and is scoped to
-# $SD_PROJECT — it can only ever match containers this pipeline created.
+# The name prefix is deterministic and survives subshells — `$$` does NOT change
+# in a subshell (BASHPID does), so command substitutions still produce the same
+# names as the trap's filter. And it is PER-INVOCATION (023 F9): the previous
+# shared `$SD_PROJECT-` prefix made one script's EXIT trap kill a concurrent
+# sibling's live engines — a verify.sh started while load-and-dump.sh was
+# restoring tore the build's engines out from under it. `$SD_PROJECT` keeps the
+# containers obviously ours; `$$` keeps them obviously MINE.
 sd_cleanup_engines() {
   local c
-  for c in $(docker ps -aq --filter "name=^${SD_PROJECT}-" 2>/dev/null); do
+  for c in $(docker ps -aq --filter "name=^${SD_PROJECT}-$$-" 2>/dev/null); do
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
 }
@@ -40,7 +46,7 @@ sd_cleanup_engines() {
 # so "whatever postgres:16-alpine resolves to today" is not good enough.
 engine_start_postgres() {
   local tag="$1"
-  local name="$SD_PROJECT-pg-$tag"
+  local name="${SD_PROJECT}-$$-pg-$tag"
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --name "$name" \
     -e POSTGRES_DB=dp_sample_trips \
@@ -70,7 +76,7 @@ engine_start_postgres() {
 # engine_start_mysql <tag>
 engine_start_mysql() {
   local tag="$1"
-  local name="$SD_PROJECT-mysql-$tag"
+  local name="${SD_PROJECT}-$$-mysql-$tag"
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --name "$name" \
     -e MYSQL_DATABASE=dp_sample_weather \

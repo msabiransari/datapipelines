@@ -63,9 +63,13 @@ for t in m['tables']: print('\t'.join([t['engine'].lower(), t['table'], str(t['r
   > "$SD_ROOT/work/.verify-expected.tsv"
 
 compare_engine() { # <engine> <handle>
-  local engine="$1" handle="$2" e t n ck want_n want_ck
+  local engine="$1" handle="$2" e t n ck want_n want_ck compared=0 expected=0
+  # The manifest's table count for THIS engine — the denominator of the
+  # non-vacuity guard below.
+  expected=$(awk -F'\t' -v e="$engine" '$1==e {n++} END {print n+0}' "$SD_ROOT/work/.verify-expected.tsv")
   while IFS=$'\t' read -r e t n ck; do
     [ "$e" = "$engine" ] || continue
+    compared=$((compared + 1))
     want_n=$(awk -F'\t' -v e="$e" -v t="$t" '$1==e && $2==t {print $3}' "$SD_ROOT/work/.verify-expected.tsv")
     want_ck=$(awk -F'\t' -v e="$e" -v t="$t" '$1==e && $2==t {print $4}' "$SD_ROOT/work/.verify-expected.tsv")
     if [ -z "$want_n" ]; then fail "$e.$t restored but the manifest has no fingerprint for it"; continue; fi
@@ -73,6 +77,15 @@ compare_engine() { # <engine> <handle>
     elif [ "sha256:$ck" != "$want_ck" ]; then fail "$e.$t content checksum: manifest=$want_ck restored=sha256:$ck"
     else pass "$e.$t  $n rows  $want_ck"; fi
   done < <(checksum_rows "$engine" "$handle")
+  # NON-VACUITY (023 F4): checksum_rows runs in process substitution, so its `die`
+  # exits only the subshell and the loop simply ends early — the old code compared
+  # the subset that arrived and could print overall OK having verified half the
+  # manifest's tables (the exact class load.sh's manifest guard prevents). A
+  # comparison of fewer tables than the manifest declares for this engine is a
+  # FAIL, whatever the individual results said.
+  if [ "$compared" -lt "$expected" ]; then
+    fail "$engine: only $compared of $expected manifest table(s) were compared — a subset comparison is a failure"
+  fi
 }
 
 # --- 2. postgres ------------------------------------------------------------
