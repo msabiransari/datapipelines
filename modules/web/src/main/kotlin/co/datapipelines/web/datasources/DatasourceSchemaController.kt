@@ -60,7 +60,7 @@ class DatasourceSchemaController(
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun schemas(
         @PathVariable name: String,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.schemas(name).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.schemas(it).toWireMap() })
 
     /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
     @GetMapping("/{name}/tables")
@@ -68,7 +68,7 @@ class DatasourceSchemaController(
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.tables(name, schema).toWireMap() })
+    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.tables(it, schema).toWireMap() })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -78,22 +78,28 @@ class DatasourceSchemaController(
         @PathVariable table: String,
         @RequestParam(required = false) schema: String?,
     ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(visible(name) { introspector.columns(name, table, schema).map { it.toWireMap() } })
+        ApiResponse.of(visible(name) { introspector.columns(it, table, schema).map { c -> c.toWireMap() } })
 
-    /** §5.3 visibility, then the shared error boundaries: an invisible datasource is not-found, identical to unknown. */
+    /**
+     * §5.3 visibility, then the shared error boundaries — and the gate's snapshot is the
+     * datasource the introspector walks (025 C3): the old `getVisible == null` check
+     * discarded the resolved row and re-resolved the name unscoped, a TOCTOU where a
+     * re-bind between the two introspected a datasource the gate would now refuse. An
+     * invisible datasource is not-found, identical to unknown.
+     */
     private fun <T> visible(
         name: String,
-        block: () -> T,
+        block: (co.datapipelines.datasources.Datasource) -> T,
     ): T {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        if (datasources.getVisible(name, workspaceId) == null) {
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Datasource.NOT_FOUND,
-                message = "Datasource '$name' not found.",
-                details = mapOf("datasource_name" to name),
-            )
-        }
-        return introspecting(name, block)
+        val gated =
+            datasources.getVisible(name, workspaceId)
+                ?: throw DatapipelinesException(
+                    code = PipelineErrorCodes.Datasource.NOT_FOUND,
+                    message = "Datasource '$name' not found.",
+                    details = mapOf("datasource_name" to name),
+                )
+        return introspecting(name) { block(gated) }
     }
 
     /**

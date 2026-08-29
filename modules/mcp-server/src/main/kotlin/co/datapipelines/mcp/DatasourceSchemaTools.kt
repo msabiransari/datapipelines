@@ -65,8 +65,8 @@ class DatasourcesGetSchemasTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.schemas(name).toWireMap() }
+        val gated = datasources.requireVisible(name, ctx)
+        return introspecting(name) { introspector.schemas(gated).toWireMap() }
     }
 }
 
@@ -100,8 +100,8 @@ class DatasourcesGetTablesTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.tables(name, args.string("schema")).toWireMap() }
+        val gated = datasources.requireVisible(name, ctx)
+        return introspecting(name) { introspector.tables(gated, args.string("schema")).toWireMap() }
     }
 }
 
@@ -139,8 +139,8 @@ class DatasourcesGetColumnsTool(
     ): Any {
         val name = args.requiredString("name")
         val table = args.requiredString("table")
-        datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.columns(name, table, args.string("schema")).map { it.toWireMap() } }
+        val gated = datasources.requireVisible(name, ctx)
+        return introspecting(name) { introspector.columns(gated, table, args.string("schema")).map { it.toWireMap() } }
     }
 }
 

@@ -116,7 +116,7 @@ class DatasourceToolsTest {
     @Test
     fun `test returns exactly connected, server_version and error`() {
         every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
-        every { registry.testConnection("pg-prod") } returns
+        every { registry.testConnection(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }) } returns
             TestResult(connected = true, testedAt = Instant.parse("2026-08-09T12:00:00Z"), serverVersion = "PostgreSQL 16.2")
 
         @Suppress("UNCHECKED_CAST")
@@ -132,7 +132,7 @@ class DatasourceToolsTest {
     @Test
     fun `a failed test reports the registry's scrubbed message and nothing else`() {
         every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
-        every { registry.testConnection("pg-prod") } returns
+        every { registry.testConnection(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }) } returns
             TestResult(
                 connected = false,
                 testedAt = Instant.parse("2026-08-09T12:00:00Z"),

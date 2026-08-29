@@ -128,7 +128,7 @@ class McpResourceReader(
         name: String,
         uri: String,
     ): String {
-        val datasource = datasources.getVisible(name, workspaceId) ?: throw notFound(uri)
+        val datasource = datasources.requireVisible(name, workspaceId)
         return ExecutorJson.write(datasource.toMcpMetadata())
     }
 

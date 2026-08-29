@@ -43,8 +43,21 @@ class SchemaIntrospector(
     fun schemas(
         datasourceName: String,
         maxSchemas: Int = MAX_LISTING_ROWS,
+    ): SchemasPage = schemas(registry.get(datasourceName) ?: throw notFound(datasourceName), maxSchemas)
+
+    /**
+     * §7A for an ALREADY-GATED [datasource] (025 C3, the §5.3 surfaces): the caller's
+     * visibility gate resolved this snapshot; introspecting it — instead of re-resolving
+     * the name through the registry's unscoped [DatasourceRegistry.get] — is what closes
+     * the gate-then-re-resolve TOCTOU (a re-bind between the two would introspect a
+     * datasource the gate now refuses). The pool build still re-reads the credential by
+     * primary key; datasource names are never reused, so the row is the row the gate saw.
+     */
+    fun schemas(
+        datasource: Datasource,
+        maxSchemas: Int = MAX_LISTING_ROWS,
     ): SchemasPage =
-        withMetaData(datasourceName) { _, meta, datasource ->
+        withMetaData(datasource) { _, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
             val exempt = datasource.introspectionIncludeSchemas.toSet()
@@ -83,8 +96,15 @@ class SchemaIntrospector(
         datasourceName: String,
         schemaFilter: String? = null,
         maxTables: Int = MAX_LISTING_ROWS,
+    ): TablesPage = tables(registry.get(datasourceName) ?: throw notFound(datasourceName), schemaFilter, maxTables)
+
+    /** §7A for an already-gated [datasource] — see [schemas]'s C3 note. */
+    fun tables(
+        datasource: Datasource,
+        schemaFilter: String? = null,
+        maxTables: Int = MAX_LISTING_ROWS,
     ): TablesPage =
-        withMetaData(datasourceName) { _, meta, datasource ->
+        withMetaData(datasource) { _, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             // The caller's filter goes through the same blank-sentinel rule as driver-reported
             // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
@@ -119,7 +139,19 @@ class SchemaIntrospector(
         table: String,
         schemaFilter: String? = null,
     ): List<ColumnInfo> =
-        withMetaData(datasourceName) { connection, meta, datasource ->
+        columns(
+            registry.get(datasourceName) ?: throw notFound(datasourceName),
+            table,
+            schemaFilter,
+        )
+
+    /** §7A for an already-gated [datasource] — see [schemas]'s C3 note. */
+    fun columns(
+        datasource: Datasource,
+        table: String,
+        schemaFilter: String? = null,
+    ): List<ColumnInfo> =
+        withMetaData(datasource) { connection, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val exempt = datasource.introspectionIncludeSchemas.toSet()
             // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
@@ -132,9 +164,9 @@ class SchemaIntrospector(
             // schema-capable dialects.
             val effectiveFilter =
                 schemaFilter.asNonBlankOrNull()
-                    ?: if (adapter.introspectionSchemaless) null else connection.currentSchema(adapter, datasourceName)
+                    ?: if (adapter.introspectionSchemaless) null else connection.currentSchema(adapter, datasource.name)
             if (effectiveFilter == null && !adapter.introspectionSchemaless) {
-                throw CurrentSchemaUnknownException(datasourceName)
+                throw CurrentSchemaUnknownException(datasource.name)
             }
             val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(effectiveFilter, meta)
             meta.getColumns(catalog, escapedSchemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
@@ -232,12 +264,22 @@ class SchemaIntrospector(
      * SQLException from a metadata read is likewise a defect and propagates. `Error` is never
      * caught.
      */
-    @Suppress("TooGenericExceptionCaught")
     private fun <T> withMetaData(
         datasourceName: String,
         block: (Connection, DatabaseMetaData, Datasource) -> T,
+    ): T = withMetaData(registry.get(datasourceName) ?: throw notFound(datasourceName), block)
+
+    /**
+     * The gated-snapshot lease (025 C3): [datasource] arrives already resolved — by the
+     * caller's visibility gate or the name-based delegate above — and the pool builds from
+     * it directly, never through a second unscoped name lookup.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun <T> withMetaData(
+        datasource: Datasource,
+        block: (Connection, DatabaseMetaData, Datasource) -> T,
     ): T {
-        val datasource = registry.get(datasourceName) ?: throw notFound(datasourceName)
+        val datasourceName = datasource.name
         val connection =
             try {
                 registry.poolFor(datasource).leaseConnection()

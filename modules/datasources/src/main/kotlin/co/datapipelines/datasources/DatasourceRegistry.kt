@@ -96,6 +96,15 @@ interface DatasourceRegistry {
     fun testConnection(name: String): TestResult?
 
     /**
+     * The probe for an ALREADY-GATED [datasource] (§5.3 surfaces, 025 C3): the visibility
+     * decision was made on this snapshot; acting on it — rather than re-resolving the name
+     * independently — is what closes the gate-then-re-resolve TOCTOU. Defaults to the
+     * name-based probe: the credential re-read is by primary key (datasource names are
+     * never reused), so the row probed is the row the gate accepted.
+     */
+    fun testConnection(datasource: Datasource): TestResult? = testConnection(datasource.name)
+
+    /**
      * The dialect registered under [name], or null when not registered — the exact contract of
      * `pipeline-contract`'s `DatasourceRegistry.dialectOf`. The reserved literal `"tempdb"` is
      * never passed here (it is not a datasource).
