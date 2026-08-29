@@ -34,13 +34,18 @@ class UiWorkspaceAdvice(
      * §3): present exactly when an active workspace resolved, so every htmx partial call
      * rides the switched workspace even before the re-stamped session claim takes over on
      * the next full-page load.
+     *
+     * The fragment carries RAW quotes: `th:attr` HTML-escapes the whole attribute exactly
+     * once, and the browser decodes it back to valid JSON. Baking `&quot;` entities in
+     * here double-escapes (htmx then sends no headers and every mutation 403s) —
+     * `LayoutHxHeadersTest` pins the rendered attribute.
      */
     @ModelAttribute("workspaceHeaderFragment")
     fun workspaceHeaderFragment(): String =
         principal()
             ?.workspace
             ?.name
-            ?.let { name -> ",&quot;DP-Workspace&quot;:&quot;${name.replace("\"", "")}&quot;" }
+            ?.let { name -> ",\"DP-Workspace\":\"${name.replace("\"", "")}\"" }
             ?: ""
 
     private fun principal(): AuthenticatedPrincipal? =
