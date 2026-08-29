@@ -31,7 +31,9 @@ cd "$(cd "$(dirname "$0")" && pwd)"
 
 DEPLOY_ENV="deploy/.env"
 LOCAL_ENV=".env.local"
-COMPOSE=(docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml)
+# APP_COMPOSE_PROJECT overrides the compose project (default: the files' pinned
+# "deploy") — for running a second isolated copy on one machine (CI, rehearsals).
+COMPOSE=(docker compose ${APP_COMPOSE_PROJECT:+-p "$APP_COMPOSE_PROJECT"} -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml)
 
 # --demo is a MODE, not a subcommand: it changes the compose invocation for every
 # verb, so it is stripped from the argument list here rather than inside start().
@@ -119,6 +121,17 @@ ensure_demo_env() {
   add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
   add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"
   add_key DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED "false"
+  # The bootstrap ACTOR (auth.md §4.4/§6.1): registration needs a users row for
+  # datasources.created_by, and startup fail-fasts without one (the §3.18
+  # cross-key rule) — which broke the zero-edit demo on a machine with no
+  # .env.local (caught by the 2026-08-29 release rehearsal). The placeholder
+  # actor below keeps zero-edit true; its OIDC login never happens, so §4.2
+  # linking never fires. Want YOUR login to be admin? Set
+  # DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL to your email in deploy/.env
+  # BEFORE the first start (the grant fires only at row creation).
+  if [[ -z $(env_get "$DEPLOY_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL) ]]; then
+    add_key DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL "demo-admin@demo.local"
+  fi
   if ((added)); then echo "==> appended the missing SAMPLE_*/demo keys to $DEMO_ENV"; fi
   # The EFFECTIVE value: deploy/.env wins over the scaffolded demo file.
   local base
