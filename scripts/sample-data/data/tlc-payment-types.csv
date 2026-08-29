@@ -1,0 +1,16 @@
+# TLC yellow-taxi payment_type lookup, transcribed from the published data dictionary.
+#
+# SOURCE (license evidence, design §8 — the owner verifies, this build claims nothing):
+#   https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+#   "Data Dictionary - Yellow Taxi Trip Records" (PDF)
+#
+# Same assert as the rate codes: an unmapped payment_type in the sample fails
+# the build.
+payment_type_id,description
+0,Flex Fare trip
+1,Credit card
+2,Cash
+3,No charge
+4,Dispute
+5,Unknown
+6,Voided trip

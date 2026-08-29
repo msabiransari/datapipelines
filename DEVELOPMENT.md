@@ -305,6 +305,17 @@ You should see the login page with one "Sign in with …" button per provider co
 
 ## 8. Create Test Data
 
+> **Shortcut: use the published sample data instead.** `./app.sh --start --demo`
+> brings up the same stack with three real, cross-engine sample databases (NYC
+> taxi trips on Postgres, weather on MySQL, reference tables on SQLite) already
+> registered, and two working cross-datasource example pipelines seeded into your
+> personal workspace — so §8.1–§8.4 below are done for you and §8.5 has something
+> to talk to. See [deployment.md Appendix B](docs/deployment.md#appendix-b-demo-quickstart--the-published-sample-data)
+> for the quickstart and the MySQL-driver note, and
+> [scripts/sample-data/README.md](scripts/sample-data/README.md) if you need to
+> build or re-publish the artifacts. Everything below stays the way to create
+> data of your own.
+
 ### 8.1 Register a datasource (after first login)
 
 ```bash

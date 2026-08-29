@@ -70,13 +70,57 @@ services:
       DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:-self-serve}
       DATAPIPELINES_WORKSPACES_OPEN_JOIN: ${DATAPIPELINES_WORKSPACES_OPEN_JOIN:-false}
       DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:-true}
+
+      # Config-declared startup content (configuration.md §3.18). BOTH ARE PATHS,
+      # and EMPTY MEANS OFF — the same shape as the two keys above, and the reason
+      # these lines can sit unconditionally in the production file: without the
+      # `demo` profile nothing sets them, so the features stay off and the app's
+      # effective configuration is byte-for-byte what it was. The demo profile
+      # supplies them from deploy/.env, pointing at the read-only sample volume
+      # the one-shot loaders populate.
+      DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:-}
+      DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:-}
+
+      # The credentials the bootstrap datasources file names as ${...} placeholders.
+      # They belong HERE, on the app, not only on the loader: that file is runtime
+      # DATA and its placeholders are resolved by the app's own substitution against
+      # the APP PROCESS's environment (datasources.md §8A.2) — which is what keeps
+      # the shareable datasource manifest free of secrets. Giving them to the loader
+      # alone starts the app and fail-fasts it at bootstrap with "references
+      # environment variable 'SAMPLE_DB_USER', which is not set in this process's
+      # environment" (observed — this is why the demo E2E is a real boot, not a
+      # compose-config inspection). Empty without the demo profile, and unread:
+      # the bootstrap keys above are empty, so the file is never opened.
+      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-}
+      SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD:-}
+      SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD:-}
     volumes:
       - ./application.yml:/application.yml:ro
+      # The sample volume: nyc_reference.db (the SQLITE datasource's file),
+      # examples.json, and the bootstrap datasources file. READ-ONLY into the app
+      # — the app never writes sample data, and the SQLITE datasource additionally
+      # opens the file with the driver's read-only mode (datasources.md §8A.4).
+      # Outside the demo profile nothing populates it and nothing points at it,
+      # so it is an empty, unread mount.
+      - sample-data:/srv/sample:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # `required: false` is load-bearing: without it, `up` WITHOUT the demo
+      # profile fails outright with "service datapipelines depends on undefined
+      # service sample-data" (verified against this Compose, not assumed). With
+      # it, the non-demo path ignores these entries entirely, and the demo path
+      # gates the app on both loaders having exited 0 — which is what makes the
+      # one-command claim true: by the time the app boots, the databases are
+      # loaded and the files it bootstraps from are on the volume.
+      sample-data:
+        condition: service_completed_successfully
+        required: false
+      sample-data-mysql:
+        condition: service_completed_successfully
+        required: false
     restart: unless-stopped
 
   postgres:
@@ -108,5 +152,109 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # ---------------------------------------------------------------- demo profile
+  #
+  # Everything below runs ONLY under `--profile demo` (sample-data design §5/§7).
+  #
+  # WHAT THE NON-DEMO PATH INHERITS, precisely — Compose has no per-profile env,
+  # volume or dependency, so the four additions to `datapipelines` above are
+  # unconditional and each is inert without the profile:
+  #   * two DATAPIPELINES_BOOTSTRAP_* env keys, empty (empty = feature off), and
+  #     the three SAMPLE_* credential keys the bootstrap file names, also empty
+  #     (nothing reads them while the bootstrap keys are empty);
+  #   * an empty read-only `sample-data` volume mount nothing points at;
+  #   * two `depends_on` entries marked `required: false`, which Compose ignores
+  #     when the target service is not enabled;
+  #   * the `mysql-data` / `sample-data` volume declarations (Compose drops
+  #     `mysql-data` from the rendered config entirely without the profile,
+  #     since no enabled service references it).
+  # `docker compose config` without `--profile demo` differs from the pre-change
+  # file by exactly those lines and nothing else.
+  #
+  #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+  #     --profile demo up -d --wait
+  #
+  # Requires SAMPLE_* in deploy/.env (deploy/.env.example) and, for the MySQL
+  # sample, an image built with -Pmysql — Connector/J is not in the default build
+  # (datasources.md §10.2). deployment.md Appendix B is the quickstart.
+
+  mysql:
+    profiles: [demo]
+    image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # MYSQL_PWD, not -p on the command line: an argv password is readable in
+      # `ps` by every process in the container.
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # Stage 1 of the load: downloads and checksum-verifies EVERY artifact, then
+  # restores Postgres and places the SQLite database, examples.json and the
+  # bootstrap datasources file on the shared volume.
+  #
+  # It runs on the pinned POSTGRES image because that image has psql and
+  # pg_restore of the matching major. Stage 2 runs on the pinned MYSQL image for
+  # the same reason. Two services rather than one because no pinned image carries
+  # both clients, and installing one at container start would be an unpinned
+  # package fetch in the one place that has to be reproducible.
+  sample-data:
+    profiles: [demo]
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "postgres,sqlite"]
+    environment:
+      # The metadata-DB superuser: the loader creates the dp_sample_trips
+      # database and the SELECT-only demo role, so it needs more than the demo
+      # login has. PGDATABASE is the database it connects to in order to do that.
+      PGHOST: postgres
+      PGUSER: datapipelines
+      PGPASSWORD: ${METADATA_DB_PASSWORD}
+      PGDATABASE: datapipelines
+      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
+      SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD}
+      SAMPLE_DIR: /srv/sample
+    volumes:
+      - ./sample-data:/opt/sample-data:ro
+      - sample-data:/srv/sample
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Stage 2: the MySQL half. Re-verifies the artifacts it uses off the shared
+  # volume before restoring — the checksums are cheap and the alternative is
+  # trusting that nothing touched the volume between the two services.
+  sample-data-mysql:
+    profiles: [demo]
+    image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "mysql"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
+      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
+      SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD}
+      SAMPLE_DIR: /srv/sample
+    volumes:
+      - ./sample-data:/opt/sample-data:ro
+      - sample-data:/srv/sample
+    depends_on:
+      mysql:
+        condition: service_healthy
+      sample-data:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
   postgres-data:
+  # Demo-profile data. Declared unconditionally because a Compose volume cannot
+  # carry a profile; unused and empty without it.
+  mysql-data:
+  sample-data:

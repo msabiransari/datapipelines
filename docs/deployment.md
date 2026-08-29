@@ -510,7 +510,127 @@ Format and further provider examples: [Auth §5.1](auth.md#51-provider-configura
 
 ---
 
-## Appendix B: Change Log
+## Appendix B: Demo Quickstart — the Published Sample Data
+
+The sample data is a **published, versioned artifact set**, not something the app
+downloads: loading it is a deployment step (sample-data design D5). Any
+deployment that pulls the same version gets the same databases, byte for byte in
+content. The build scripts that produce it live at
+[`scripts/sample-data/`](../scripts/sample-data/README.md); everything below is
+the consuming side.
+
+What you get: NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus
+daily and monthly rollups), NOAA weather for five NYC-area stations on MySQL, and
+TLC zones / rate codes / payment types / a holiday calendar on SQLite —
+registered as three `global` + `readonly` datasources, with two cross-datasource
+example pipelines seeded into every new personal workspace.
+
+### One command
+
+Fill in the `SAMPLE_*` block of [`deploy/.env.example`](../deploy/.env.example) —
+the artifact base URL, the version, and the demo login's passwords — then:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+  --profile demo up -d --wait
+```
+
+That is the whole thing. `--wait` returns when the app is healthy, and by then
+the artifacts have been downloaded, every checksum verified, the databases
+restored, the SELECT-only demo login created, and the three datasources
+registered. From a checkout that builds its own image:
+
+```bash
+./app.sh --start --demo
+```
+
+`--demo` wraps the same profile and additionally builds the jar with `-Pmysql`
+(see the driver note below). `./app.sh --stop --demo` and `--status --demo` take
+the same flag, so the demo services are not left running invisibly.
+
+**MySQL driver.** MySQL Connector/J is GPL with a FOSS exception and is *not* in
+the default build (§3.5, [Datasources §10.2](datasources.md#102-strategy)). The
+`sample-weather` datasource is MYSQL, and bootstrap registration fail-fasts
+startup with `datasource.driver_not_loaded` without it. Build with the driver:
+
+```bash
+./gradlew -Pmysql :modules:app:bootJar && docker build -t datapipelines:local .
+```
+
+or drop the jar into `lib/`. `./app.sh --start --demo` does the `-Pmysql` build
+for you.
+
+### Point an agent at it — three steps
+
+1. **Log in** at `http://localhost:8080` with the OIDC provider configured in
+   `deploy/.env`. The first login provisions your personal workspace and seeds
+   the example pipelines into it.
+2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
+   is shown exactly once.
+3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
+   It can list the seeded pipelines, read the three sample datasources' schemas,
+   and execute `revenue_by_borough` or `rainy_vs_dry_ridership` immediately —
+   see [MCP Server](mcp-server.md).
+
+### What the demo profile turns on
+
+The profile adds a `mysql` service and two one-shot loaders, and points the app
+at the files they place on a read-only volume. It also sets the §7 demo posture:
+`auto-per-user` provisioning (every visitor gets their own workspace) and
+`member-datasources-enabled=false` (an open datasource form on a public server is
+an SSRF and port-scan primitive — demo users get the seeded datasources only).
+Without `--profile demo` none of it exists: both `datapipelines.bootstrap.*` keys
+are paths and empty means off, so the non-demo stack is configured exactly as it
+was.
+
+The demo datasources are protected in three independent layers: workspace-scoped
+access, the `is_readonly` flag on the datasource row
+([Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)),
+and a database login granted `SELECT` and nothing else — created by the loader,
+never assumed. The SQLite entry additionally opens its file with the driver's
+read-only mode ([Datasources §8A.4](datasources.md#8a4-sqlite-read-only-open-mode)).
+On a public demo, add the §9 hardening item that belongs with this posture:
+egress-restrict the app container's network, so a datasource anyone can reach
+cannot become a path to anywhere else.
+
+### The loader
+
+`deploy/sample-data/load.sh <base-url> <version>` is what the one-shot services
+run. Its contract, in order: download every artifact the manifest names, verify
+**every** checksum, and only then touch an engine — a corrupted download can
+never leave a half-loaded database behind. Each engine then gets a
+`_sample_meta(version)` marker, written **last**, so a re-run of a loaded
+deployment skips it and a failed engine is retried cleanly on the next start.
+
+It runs as two services because no pinned image carries both a Postgres and a
+MySQL client, and installing one at container start would put an unpinned package
+fetch in the one place that has to be reproducible.
+
+### Re-publishing is a new version
+
+Version directories are immutable (design §4). Any change to the data — a wider
+window, a different sample, a corrected lookup, even a typo — is published as
+`v2` under a new prefix; `v1` is never edited. Consumers pin the version
+(`SAMPLE_VERSION`), and nothing references a `latest` alias. This is what makes
+"the same version means the same data" a fact rather than a hope, and it is why
+the loader refuses a manifest whose `version` does not match the directory it
+came from.
+
+### Licence gate — before serving this data publicly
+
+Every `provenance` row in `manifest.json` ships `license_verified: null`. The
+build verifies no licence and claims none; the licence strings are research
+claims carried with their evidence links in `scripts/sample-data/sources.lock`.
+
+**Publishing with any `license_verified` still null blocks go-live** (design §8).
+Verify each source's current terms, record the date, and swap — do not ship — any
+dataset that fails. This applies to datapipelines.co; a self-hosted evaluation
+loading the artifacts for its own use is a different question, and one for the
+operator.
+
+---
+
+## Appendix C: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
