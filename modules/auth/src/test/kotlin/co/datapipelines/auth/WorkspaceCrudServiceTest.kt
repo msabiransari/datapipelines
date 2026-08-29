@@ -212,7 +212,11 @@ class WorkspaceCrudServiceTest {
     }
 
     @Test
-    fun `open-join lets any authenticated principal add their OWN email`() {
+    fun `open-join lets a NON-member add their OWN email - the membership pre-check must not run first`() {
+        // 022 review F4: addMember ran read()'s membership pre-check BEFORE the self-join
+        // branch, so every non-member 403ed and open-join was unreachable. This test was
+        // vacuous while its fixture was already a member — the caller below belongs to
+        // ANOTHER workspace only.
         val openJoin =
             WorkspaceService(
                 repository,
@@ -225,6 +229,11 @@ class WorkspaceCrudServiceTest {
                 contentCheck,
             )
         every { repository.findByName("acme") } returns ws
+        val outsider =
+            principal(
+                admin = false,
+                memberships = listOf(WorkspaceMembership(UUID.randomUUID(), "elsewhere", WorkspaceRole.MEMBER, Instant.EPOCH)),
+            )
         val alice =
             User(
                 ownerId,
@@ -242,7 +251,7 @@ class WorkspaceCrudServiceTest {
         every { repository.addMember(ws.id, ownerId) } returns
             WorkspaceMemberRow(ownerId, "alice@company.com", "Alice", WorkspaceRole.MEMBER, Instant.EPOCH)
 
-        openJoin.addMember(member(), "acme", "alice@company.com").role shouldBe WorkspaceRole.MEMBER
+        openJoin.addMember(outsider, "acme", "alice@company.com").role shouldBe WorkspaceRole.MEMBER
     }
 
     @Test

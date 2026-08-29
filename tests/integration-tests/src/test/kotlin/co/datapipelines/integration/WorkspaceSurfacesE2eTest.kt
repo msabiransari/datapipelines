@@ -348,6 +348,33 @@ class WorkspaceSurfacesE2eTest {
             .body("error.details.reason", Matchers.equalTo("user_not_found"))
     }
 
+    @Test
+    fun `open-join - a non-member joins with their OWN email, then reads the workspace`() {
+        ensureSeeded()
+        // Bob owns globex and is NOT a member of acme. 022 review F4: this row 403ed
+        // membership_required before the fix — addMember's membership pre-check ran
+        // before the self-join branch, so open-join was unreachable end to end.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, bobKey)
+            .body("""{"email":"bob@globex.test"}""")
+            .`when`()
+            .post("/api/v1/workspaces/acme/members")
+            .then()
+            .statusCode(200)
+            .body("data.role", Matchers.equalTo("member"))
+
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, bobKey)
+            .`when`()
+            .get("/api/v1/workspaces/acme")
+            .then()
+            .statusCode(200)
+            .body("data.name", Matchers.equalTo("acme"))
+    }
+
     // ------------------------------------------------------------ UI screens smoke
 
     @Test
@@ -779,6 +806,10 @@ class WorkspaceSurfacesE2eTest {
 
             // T33's http half is provable on the wire only with an http base-url.
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+
+            // design §7: the open-join self-service row runs against the FULL app in this
+            // suite — bob (a globex owner, not an acme member) joins acme with his own email.
+            registry.add("datapipelines.workspaces.open-join") { "true" }
         }
 
         private val oidc = OidcDiscoveryStub()

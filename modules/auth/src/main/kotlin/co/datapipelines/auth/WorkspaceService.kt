@@ -293,9 +293,20 @@ class WorkspaceService(
         name: String,
         email: String,
     ): WorkspaceMemberRow {
-        val workspace = read(principal, name)
         val normalized = email.trim().lowercase()
         val selfJoin = normalized == principal.email
+        val workspace =
+            if (selfJoin && workspacesProperties.openJoin) {
+                // design §7 self-service: resolve the target WITHOUT read()'s membership
+                // pre-check — it would 403 every non-member before the self-join branch
+                // ever ran (022 review F4: open-join was unreachable). Under open-join
+                // joinable() already lists every live workspace to everyone, so a plain
+                // not-found here opens no existence oracle.
+                authCache.workspaceByName(name) { workspaceRepository.findByName(it) }
+                    ?: throw WorkspaceNotFoundException(name)
+            } else {
+                read(principal, name)
+            }
         if (!selfJoin) {
             requireOwnerOrAdmin(principal, workspace)
         } else if (!workspacesProperties.openJoin && !isOwnerOrAdmin(principal, workspace)) {
