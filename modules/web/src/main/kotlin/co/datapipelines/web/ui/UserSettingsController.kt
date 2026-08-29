@@ -35,7 +35,7 @@ class UserSettingsController(
     }
 
     @PatchMapping("/partials/profile/theme")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.PROFILE_PREFERENCE)
     fun updateTheme(
         @RequestParam theme: String,
     ): ResponseEntity<String> {

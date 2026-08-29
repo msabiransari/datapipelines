@@ -62,6 +62,16 @@ object ScopeMatrix {
          * that the documented row has a wired minimum the moment the endpoint lands.
          */
         CURRENT_PRINCIPAL(Scope.READ),
+
+        /**
+         * "Set own theme preference" (§7.6, `PATCH /partials/profile/theme`): a mutation
+         * of the caller's OWN user row and nothing else — the sibling of
+         * [MANAGE_OWN_API_KEYS]. [Scope.READ] is the §7.5 floor, so this IS "any
+         * authenticated principal": the operation writes only the principal's own row
+         * (the handler resolves the caller's userId; there is no payload-chosen target),
+         * so no scope above `read` is meaningful and none weaker exists to express.
+         */
+        PROFILE_PREFERENCE(Scope.READ),
         USER_ADMINISTRATION(Scope.ADMIN),
 
         /**

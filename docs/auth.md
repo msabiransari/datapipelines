@@ -577,6 +577,7 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Create / update / delete global datasources | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for `global` datasources and the `global`/`readonly`-on-global flag writes (workspaces D8) | `admin` |
 | Manage own API keys | `/api/v1/auth/api-keys` (key scopes ⊆ own scopes, §7.4) | any authenticated |
 | Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | any authenticated |
+| Set own theme preference | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
 | List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
 | Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | any authenticated |

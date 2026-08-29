@@ -35,6 +35,7 @@ class ScopeMatrixSpecDriftTest {
             "Create / update / delete global datasources" to ScopeMatrix.RestOperation.MUTATE_DATASOURCES,
             "Manage own API keys" to ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS,
             "Get current principal" to ScopeMatrix.RestOperation.CURRENT_PRINCIPAL,
+            "Set own theme preference" to ScopeMatrix.RestOperation.PROFILE_PREFERENCE,
             "User administration" to ScopeMatrix.RestOperation.USER_ADMINISTRATION,
             "List / read own workspaces & members" to ScopeMatrix.RestOperation.WORKSPACES_READ,
             "Create a workspace (per provisioning mode)" to ScopeMatrix.RestOperation.WORKSPACE_CREATE,
