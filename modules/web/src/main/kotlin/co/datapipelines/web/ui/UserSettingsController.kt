@@ -12,7 +12,6 @@ import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.RequestParam
-import java.io.File
 
 @Controller
 class UserSettingsController(
@@ -59,23 +58,14 @@ class UserSettingsController(
     }
 
     companion object {
-        const val THEME_ROOT = "static/vendor/design-system/themes/"
-
-        fun listAvailableThemes(): List<String> {
-            val classpathDir = UserSettingsController::class.java.classLoader.getResource(THEME_ROOT)
-            if (classpathDir == null) return DEFAULT_THEMES
-
-            val dir = File(classpathDir.toURI())
-            if (!dir.isDirectory) return DEFAULT_THEMES
-
-            return dir
-                .listFiles()
-                ?.filter { it.name.endsWith(".css") }
-                ?.map { it.nameWithoutExtension }
-                ?.sorted()
-                ?.ifEmpty { DEFAULT_THEMES }
-                ?: DEFAULT_THEMES
-        }
+        /**
+         * The vendored theme names for the settings screen and the theme write's validation.
+         * [VendoredThemes.names] enumerates the design-system CSS jar-safe (025 B1 — the T21
+         * class: this used to resolve the classpath dir through `File(...)` and 500'd /settings
+         * inside a packaged deployment); the fallback list covers a classpath with no vendored
+         * assets (pre-P8).
+         */
+        fun listAvailableThemes(): List<String> = VendoredThemes.names() ?: DEFAULT_THEMES
 
         private val DEFAULT_THEMES =
             listOf("saas", "dark", "light", "ocean", "forest", "professional", "minimal", "healthcare", "auto")
