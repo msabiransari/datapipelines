@@ -91,25 +91,23 @@ class DomainConfiguration {
      * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
      * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
      *
-     * The guard's scope follows the datasource's BINDING (022 review F5): a **bound** datasource
-     * is referenceable only from its own workspace (§5.3 visibility), so its own workspace's
-     * count is the whole truth; a **global** one is referenceable from EVERY workspace, so the
-     * guard aggregates the per-workspace scans across all of them — the cross-workspace promise
-     * of datasources §6.2 ("any non-deleted pipeline"). Reading the row here also removes the
-     * old contextual `currentPrincipal()` dependency: the answer no longer depends on which
-     * workspace the CALLER happens to be acting from.
+     * The count ALWAYS aggregates across every workspace (023 verified, 025 A4): §6.2's
+     * "any non-deleted pipeline" is unconditional, and a binding-scoped branch — however
+     * appealing as loop avoidance — is a two-step bypass of it (`PUT {"global": false,
+     * "workspace": "x"}` re-binds a referenced global datasource with no cross-workspace
+     * check, and the bound branch would then count only the new workspace, orphaning every
+     * other workspace's references). A bound row CAN be referenced from other workspaces:
+     * references saved while the datasource was global survive the re-bind. Reading the
+     * row's binding here serves nothing anymore; the caller's workspace never mattered
+     * (022 review F5) and the row's own binding no longer does either.
      */
     @Bean
     fun datasourceReferences(
         bodies: PipelineBodies,
-        repository: DatasourceRepository,
         workspaces: WorkspaceRepository,
     ): DatasourceReferences =
         DatasourceReferences { name ->
-            when (val boundTo = repository.findByName(name)?.workspaceId) {
-                null -> workspaces.findAll().flatMap { bodies.pipelinesReferencing(it.id, name) }
-                else -> bodies.pipelinesReferencing(boundTo, name)
-            }
+            workspaces.findAll().flatMap { bodies.pipelinesReferencing(it.id, name) }
         }
 
     @Bean
