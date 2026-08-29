@@ -146,6 +146,24 @@ class WorkspaceCrudServiceTest {
     }
 
     @Test
+    fun `a rename racing a delete is membership_required for a member - the no-oracle line holds on the race`() {
+        // 022 review (below-cap): the vanished-row branch threw WorkspaceNotFoundException
+        // to ANY caller — a 404-vs-403 oracle for members.
+        every { repository.findByName("acme") } returns ws
+        every { repository.updateDisplayName(ws.id, "Renamed") } returns null
+        shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(owner(), "acme", "Renamed") }
+    }
+
+    @Test
+    fun `a rename racing a delete is the real not_found for an admin`() {
+        every { repository.findByName("acme") } returns ws
+        every { repository.updateDisplayName(ws.id, "Renamed") } returns null
+        shouldThrow<WorkspaceNotFoundException> {
+            service.updateDisplayName(principal(admin = true, memberships = emptyList()), "acme", "Renamed")
+        }
+    }
+
+    @Test
     fun `delete is blocked by workspace_in_use with the counts of what blocks`() {
         every { repository.findByName("acme") } returns ws
         every { contentCheck.nonDeletedCounts(ws.id) } returns mapOf("pipelines" to 2, "datasources" to 1)

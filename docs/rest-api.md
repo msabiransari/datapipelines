@@ -1167,7 +1167,7 @@ GET /workspaces/{name}/members
 POST /workspaces/{name}/members
 {"email": "bob@example.com"}
 ```
-Owner or global admin — except the `open-join` self-service path: when `datapipelines.workspaces.open-join` is `true` (self-serve mode) and the email is the caller's own, any authenticated principal joins. The user must already exist (OIDC-provisioned); an unknown email is the §16.3 unknown-user 404 stand-in (`pipeline.execution.not_found`, `details.reason = "user_not_found"`). Adding an existing member is idempotent.
+Owner or global admin — except the `open-join` self-service path: when `datapipelines.workspaces.open-join` is `true` (self-serve mode) and the email is the caller's own, any authenticated principal joins. The user must already exist (OIDC-provisioned); an unknown email is the §16.3 unknown-user 404 stand-in (`pipeline.execution.not_found`, `details.reason = "user_not_found"`). A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "email"`). Adding an existing member is idempotent.
 
 ### 17.8 Remove member
 

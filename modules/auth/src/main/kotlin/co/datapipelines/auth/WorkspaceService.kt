@@ -236,7 +236,10 @@ class WorkspaceService(
         requireOwnerOrAdmin(principal, workspace)
         val updated =
             workspaceRepository.updateDisplayName(workspace.id, displayName)
-                ?: throw WorkspaceNotFoundException(name)
+                // The row vanished between read() and the write. The no-oracle line holds
+                // even on the race (022 review, below-cap): a member must not learn from a
+                // 404-vs-403 split that the workspace existed a moment ago.
+                ?: throw if (principal.isAdmin) WorkspaceNotFoundException(name) else WorkspaceMembershipRequiredException()
         authCache.invalidateWorkspace(name)
         auditLogger.log(
             event = "auth.workspace.updated",

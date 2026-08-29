@@ -397,6 +397,24 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
+    fun `a missing member email is the generic bad-parameter 400 - not the datasource domain's code`() {
+        ensureSeeded()
+        // 022 review (below-cap): this refusal emitted datasource.validation.properties_invalid
+        // from a WORKSPACE endpoint. The catalogued generic bad-parameter code is the stand-in.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, aliceKey)
+            .body("""{}""")
+            .`when`()
+            .post("/api/v1/workspaces/acme/members")
+            .then()
+            .statusCode(400)
+            .body("error.code", Matchers.equalTo("pipeline.execution.invalid_parameter_type"))
+            .body("error.details.field", Matchers.equalTo("email"))
+    }
+
+    @Test
     fun `an unknown member email is the §16-3 unknown-user stand-in`() {
         ensureSeeded()
         given()

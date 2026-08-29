@@ -146,7 +146,6 @@ class DatasourcesController(
         rules.requireGlobalMutationAllowed(principal, existing, name)
         rules.requireMemberDatasourcesGate(principal)
         rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
-        rules.requireReadonlyWriteAllowed(principal, existing, readonlyRequested)
 
         val datasource =
             bind(body, requirePassword = false, pathName = name).copy(

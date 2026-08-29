@@ -39,7 +39,15 @@ class DatasourceWorkspaceRules(
         }
     }
 
-    /** A member mutating a GLOBAL datasource is the 400 — global CUD is admin-only (D8). */
+    /**
+     * A member mutating a GLOBAL datasource is the 400 — global CUD is admin-only (D8).
+     *
+     * This gate fully subsumes the design-§6 rule "only `admin` flips `readonly` on a
+     * GLOBAL datasource": anyone reaching a readonly write on a global row has already
+     * passed this check, and only admins pass it. The separate `requireReadonlyWriteAllowed`
+     * was therefore unreachable on every path and was deleted in the 022b round rather
+     * than kept as decorative defense (022 review, below-cap).
+     */
     fun requireGlobalMutationAllowed(
         principal: AuthenticatedPrincipal,
         existing: Datasource,
@@ -57,17 +65,6 @@ class DatasourceWorkspaceRules(
     ) {
         if (globalRequested != null && !principal.isAdmin) {
             throw workspaceForbidden("the global flag requires admin")
-        }
-    }
-
-    /** `readonly` on a GLOBAL datasource is admin-only (design §6 last paragraph). */
-    fun requireReadonlyWriteAllowed(
-        principal: AuthenticatedPrincipal,
-        existing: Datasource,
-        readonlyRequested: Boolean?,
-    ) {
-        if (existing.workspaceId == null && readonlyRequested != null && !principal.isAdmin) {
-            throw workspaceForbidden("flipping readonly on a global datasource requires admin")
         }
     }
 

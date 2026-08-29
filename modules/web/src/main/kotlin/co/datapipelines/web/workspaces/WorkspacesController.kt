@@ -112,7 +112,12 @@ class WorkspacesController(
         val email =
             body.get("email")?.takeIf { it.isTextual }?.asText()
                 ?: throw ApiException(
-                    PipelineErrorCodes.Datasource.PROPERTIES_INVALID,
+                    // The catalog has no workspace-domain payload code and adding one is a
+                    // contract change; the surface's generic bad-parameter code (the one
+                    // ApiExceptionHandler uses for missing/wrong-typed parameters) is the
+                    // honest stand-in — NOT the datasource-domain code this used to emit
+                    // (022 review, below-cap).
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                     "A member email is required.",
                     mapOf("field" to "email"),
                 )
