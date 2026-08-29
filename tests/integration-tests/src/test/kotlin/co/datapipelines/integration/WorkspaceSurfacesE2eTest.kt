@@ -468,6 +468,32 @@ class WorkspaceSurfacesE2eTest {
             .statusCode(200)
     }
 
+    @Test
+    fun `the register modal's refusal arrives as a 400 with the markup the page injects into register-result`() {
+        ensureSeeded()
+        // F9 (022 review): the modal used to rely on the response-targets extension
+        // (never loaded), so refusals were invisible. The page now handles
+        // htmx:responseError and writes THIS body into #register-result — the smoke
+        // proves the partial route's side of that contract: 400, refusal text, no 500.
+        val csrf = "register-csrf"
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ALICE, "alice@acme.test", "acme"))
+            .cookie(CSRF_COOKIE, csrf)
+            .header(CSRF_HEADER, csrf)
+            .contentType(ContentType.URLENC)
+            .formParam("name", "bad-dialect")
+            .formParam("dialect", "NOSUCH")
+            .formParam("jdbcUrl", "jdbc:postgresql://db:5432/app")
+            .formParam("username", "u")
+            .formParam("password", "p")
+            .`when`()
+            .post("/partials/datasources")
+            .then()
+            .statusCode(400)
+            .body(Matchers.containsString("Unknown dialect"))
+    }
+
     // ------------------------------------------------------------ T23
 
     @Test

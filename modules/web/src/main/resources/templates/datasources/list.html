@@ -85,20 +85,43 @@
 
   <script>
     function showRegisterModal() {
+      document.getElementById('register-result').removeAttribute('data-error');
+      document.getElementById('register-result').innerHTML = '';
       document.getElementById('register-modal').style.display = 'flex';
     }
     function hideRegisterModal() {
       document.getElementById('register-modal').style.display = 'none';
     }
     document.addEventListener('DOMContentLoaded', function() {
+      var result = document.getElementById('register-result');
+
+      // Refusals arrive as 4xx — htmx does NOT swap those into hx-target (the layout's
+      // hx-target-error is the response-targets extension, which is not loaded). Handle
+      // the failure explicitly: the refusal markup lands in #register-result, tagged so
+      // the observer below does NOT close the modal over it (022 review F9).
+      document.body.addEventListener('htmx:responseError', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
+        result.setAttribute('data-error', 'true');
+        result.innerHTML = event.detail.xhr.responseText;
+      });
+
+      // A fresh attempt clears the previous refusal, so a later success is not masked by it.
+      document.body.addEventListener('htmx:beforeRequest', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
+        result.removeAttribute('data-error');
+        result.innerHTML = '';
+      });
+
+      // Close the modal only on SUCCESS content — never over an error (F9).
       var observer = new MutationObserver(function() {
         var modal = document.getElementById('register-modal');
-        if (modal.style.display === 'flex' && document.getElementById('register-result').children.length > 0) {
+        if (modal.style.display === 'flex' &&
+            result.children.length > 0 &&
+            result.getAttribute('data-error') !== 'true') {
           hideRegisterModal();
         }
       });
-      var target = document.getElementById('register-result');
-      if (target) observer.observe(target, {childList: true, subtree: true});
+      if (result) observer.observe(result, {childList: true, subtree: true});
     });
   </script>
 </th:block>
