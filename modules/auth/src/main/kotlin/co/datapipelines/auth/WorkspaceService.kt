@@ -254,6 +254,20 @@ class WorkspaceService(
      * still owns non-deleted pipelines/templates/datasources ([WorkspaceContentCheck]).
      * Owner-or-admin. Every member's membership cache is invalidated so the disappearance is
      * immediate, not a 60s surprise.
+     *
+     * ## The accepted check-then-act race (022/F10, 025 A3 — design §11 documents the decision)
+     *
+     * The content count and the soft delete are not one transaction, and cannot be: the
+     * counted tables belong to three other modules (module-structure §4.2), reached through
+     * the [WorkspaceContentCheck] port. A content-creating request that resolved this
+     * workspace before the soft delete and commits after the count strands its rows —
+     * invisible to every listing (memberships join `is_deleted = FALSE`), with the name
+     * permanently taken. Closing it requires either a cross-module locking protocol every
+     * content-save path joins, or content-table triggers whose refusals map to no catalogued
+     * code — both rejected for v1 in the design note. What v1 DOES do is detect: a
+     * post-delete recount that finds content emits `auth.workspace.stranded_content`
+     * (audit + ERROR log) instead of leaving the strand silent. The detector is
+     * best-effort — a commit landing after the recount still strands silently.
      */
     fun delete(
         principal: AuthenticatedPrincipal,
@@ -272,6 +286,22 @@ class WorkspaceService(
             userId = principal.userId,
             details = mapOf("workspace" to name),
         )
+        // The race detector (see KDoc): best-effort, never a refusal — the deletion stands.
+        val stranded = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
+        if (stranded.isNotEmpty()) {
+            log.error(
+                "Workspace '{}' was deleted but {} landed concurrently and is now stranded " +
+                    "(invisible to listings, name held). Recover by SQL: un-delete the workspace " +
+                    "or remove the stranded rows.",
+                name,
+                stranded,
+            )
+            auditLogger.log(
+                event = "auth.workspace.stranded_content",
+                userId = principal.userId,
+                details = mapOf("workspace" to name, "counts" to stranded),
+            )
+        }
     }
 
     /** The member listing (design §9): any member of the workspace, or a global admin. */

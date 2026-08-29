@@ -274,6 +274,39 @@ to a workspace they're not in).
 
 ## 11. Explicitly out of scope (deferred)
 
+### 11.1 The delete check-then-act race (022/F10 — decided 2026-08-29, 025 A3: accepted and documented, detected)
+
+Workspace delete counts the workspace's non-deleted pipelines/templates/datasources, then
+soft-deletes the workspace. Nothing spans the two steps: the counted tables live in three
+other modules, reached through the `WorkspaceContentCheck` port — auth can neither
+transaction over them nor lock them. A content create that resolves the workspace before
+the soft delete and commits after the count therefore strands its rows: invisible to every
+listing (memberships join `is_deleted = FALSE`), the workspace name permanently held.
+
+**Decision: accept for v1, with detection.** The alternatives were rejected on cost and
+blast radius, not feasibility:
+
+- *Advisory lock* (`pg_advisory_xact_lock` keyed by workspace id around count+delete)
+  closes the race only if EVERY content-save path — pipeline create/update/import, template
+  create/update/render-import, datasource save, example seeding, bootstrap registration —
+  takes the same lock. That is a cross-module locking protocol invented at the last code
+  round before launch; one uncovered writer reopens the exact race while looking guarded.
+- *Two-phase delete* (a `deleting` status claimed atomically before the count, restored on
+  `in_use`) narrows the bad state but does not close the window — the stranding insert can
+  still land between the post-claim count and the commit, and refusing it needs the same
+  cross-module write-path checks as the lock protocol.
+- *Content-table triggers* refusing inserts into soft-deleted workspaces close it
+  hermetically, but surface as raw SQL exceptions on three modules' save paths with no
+  catalogued code, and introduce hidden DB behavior the codebase has none of. This is the
+  recorded v2 closure if stranded content becomes an operator-visible problem.
+
+What v1 ships instead: a **post-delete recount** in `WorkspaceService.delete` — content
+found after the soft delete emits `auth.workspace.stranded_content` (audit + ERROR log
+naming the recovery), so the strand is operator-visible instead of silent. The detector is
+best-effort (a commit landing after the recount still strands); the window itself is
+milliseconds wide and requires a concurrent create inside the exact workspace its owner is
+deleting.
+
 - Admin invite/approval flow (`closed` + owner-adds-members covers v1).
 - Per-workspace roles beyond owner/member; per-datasource ACLs (ROADMAP).
 - Per-workspace quotas/rate limits (demo abuse control is deployment-level

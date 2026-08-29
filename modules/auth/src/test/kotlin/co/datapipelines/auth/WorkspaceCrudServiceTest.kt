@@ -189,6 +189,37 @@ class WorkspaceCrudServiceTest {
         verify { auditLogger.log("auth.workspace.deleted", any(), null, null, null, any()) }
     }
 
+    /**
+     * The accepted delete race (022/F10, 025 A3 — the design decision is the workspaces
+     * design §11 note): content created between the pre-delete count and the soft delete
+     * strands. The deletion itself stands, but the stranding is DETECTED — a post-delete
+     * recount that finds content emits `auth.workspace.stranded_content` for the operator
+     * instead of leaving rows invisible to every listing with the name permanently taken.
+     */
+    @Test
+    fun `content landing in the delete window is detected and audited, not silently stranded`() {
+        every { repository.findByName("acme") } returns ws
+        // First count (the gate): empty. Second count (the post-delete recount): a racing
+        // pipeline landed.
+        every { contentCheck.nonDeletedCounts(ws.id) } returns emptyMap() andThen mapOf("pipelines" to 1)
+        every { repository.findMembersOf(ws.id) } returns
+            listOf(WorkspaceMemberRow(ownerId, "a@company.com", "Alice", WorkspaceRole.OWNER, Instant.EPOCH))
+        every { repository.softDelete(ws.id) } returns true
+
+        service.delete(owner(), "acme")
+
+        verify {
+            auditLogger.log(
+                "auth.workspace.stranded_content",
+                withArg { it shouldBe ownerId },
+                null,
+                null,
+                null,
+                withArg { details -> details["counts"] shouldBe mapOf("pipelines" to 1) },
+            )
+        }
+    }
+
     // ------------------------------------------------------------ members
 
     @Test
