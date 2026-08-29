@@ -103,7 +103,10 @@ class DatasourceWorkspaceRules(
         global: Boolean?,
         workspaceName: String?,
     ): UUID? {
-        if (workspaceName != null && global != null) {
+        if (workspaceName != null && global == true) {
+            // The ONE true contradiction: global and bound at once. `global:false` WITH a
+            // workspace is the documented re-bind payload (create accepts it too) — the
+            // guard used to reject it as well, dead-coding the re-bind branch (022 review F7).
             throw workspaceForbidden("a datasource is either global or bound to one workspace, not both")
         }
         if (global != null) {

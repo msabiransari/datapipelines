@@ -3,7 +3,9 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -22,6 +24,7 @@ class ApiKeysPartialController(
     private val apiKeyRepository: ApiKeyRepository,
 ) {
     @PostMapping("/partials/api-keys")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
     fun create(
         @RequestParam name: String,
         @RequestParam(required = false) scopes: String?,
@@ -60,6 +63,7 @@ class ApiKeysPartialController(
     }
 
     @DeleteMapping("/partials/api-keys/{keyId}")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
     fun revoke(
         @PathVariable keyId: String,
     ): ResponseEntity<String> {

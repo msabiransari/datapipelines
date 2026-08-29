@@ -593,7 +593,7 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 
 (MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 18 tools operate inside the API key's pinned workspace, design §9.)
 
-**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix.
+**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 
 ---
 
@@ -667,7 +667,7 @@ class SecurityConfig(
 5. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
 6. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects
 7. AuthorizationFilter             — checks authenticated() for protected paths
-8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods
+8. ScopeInterceptor (MVC)          — checks @RequiredScope annotation on controller methods; default-deny for unannotated handlers under /api/**, /partials/** and /mcp
 9. Controller                      — handles the request
 ```
 

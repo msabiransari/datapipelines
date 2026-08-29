@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
@@ -28,6 +30,7 @@ class DatasourcePartialController(
     private val rules: DatasourceWorkspaceRules,
 ) {
     @GetMapping("/partials/datasources")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,
@@ -60,6 +63,7 @@ class DatasourcePartialController(
     }
 
     @PostMapping("/partials/datasources/{name}/test")
+    @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
     fun test(
         model: Model,
         @PathVariable name: String,
@@ -82,6 +86,7 @@ class DatasourcePartialController(
      */
     @Suppress("LongParameterList") // the register form's fields, one parameter each (the §5 form-encoding idiom)
     @PostMapping("/partials/datasources")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
     fun register(
         @RequestParam name: String,
         @RequestParam dialect: String,

@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRepository
@@ -31,6 +33,7 @@ class ExecutionDetailPartialController(
     private val cancellation: ExecutionCancellationService,
 ) {
     @GetMapping("/{id}/result")
+    @RequiredScope(ScopeMatrix.RestOperation.RETRIEVE_RESULT)
     fun result(
         @PathVariable id: UUID,
         @RequestParam(required = false, defaultValue = "0") offset: Long,
@@ -67,6 +70,7 @@ class ExecutionDetailPartialController(
 
     @Suppress("ThrowsCount")
     @DeleteMapping("/{id}/cancel")
+    @RequiredScope(ScopeMatrix.RestOperation.CANCEL_EXECUTION)
     fun cancel(
         @PathVariable id: UUID,
         model: Model,

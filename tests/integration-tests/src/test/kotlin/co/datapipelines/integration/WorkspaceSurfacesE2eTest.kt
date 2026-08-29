@@ -57,6 +57,7 @@ class WorkspaceSurfacesE2eTest {
     private val bobKey get() = BOB_KEY.plaintext
     private val carolKey get() = CAROL_KEY.plaintext
     private val adminKey get() = ADMIN_KEY.plaintext
+    private val readonlyKey get() = READONLY_KEY.plaintext
 
     // ------------------------------------------------------------ datasource isolation (§5.3)
 
@@ -502,6 +503,76 @@ class WorkspaceSurfacesE2eTest {
     // ------------------------------------------------------------ T31
 
     @Test
+    fun `a read-scoped key cannot reach the mutating UI partials - the REST twin's floor applies`() {
+        ensureSeeded()
+        ensureDatasourcesRegistered()
+        // 022 review F6: POST /partials/datasources had NO scope floor (the interceptor
+        // governed /api and /mcp only) — a read key could register a datasource below the
+        // documented author floor. Partials now declare their REST twin's operation.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, readonlyKey)
+            .contentType(ContentType.URLENC)
+            .formParam("name", "readonly-smuggle")
+            .formParam("dialect", "H2")
+            .formParam("jdbcUrl", H2_ACME_URL)
+            .formParam("username", H2_USER)
+            .formParam("password", H2_PASSWORD)
+            .`when`()
+            .post("/partials/datasources")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
+
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, readonlyKey)
+            .contentType(ContentType.URLENC)
+            .`when`()
+            .post("/partials/datasources/$DS_ACME/test")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
+
+        // The read floor itself is untouched: the listing partial still serves a read key.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, readonlyKey)
+            .`when`()
+            .get("/partials/datasources")
+            .then()
+            .statusCode(200)
+    }
+
+    @Test
+    fun `an author key CAN register through the partial - the floor is not a wall`() {
+        ensureSeeded()
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, aliceKey)
+            .contentType(ContentType.URLENC)
+            .formParam("name", "partial-reg")
+            .formParam("dialect", "H2")
+            .formParam("jdbcUrl", "jdbc:h2:mem:surfaces_partial;DB_CLOSE_DELAY=-1")
+            .formParam("username", H2_USER)
+            .formParam("password", H2_PASSWORD)
+            .`when`()
+            .post("/partials/datasources")
+            .then()
+            .statusCode(200)
+            .header("HX-Redirect", Matchers.equalTo("/datasources"))
+
+        // Cleanup through the REST twin.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, aliceKey)
+            .`when`()
+            .delete("/api/v1/datasources/partial-reg")
+            .then()
+            .statusCode(204)
+    }
+
+    @Test
     fun `an unauthenticated browser request 302s to the RELATIVE login path`() {
         given()
             .port(port)
@@ -695,6 +766,7 @@ class WorkspaceSurfacesE2eTest {
         private val BOB_KEY = seededKey("bob-key", BOB, arrayOf("read", "execute", "author"))
         private val CAROL_KEY = seededKey("carol-key", CAROL, arrayOf("read", "execute", "author"))
         private val ADMIN_KEY = seededKey("admin-key", ROOT, arrayOf("read", "execute", "author", "admin"))
+        private val READONLY_KEY = seededKey("readonly-key", ALICE, arrayOf("read"))
 
         private fun seededKey(
             name: String,
@@ -801,7 +873,7 @@ class WorkspaceSurfacesE2eTest {
         }
 
         private fun seedKeys(connection: java.sql.Connection) {
-            val pins = mapOf(ALICE_KEY to WS_ACME, CAROL_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX)
+            val pins = mapOf(ALICE_KEY to WS_ACME, CAROL_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX, READONLY_KEY to WS_ACME)
             connection
                 .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
                 .use { ps ->

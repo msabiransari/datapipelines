@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.config.BeanDefinition
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
 import org.springframework.core.type.filter.AnnotationTypeFilter
+import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -47,6 +49,32 @@ class RequiredScopeCoverageTest {
         missing shouldBe emptyList()
     }
 
+    /**
+     * The /partials arm of the same guard (022 review F6): the htmx partials are reachable
+     * with an API key like any route, and `ScopeInterceptor` now default-denies unannotated
+     * handlers there — this fails the build the moment an unannotated partial lands. UI
+     * page handlers (full-screen GETs outside `/partials`) are governed by the filter
+     * chain's authentication rule, not the scope matrix.
+     */
+    @Test
+    fun `every partials handler declares its section-7-6 operation`() {
+        val missing = mutableListOf<String>()
+        uiControllers().forEach { controller ->
+            val classLevelScope = controller.findAnnotation<RequiredScope>() != null
+            val classPath = controller.findAnnotation<RequestMapping>()?.value?.firstOrNull().orEmpty()
+            controller.functions
+                .filter { isHttpHandler(it.javaMethod) }
+                .filter { fn ->
+                    val methodPath = httpPath(fn.javaMethod)
+                    methodPath.startsWith(PARTIALS_PREFIX) || classPath.startsWith(PARTIALS_PREFIX)
+                }.forEach { fn ->
+                    val annotated = fn.findAnnotation<RequiredScope>() != null || classLevelScope
+                    if (!annotated) missing.add("${controller.simpleName}#${fn.name}")
+                }
+        }
+        missing shouldBe emptyList()
+    }
+
     /** The scan actually sees the module's controllers — a scan that finds nothing proves nothing. */
     @Test
     fun `the classpath scan finds the module's controllers`() {
@@ -77,11 +105,36 @@ class RequiredScopeCoverageTest {
             GetMapping::class.java,
             PostMapping::class.java,
             PutMapping::class.java,
+            PatchMapping::class.java,
             DeleteMapping::class.java,
         ).any { method.getAnnotation(it) != null }
     }
 
+    /** The first path value of whichever HTTP-mapping annotation the method carries; "" when none. */
+    private fun httpPath(method: java.lang.reflect.Method?): String {
+        if (method == null) return ""
+        return listOf(
+            method.getAnnotation(GetMapping::class.java)?.value,
+            method.getAnnotation(PostMapping::class.java)?.value,
+            method.getAnnotation(PutMapping::class.java)?.value,
+            method.getAnnotation(PatchMapping::class.java)?.value,
+            method.getAnnotation(DeleteMapping::class.java)?.value,
+        ).filterNotNull().firstOrNull()?.firstOrNull().orEmpty()
+    }
+
+    private fun uiControllers(): List<KClass<*>> =
+        ClassPathScanningCandidateComponentProvider(false)
+            .apply { addIncludeFilter(AnnotationTypeFilter(Controller::class.java)) }
+            .findCandidateComponents(BASE_PACKAGE)
+            .map(BeanDefinition::getBeanClassName)
+            .filterNotNull()
+            .map { Class.forName(it) }
+            .filter { it.protectionDomain.codeSource.location.path.contains("/main/") }
+            .map { it.kotlin }
+            .sortedBy { it.qualifiedName }
+
     private companion object {
         const val BASE_PACKAGE = "co.datapipelines.web"
+        const val PARTIALS_PREFIX = "/partials"
     }
 }

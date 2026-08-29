@@ -13,16 +13,22 @@ import org.springframework.web.servlet.HandlerInterceptor
  * operation's [ScopeMatrix.RestOperation.minScope] is the minimum.
  *
  * ## Default deny (AUTH-SEC-9)
- * A handler under the `/api` prefix or on `/mcp` that carries **no** `@RequiredScope` — on the
- * method or on its controller class — is **denied**, not served. Forgetting the
- * annotation is the realistic failure mode (a new endpoint, a hurried refactor), and
- * fail-open there means an unscoped endpoint ships silently. The denial is logged at
- * ERROR naming the handler, because it is a wiring bug an operator must see, not a
+ * A handler under the `/api` or `/partials` prefixes or on `/mcp` that carries **no**
+ * `@RequiredScope` — on the method or on its controller class — is **denied**, not served.
+ * Forgetting the annotation is the realistic failure mode (a new endpoint, a hurried
+ * refactor), and fail-open there means an unscoped endpoint ships silently. The denial is
+ * logged at ERROR naming the handler, because it is a wiring bug an operator must see, not a
  * user error.
+ *
+ * `/partials` joined the governed prefixes in the 022b fix round (review F6): the htmx
+ * partials are reachable with an API key like any other route, so a mutating partial
+ * without the floor bypassed its REST twin's scope — a `read` key could register a
+ * datasource. Every partial declares its REST twin's §7.6 operation.
  *
  * Outside those prefixes an unannotated handler is allowed through: the login page,
  * static assets and health probes are gated by the filter chain's `permitAll`
- * list (§8.3), not by the scope matrix.
+ * list (§8.3), not by the scope matrix. An ANNOTATED handler is enforced on any path —
+ * the prefixes govern only the default-deny.
  */
 class ScopeInterceptor(
     private val errorWriter: AuthErrorWriter,
@@ -89,9 +95,11 @@ class ScopeInterceptor(
         handler.getMethodAnnotation(RequiredScope::class.java)?.value
             ?: handler.beanType.getAnnotation(RequiredScope::class.java)?.value
 
-    /** True on the surfaces the §7.6 matrix governs: the REST API and the MCP endpoint. */
+    /** True on the surfaces the §7.6 matrix governs: the REST API, the htmx partials and the MCP endpoint. */
     private fun isScopeGoverned(request: HttpServletRequest): Boolean =
-        request.requestURI.startsWith(API_PREFIX) || request.requestURI == ApiKeyCredential.MCP_PATH
+        request.requestURI.startsWith(API_PREFIX) ||
+            request.requestURI.startsWith(PARTIALS_PREFIX) ||
+            request.requestURI == ApiKeyCredential.MCP_PATH
 
     private fun denyUnannotated(
         request: HttpServletRequest,
@@ -120,6 +128,7 @@ class ScopeInterceptor(
 
     private companion object {
         const val API_PREFIX = "/api/"
+        const val PARTIALS_PREFIX = "/partials/"
         const val HTTP_FORBIDDEN = 403
     }
 }

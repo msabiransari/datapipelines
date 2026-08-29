@@ -1,7 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
@@ -16,6 +18,7 @@ class TemplatePartialController(
     private val templates: TemplateRepository,
 ) {
     @GetMapping("/partials/templates")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,

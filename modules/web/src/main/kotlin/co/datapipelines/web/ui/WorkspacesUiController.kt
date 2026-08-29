@@ -4,6 +4,8 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
+import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceProvisioningMode
 import co.datapipelines.auth.WorkspaceRole
@@ -73,6 +75,7 @@ class WorkspacesUiController(
 
     /** The create action; refusals (mode, name, duplicate) bounce back with the message. */
     @PostMapping("/workspaces/create")
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_CREATE)
     fun create(
         @RequestParam name: String,
         @RequestParam(required = false) displayName: String?,
@@ -87,12 +90,14 @@ class WorkspacesUiController(
 
     /** The `open-join` self-service join — adding your own email. */
     @PostMapping("/workspaces/{name}/join")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun join(
         @PathVariable name: String,
     ): String = action("joined") { workspaceService.addMember(requirePrincipal(), name, requirePrincipal().email) }
 
     /** An owner (or admin) adds a member by email. */
     @PostMapping("/workspaces/{name}/members")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun addMember(
         @PathVariable name: String,
         @RequestParam email: String,
@@ -100,6 +105,7 @@ class WorkspacesUiController(
 
     /** An owner (or admin) removes a member; an owner target is the `in_use` refusal. */
     @PostMapping("/workspaces/{name}/members/{userId}/remove")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -107,6 +113,7 @@ class WorkspacesUiController(
 
     /** Workspace delete; `in_use` bounces back with the counts of what blocks. */
     @PostMapping("/workspaces/{name}/delete")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun delete(
         @PathVariable name: String,
     ): String = action("deleted") { workspaceService.delete(requirePrincipal(), name) }
@@ -119,6 +126,7 @@ class WorkspacesUiController(
      * hx-headers). A refused switch falls back to the workspaces screen with the error.
      */
     @PostMapping("/workspace/switch")
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
     fun switch(
         response: jakarta.servlet.http.HttpServletResponse,
         @RequestParam name: String,

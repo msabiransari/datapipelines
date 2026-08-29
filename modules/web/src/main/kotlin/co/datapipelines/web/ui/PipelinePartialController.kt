@@ -1,7 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.currentPrincipal
 import org.springframework.security.core.context.SecurityContextHolder
@@ -15,6 +17,7 @@ class PipelinePartialController(
     private val pipelines: PipelineRepository,
 ) {
     @GetMapping("/partials/pipelines")
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,
