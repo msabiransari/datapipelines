@@ -1,12 +1,14 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthException
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceErrorCodes
 import co.datapipelines.auth.WorkspaceProvisioningMode
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
@@ -82,7 +84,7 @@ class WorkspacesUiController(
     ): String =
         action("created") {
             workspaceService.create(
-                requirePrincipal(),
+                requireSessionPrincipal(),
                 name.trim(),
                 displayName?.trim()?.takeIf { it.isNotEmpty() } ?: name.trim(),
             )
@@ -93,7 +95,11 @@ class WorkspacesUiController(
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun join(
         @PathVariable name: String,
-    ): String = action("joined") { workspaceService.addMember(requirePrincipal(), name, requirePrincipal().email) }
+    ): String =
+        action("joined") {
+            val principal = requireSessionPrincipal()
+            workspaceService.addMember(principal, name, principal.email)
+        }
 
     /** An owner (or admin) adds a member by email. */
     @PostMapping("/workspaces/{name}/members")
@@ -101,7 +107,7 @@ class WorkspacesUiController(
     fun addMember(
         @PathVariable name: String,
         @RequestParam email: String,
-    ): String = action("member_added") { workspaceService.addMember(requirePrincipal(), name, email) }
+    ): String = action("member_added") { workspaceService.addMember(requireSessionPrincipal(), name, email) }
 
     /** An owner (or admin) removes a member; an owner target is the `in_use` refusal. */
     @PostMapping("/workspaces/{name}/members/{userId}/remove")
@@ -109,14 +115,14 @@ class WorkspacesUiController(
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
-    ): String = action("member_removed") { workspaceService.removeMember(requirePrincipal(), name, userId) }
+    ): String = action("member_removed") { workspaceService.removeMember(requireSessionPrincipal(), name, userId) }
 
     /** Workspace delete; `in_use` bounces back with the counts of what blocks. */
     @PostMapping("/workspaces/{name}/delete")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
     fun delete(
         @PathVariable name: String,
-    ): String = action("deleted") { workspaceService.delete(requirePrincipal(), name) }
+    ): String = action("deleted") { workspaceService.delete(requireSessionPrincipal(), name) }
 
     /**
      * The shell switcher's action: resolve the target workspace (the SAME membership check
@@ -131,8 +137,10 @@ class WorkspacesUiController(
         response: jakarta.servlet.http.HttpServletResponse,
         @RequestParam name: String,
     ): String {
-        val principal = requirePrincipal()
         return try {
+            // Session-only, and INSIDE the try: an API-key caller gets the same refusal
+            // bounce as any other refused switch — and, critically, no minted cookie.
+            val principal = requireSessionPrincipal()
             val target = workspaceService.resolveSwitch(principal, name.trim())
             val user = userService.snapshot(principal.userId) ?: return "redirect:/workspaces?error=unknown_user"
             response.addCookie(sessionCookie(jwtService.issue(user, target.name), authProperties))
@@ -161,4 +169,47 @@ class WorkspacesUiController(
     private fun requirePrincipal(): AuthenticatedPrincipal =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
             ?: error("No authenticated principal")
+
+    /**
+     * The session-only gate for every MUTATING action on this controller (D3).
+     *
+     * These are browser form posts; the REST surface under `/api/v1/workspaces` is the
+     * programmatic one.
+     * An API-key principal must never drive them, and [switch] is the sharp case: it MINTS
+     * a `dp_session` cookie from `scopesFor(user)` — the USER's scopes, not the KEY's — so
+     * without this gate a `read`-scoped agent key could trade itself for an author/admin
+     * session, and a key pinned to one workspace could mint a session for another. That is
+     * exactly the skeleton-key outcome [co.datapipelines.auth.WorkspaceResolutionFilter]
+     * refuses `DP-Workspace` to prevent; a key's workspace is pinned at issuance, and
+     * scope is a property of the credential, not of its owner.
+     *
+     * Reachable at all because an API key authenticates on EVERY path (`ApiKeyFilter` has
+     * no path test) and is CSRF-exempt (`ApiKeyCredentialMatcher`), while these handlers'
+     * `@RequiredScope` floors are `Scope.READ` — so the annotation passes a read key
+     * through. The floors themselves are the wider question (the sibling routes are
+     * role-gated in-handler, so their exposure is bounded); this gate closes the
+     * credential-minting hole outright and is deliberately independent of them.
+     *
+     * Carries the catalogued `workspace.header_forbidden` code — the same refusal CLASS
+     * (an API key may not change its pinned workspace context), reused rather than adding
+     * a code, because a new code requires the pipeline-contract constant, the §13.12 doc
+     * row and the drift counts in one commit. A dedicated `workspace.session_required`
+     * is the recorded follow-up.
+     */
+    private fun requireSessionPrincipal(): AuthenticatedPrincipal {
+        val principal = requirePrincipal()
+        if (principal.authMethod != AuthMethod.OIDC) {
+            throw AuthException(
+                WorkspaceErrorCodes.HEADER_FORBIDDEN,
+                HTTP_BAD_REQUEST,
+                "Workspace actions are session-only; an API key's workspace is pinned at issuance (D3)",
+                "API keys are pinned to one workspace. Use the REST API with a key, or sign in to switch.",
+            )
+        }
+        return principal
+    }
+
+    private companion object {
+        const val HTTP_BAD_REQUEST = 400
+    }
 }

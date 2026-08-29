@@ -18,6 +18,7 @@ import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletResponse
@@ -153,5 +154,86 @@ class WorkspacesUiControllerTest {
 
         every { workspaceService.resolveSwitch(principal, "rival") } throws WorkspaceMembershipRequiredException()
         controller.switch(MockHttpServletResponse(), "rival") shouldBe "redirect:/workspaces?error=switch_refused"
+    }
+
+    // ---------------------------------------------------------------- D3: session-only
+
+    /**
+     * The escalation this gate exists for (022 review finding, orchestrator-verified
+     * 2026-08-29): an API key authenticates on EVERY path and is CSRF-exempt, and these
+     * handlers' floors are `Scope.READ` — so before the gate a READ-scoped key could POST
+     * /workspace/switch and get back a `dp_session` cookie stamped with `scopesFor(user)`,
+     * i.e. the USER's author/admin scopes, and for ANY workspace the user belongs to (the
+     * skeleton-key outcome D3's header refusal exists to prevent).
+     *
+     * The mocks below would let the switch SUCCEED: remove the gate and the cookie
+     * assertion goes red, which is what makes this a pin rather than a tautology.
+     */
+    @Test
+    fun `an API-key principal cannot mint a session cookie through switch`() {
+        authenticateWithApiKey()
+        every { workspaceService.resolveSwitch(any(), any()) } returns WorkspaceContext(UUID.randomUUID(), "globex")
+        every { userService.snapshot(userId) } returns
+            User(
+                userId,
+                "alice@acme.test",
+                "Alice",
+                null,
+                "google",
+                "sub-a",
+                isActive = true,
+                isAdmin = false,
+                createdAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+            )
+        every { jwtService.issue(any(), any()) } returns "escalated-jwt"
+
+        val response = MockHttpServletResponse()
+        controller.switch(response, "globex") shouldBe "redirect:/workspaces?error=switch_refused"
+
+        // The security property, asserted directly: no credential was minted.
+        response.getCookie("dp_session") shouldBe null
+        // ...and the minting path was never reached at all.
+        verify(exactly = 0) { jwtService.issue(any(), any()) }
+    }
+
+    /**
+     * The same gate across the rest of the family. These are role-gated in-handler, so the
+     * exposure was bounded — but scope is a property of the CREDENTIAL, not of its owner,
+     * and a `read` key driving a workspace delete violates that outright.
+     */
+    @Test
+    fun `an API-key principal cannot create, join, add, remove or delete`() {
+        authenticateWithApiKey()
+        val refusal = "redirect:/workspaces?error=header_forbidden"
+
+        controller.create("globex", "Globex") shouldBe refusal
+        controller.join("globex") shouldBe refusal
+        controller.addMember("globex", "bob@acme.test") shouldBe refusal
+        controller.removeMember("globex", UUID.randomUUID()) shouldBe refusal
+        controller.delete("globex") shouldBe refusal
+
+        // The gate is in FRONT of the service, not behind it.
+        verify(exactly = 0) { workspaceService.create(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.addMember(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.removeMember(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.delete(any(), any()) }
+    }
+
+    private fun authenticateWithApiKey() {
+        val keyPrincipal =
+            AuthenticatedPrincipal(
+                userId,
+                "alice@acme.test",
+                "Alice",
+                // A minimum-privilege key — the escalation's whole point is that the USER
+                // behind it is an author or admin.
+                setOf(Scope.READ),
+                AuthMethod.API_KEY,
+                keyId = "dpk_TESTKEY",
+                workspace = WorkspaceContext(UUID.randomUUID(), "acme"),
+            )
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(keyPrincipal, null, emptyList())
     }
 }
