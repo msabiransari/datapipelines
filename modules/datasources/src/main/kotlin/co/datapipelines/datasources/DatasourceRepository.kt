@@ -38,6 +38,10 @@ class DatasourceRow(
     val queryTimeoutSeconds: Int?,
     val introspectionIncludeSchemas: List<String>,
     val isReadonly: Boolean,
+    /** The bound workspace (V4), or null = global (D9). */
+    val workspaceId: UUID?,
+    /** The bound workspace's name, joined at read time; null exactly when [workspaceId] is null. */
+    val workspaceName: String?,
     val isDeleted: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -57,6 +61,8 @@ class DatasourceRow(
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
             isReadonly = isReadonly,
+            workspaceId = workspaceId,
+            workspaceName = workspaceName,
         )
 }
 
@@ -76,7 +82,7 @@ class DatasourceRepository(
 ) {
     /** The live (non-deleted) row for [name], or null. */
     fun findByName(name: String): DatasourceRow? =
-        jdbc.query("$SELECT_COLUMNS WHERE name = :name AND is_deleted = FALSE", mapOf("name" to name), mapper()).singleOrNull()
+        jdbc.query("$SELECT_COLUMNS WHERE d.name = :name AND d.is_deleted = FALSE", mapOf("name" to name), mapper()).singleOrNull()
 
     /** Whether a live datasource exists under [name]. */
     fun exists(name: String): Boolean =
@@ -101,15 +107,57 @@ class DatasourceRepository(
                 Boolean::class.java,
             ) ?: false
 
-    /** Every live datasource, name order; optionally narrowed to one [dialect]. */
+    /** Every live datasource, name order; optionally narrowed to one [dialect]. No workspace filter — see [findAllVisible]. */
     fun findAll(dialect: Dialect? = null): List<DatasourceRow> {
-        val filter = if (dialect == null) "" else " AND dialect = :dialect"
+        val filter = if (dialect == null) "" else " AND d.dialect = :dialect"
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE is_deleted = FALSE$filter ORDER BY name",
+            "$SELECT_COLUMNS WHERE d.is_deleted = FALSE$filter ORDER BY d.name",
             mapOf("dialect" to dialect?.wire),
             mapper(),
         )
     }
+
+    /**
+     * Every datasource VISIBLE to [workspaceId] (workspaces design §5.3): the workspace's
+     * bound rows plus every global one (`workspace_id IS NULL`), name order. The predicate
+     * lives in the SQL — never a controller-side post-filter — so paging totals count
+     * exactly what the principal can see (a post-filter leaks via paging counts).
+     */
+    fun findAllVisible(
+        workspaceId: UUID,
+        dialect: Dialect? = null,
+    ): List<DatasourceRow> {
+        val dialectFilter = if (dialect == null) "" else " AND d.dialect = :dialect"
+        return jdbc.query(
+            """
+            $SELECT_COLUMNS
+             WHERE d.is_deleted = FALSE AND (d.workspace_id IS NULL OR d.workspace_id = :workspaceId)$dialectFilter
+             ORDER BY d.name
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("workspaceId", workspaceId).addValue("dialect", dialect?.wire),
+            mapper(),
+        )
+    }
+
+    /**
+     * The live row for [name] when VISIBLE to [workspaceId] (its bound rows + global), else
+     * null — by-name GET of another workspace's datasource behaves as not-found (design
+     * §5.3, the no-oracle rule). [findByName] stays unfiltered for the name-keyed internal
+     * paths (save, pool build, D10 live read).
+     */
+    fun findVisibleByName(
+        name: String,
+        workspaceId: UUID,
+    ): DatasourceRow? =
+        jdbc
+            .query(
+                """
+                $SELECT_COLUMNS
+                 WHERE d.is_deleted = FALSE AND d.name = :name AND (d.workspace_id IS NULL OR d.workspace_id = :workspaceId)
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("name", name).addValue("workspaceId", workspaceId),
+                mapper(),
+            ).singleOrNull()
 
     /** Inserts a new datasource, returning the stored row. Maps a PK collision to duplicate_name. */
     fun create(
@@ -124,7 +172,9 @@ class DatasourceRepository(
     /**
      * Updates a live datasource in place, returning the stored row, or null when no live row has
      * this name. `name` is never updated (immutable, §11.1). When [passwordEncrypted] is null the
-     * existing credential is kept (PUT with no password); otherwise it is replaced.
+     * existing credential is kept (PUT with no password); otherwise it is replaced. `is_readonly`
+     * and `workspace_id` update to the entity's values — the D8-gated flag writes cross the
+     * registry save boundary, which is what makes a flip reach the pool (see INSERT_SQL's note).
      */
     fun update(
         datasource: Datasource,
@@ -141,6 +191,8 @@ class DatasourceRepository(
                 .addValue("propertiesJson", propertiesJson(datasource.properties))
                 .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
                 .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
+                .addValue("isReadonly", datasource.isReadonly)
+                .addValue("workspaceId", datasource.workspaceId)
                 .addValue("passwordEncrypted", passwordEncrypted)
         val sql = if (passwordEncrypted == null) UPDATE_KEEP_PASSWORD_SQL else UPDATE_WITH_PASSWORD_SQL
         return jdbc.query(sql, params, mapper()).singleOrNull()
@@ -169,6 +221,7 @@ class DatasourceRepository(
         .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
         .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
         .addValue("isReadonly", datasource.isReadonly)
+        .addValue("workspaceId", datasource.workspaceId)
         .addValue("createdBy", createdBy)
 
     /**
@@ -202,6 +255,8 @@ class DatasourceRepository(
                 queryTimeoutSeconds = rs.getObject("query_timeout_seconds") as? Int,
                 introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas_json")),
                 isReadonly = rs.getBoolean("is_readonly"),
+                workspaceId = rs.getObject("workspace_id", UUID::class.java),
+                workspaceName = rs.getString("workspace_name"),
                 isDeleted = rs.getBoolean("is_deleted"),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
@@ -254,51 +309,81 @@ class DatasourceRepository(
         const val NAME_CONSTRAINT = "datasources_pkey"
 
         const val COLUMNS =
-            "name, display_name, description, dialect, jdbc_url, username, password_encrypted, " +
-                "properties_json, query_timeout_seconds, introspection_include_schemas_json, " +
-                "is_readonly, is_deleted, created_at, updated_at, created_by"
+            "d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted, " +
+                "d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json, " +
+                "d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by"
 
-        const val SELECT_COLUMNS = "SELECT $COLUMNS FROM datasources"
+        /** Every read joins `workspaces` for the additive `workspace` name (LEFT — global rows have NULL). */
+        const val SELECT_COLUMNS =
+            "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.workspace_id"
 
         /**
-         * `is_readonly` is written on INSERT only. The REST create path never sets
-         * [Datasource.isReadonly] (it is not in the §3.1 payload vocabulary — flag writes over
-         * the API belong to the surfaces slice), so for an API caller this column takes the
-         * entity default `false`, exactly the value the DB default already gave it. Bootstrap
-         * registration is the one caller that sets it true. UPDATE still never touches it: a
-         * PUT must not be able to flip a readonly datasource writable.
+         * `is_readonly` and `workspace_id` are written on INSERT and UPDATE both — the
+         * surfaces slice's flag writes (workspaces design §6/D8) cross the registry's save
+         * boundary, which evicts the pool on every update so a `readonly` flip takes effect
+         * at the next pool build. The D8 gates (who may flip what) live at the web surface;
+         * this module persists what it is handed. Bootstrap registration names neither
+         * global (NULL) nor readonly=true specially — its values flow through unchanged.
+         *
+         * INSERT is a data-modifying CTE (the `WorkspaceRepository.create` precedent): the
+         * RETURNING row is re-read through the workspace join so the stored row carries the
+         * additive `workspace_name` exactly like every other read.
          */
         val INSERT_SQL =
             """
-            INSERT INTO datasources
-                (name, display_name, description, dialect, jdbc_url, username, password_encrypted,
-                 properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                 is_readonly, created_by)
-            VALUES
-                (:name, :displayName, :description, :dialect, :jdbcUrl, :username, :passwordEncrypted,
-                 CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
-                 CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :createdBy)
-            RETURNING $COLUMNS
+            WITH inserted AS (
+                INSERT INTO datasources
+                    (name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                     properties_json, query_timeout_seconds, introspection_include_schemas_json,
+                     is_readonly, workspace_id, created_by)
+                VALUES
+                    (:name, :displayName, :description, :dialect, :jdbcUrl, :username, :passwordEncrypted,
+                     CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
+                     CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :workspaceId, :createdBy)
+                RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                    properties_json, query_timeout_seconds, introspection_include_schemas_json,
+                    is_readonly, workspace_id, is_deleted, created_at, updated_at, created_by
+            )
+            SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
+                   d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
+                   d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by
+              FROM inserted d LEFT JOIN workspaces w ON w.id = d.workspace_id
             """.trimIndent()
 
         val UPDATE_WITH_PASSWORD_SQL = updateSql(includePassword = true)
         val UPDATE_KEEP_PASSWORD_SQL = updateSql(includePassword = false)
 
+        /**
+         * The UPDATE is a data-modifying CTE for the same reason as [INSERT_SQL]: Postgres
+         * `RETURNING` cannot join, so the CTE's row is re-read through the workspace join and
+         * the stored row carries `workspace_name` exactly like every other read. (Postgres
+         * also rejects `UPDATE datasources d` aliases — the alias lives on the CTE.)
+         */
         private fun updateSql(includePassword: Boolean): String {
-            val passwordClause = if (includePassword) "password_encrypted = :passwordEncrypted,\n                   " else ""
+            val passwordClause = if (includePassword) "password_encrypted = :passwordEncrypted,\n                       " else ""
             return """
-                UPDATE datasources
-                   SET display_name = :displayName,
-                       description = :description,
-                       dialect = :dialect,
-                       jdbc_url = :jdbcUrl,
-                       username = :username,
-                       ${passwordClause}properties_json = CAST(:propertiesJson AS jsonb),
-                       query_timeout_seconds = :queryTimeoutSeconds,
-                       introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
-                       updated_at = NOW()
-                 WHERE name = :name AND is_deleted = FALSE
-                RETURNING $COLUMNS
+                WITH updated AS (
+                    UPDATE datasources
+                       SET display_name = :displayName,
+                           description = :description,
+                           dialect = :dialect,
+                           jdbc_url = :jdbcUrl,
+                           username = :username,
+                           ${passwordClause}properties_json = CAST(:propertiesJson AS jsonb),
+                           query_timeout_seconds = :queryTimeoutSeconds,
+                           introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
+                           is_readonly = :isReadonly,
+                           workspace_id = :workspaceId,
+                           updated_at = NOW()
+                     WHERE name = :name AND is_deleted = FALSE
+                    RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                        properties_json, query_timeout_seconds, introspection_include_schemas_json,
+                        is_readonly, workspace_id, is_deleted, created_at, updated_at, created_by
+                )
+                SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
+                       d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
+                       d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by
+                  FROM updated d LEFT JOIN workspaces w ON w.id = d.workspace_id
                 """.trimIndent()
         }
     }

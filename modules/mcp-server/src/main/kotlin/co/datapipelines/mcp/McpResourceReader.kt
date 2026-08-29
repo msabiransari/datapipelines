@@ -42,15 +42,48 @@ class McpResourceReader(
         val parsed = McpResourceUri.parse(uri) ?: throw notFound(uri)
         val contents =
             when (parsed) {
-                is McpResourceUri.PipelineLatest -> json(uri, pipelineBody(workspaceId, parsed.id, null))
-                is McpResourceUri.PipelineVersion -> json(uri, pipelineBody(workspaceId, parsed.id, parsed.version))
-                is McpResourceUri.PipelineParameters -> json(uri, parameters(workspaceId, parsed.id))
-                is McpResourceUri.TemplateLatest -> template(workspaceId, uri, parsed.id, null)
-                is McpResourceUri.TemplateVersion -> template(workspaceId, uri, parsed.id, parsed.version)
-                is McpResourceUri.DatasourceList -> json(uri, ExecutorJson.write(datasources.list().map { it.toMcpMetadata() }))
-                is McpResourceUri.DatasourceByName -> json(uri, datasource(parsed.name, uri))
-                is McpResourceUri.Execution -> json(uri, execution(workspaceId, parsed.executionId, ctx, uri))
-                is McpResourceUri.ExecutionEvents -> text(uri, eventReplay(workspaceId, parsed.executionId, ctx, uri))
+                is McpResourceUri.PipelineLatest -> {
+                    json(uri, pipelineBody(workspaceId, parsed.id, null))
+                }
+
+                is McpResourceUri.PipelineVersion -> {
+                    json(uri, pipelineBody(workspaceId, parsed.id, parsed.version))
+                }
+
+                is McpResourceUri.PipelineParameters -> {
+                    json(uri, parameters(workspaceId, parsed.id))
+                }
+
+                is McpResourceUri.TemplateLatest -> {
+                    template(workspaceId, uri, parsed.id, null)
+                }
+
+                is McpResourceUri.TemplateVersion -> {
+                    template(workspaceId, uri, parsed.id, parsed.version)
+                }
+
+                is McpResourceUri.DatasourceList -> {
+                    json(
+                        uri,
+                        ExecutorJson.write(
+                            datasources.listVisible(workspaceId = workspaceId).map {
+                                it.toMcpMetadata()
+                            },
+                        ),
+                    )
+                }
+
+                is McpResourceUri.DatasourceByName -> {
+                    json(uri, datasource(workspaceId, parsed.name, uri))
+                }
+
+                is McpResourceUri.Execution -> {
+                    json(uri, execution(workspaceId, parsed.executionId, ctx, uri))
+                }
+
+                is McpResourceUri.ExecutionEvents -> {
+                    text(uri, eventReplay(workspaceId, parsed.executionId, ctx, uri))
+                }
             }
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
     }
@@ -89,11 +122,13 @@ class McpResourceReader(
         return McpSchema.TextResourceContents(uri, McpResourceCatalog.MIME_FREEMARKER_SQL, body, null)
     }
 
+    /** §5.3: by-name read of a datasource the pinned workspace cannot see is not-found, like every surface. */
     private fun datasource(
+        workspaceId: UUID,
         name: String,
         uri: String,
     ): String {
-        val datasource = datasources.get(name) ?: throw notFound(uri)
+        val datasource = datasources.getVisible(name, workspaceId) ?: throw notFound(uri)
         return ExecutorJson.write(datasource.toMcpMetadata())
     }
 

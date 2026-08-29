@@ -33,6 +33,14 @@ object ScopeMatrix {
          * datasource, and the stated consumer is pipeline authoring.
          */
         INTROSPECT_DATASOURCE(Scope.AUTHOR),
+
+        /**
+         * "Create / update / delete workspace-bound datasources" (§7.6, workspaces design
+         * D8): `author` is the scope floor; the D8 gates — the `member-datasources-enabled`
+         * config gate and the membership/binding checks — are enforced by the handler, not
+         * expressible in a scope. Global datasource CUD stays [MUTATE_DATASOURCES] (`admin`).
+         */
+        MUTATE_WORKSPACE_DATASOURCES(Scope.AUTHOR),
         MUTATE_DATASOURCES(Scope.ADMIN),
 
         /**
@@ -55,6 +63,29 @@ object ScopeMatrix {
          */
         CURRENT_PRINCIPAL(Scope.READ),
         USER_ADMINISTRATION(Scope.ADMIN),
+
+        /**
+         * "List / read own workspaces & members" (§7.6, workspaces design §5.4/§9):
+         * list-own and read are any-authenticated — a member listing/read of one's own
+         * workspaces. `read` is the §7.5 floor, the same "any authenticated" convention as
+         * [MANAGE_OWN_API_KEYS].
+         */
+        WORKSPACES_READ(Scope.READ),
+
+        /**
+         * "Create a workspace (per provisioning mode)" (§7.6, design §7/§9): the scope
+         * floor is any-authenticated; the per-mode refusal (`closed` → non-admin) is
+         * [WorkspaceCreationForbiddenException], raised by the handler.
+         */
+        WORKSPACE_CREATE(Scope.READ),
+
+        /**
+         * "Update a workspace / manage its members" (§7.6, design §5.4/§9): any
+         * authenticated principal may REACH the operation; ownership (workspace `owner`
+         * role or global admin) is enforced by the handler — a role is not a scope, and
+         * the `read` floor keeps the matrix from overstating what the scope system checks.
+         */
+        MANAGE_WORKSPACE(Scope.READ),
     }
 
     /**

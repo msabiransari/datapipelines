@@ -158,7 +158,7 @@ class McpResourceCatalog(
             descriptor(
                 uri = McpResourceUri.datasources(),
                 name = "datasources",
-                description = "Every registered datasource, without credentials.",
+                description = "Every datasource visible in the key's pinned workspace (bound + global), without credentials.",
                 mimeType = MIME_JSON,
             )
         val items =
@@ -196,14 +196,16 @@ class McpResourceCatalog(
      * One `resources/list` call's memo of the unbounded reads (mcp-sec-5).
      *
      * A page walks its kinds and then probes `hasMore`, so an un-memoized `findAll()` ran two or
-     * three times per page. Memoizing bounds a call to **one** scan of each.
+     * three times per page. Memoizing bounds a call to **one** scan of each. Datasources read
+     * the workspace-VISIBLE set (workspaces §5.3) — bound to the key's pinned workspace plus
+     * global — the same predicate the `datasources_list` tool applies.
      */
     private inner class RequestScan(
         val workspaceId: java.util.UUID,
     ) {
         val pipelines by lazy { this@McpResourceCatalog.pipelines.findAll(workspaceId).sortedBy { it.id } }
 
-        val datasources by lazy { this@McpResourceCatalog.datasources.list().sortedBy { it.name } }
+        val datasources by lazy { this@McpResourceCatalog.datasources.listVisible(workspaceId = workspaceId).sortedBy { it.name } }
     }
 
     private fun descriptor(

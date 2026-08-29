@@ -2,18 +2,16 @@ package co.datapipelines.auth
 
 private const val HTTP_BAD_REQUEST = 400
 private const val HTTP_FORBIDDEN = 403
+private const val HTTP_NOT_FOUND = 404
+private const val HTTP_CONFLICT = 409
 
 /**
- * The `workspace.*` error codes this slice raises (design §8).
+ * The `workspace.*` error codes this module raises (design §8).
  *
  * The registry of record is [Pipeline Contract §13.12]; `PipelineErrorCodes.Workspace`
  * carries the pipeline-contract-side constants and this object mirrors them exactly —
  * the same duplication pattern as [AuthErrorCodes] vs §13.7, and drift-guarded the same
  * way: `AuthErrorSpecDriftTest` asserts this set equals the doc's §13.12 table.
- *
- * The CRUD-only codes (`workspace.not_found`, `workspace.validation.*`, `workspace.in_use`)
- * are deliberately absent: they land with the REST surface slice (021), which is the slice
- * that raises them.
  */
 object WorkspaceErrorCodes {
     /** 403 — the principal is not a member of the addressed workspace (design §5.1/§7). */
@@ -25,8 +23,25 @@ object WorkspaceErrorCodes {
     /** 400 — `DP-Workspace` was sent on an API-key request; a key's workspace is pinned at issuance (D3). */
     const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
+    /**
+     * 404 — an unknown workspace name, for a principal who could otherwise see any workspace
+     * (a global `admin`, design §8). For everyone else unknown and non-member are the same
+     * 403 [MEMBERSHIP_REQUIRED] — no existence oracle (the 019 precedent).
+     */
+    const val NOT_FOUND = "workspace.not_found"
+
+    /** 400 — workspace name fails `[a-z0-9_-]+`, 1–63 (metadata-db §4.11). */
+    const val NAME_INVALID = "workspace.validation.name_invalid"
+
+    /** 409 — workspace name exists (global namespace, soft-deleted included — house rule). */
+    const val DUPLICATE_NAME = "workspace.validation.duplicate_name"
+
+    /** 409 — delete blocked: the workspace still owns non-deleted pipelines/templates/datasources (design §8). */
+    const val IN_USE = "workspace.in_use"
+
     /** The full §13.12 set — the spec-drift test asserts this equals the doc. */
-    val ALL: Set<String> = setOf(MEMBERSHIP_REQUIRED, CREATION_FORBIDDEN, HEADER_FORBIDDEN)
+    val ALL: Set<String> =
+        setOf(MEMBERSHIP_REQUIRED, CREATION_FORBIDDEN, HEADER_FORBIDDEN, NOT_FOUND, NAME_INVALID, DUPLICATE_NAME, IN_USE)
 }
 
 /**
@@ -68,3 +83,74 @@ class WorkspaceHeaderForbiddenException :
         "DP-Workspace is not accepted on API-key requests; the key's workspace is pinned at issuance",
         "API keys are pinned to one workspace. Remove the DP-Workspace header and try again.",
     )
+
+/**
+ * An unknown workspace name addressed by a principal who could otherwise see any workspace —
+ * a global `admin` (design §8). Members never see this: for them unknown and non-member are
+ * the same 403 [WorkspaceMembershipRequiredException], so the name cannot be probed.
+ */
+class WorkspaceNotFoundException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.NOT_FOUND,
+        HTTP_NOT_FOUND,
+        "Workspace '$name' not found.",
+        "We couldn't find that workspace.",
+        details = mapOf("workspace" to name),
+    )
+
+/** A workspace name outside `[a-z0-9_-]{1,63}` (metadata-db §4.11) — a 400 at the CRUD surface. */
+class WorkspaceNameInvalidException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.NAME_INVALID,
+        HTTP_BAD_REQUEST,
+        "Workspace name '$name' does not match [a-z0-9_-]{1,63}.",
+        "Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.",
+        details = mapOf("workspace" to name.take(MAX_ECHOED_NAME_CHARS)),
+    )
+
+/**
+ * The workspace name is taken (design §8) — the global namespace, soft-deleted rows included
+ * (the house "name not reusable until hard-deleted" rule, unchanged from pipelines/templates).
+ */
+class WorkspaceDuplicateNameException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.DUPLICATE_NAME,
+        HTTP_CONFLICT,
+        "A workspace named '$name' already exists.",
+        "A workspace with that name already exists. Pick a different name.",
+        details = mapOf("workspace" to name),
+    )
+
+/**
+ * Delete blocked: the workspace still owns non-deleted content (design §8) — or a member
+ * removal would orphan it ([blockedBy] names which). [counts] names what blocks, by kind.
+ */
+class WorkspaceInUseException(
+    name: String,
+    counts: Map<String, Int>,
+    blockedBy: String? = null,
+) : AuthException(
+        WorkspaceErrorCodes.IN_USE,
+        HTTP_CONFLICT,
+        if (blockedBy == null) {
+            "Workspace '$name' still owns non-deleted content: $counts."
+        } else {
+            "Workspace '$name' refuses this operation: blocked by $blockedBy."
+        },
+        if (blockedBy == null) {
+            "This workspace still has content in it. Delete its pipelines, templates and datasources first."
+        } else {
+            "This workspace needs at least one owner. Ownership transfer is not available yet."
+        },
+        details =
+            if (blockedBy == null) {
+                mapOf("workspace" to name, "counts" to counts)
+            } else {
+                mapOf("workspace" to name, "blocked_by" to blockedBy)
+            },
+    )
+
+private const val MAX_ECHOED_NAME_CHARS = 63

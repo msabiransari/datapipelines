@@ -789,6 +789,8 @@ Content-Type: application/json
 
 `introspection_include_schemas` (optional, [Datasources §3.3](datasources.md#33-field-reference)) exempts exact schema names from the §9.7 system-schema exclusion; entries are legal schema identifiers — letters, digits, `_`, `$`, `#`, lowercase (entries outside the alphabet — wildcards, quoted identifiers, qualified `db.schema` names — are rejected with `400 datasource.validation.properties_invalid`), and the stored list is normalized on save — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — so what a GET projects always survives an unmodified PUT round-trip. Omitted from the response when empty.
 
+**Workspace binding (workspaces D8):** the optional `global` (boolean, admin-only — creating shared infrastructure is an admin act) and `workspace` (string, a workspace the caller can access) fields set the binding; with neither, the datasource binds to the caller's ACTIVE workspace. `readonly` (boolean, default `false`) forbids the three write-shaped pipeline uses ([Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)). A non-admin sending `global: true`, binding to a workspace they are not in, or any member write while `member-datasources-enabled` is off, is `400 datasource.validation.workspace_forbidden`. Datasource NAMES stay a flat global namespace: a collision with another workspace's datasource is still `409 datasource.validation.duplicate_name` (by design — `name` is the PK and the pool-registry key).
+
 Response: `201 Created` with the datasource entity (excluding password).
 
 ### 9.2 List datasources
@@ -797,7 +799,7 @@ Response: `201 Created` with the datasource entity (excluding password).
 GET /datasources?dialect={dialect}&offset=0&limit=50
 ```
 
-Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints paginate).
+Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints paginate). **Workspace-scoped** (workspaces §5.3): the listing shows the active workspace's bound datasources plus all global ones; the predicate runs in the repository's SQL, so `total` counts exactly what the caller can see. A workspace-bound datasource of another workspace is absent — not filtered client-side, not paged-past.
 
 ### 9.3 Get datasource (sensitive fields redacted)
 
@@ -805,7 +807,7 @@ Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints pagina
 GET /datasources/{name}
 ```
 
-Returns everything except `password`.
+Returns everything except `password`, plus the additive `workspace` (the bound workspace's name, `null` = global) and `readonly` fields (workspaces design §9). A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
 
 ### 9.4 Update datasource
 
@@ -813,7 +815,7 @@ Returns everything except `password`.
 PUT /datasources/{name}
 ```
 
-Updates connection details. Password is optional — omit to keep existing. The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent.
+Updates connection details. Password is optional — omit to keep existing. The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent. The `global`/`readonly` flags are optional — absent keeps the stored value, present attempts a gated write: `global` (either direction) and mutating a global datasource are admin-only, and `readonly` on a GLOBAL datasource is admin-only (workspaces design §6 last paragraph); a member may flip `readonly` on their workspace-bound datasource when the D8 gate is on. An accepted flag write crosses the same registry save path as every update — the connection pool is drained and rebuilds under the new settings at the next lease. Errors: `400 datasource.validation.workspace_forbidden` for the refusals.
 
 ### 9.5 Delete datasource
 
@@ -821,7 +823,7 @@ Updates connection details. Password is optional — omit to keep existing. The 
 DELETE /datasources/{name}
 ```
 
-Fails with `datasource.in_use` if any non-deleted pipeline references it.
+Fails with `datasource.in_use` if any non-deleted pipeline references it. D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
 
 ### 9.6 Test connection
 
@@ -1109,6 +1111,73 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 
 ---
 
+## 17. Workspace Endpoints
+
+Workspaces are the unit of team isolation ([workspaces design](superpowers/specs/2026-08-16-workspaces-design.md) §9; [Auth §5.6](auth.md#56-workspace-resolution--the-dp-workspace-header) resolves the ACTIVE workspace per request). Every endpoint below lives under `/api/v1`. Scope minimums are in [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative); the role/mode gates (owner-or-admin, provisioning mode, `open-join`) are enforced in the service layer, default-deny.
+
+**The no-oracle rule** ([pipeline-contract §13.12](pipeline-contract.md#1312-workspace-resolution)): for anyone but a global admin, an unknown workspace name and a workspace the caller is not a member of are the SAME `403 workspace.membership_required` — a name cannot be probed. A global admin (who could otherwise see any workspace) gets a real `404 workspace.not_found`. A member who is not the owner of a workspace they ARE in gets the same 403 for management operations — role probing is an oracle too.
+
+### 17.1 List own workspaces
+
+```
+GET /workspaces
+```
+The caller's memberships (design §9 "list-own"): `{name, role, joined_at}` rows. A global admin gets exactly the same shape for their own memberships — no implicit merged view (the ratified 019 ruling; admins address other workspaces per-request via `DP-Workspace`).
+
+### 17.2 Get workspace
+
+```
+GET /workspaces/{name}
+```
+`{name, display_name, is_personal, created_at}`. Members (or a global admin) only — everyone else gets the 403/404 split above.
+
+### 17.3 Create workspace
+
+```
+POST /workspaces
+{"name": "team-etl", "display_name": "Team ETL"}
+```
+`display_name` optional (defaults to `name`). Per provisioning mode (configuration §3.17): `auto-per-user`/`self-serve` allow any authenticated principal; `closed` refuses non-admins with `403 workspace.creation_forbidden`. The creator enters as `owner`. Errors: `400 workspace.validation.name_invalid` (`[a-z0-9_-]+`, 1–63), `409 workspace.validation.duplicate_name` (global namespace, soft-deleted included).
+
+### 17.4 Update workspace
+
+```
+PUT /workspaces/{name}
+{"display_name": "Team ETL (renamed)"}
+```
+Renames the display name; `name` is immutable v1. An absent `display_name` keeps the current one. Owner or global admin.
+
+### 17.5 Delete workspace
+
+```
+DELETE /workspaces/{name}
+```
+Soft delete. `409 workspace.in_use` while the workspace still owns non-deleted pipelines, templates or (workspace-bound) datasources — `details.counts` names what blocks, by kind. Owner or global admin.
+
+### 17.6 List members
+
+```
+GET /workspaces/{name}/members
+```
+`{user_id, email, display_name, role, joined_at}` rows, oldest membership first. Any member of the workspace, or a global admin.
+
+### 17.7 Add member
+
+```
+POST /workspaces/{name}/members
+{"email": "bob@example.com"}
+```
+Owner or global admin — except the `open-join` self-service path: when `datapipelines.workspaces.open-join` is `true` (self-serve mode) and the email is the caller's own, any authenticated principal joins. The user must already exist (OIDC-provisioned); an unknown email is the §16.3 unknown-user 404 stand-in (`pipeline.execution.not_found`, `details.reason = "user_not_found"`). Adding an existing member is idempotent.
+
+### 17.8 Remove member
+
+```
+DELETE /workspaces/{name}/members/{user_id}
+```
+Owner or global admin. Removing a member with the `owner` role is refused with `409 workspace.in_use` (`details.blocked_by = "owner_membership"`) — ownership transfer is not a v1 operation, and a workspace must never be left without its owner.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
@@ -1129,3 +1198,4 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 | 2026-08-16 | v1.13 | hardening round 5 (008 review fix-cycle) | §9.1/§9.4: include-schemas entries are validated against the legal-identifier alphabet of the supported dialects (letters, digits, `_`, `$`, `#`, lowercase) instead of a per-character wildcard denylist — `?`, glob ranges, quoted identifiers, and qualified `db.schema` entries are now rejected (`400 properties_invalid`) rather than storing inert. |
 | 2026-08-16 | v1.14 | pipeline composition | §10.2: `triggered_via` gains `"PIPELINE"` — a child execution spawned by a parent's PIPELINE node appears in execution history like any other row (enums §18, metadata-db §4.6 V3 lineage columns). |
 | 2026-08-17 | v1.15 | pipeline composition | §6.4.3: a PIPELINE node's `node_completed` carries `child_execution_id` (absent for all other node types); the same value appears in the terminal events' `node_stats` entries. §10.1's history surfaces render the lineage: a child row shows its `parent_execution_id` link. |
+| 2026-08-28 | v1.16 | workspaces surfaces | New **§17 workspace endpoints** (list-own/read/create per mode/update/delete with `workspace.in_use`/members sub-resource with `open-join`) — §13.12's CRUD codes go live. §9 re-grounded on the workspaces model: §9.1 binding fields (`global` admin-only, `workspace` accessible-to-caller, default = ACTIVE workspace) + `readonly`; §9.2 listing is workspace-scoped with exact totals; §9.3 gains additive `workspace`+`readonly` fields; §9.4/§9.5 D8 gates (member CUD behind `member-datasources-enabled`, global CUD admin-only) with pool-rebuilding flag writes; by-name access to another workspace's datasource is not-found. T23: template duplicate name is `409 template.validation.duplicate_name`. T31: unauthenticated HTML-accepting requests 302 to `/login`; `/api/**`+`/mcp` keep the exact 401 JSON envelope. |

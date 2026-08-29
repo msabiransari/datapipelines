@@ -54,6 +54,41 @@ class AuthRepositoriesIntegrationTest {
         )
     }
 
+    // ------------------------------------------------------------ WorkspaceRepository (§4.11/§4.12)
+
+    @Test
+    fun `the workspace member lifecycle round-trips - add, list, roles, rename, remove, soft-delete`() {
+        val workspaces = WorkspaceRepository(jdbc)
+        val alice = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        val bob = users.insert("bob@company.com", "Bob", null, "google", "sub-2", isAdmin = false)
+
+        val ws = workspaces.create("acme", "Acme", isPersonal = false, createdBy = alice.id)
+        workspaces.nameExists("acme").shouldBeTrue()
+
+        workspaces.addMember(ws.id, bob.id).shouldNotBeNull()
+        workspaces.findMembersOf(ws.id).map { it.email } shouldContainExactlyInAnyOrder listOf("alice@company.com", "bob@company.com")
+        workspaces.roleOf(ws.id, alice.id) shouldBe WorkspaceRole.OWNER
+        workspaces.roleOf(ws.id, bob.id) shouldBe WorkspaceRole.MEMBER
+        workspaces.findMemberRow(ws.id, bob.id).shouldNotBeNull().role shouldBe WorkspaceRole.MEMBER
+        // Idempotent add: an existing membership comes back unchanged.
+        workspaces.addMember(ws.id, bob.id).shouldNotBeNull().role shouldBe WorkspaceRole.MEMBER
+
+        workspaces.findAll().map { it.name } shouldContainExactlyInAnyOrder listOf("default", "acme")
+
+        val renamed = workspaces.updateDisplayName(ws.id, "Acme Renamed").shouldNotBeNull()
+        renamed.displayName shouldBe "Acme Renamed"
+
+        workspaces.removeMember(ws.id, bob.id).shouldBeTrue()
+        workspaces.removeMember(ws.id, bob.id).shouldBeFalse()
+        workspaces.findMembersOf(ws.id).shouldHaveSize(1)
+
+        workspaces.softDelete(ws.id).shouldBeTrue()
+        workspaces.softDelete(ws.id).shouldBeFalse()
+        // Soft-deleted: gone from reads, but the NAME stays taken (house rule).
+        workspaces.findByName("acme").shouldBeNull()
+        workspaces.nameExists("acme").shouldBeTrue()
+    }
+
     @Test
     fun `insert then findByEmail round-trips the user`() {
         val created = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)

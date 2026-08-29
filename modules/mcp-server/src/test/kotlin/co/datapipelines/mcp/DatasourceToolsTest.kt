@@ -23,7 +23,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `list never returns a password`() {
-        every { registry.list(null) } returns listOf(McpFixtures.datasource())
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
 
         val payload = DatasourcesListTool(registry).call(McpArguments(emptyMap()), readCtx)
         val first = (payload as List<*>).first() as Map<*, *>
@@ -41,7 +41,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `list pushes the dialect filter down to the registry`() {
-        every { registry.list(Dialect.MYSQL) } returns emptyList()
+        every { registry.listVisible(Dialect.MYSQL, McpFixtures.WORKSPACE_ID) } returns emptyList()
 
         (DatasourcesListTool(registry).call(McpArguments(mapOf("dialect" to "MYSQL")), readCtx) as List<*>).size shouldBe 0
     }
@@ -53,14 +53,14 @@ class DatasourceToolsTest {
 
         assertAll(
             { hits.size shouldBe 0 },
-            { verify(exactly = 0) { registry.list(any()) } },
+            { verify(exactly = 0) { registry.listVisible(any(), any()) } },
             { DatasourcesListTool(registry).definition.inputSchema().toString() shouldNotContain "enum" },
         )
     }
 
     @Test
     fun `get returns connection metadata without credentials`() {
-        every { registry.get("pg-prod") } returns McpFixtures.datasource()
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
         val payload = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
@@ -78,9 +78,9 @@ class DatasourceToolsTest {
         // allowlist was active when debugging why a schema is or isn't visible — REST
         // returned the field, MCP didn't. Same omitted-when-empty envelope semantics as
         // REST §3.2, on both surfaces that share toMcpMetadata.
-        every { registry.get("pg-prod") } returns
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns
             McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting"))
-        every { registry.list(null) } returns
+        every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
             listOf(McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting")))
 
         @Suppress("UNCHECKED_CAST")
@@ -95,7 +95,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `get omits the introspection allowlist when it is empty - the envelope convention`() {
-        every { registry.get("pg-prod") } returns McpFixtures.datasource()
+        every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
         val payload = DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
@@ -105,7 +105,7 @@ class DatasourceToolsTest {
 
     @Test
     fun `an unknown datasource is a catalogued not-found`() {
-        every { registry.get("nope") } returns null
+        every { registry.getVisible("nope", McpFixtures.WORKSPACE_ID) } returns null
 
         shouldThrow<DatapipelinesException> {
             DatasourcesGetTool(registry).call(McpArguments(mapOf("name" to "nope")), readCtx)

@@ -68,23 +68,32 @@ class AuthConfiguration {
      * [personalWorkspaceSeeder] (D9) is optional for the same layering reason — its
      * implementation drives `web`'s import services — but for a different operational one:
      * absent means "this deployment configured no examples file", not "degrade quietly".
+     *
+     * [contentCheck] (the `workspace.in_use` port) is optional the same way: `web` wires the
+     * real one over the pipeline/template/datasource repositories; auth-only test slices
+     * default to "no content", which is true of every workspace they create.
      */
+    @Suppress("LongParameterList") // the wiring bean — every parameter is an @Bean reference (019 precedent)
     @Bean
     fun workspaceService(
         workspaceRepository: WorkspaceRepository,
+        userRepository: UserRepository,
         authCache: AuthCache,
         workspacesProperties: WorkspacesProperties,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         auditLogger: AuditLogger,
         personalWorkspaceSeeder: ObjectProvider<PersonalWorkspaceSeeder>,
+        contentCheck: ObjectProvider<WorkspaceContentCheck>,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
+            userRepository,
             authCache,
             workspacesProperties,
             lastUsedWorkspaceStore.getIfAvailable(),
             auditLogger,
             personalWorkspaceSeeder.getIfAvailable(),
+            contentCheck.getIfAvailable() ?: WorkspaceContentCheck.NONE,
         )
 
     @Bean
@@ -129,7 +138,13 @@ class AuthConfiguration {
     fun cookieOAuth2AuthorizationRequestRepository(
         jwtService: JwtService,
         objectMapper: ObjectMapper,
-    ): CookieOAuth2AuthorizationRequestRepository = CookieOAuth2AuthorizationRequestRepository(jwtService, objectMapper)
+        authProperties: AuthProperties,
+    ): CookieOAuth2AuthorizationRequestRepository =
+        CookieOAuth2AuthorizationRequestRepository(
+            jwtService,
+            objectMapper,
+            secureCookies = authProperties.secureCookies(),
+        )
 
     /**
      * The servlet filters the auth chain installs (auth.md §8.2), built as plain

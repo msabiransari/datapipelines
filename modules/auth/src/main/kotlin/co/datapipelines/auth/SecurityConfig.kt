@@ -51,6 +51,7 @@ class SecurityConfig(
     private val auditLogoutHandler: AuditLogoutHandler,
     private val authorizationRequestRepository: CookieOAuth2AuthorizationRequestRepository,
     private val authorizationRequestResolver: OAuth2AuthorizationRequestResolver,
+    private val authProperties: AuthProperties,
 ) {
     private val log = LoggerFactory.getLogger(SecurityConfig::class.java)
 
@@ -133,11 +134,16 @@ class SecurityConfig(
         return http.build()
     }
 
-    /** CSRF token in a JS-readable `dp_csrf` cookie; SPA echoes it in `DP-CSRF-Token`. */
+    /**
+     * CSRF token in a JS-readable `dp_csrf` cookie; SPA echoes it in `DP-CSRF-Token`.
+     * `Secure` follows the base-url scheme (T33) — see [AuthProperties.secureCookies].
+     */
+    @Suppress("DEPRECATION") // setSecure is the API this Spring Security version ships; the replacement ctor does not exist yet
     private fun csrfTokenRepository(): CookieCsrfTokenRepository =
         CookieCsrfTokenRepository.withHttpOnlyFalse().apply {
             setCookieName(CSRF_COOKIE)
             setHeaderName(CSRF_HEADER)
+            setSecure(authProperties.secureCookies())
         }
 
     /** Registers the scope interceptor on the MVC pipeline (auth.md §8.1). */

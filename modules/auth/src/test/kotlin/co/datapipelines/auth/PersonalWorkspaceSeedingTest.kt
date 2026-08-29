@@ -47,6 +47,7 @@ class PersonalWorkspaceSeedingTest {
     ): WorkspaceService =
         WorkspaceService(
             repository,
+            mockk(relaxed = true),
             AuthCache(AuthProperties()),
             WorkspacesProperties(provisioningMode = WorkspaceProvisioningMode.AUTO_PER_USER),
             null,

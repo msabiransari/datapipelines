@@ -4,18 +4,44 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
- * Workspace membership resolution and provisioning (design §5/§7).
+ * Supplies the "does this workspace still own content" answer for delete (design §8
+ * `workspace.in_use`). The counts live in `pipeline-contract`'s and `datasources`' tables,
+ * which auth cannot see (module-structure §4.2) — so auth declares the port and the
+ * aggregation layer wires it, exactly like [PersonalWorkspaceSeeder] and
+ * `datasources`' `DatasourceReferences`.
+ */
+fun interface WorkspaceContentCheck {
+    /**
+     * Non-deleted content counts owned by [workspaceId], keyed by kind
+     * (`pipelines`, `templates`, `datasources`); kinds with zero rows are omitted.
+     */
+    fun nonDeletedCounts(workspaceId: UUID): Map<String, Int>
+
+    companion object {
+        val NONE = WorkspaceContentCheck { emptyMap() }
+    }
+}
+
+/**
+ * Workspace membership resolution and provisioning (design §5/§7), plus the CRUD and
+ * member-management service paths the REST surface (design §9) calls.
  *
  * Every read goes through [AuthCache]'s 60s liveness discipline — the identical window
  * `users.is_active` already accepts (design §4), so workspace revocation takes effect
  * within ~1 minute, immediately on the instance that performed the mutation.
  *
  * ## Provisioning modes (design §7, configuration.md §3.17)
- * [create] is the service path all three modes share (the REST surface is slice 021):
+ * [create] is the service path all three modes share:
  * - `auto-per-user` / `self-serve`: any authenticated user creates; `auto-per-user`
  *   additionally provisions a personal workspace on first login ([ensurePersonalWorkspace]).
  * - `closed`: only a global `admin` creates — anything else is
  *   [WorkspaceCreationForbiddenException].
+ *
+ * ## The no-oracle rule (design §8, the 019 precedent)
+ * Unknown-workspace and not-a-member are the SAME 403 [WorkspaceMembershipRequiredException]
+ * for every principal except a global admin, who could otherwise see any workspace and so
+ * gets a real 404 [WorkspaceNotFoundException]. Management refusals (a member who is not
+ * the owner) reuse the 403 so a workspace's existence stays unprobeable.
  *
  * ## Personal-workspace names (design §7)
  * Derived from the lowercased email local-part, sanitized to the `[a-z0-9_-]+` (1–63)
@@ -24,11 +50,13 @@ import java.util.UUID
  */
 class WorkspaceService(
     private val workspaceRepository: WorkspaceRepository,
+    private val userRepository: UserRepository,
     private val authCache: AuthCache,
     private val workspacesProperties: WorkspacesProperties,
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val auditLogger: AuditLogger,
     private val personalWorkspaceSeeder: PersonalWorkspaceSeeder? = null,
+    private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
 ) {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -129,9 +157,11 @@ class WorkspaceService(
 
     /**
      * The workspace-creation service path every mode shares (design §7; the REST CRUD
-     * surface is slice 021). `closed` refuses non-admins; the other modes allow any
-     * authenticated user. The creator enters as `owner`.
+     * surface is design §9). `closed` refuses non-admins; the other modes allow any
+     * authenticated user. The creator enters as `owner`. Name failures are catalogued:
+     * [WorkspaceNameInvalidException] / [WorkspaceDuplicateNameException].
      */
+    @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     fun create(
         principal: AuthenticatedPrincipal,
         name: String,
@@ -140,10 +170,16 @@ class WorkspaceService(
         if (workspacesProperties.provisioningMode == WorkspaceProvisioningMode.CLOSED && !principal.isAdmin) {
             throw WorkspaceCreationForbiddenException(workspacesProperties.provisioningMode)
         }
-        require(NAME_REGEX.matches(name)) {
-            "Workspace name '$name' does not match ${NAME_REGEX.pattern} (workspace.validation.name_invalid lands with slice 021)"
-        }
-        val created = workspaceRepository.create(name, displayName, isPersonal = false, createdBy = principal.userId)
+        if (!NAME_REGEX.matches(name)) throw WorkspaceNameInvalidException(name)
+        if (workspaceRepository.nameExists(name)) throw WorkspaceDuplicateNameException(name)
+        val created =
+            try {
+                workspaceRepository.create(name, displayName, isPersonal = false, createdBy = principal.userId)
+            } catch (_: org.springframework.dao.DuplicateKeyException) {
+                // The atomic authority: a racing create wins between the pre-check and here —
+                // the SAME catalogued answer, never the raw constraint violation.
+                throw WorkspaceDuplicateNameException(name)
+            }
         authCache.invalidateMemberships(principal.userId)
         auditLogger.log(
             event = "auth.workspace.created",
@@ -151,6 +187,188 @@ class WorkspaceService(
             details = mapOf("workspace" to created.name),
         )
         return created
+    }
+
+    /**
+     * The caller's own workspaces (design §9 "list-own"): membership rows joined to their
+     * workspaces, oldest first. A global admin gets exactly the same shape — no implicit
+     * merged view (the ratified 019 ruling: admin addresses other workspaces per-request
+     * via `DP-Workspace`, not through this listing).
+     */
+    fun listOwn(principal: AuthenticatedPrincipal): List<WorkspaceMembership> = memberships(principal.userId)
+
+    /** The `open-join` joinable listing (design §7): every live workspace the principal does NOT belong to. */
+    fun joinable(principal: AuthenticatedPrincipal): List<Workspace> =
+        if (!workspacesProperties.openJoin) {
+            emptyList()
+        } else {
+            workspaceRepository.findAll().filter { ws -> memberships(principal.userId).none { it.workspaceId == ws.id } }
+        }
+
+    /**
+     * One workspace by name, when the principal may see it (design §9 "read"): a member, or
+     * a global admin. Members share the 019 no-oracle 403 for unknown names; only an admin
+     * gets the 404 (they could otherwise see any workspace). Read through the liveness cache,
+     * like [resolveSwitch].
+     */
+    fun read(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): Workspace {
+        val workspace = authCache.workspaceByName(name) { workspaceRepository.findByName(it) }
+        if (principal.isAdmin) {
+            if (workspace == null) throw WorkspaceNotFoundException(name)
+            return workspace
+        }
+        if (workspace == null || memberships(principal.userId).none { it.workspaceId == workspace.id }) {
+            throw WorkspaceMembershipRequiredException()
+        }
+        return workspace
+    }
+
+    /** Renames the display name (design §9; `name` is immutable v1). Owner-or-admin. */
+    fun updateDisplayName(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        displayName: String,
+    ): Workspace {
+        val workspace = read(principal, name)
+        requireOwnerOrAdmin(principal, workspace)
+        val updated =
+            workspaceRepository.updateDisplayName(workspace.id, displayName)
+                ?: throw WorkspaceNotFoundException(name)
+        authCache.invalidateWorkspace(name)
+        auditLogger.log(
+            event = "auth.workspace.updated",
+            userId = principal.userId,
+            details = mapOf("workspace" to name),
+        )
+        return updated
+    }
+
+    /**
+     * Soft-deletes the workspace (design §9): refused with [WorkspaceInUseException] while it
+     * still owns non-deleted pipelines/templates/datasources ([WorkspaceContentCheck]).
+     * Owner-or-admin. Every member's membership cache is invalidated so the disappearance is
+     * immediate, not a 60s surprise.
+     */
+    fun delete(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ) {
+        val workspace = read(principal, name)
+        requireOwnerOrAdmin(principal, workspace)
+        val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
+        if (counts.isNotEmpty()) throw WorkspaceInUseException(name, counts)
+        val members = workspaceRepository.findMembersOf(workspace.id)
+        workspaceRepository.softDelete(workspace.id)
+        members.forEach { authCache.invalidateMemberships(it.userId) }
+        authCache.invalidateWorkspace(name)
+        auditLogger.log(
+            event = "auth.workspace.deleted",
+            userId = principal.userId,
+            details = mapOf("workspace" to name),
+        )
+    }
+
+    /** The member listing (design §9): any member of the workspace, or a global admin. */
+    fun members(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): List<WorkspaceMemberRow> {
+        val workspace = read(principal, name)
+        return workspaceRepository.findMembersOf(workspace.id)
+    }
+
+    /**
+     * Adds a member (design §9). Owner-or-admin — except the `open-join` self-service
+     * path: when `open-join` is on and [email] is the caller's own, any authenticated
+     * principal joins (design §7). The email is resolved here so the caller's 404 mapping
+     * (the house unknown-user stand-in — §13.7 has no `auth.user.not_found`) and the
+     * membership write are one transaction of intent; unknown emails surface as
+     * [NoSuchElementException] with the email, which the web layer maps.
+     */
+    fun addMember(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        email: String,
+    ): WorkspaceMemberRow {
+        val workspace = read(principal, name)
+        val normalized = email.trim().lowercase()
+        val selfJoin = normalized == principal.email
+        if (!selfJoin) {
+            requireOwnerOrAdmin(principal, workspace)
+        } else if (!workspacesProperties.openJoin && !isOwnerOrAdmin(principal, workspace)) {
+            // Joining your own email without open-join is still just an add: the caller
+            // must be owner/admin. A non-owner self-add is the membership 403, same as
+            // any other non-owner management act — no oracle created.
+            throw WorkspaceMembershipRequiredException()
+        }
+        val user =
+            userRepository.findByEmail(normalized)
+                ?: throw UnknownMemberEmailException(normalized)
+        val row = workspaceRepository.addMember(workspace.id, user.id)
+        authCache.invalidateMemberships(user.id)
+        auditLogger.log(
+            event = "auth.workspace.member_added",
+            userId = principal.userId,
+            details = mapOf("workspace" to name, "member" to normalized),
+        )
+        return row ?: error("membership for $normalized in $name vanished after insert")
+    }
+
+    /** Unknown member email at [addMember] — mapped by the web layer to the §16.3 unknown-user stand-in. */
+    class UnknownMemberEmailException(
+        val email: String,
+    ) : IllegalStateException("No user with email '$email'.")
+
+    /**
+     * Removes a membership (design §9). Owner-or-admin. Removing an OWNER is refused with
+     * [WorkspaceInUseException] (`blocked_by: owner_membership`): ownership transfer is not
+     * a v1 operation, and a workspace left without its owner would be unmanageable — the
+     * delete-blocked shape is the honest 409 the catalog has for "this removal would orphan
+     * the workspace".
+     */
+    fun removeMember(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        userId: UUID,
+    ) {
+        val workspace = read(principal, name)
+        requireOwnerOrAdmin(principal, workspace)
+        val target =
+            workspaceRepository.findMemberRow(workspace.id, userId)
+                ?: throw WorkspaceMembershipRequiredException()
+        if (target.role == WorkspaceRole.OWNER) {
+            throw WorkspaceInUseException(name, emptyMap(), blockedBy = "owner_membership")
+        }
+        workspaceRepository.removeMember(workspace.id, userId)
+        authCache.invalidateMemberships(userId)
+        auditLogger.log(
+            event = "auth.workspace.member_removed",
+            userId = principal.userId,
+            details = mapOf("workspace" to name, "member_user_id" to userId.toString()),
+        )
+    }
+
+    private fun isOwnerOrAdmin(
+        principal: AuthenticatedPrincipal,
+        workspace: Workspace,
+    ): Boolean {
+        if (principal.isAdmin) return true
+        return memberships(principal.userId).any { it.workspaceId == workspace.id && it.role == WorkspaceRole.OWNER }
+    }
+
+    /**
+     * The owner-or-admin gate (design §5.4): a member who is not the owner gets the same
+     * 403 as a non-member — role probing is an oracle too ("this workspace exists, I am in
+     * it, someone else owns it" is a disclosure the no-oracle rule exists to prevent).
+     */
+    private fun requireOwnerOrAdmin(
+        principal: AuthenticatedPrincipal,
+        workspace: Workspace,
+    ) {
+        if (!isOwnerOrAdmin(principal, workspace)) throw WorkspaceMembershipRequiredException()
     }
 
     /** True when [principal] may operate in [workspaceId] — member or global `admin` (D4). Read-through the liveness cache. */

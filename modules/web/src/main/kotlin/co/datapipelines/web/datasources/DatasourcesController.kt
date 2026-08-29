@@ -27,30 +27,56 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * The datasource endpoints (rest-api.md §9).
+ * The datasource endpoints (rest-api.md §9) under the workspaces model (design §5.3/D8/§6).
  *
- * The registry owns the rules: §9 validation with the save-time test pool build, AES-GCM
- * credential encryption, the in-use delete guard, and the connectivity probe. This controller
- * binds the inbound shape, maps outcomes to HTTP, and projects responses — and the projection is
- * field-by-field, never a serialized [Datasource]: that type can transiently carry the plaintext
- * password, and "credentials are never returned" must be a property of the code.
+ * ## Visibility (§5.3)
  *
- * `create` is `admin`-scoped and `test` is `author`-scoped per the §7.6 matrix — the annotation
- * is read by `auth`'s ScopeInterceptor; nothing here re-asserts a scope.
+ * Every read (list/get/test) resolves the caller's ACTIVE workspace and sees exactly its
+ * bound datasources plus all global ones. The predicate is the repository's SQL
+ * ([DatasourceRegistry.listVisible]/[getVisible]) — never a controller-side post-filter —
+ * so paging totals count exactly the visible set. A workspace-bound datasource of ANOTHER
+ * workspace is invisible: by-name access behaves as not-found. The datasource NAME
+ * namespace stays flat and global — a cross-workspace create collision is
+ * `datasource.validation.duplicate_name`, by design (design §3).
+ *
+ * ## The D8 gates — [DatasourceWorkspaceRules]
+ *
+ * One shared component answers "who may write what" for this controller AND the UI's form
+ * partial, so the two surfaces cannot drift. The scope floor for the three CUD verbs is
+ * [ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES] (author); admin-ness and the
+ * config gate are not scopes and live in the rules.
+ *
+ * ## The registry owns the rest
+ *
+ * §9 validation with the save-time test pool build, AES-GCM encryption, the in-use delete
+ * guard — and POOL INVALIDATION: every write path here crosses `registry.save`, which
+ * evicts the pool on update, so a `readonly` flip rebuilds the pool under the new setting
+ * at the next lease (design §6; D11/F5 — not widened here).
  */
 @RestController
 @RequestMapping("/api/v1/datasources")
 class DatasourcesController(
     private val datasources: DatasourceRegistry,
+    private val rules: DatasourceWorkspaceRules,
 ) {
-    /** §9.1 — register. A name already taken is `409 datasource.validation.duplicate_name`. */
+    /**
+     * §9.1 — register. A name already taken is `409 datasource.validation.duplicate_name`
+     * (the namespace is global across workspaces, design §3). Binding per D8: `global: true`
+     * (admin) or an explicit `workspace` name (accessible to the caller), else the ACTIVE
+     * workspace. `readonly` settable by whoever may create.
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
     fun create(
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
-        val datasource = bind(body, requirePassword = true)
+        val principal = currentPrincipal()
+        val datasource =
+            bind(body, requirePassword = true).copy(
+                isReadonly = booleanFlag(body, "readonly") ?: false,
+                workspaceId = rules.resolveCreateBinding(principal, booleanFlag(body, "global"), workspaceNameOf(body)),
+            )
         if (datasources.exists(datasource.name)) {
             throw ApiException(
                 PipelineErrorCodes.Datasource.DUPLICATE_NAME,
@@ -58,15 +84,13 @@ class DatasourcesController(
                 mapOf("datasource_name" to datasource.name),
             )
         }
-        return ApiResponse.of(datasources.save(datasource, currentPrincipal().userId).toResponse())
+        return ApiResponse.of(datasources.save(datasource, principal.userId).toResponse())
     }
 
     /**
-     * §9.2 — the listing, optionally narrowed to one dialect. Passwords are never included.
-     *
-     * Paginated per rest-api §2 principle 6 ("list endpoints paginate") even though §9.2's example
-     * shows no parameters (noted for doc-sync): the registry returns the full (small, bounded by
-     * what a deployment configures) set, so the page is cut in memory with an **exact** total.
+     * §9.2 — the listing, workspace-scoped: the active workspace's bound datasources plus
+     * all global ones. Paginated with an EXACT total — the visibility predicate ran in SQL,
+     * so `total` counts exactly what this principal can see (no post-filter paging leak).
      */
     @GetMapping
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -86,37 +110,66 @@ class DatasourcesController(
             }
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val all = datasources.list(filter)
-        val items = all.drop(page).take(size).map { it.toResponse() }
-        return ApiResponse.of(PagedData(items, Pagination.of(page, size, all.size.toLong(), items.size)))
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val visible = datasources.listVisible(filter, workspaceId)
+        val items = visible.drop(page).take(size).map { it.toResponse() }
+        return ApiResponse.of(PagedData(items, Pagination.of(page, size, visible.size.toLong(), items.size)))
     }
 
-    /** §9.3 — one datasource, sensitive fields excluded. */
+    /** §9.3 — one datasource; a workspace-bound datasource of another workspace is not-found (§5.3). */
     @GetMapping("/{name}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun get(
         @PathVariable name: String,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of((datasources.get(name) ?: throw ApiErrors.datasourceNotFound(name)).toResponse())
+    ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val datasource = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
+        return ApiResponse.of(datasource.toResponse())
+    }
 
-    /** §9.4 — update. `password` is optional; omitting it keeps the stored credential. */
+    /**
+     * §9.4 — update, under the D8 gates. `password` optional (omit to keep); `readonly`
+     * and `global` optional flags — absent keeps the stored value, present attempts a gated
+     * write. Every accepted write crosses `registry.save` → pool eviction.
+     */
     @PutMapping("/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
     fun update(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
-        if (!datasources.exists(name)) throw ApiErrors.datasourceNotFound(name)
-        val datasource = bind(body, requirePassword = false, pathName = name)
-        return ApiResponse.of(datasources.save(datasource, currentPrincipal().userId).toResponse())
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val existing = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
+        val globalRequested = booleanFlag(body, "global")
+        val readonlyRequested = booleanFlag(body, "readonly")
+        rules.requireGlobalMutationAllowed(principal, existing, name)
+        rules.requireMemberDatasourcesGate(principal)
+        rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
+        rules.requireReadonlyWriteAllowed(principal, existing, readonlyRequested)
+
+        val datasource =
+            bind(body, requirePassword = false, pathName = name).copy(
+                isReadonly = readonlyRequested ?: existing.isReadonly,
+                workspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, workspaceNameOf(body)),
+            )
+        return ApiResponse.of(datasources.save(datasource, principal.userId).toResponse())
     }
 
-    /** §9.5 — soft delete; `409 datasource.in_use` while any live pipeline references it. */
+    /** §9.5 — soft delete, D8-gated like update; `409 datasource.in_use` while any live pipeline references it. */
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued code
     fun delete(
         @PathVariable name: String,
     ) {
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        val existing = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
+        rules.requireGlobalMutationAllowed(principal, existing, name)
+        rules.requireMemberDatasourcesGate(principal)
+
         val result = datasources.delete(name)
         when {
             // 204 — the delete landed.
@@ -138,13 +191,16 @@ class DatasourcesController(
 
     /**
      * §9.6 — live connectivity probe. A connection failure is **data** (`200` with
-     * `connected: false`), never an HTTP error; only an unknown name is a 404.
+     * `connected: false`), never an HTTP error; an unknown name is a 404 — and so is a name
+     * bound to another workspace (§5.3 visibility).
      */
     @PostMapping("/{name}/test")
     @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
     fun test(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
         val result = datasources.testConnection(name) ?: throw ApiErrors.datasourceNotFound(name)
         return ApiResponse.of(
             mapOf(
@@ -153,6 +209,29 @@ class DatasourcesController(
                 "error" to result.error,
             ),
         )
+    }
+
+    private fun workspaceNameOf(body: JsonNode): String? =
+        body
+            .get("workspace")
+            ?.takeIf { it.isTextual }
+            ?.asText()
+            ?.trim()
+
+    /** Reads a boolean flag; null when absent; a non-boolean value is a payload-shape 400. */
+    private fun booleanFlag(
+        body: JsonNode,
+        field: String,
+    ): Boolean? {
+        val node = body.get(field) ?: return null
+        if (!node.isBoolean) {
+            throw ApiException(
+                PipelineErrorCodes.Datasource.PROPERTIES_INVALID,
+                "Invalid datasource payload: '$field' must be a boolean.",
+                mapOf("field" to field),
+            )
+        }
+        return node.asBoolean()
     }
 
     /** Binds the §9.1/§9.4 payload; wire-value problems are 400s with catalogued codes. */
@@ -242,8 +321,8 @@ class DatasourcesController(
         )
     }
 
-    /** The outbound shape — every field a reader is entitled to, `password_set` derived. */
-    private fun Datasource.toResponse(): Map<String, Any?> =
+    /** The outbound shape — every field a reader is entitled to, `password_set` derived, plus the additive `workspace`/`readonly`. */
+    fun Datasource.toResponse(): Map<String, Any?> =
         buildMap {
             put("name", name)
             put("display_name", displayName)
@@ -257,6 +336,10 @@ class DatasourcesController(
             // is also today's default behavior for every pre-existing datasource.
             if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
             put("properties", mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc))
+            // Workspaces design §9 — additive: the bound workspace's NAME (null = global)
+            // and the readonly flag (machine-readable, D6).
+            put("workspace", workspaceName)
+            put("readonly", isReadonly)
         }
 
     private companion object {

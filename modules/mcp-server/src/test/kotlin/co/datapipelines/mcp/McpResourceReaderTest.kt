@@ -84,7 +84,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `a datasource reads without its password`() {
-        every { datasources.get("pg-prod") } returns McpFixtures.datasource()
+        every { datasources.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         val text = contents(McpResourceUri.datasource("pg-prod")).text()
 
@@ -97,7 +97,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `the datasource collection lists every datasource without credentials`() {
-        every { datasources.list(null) } returns listOf(McpFixtures.datasource())
+        every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
 
         val text = contents(McpResourceUri.datasources()).text()
 

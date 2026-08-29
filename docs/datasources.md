@@ -50,6 +50,11 @@ This spec defines:
   "username": "datapipelines_app",
   "password": "...",                       // write-only; never returned in GET
   "query_timeout_seconds": 60,
+  "global": false,                         // OPTIONAL (workspaces D8) — admin-only; true = shared
+                                           // infrastructure (workspace_id NULL)
+  "workspace": "team-etl",                 // OPTIONAL (workspaces D8) — a workspace the caller can
+                                           // access; default = the ACTIVE workspace
+  "readonly": true,                        // OPTIONAL (§5.7) — forbids the three write-shaped uses
   "introspection_include_schemas": ["apex_reporting"],   // OPTIONAL — §7A escape hatch for the
                                                           // system-schema exclusion floors
   "properties": {
@@ -77,6 +82,8 @@ This spec defines:
 Identical to request, except:
 - `password` is **never** returned. Replaced with `password_set: true | false`.
 - `jdbc_url` is included (operators need it for debugging).
+- `workspace` (string, additive — workspaces design §9): the bound workspace's NAME, `null` = global.
+- `readonly` (boolean, additive): the §5.7 flag, machine-readable.
 
 ### 3.3 Field reference
 
@@ -92,6 +99,19 @@ Identical to request, except:
 | `query_timeout_seconds` | integer | optional | `Statement.setQueryTimeout` for every node executing against this datasource. When set, it **overrides** `datapipelines.executor.node-query-timeout-seconds` — see §5.5. |
 | `introspection_include_schemas` | array of strings | optional | §7A escape hatch for the dialect's system-schema exclusion: a schema named here is exempt from the exclusion in **all three** introspection operations. Exact names over the **legal-identifier alphabet of the supported dialects** — letters, digits, `_`, `$`, `#` (`_` is an ordinary name character, not SQL-LIKE's wildcard here; an entry outside the alphabet is rejected at save with `datasource.validation.properties_invalid`, because wildcards, quoted identifiers, and qualified `db.schema` names can never match a real schema as exact entries) — and normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the **registry's save boundary** (the single place every write path crosses) and again on read, so a row whose allowlist landed by restore or a manual JSONB edit cannot sit silently inert AND what a GET projects always survives an unmodified PUT round-trip; absent/empty = the exclusion floors apply unchanged. See §7A. |
 | `properties` | object | optional | Two namespaced passthrough maps: `properties.hikari.*` and `properties.jdbc.*`. See §5. |
+| `global` | boolean | optional (write) | Workspaces D8: `true` binds the datasource to NO workspace (global, visible to everyone) — **admin-only** to set, either direction. Mutually exclusive with `workspace`. |
+| `workspace` | string | optional (write) | Workspaces D8: the workspace to bind to — must be one the caller can access (member or admin); `datasource.validation.workspace_forbidden` otherwise. Default: the caller's ACTIVE workspace. |
+| `readonly` | boolean | optional | The §5.7 flag. Editable by whoever may edit the datasource, except on a GLOBAL datasource where only admin may flip it. On update, absent keeps the stored value. |
+
+**Visibility (workspaces design §5.3, normative):** every listing and by-name read sees the ACTIVE
+workspace's bound datasources plus all global ones — enforced in the repository's SQL
+(`findAllVisible`/`findVisibleByName`), never post-filtered, so paging totals are exact. A
+workspace-bound datasource of another workspace behaves as **not-found** on every surface (REST,
+MCP, introspection). Datasource NAMES remain a flat GLOBAL namespace (§11.1, workspaces design §3):
+`name` is the primary key and the GCM AAD anchor, so a create colliding with another workspace's
+datasource name is `datasource.validation.duplicate_name` — by design. Member CUD is gated by
+`datapipelines.workspaces.member-datasources-enabled` (configuration §3.17); refusals are
+`datasource.validation.workspace_forbidden` (400).
 
 ---
 
@@ -273,7 +293,7 @@ A datasource flagged `is_readonly` (metadata-db §4.10, V4; workspaces design 20
 
 **Normative deployment guidance (layer 3): the flag is contract, not containment.** A datasource whose data must not change gets a **SELECT-only database user** regardless of the flag — the flag gives agents fast machine-readable feedback and the executor a deterministic refusal, but only the credential gives the guarantee (the datapipelines.co demo's seeded datasources are `global` + `readonly` AND run under SELECT-only users).
 
-The flag itself is row-level state in this slice: rows acquire it through SQL/fixtures, and the module's read paths (`findByName`, the registry, `getLive`, the pool-build reload) surface it. The write surface — flag on create/update, the admin gates of workspaces D8, payload fields, visibility — is the workspaces surfaces slice.
+The flag is a first-class writable field since the workspaces surfaces slice. Whoever may edit a datasource may flip `readonly` on it — EXCEPT on a GLOBAL datasource, where only a global admin may (workspaces design §6 last paragraph, D8). Every flag write crosses the registry's save boundary, so the pool is drained on update and rebuilds under the new `readOnly` setting at the next lease; there is no column-level UPDATE path, by construction. The §5.2 pool lifecycle is the mechanism — this paragraph is the pointer, not a second statement of it.
 
 ---
 
@@ -740,7 +760,6 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-08-28 | v2.15 | sample data, slice A | **§8A new:** bootstrap registration — the `datapipelines.bootstrap.datasources-file` mechanism (§8A.1 file shape incl. the required-and-true `global` flag and `readonly`, §8A.2 `${ENV_VAR}` resolution against the process environment, §8A.3 create-if-absent / never-update / full-§9-validation-per-entry / fail-fast, §8A.4 the xerial `open_mode: "1"` read-only key verified against pinned 3.49.1.0). `is_readonly` is now written on INSERT (from the entity, which the REST bind still never sets — flag writes over the API remain deferred to the surfaces slice); UPDATE still never touches it |
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |
 | 2026-08-08 | v1.2 | P3 build | §9 name uniqueness made GLOBAL — includes soft-deleted rows; recreating a deleted name is rejected with `datasource.duplicate_name`, never reactivates the old row. (Row recorded retroactively 2026-08-09 — the amendment landed in commit 1b07b49 without its Change Log row.) |
@@ -765,4 +784,6 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-16 | v2.11 | hardening round 5 (008 review fix-cycle) | §3.3/§7A: the ONE allowlist normalization rule completes to trim → lowercase → **drop blank-after-trim entries** → **deduplicate** (first-seen order), at both boundaries. A restored/hand-edited `[" "]` row used to read back as `[""]` — projected to REST and MCP, exempting nothing, and 400ing an unmodified PUT round-trip (the validator rejects blanks); blanks and duplicates are now dropped at normalization, so what a GET projects always survives an unmodified re-save. |
 | 2026-08-16 | v2.12 | hardening round 5 (008 review fix-cycle) | §3.3: the ONE rule has ONE implementation and every path crosses it — the REST bind calls the shared `normalizeIncludeSchemas` (its re-inlined trim+lowercase is gone), and the registry's `validate()` (the dry-run path) validates the NORMALIZED form, agreeing with `save()` by construction instead of checking raw input that save never persists. The helper short-circuits empty and already-normalized input (it runs per row on the uncached `list()` read path). |
 | 2026-08-16 | v2.13 | hardening round 5 (008 review fix-cycle) | §3.3/§7A/§9: the wildcard DENYLIST (`*` R3, `%` R4) is replaced by an ALLOWLIST of legal schema-identifier characters across the supported dialects — letters, digits, `_`, `$`, `#`, lowercase. The complement of "can match a real schema name" closes the whole inert-entry class at once: `?`, glob ranges `[a-z]`, pasted quoted identifiers, and qualified `db.schema` entries stored and silently exempted nothing before; now they are rejected with the entry named and the accepted alphabet stated. |
+| 2026-08-28 | v2.15 | workspaces surfaces slice | §3: the write vocabulary gains `global` (admin-only) / `workspace` (accessible-to-caller, default ACTIVE) / `readonly`; the response gains additive `workspace` + `readonly`. **Visibility (§5.3-of-design) made normative here**: listing/by-name see ACTIVE-bound + global, enforced in repository SQL (`findAllVisible`/`findVisibleByName`), other-workspace rows are not-found, names stay a flat global namespace (cross-workspace create collisions are `duplicate_name`, by design). §5.7's flag is now writable through the D8-gated registry save path (pool rebuilt on every flag write); the "row-level state in this slice" note is history. |
 | 2026-08-27 | v2.14 | workspaces readonly slice | New **§5.7 Readonly datasources** (workspaces design 2026-08-16 §6, D6/D10): the `is_readonly` V4 column's semantics — the three forbidden write shapes, the save-time code (`pipeline.validation.datasource_readonly`, contract §12.5), the live-registry executor backstop (`pipeline.node.datasource_readonly`, contract §13.4, past the §6.3 cache), the Hikari `readOnly` pool flag as defense in depth, and the normative SELECT-only-user deployment guidance. §5.6: `readOnly` joins the server-managed refusal set — refused in BOTH directions and both carriers. Flag writes/payload fields explicitly deferred to the surfaces slice. |
+| 2026-08-28 | v2.15 | sample data, slice A | **§8A new:** bootstrap registration — the `datapipelines.bootstrap.datasources-file` mechanism (§8A.1 file shape incl. the required-and-true `global` flag and `readonly`, §8A.2 `${ENV_VAR}` resolution against the process environment, §8A.3 create-if-absent / never-update / full-§9-validation-per-entry / fail-fast, §8A.4 the xerial `open_mode: "1"` read-only key verified against pinned 3.49.1.0). `is_readonly` is now written on INSERT (from the entity, which the REST bind still never sets — flag writes over the API remain deferred to the surfaces slice); UPDATE still never touches it |

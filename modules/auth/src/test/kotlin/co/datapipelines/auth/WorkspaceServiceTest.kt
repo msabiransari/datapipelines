@@ -18,6 +18,7 @@ import java.util.UUID
  */
 class WorkspaceServiceTest {
     private val repository = mockk<WorkspaceRepository>()
+    private val userRepository = mockk<UserRepository>(relaxed = true)
     private val cache = AuthCache(AuthProperties())
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val lastUsed = mockk<LastUsedWorkspaceStore>(relaxed = true)
@@ -27,7 +28,7 @@ class WorkspaceServiceTest {
     private val wsB = workspace("beta")
 
     private fun service(mode: WorkspaceProvisioningMode = WorkspaceProvisioningMode.SELF_SERVE) =
-        WorkspaceService(repository, cache, WorkspacesProperties(provisioningMode = mode), lastUsed, auditLogger)
+        WorkspaceService(repository, userRepository, cache, WorkspacesProperties(provisioningMode = mode), lastUsed, auditLogger)
 
     private fun workspace(name: String): Workspace =
         Workspace(UUID.randomUUID(), name, name, isPersonal = false, createdBy = null, isDeleted = false, createdAt = Instant.now())
@@ -164,6 +165,7 @@ class WorkspaceServiceTest {
     @Test
     fun `closed mode allows an admin creator`() {
         val principal = principal(admin = true, memberships = emptyList())
+        every { repository.nameExists("acme") } returns false
         every { repository.create("acme", "Acme", false, userId) } returns wsA
 
         service(WorkspaceProvisioningMode.CLOSED).create(principal, "acme", "Acme") shouldBe wsA
@@ -172,6 +174,7 @@ class WorkspaceServiceTest {
     @Test
     fun `self-serve allows any authenticated creator and audits the creation`() {
         val principal = principal(memberships = emptyList())
+        every { repository.nameExists("acme") } returns false
         every { repository.create("acme", "Acme", false, userId) } returns wsA
 
         service().create(principal, "acme", "Acme") shouldBe wsA
@@ -182,7 +185,7 @@ class WorkspaceServiceTest {
     fun `a malformed workspace name is rejected before the database is touched`() {
         val principal = principal(memberships = emptyList())
 
-        shouldThrow<IllegalArgumentException> { service().create(principal, "ACME Corp!", "Acme") }
+        shouldThrow<WorkspaceNameInvalidException> { service().create(principal, "ACME Corp!", "Acme") }
         verify(exactly = 0) { repository.create(any(), any(), any(), any()) }
     }
 

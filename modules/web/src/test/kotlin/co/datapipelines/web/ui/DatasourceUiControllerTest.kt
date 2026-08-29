@@ -24,7 +24,7 @@ import java.util.UUID
 class DatasourceUiControllerTest {
     private val registry = mockk<DatasourceRegistry>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = DatasourceUiController(registry, themeResolver)
+    private val controller = DatasourceUiController(registry, co.datapipelines.auth.WorkspacesProperties(), themeResolver)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -42,10 +42,36 @@ class DatasourceUiControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
+    private fun authenticate() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(
+                    userId,
+                    "a@b.c",
+                    "A",
+                    setOf(Scope.ADMIN),
+                    AuthMethod.OIDC,
+                    workspace = WorkspaceContext(workspaceId, "acme"),
+                ),
+                null,
+                emptyList(),
+            )
+    }
+
+    private fun partialController() =
+        DatasourcePartialController(
+            registry,
+            co.datapipelines.web.datasources.DatasourceWorkspaceRules(
+                mockk(relaxed = true),
+                co.datapipelines.auth.WorkspacesProperties(),
+            ),
+        )
+
     @Test
     fun `list page returns datasources view with theme and datasources`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { registry.list(null) } returns listOf(datasource(), datasource("pg-staging"))
+        every { registry.listVisible(null, workspaceId) } returns listOf(datasource(), datasource("pg-staging"))
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null, null)
@@ -60,9 +86,10 @@ class DatasourceUiControllerTest {
 
     @Test
     fun `list page filters by dialect`() {
+        authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         val dsList = listOf(datasource("pg1"), datasource("pg2"))
-        every { registry.list(Dialect.POSTGRES) } returns dsList
+        every { registry.listVisible(Dialect.POSTGRES, workspaceId) } returns dsList
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, "POSTGRES", null)
@@ -75,9 +102,10 @@ class DatasourceUiControllerTest {
 
     @Test
     fun `partial returns fragment view`() {
-        every { registry.list(null) } returns listOf(datasource())
+        authenticate()
+        every { registry.listVisible(null, workspaceId) } returns listOf(datasource())
 
-        val partialController = DatasourcePartialController(registry)
+        val partialController = partialController()
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.list(model, null, null, null)
 
@@ -95,9 +123,11 @@ class DatasourceUiControllerTest {
                 serverVersion = "15.4",
                 error = null,
             )
+        authenticate()
+        every { registry.getVisible("pg-prod", workspaceId) } returns datasource()
         every { registry.testConnection("pg-prod") } returns result
 
-        val partialController = DatasourcePartialController(registry)
+        val partialController = partialController()
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.test(model, "pg-prod")
 
@@ -115,9 +145,11 @@ class DatasourceUiControllerTest {
                 serverVersion = null,
                 error = "Connection refused",
             )
+        authenticate()
+        every { registry.getVisible("bad-ds", workspaceId) } returns datasource("bad-ds")
         every { registry.testConnection("bad-ds") } returns result
 
-        val partialController = DatasourcePartialController(registry)
+        val partialController = partialController()
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.test(model, "bad-ds")
 
@@ -130,20 +162,10 @@ class DatasourceUiControllerTest {
 
     @Test
     fun `scopes are populated from principal`() {
-        val principal =
-            AuthenticatedPrincipal(
-                userId,
-                "a@b.c",
-                "A",
-                setOf(Scope.ADMIN),
-                AuthMethod.OIDC,
-                workspace = WorkspaceContext(workspaceId, "acme"),
-            )
-        SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(principal, null, emptyList())
+        authenticate()
 
         every { themeResolver.resolve(any()) } returns "saas"
-        every { registry.list(null) } returns emptyList()
+        every { registry.listVisible(null, workspaceId) } returns emptyList()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)

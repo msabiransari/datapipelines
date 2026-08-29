@@ -81,4 +81,16 @@ data class AuthProperties(
         val domain = email.substringAfterLast('@', missingDelimiterValue = "").lowercase()
         return domain.isNotEmpty() && domain in domains
     }
+
+    /**
+     * Whether the cookies this module mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`)
+     * carry the `Secure` flag (T33, auth.md §5.4/§8.4): keyed off [baseUrl]'s scheme. An
+     * explicit `http://` base-url (local development) turns the flag off so login works
+     * over plain HTTP; everything else — `https://`, or no base-url at all (no OIDC
+     * configured, e.g. module test slices) — stays `Secure`. Fail-secure: production
+     * MUST run https (auth.md §8.4 note), and the wrong default would silently drop
+     * sessions there, while the wrong non-default only inconveniences a dev who can see
+     * the base-url they set.
+     */
+    fun secureCookies(): Boolean = baseUrl?.startsWith("http://") != true
 }

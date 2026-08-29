@@ -31,10 +31,14 @@ class ScopeMatrixSpecDriftTest {
             "Create / update / delete pipelines & templates, import" to ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES,
             "Test a datasource connection" to ScopeMatrix.RestOperation.TEST_DATASOURCE,
             "Introspect a datasource schema" to ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE,
-            "Create / update / delete datasources" to ScopeMatrix.RestOperation.MUTATE_DATASOURCES,
+            "Create / update / delete workspace-bound datasources" to ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES,
+            "Create / update / delete global datasources" to ScopeMatrix.RestOperation.MUTATE_DATASOURCES,
             "Manage own API keys" to ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS,
             "Get current principal" to ScopeMatrix.RestOperation.CURRENT_PRINCIPAL,
             "User administration" to ScopeMatrix.RestOperation.USER_ADMINISTRATION,
+            "List / read own workspaces & members" to ScopeMatrix.RestOperation.WORKSPACES_READ,
+            "Create a workspace (per provisioning mode)" to ScopeMatrix.RestOperation.WORKSPACE_CREATE,
+            "Update a workspace / manage its members" to ScopeMatrix.RestOperation.MANAGE_WORKSPACE,
         )
 
     @Test

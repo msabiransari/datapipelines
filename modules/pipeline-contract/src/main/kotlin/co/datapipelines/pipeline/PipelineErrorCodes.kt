@@ -309,6 +309,10 @@ object PipelineErrorCodes {
         const val PROPERTIES_INVALID = "datasource.validation.properties_invalid"
         const val QUERY_TIMEOUT_INVALID = "datasource.validation.query_timeout_invalid"
         const val DUPLICATE_NAME = "datasource.validation.duplicate_name"
+
+        /** §13.8 — a D8 refusal: non-admin attempted `global`/readonly-on-global, or a workspace binding they are not in. */
+        const val WORKSPACE_FORBIDDEN = "datasource.validation.workspace_forbidden"
+
         const val IN_USE = "datasource.in_use"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
@@ -328,6 +332,13 @@ object PipelineErrorCodes {
         const val IMPORT_CYCLE = "template.validation.import_cycle"
         const val IMPORT_DEPTH_EXCEEDED = "template.validation.import_depth_exceeded"
         const val DUPLICATE_ALIAS = "template.validation.duplicate_alias"
+
+        /**
+         * §13.9 — name already exists in this workspace (UNIQUE(workspace_id, name),
+         * soft-deleted included); mirrors `pipeline.validation.duplicate_name`.
+         */
+        const val DUPLICATE_NAME = "template.validation.duplicate_name"
+
         const val NOT_FOUND = "template.not_found"
     }
 
@@ -350,13 +361,11 @@ object PipelineErrorCodes {
     }
 
     /**
-     * §13.12 — workspace resolution (design 2026-08-16-workspaces §5/§7/§8). Raised by the
-     * `auth` module's resolution layer; the `auth`-side constants mirror these exactly and
-     * `AuthErrorSpecDriftTest` asserts both against the doc — the same duplication pattern
-     * as [Auth] vs §13.7.
-     *
-     * The CRUD codes (`workspace.not_found`, `workspace.validation.*`, `workspace.in_use`)
-     * land with the REST surface slice that raises them (021).
+     * §13.12 — workspace resolution and CRUD (design 2026-08-16-workspaces §5/§7/§8/§9).
+     * The resolution codes are raised by the `auth` module's resolution layer; the CRUD
+     * codes by the workspace REST surface. The `auth`-side constants mirror these exactly
+     * and `AuthErrorSpecDriftTest` asserts both against the doc — the same duplication
+     * pattern as [Auth] vs §13.7.
      */
     object Workspace {
         /** §13.12 — the principal is not a member of the addressed workspace (or has zero memberships). */
@@ -367,5 +376,20 @@ object PipelineErrorCodes {
 
         /** §13.12 — `DP-Workspace` on an API-key request; a key's workspace is pinned at issuance (D3). */
         const val HEADER_FORBIDDEN = "workspace.header_forbidden"
+
+        /** §13.12 — unknown workspace name, for a principal who could otherwise see any workspace (an admin). */
+        const val NOT_FOUND = "workspace.not_found"
+
+        /** §13.12 — workspace name fails `[a-z0-9_-]+`, 1–63. */
+        const val NAME_INVALID = "workspace.validation.name_invalid"
+
+        /** §13.12 — workspace name exists (global namespace, soft-deleted included). */
+        const val DUPLICATE_NAME = "workspace.validation.duplicate_name"
+
+        /**
+         * §13.12 — delete blocked: workspace still owns non-deleted
+         * pipelines/templates/datasources (or a removal would orphan its owner).
+         */
+        const val IN_USE = "workspace.in_use"
     }
 }

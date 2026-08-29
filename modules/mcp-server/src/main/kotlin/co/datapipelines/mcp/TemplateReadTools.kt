@@ -23,8 +23,9 @@ class TemplatesListTool(
         McpTools.tool(
             name = "templates_list",
             description =
-                "List SQL templates registered on this instance. Templates are reusable SQL generators authored in " +
-                    "Freemarker; pipelines reference them by id+version.",
+                "List the SQL templates of the key's pinned workspace. Templates are reusable SQL generators authored in " +
+                    "Freemarker; pipelines reference them by id+version. Template ids are unique per workspace — " +
+                    "another workspace's template resolves as not-found.",
             schema =
                 """
                 {

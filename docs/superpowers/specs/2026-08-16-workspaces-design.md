@@ -141,8 +141,11 @@ already accepted for deactivation.
    train agents on a lie).
 3. **Visibility:** list/get/execute/author operations see: the active
    workspace's pipelines/templates/executions + workspace-bound datasources,
-   plus all `global` datasources. Global `is_admin` sees everything
-   (existing admin semantics).
+   plus all `global` datasources. Global `is_admin` bypasses membership
+   checks (can address any workspace via `DP-Workspace`) but gets NO
+   implicit merged view — admin listings scope to the ACTIVE workspace like
+   every principal (ratified 019 ruling, Deviation-9; a cross-workspace
+   admin view is a future feature, not this spec).
 4. **Scope matrix (auth §7.6) additions** — workspace CRUD + membership
    endpoints (`/api/v1/workspaces/**`): create per provisioning mode; update/
    member-management: workspace `owner` (or admin); list-own/read: any
@@ -174,10 +177,11 @@ shapes — the agent needs the pointer, not three enum values.
 registry entry per node (covers D10 flips between save and run) and fails the
 node with proposed runtime code `pipeline.node.datasource_readonly` (§13.4
 family, 500-class like its siblings). Additionally the dialect adapter builds
-the pool for a readonly datasource with Hikari's `readOnly=true` so every
-leased connection starts read-only; treated as defense in depth, not proof —
-JDBC read-only enforcement strength varies by driver (Postgres enforces
-read-only transactions; others are advisory). `properties.hikari.readOnly`
+the pool for a readonly datasource with Hikari's `readOnly=true`; treated as
+defense in depth, not proof — JDBC read-only enforcement strength varies by
+driver, and (empirically corrected at 020: probed on the pinned HikariCP
+6.3.0 + H2 2.3.232) the flag reaches the pool, NOT the leased connection —
+see datasources.md §5.7 layer 3 for the verified wording. `properties.hikari.readOnly`
 joins the server-managed refusal set (§5.6) — operator passthrough must not
 silently flip the flag either way on a readonly datasource.
 

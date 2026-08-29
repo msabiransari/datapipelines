@@ -809,7 +809,8 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.password_missing` | 400 | `password` required on create |
 | `datasource.validation.properties_invalid` | 400 | Test pool build rejected a `hikari`/`jdbc` property |
 | `datasource.validation.query_timeout_invalid` | 400 | `query_timeout_seconds` present but < 1 |
-| `datasource.validation.duplicate_name` | 409 | Name already exists |
+| `datasource.validation.duplicate_name` | 409 | Name already exists — the namespace is global across workspaces too (workspaces design §3: `name` stays the PK/AAD anchor) |
+| `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
@@ -833,6 +834,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
+| `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 
 ### 13.10 Result retrieval
@@ -858,13 +860,21 @@ Defined and described in [REST API §7](rest-api.md#7-result-delivery).
 
 ### 13.12 Workspace resolution
 
-Raised by the workspace resolution layer (auth §5): the per-request `DP-Workspace` switch and API-key pinning. The workspace CRUD codes (`workspace.not_found`, `workspace.validation.*`, `workspace.in_use`) are catalogued with the REST surface that raises them.
+Raised by the workspace resolution layer (auth §5) — the per-request `DP-Workspace` switch
+and API-key pinning — and by the workspace CRUD surface (auth §5.6, REST API §17). The
+no-oracle rule governs: unknown-workspace and not-a-member are the SAME 403
+`workspace.membership_required` for every principal except a global admin, who could
+otherwise see any workspace and so gets a real 404.
 
 | Code | HTTP | Description |
 |---|---|---|
 | `workspace.membership_required` | 403 | Principal is not a member of the addressed workspace (or has zero memberships); also covers unknown names, so the switch cannot probe existence |
 | `workspace.creation_forbidden` | 403 | The provisioning mode forbids this caller creating a workspace |
 | `workspace.header_forbidden` | 400 | `DP-Workspace` sent on an API-key request; a key's workspace is pinned at issuance and cannot switch |
+| `workspace.not_found` | 404 | Unknown workspace name, for a principal who could otherwise see any workspace (a global admin); members never see this code |
+| `workspace.validation.name_invalid` | 400 | Workspace name fails `[a-z0-9_-]+`, 1–63 |
+| `workspace.validation.duplicate_name` | 409 | Workspace name exists (global namespace, soft-deleted included — house rule) |
+| `workspace.in_use` | 409 | Delete blocked: workspace still owns non-deleted pipelines/templates/datasources; also refuses a member removal that would leave the workspace without an owner (`details.blocked_by: owner_membership`) |
 
 ---
 

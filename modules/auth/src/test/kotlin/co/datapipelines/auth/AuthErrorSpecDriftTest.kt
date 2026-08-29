@@ -59,6 +59,10 @@ class AuthErrorSpecDriftTest {
                 WorkspaceErrorCodes.CREATION_FORBIDDEN to
                     WorkspaceCreationForbiddenException(WorkspaceProvisioningMode.CLOSED).status,
                 WorkspaceErrorCodes.HEADER_FORBIDDEN to WorkspaceHeaderForbiddenException().status,
+                WorkspaceErrorCodes.NOT_FOUND to WorkspaceNotFoundException("x").status,
+                WorkspaceErrorCodes.NAME_INVALID to WorkspaceNameInvalidException("X!").status,
+                WorkspaceErrorCodes.DUPLICATE_NAME to WorkspaceDuplicateNameException("x").status,
+                WorkspaceErrorCodes.IN_USE to WorkspaceInUseException("x", mapOf("pipelines" to 1)).status,
             )
         exceptionStatus.forEach { (code, status) ->
             (code to status) shouldBe (code to docStatus.getValue(code))

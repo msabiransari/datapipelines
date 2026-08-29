@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.TableInfo
@@ -18,6 +19,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.springframework.security.core.context.SecurityContextHolder
 
 /**
  * §7A endpoint DELEGATION over a mocked introspector: the controller binds paths, threads the
@@ -28,7 +30,39 @@ import org.junit.jupiter.api.assertAll
  */
 class DatasourceSchemaControllerTest {
     private val introspector = mockk<SchemaIntrospector>()
-    private val controller = DatasourceSchemaController(introspector)
+    private val registry = mockk<DatasourceRegistry>()
+    private val controller = DatasourceSchemaController(introspector, registry)
+    private val workspaceId = java.util.UUID.randomUUID()
+
+    @org.junit.jupiter.api.BeforeEach
+    fun seedVisibleDatasource() {
+        SecurityContextHolder.getContext().authentication =
+            org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(
+                co.datapipelines.auth.AuthenticatedPrincipal(
+                    userId = java.util.UUID.randomUUID(),
+                    email = "a@b.c",
+                    displayName = "A",
+                    scopes = setOf(co.datapipelines.auth.Scope.READ),
+                    authMethod = co.datapipelines.auth.AuthMethod.OIDC,
+                    workspace = co.datapipelines.auth.WorkspaceContext(workspaceId, "team"),
+                ),
+                null,
+                org.springframework.security.core.authority.AuthorityUtils.NO_AUTHORITIES,
+            )
+        io.mockk.every { registry.getVisible(any(), workspaceId) } returns
+            co.datapipelines.datasources.Datasource(
+                name = "visible",
+                displayName = "Visible",
+                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
+                jdbcUrl = "jdbc:postgresql://db:5432/app",
+                username = "readonly",
+            )
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    fun clearContext() =
+        org.springframework.security.core.context.SecurityContextHolder
+            .clearContext()
 
     @Test
     fun `schemas delegates to the introspector and serves the shared wire projection`() {
@@ -69,12 +103,9 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `an unknown datasource surfaces the catalogued not-found`() {
-        every { introspector.tables("nope", null) } throws
-            DatapipelinesException(
-                code = PipelineErrorCodes.Datasource.NOT_FOUND,
-                message = "Datasource 'nope' is not registered in this environment.",
-                details = mapOf("datasource" to "nope"),
-            )
+        // Workspaces §5.3: the controller's visibility pre-check answers not-found BEFORE the
+        // introspector is reached — an invisible datasource and an unknown one are the same 404.
+        every { registry.getVisible("nope", workspaceId) } returns null
 
         shouldThrow<DatapipelinesException> { controller.tables("nope", schema = null) }
             .code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
@@ -108,7 +139,7 @@ class DatasourceSchemaControllerTest {
         // which this controller maps to `pipeline.execution.datasource_unreachable` (HTTP 502
         // via ApiErrorCatalog — pinned here so the status mapping cannot drift either).
         val introspector = realIntrospectorThrowing(java.sql.SQLTimeoutException("timeout: network is dead"))
-        val controller = DatasourceSchemaController(introspector)
+        val controller = DatasourceSchemaController(introspector, registry)
 
         val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
 
@@ -139,7 +170,7 @@ class DatasourceSchemaControllerTest {
             realIntrospectorOver(meta) { connection ->
                 every { connection.catalog } returns "app"
             }
-        val controller = DatasourceSchemaController(introspector)
+        val controller = DatasourceSchemaController(introspector, registry)
 
         val data = controller.columns("pg-prod", "orders", schema = "").data
 
@@ -164,6 +195,7 @@ class DatasourceSchemaControllerTest {
                 realIntrospectorOver(meta) { connection ->
                     io.mockk.every { connection.catalog } returns null
                 },
+                registry,
             )
 
         val thrown = shouldThrow<DatapipelinesException> { controller.columns("pg-prod", "orders", schema = null) }
@@ -195,6 +227,7 @@ class DatasourceSchemaControllerTest {
                 realIntrospectorOver(meta) { connection ->
                     io.mockk.every { connection.catalog } returns null
                 },
+                registry,
             )
 
         val data = controller.tables("pg-prod", schema = null).data
@@ -218,7 +251,7 @@ class DatasourceSchemaControllerTest {
                 every { connection.catalog } throws
                     java.sql.SQLNonTransientConnectionException("connection exception", "08001")
             }
-        val controller = DatasourceSchemaController(introspector)
+        val controller = DatasourceSchemaController(introspector, registry)
 
         val thrown = shouldThrow<DatapipelinesException> { controller.columns("pg-prod", "orders", schema = null) }
 
@@ -261,6 +294,7 @@ class DatasourceSchemaControllerTest {
                             null,
                         )
                 },
+                registry,
             )
 
         val thrown = shouldThrow<DatapipelinesException> { controller.columns("h2-prod", "orders", schema = null) }

@@ -151,7 +151,7 @@ class McpServerWiringTest {
         val delegate = mockk<McpStatelessServerHandler>()
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
-        every { datasources.list(null) } returns emptyList()
+        every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { delegate.handleRequest(any(), any()) } returns
             Mono.just(McpSchema.JSONRPCResponse.result("1", mapOf("delegated" to true)))
