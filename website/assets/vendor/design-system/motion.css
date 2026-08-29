@@ -1,0 +1,221 @@
+/* ============================================================
+   MOTION SYSTEM
+   Keyframes + utility classes for consistent animation.
+   Respects prefers-reduced-motion.
+   ============================================================ */
+
+/* --------------------------------------------------------
+   Keyframes
+   -------------------------------------------------------- */
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes ds-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes ds-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ds-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ds-scale-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes ds-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes ds-pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+@keyframes ds-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------
+   Utility Classes
+   -------------------------------------------------------- */
+.ds-animate-fade-in {
+  animation: ds-fade-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-fade-out {
+  animation: ds-fade-out var(--duration-normal) var(--ease-in) forwards;
+}
+
+.ds-animate-slide-up {
+  animation: ds-slide-up var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-slide-down {
+  animation: ds-slide-down var(--duration-normal) var(--ease-out) forwards;
+}
+
+.ds-animate-scale-in {
+  animation: ds-scale-in var(--duration-normal) var(--ease-spring) forwards;
+}
+
+.ds-animate-scale-out {
+  animation: ds-scale-out var(--duration-normal) var(--ease-in) forwards;
+}
+
+.ds-animate-pulse {
+  animation: ds-pulse-soft 2s var(--ease-in-out) infinite;
+}
+
+.ds-animate-spin {
+  animation: ds-spin 1s linear infinite;
+}
+
+/* Stagger children animations */
+.ds-stagger-children > * {
+  opacity: 0;
+  animation: ds-slide-up var(--duration-normal) var(--ease-out) forwards;
+}
+.ds-stagger-children > *:nth-child(1)  { animation-delay: calc(var(--stagger-base) * 0); }
+.ds-stagger-children > *:nth-child(2)  { animation-delay: calc(var(--stagger-base) * 1); }
+.ds-stagger-children > *:nth-child(3)  { animation-delay: calc(var(--stagger-base) * 2); }
+.ds-stagger-children > *:nth-child(4)  { animation-delay: calc(var(--stagger-base) * 3); }
+.ds-stagger-children > *:nth-child(5)  { animation-delay: calc(var(--stagger-base) * 4); }
+.ds-stagger-children > *:nth-child(6)  { animation-delay: calc(var(--stagger-base) * 5); }
+.ds-stagger-children > *:nth-child(7)  { animation-delay: calc(var(--stagger-base) * 6); }
+.ds-stagger-children > *:nth-child(8)  { animation-delay: calc(var(--stagger-base) * 7); }
+.ds-stagger-children > *:nth-child(9)  { animation-delay: calc(var(--stagger-base) * 8); }
+.ds-stagger-children > *:nth-child(10) { animation-delay: calc(var(--stagger-base) * 9); }
+
+/* Skeleton / Shimmer loading state */
+.ds-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-inset) 25%,
+    var(--surface-hover) 50%,
+    var(--surface-inset) 75%
+  );
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.5s infinite linear;
+  border-radius: var(--radius-base);
+}
+
+/* Smooth transitions for interactive elements */
+.ds-transition {
+  transition: color var(--duration-fast) var(--ease-out),
+              background-color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+
+.ds-transition-slow {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+/* Hover lift effect for cards */
+.ds-hover-lift {
+  transition: transform var(--duration-base) var(--ease-out),
+              box-shadow var(--duration-base) var(--ease-out);
+}
+.ds-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast:    0ms;
+    --duration-base:    0ms;
+    --duration-normal:  0ms;
+    --duration-slow:    0ms;
+    --duration-slower:  0ms;
+    --stagger-fast:     0ms;
+    --stagger-base:     0ms;
+    --stagger-slow:     0ms;
+  }
+
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ds-animate-fade-in,
+  .ds-animate-fade-out,
+  .ds-animate-slide-up,
+  .ds-animate-slide-down,
+  .ds-animate-scale-in,
+  .ds-animate-scale-out,
+  .ds-animate-pulse,
+  .ds-animate-spin,
+  .ds-shimmer,
+  .ds-stagger-children > * {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+
+  .ds-shimmer {
+    background-position: 0 0 !important;
+  }
+
+  .ds-hover-lift:hover {
+    transform: none;
+  }
+
+  /* Preserve focus ring visibility even when motion is reduced */
+  :focus-visible {
+    transition-duration: var(--duration-fast) !important;
+  }
+}
+
+
+/* Toast animations */
+@keyframes ds-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ds-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
