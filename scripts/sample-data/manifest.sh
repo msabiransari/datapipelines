@@ -9,12 +9,13 @@
 # verify.sh re-derives every row count and content checksum in it from the
 # artifacts themselves.
 #
-# LICENSE GATE (design §8). Every provenance row ships `license_verified: null`.
-# This build verifies no licence and claims none — the licence strings are the
-# design's research claims, carried forward with their evidence links in
-# sources.lock. Flipping a null to a date is the OWNER's act after checking the
-# current terms, and deployment.md states that publishing with any null still
-# present blocks go-live.
+# LICENSE GATE (design §8). Every provenance row's `license_verified` comes from
+# sources.lock's `param license_verified` — set ONLY by the owner after checking
+# the current terms (owner-verified 2026-08-29; dossier of record in the
+# orchestration store). When the param is absent the rows ship null, and
+# deployment.md states that publishing with any null still present blocks
+# go-live. The licence strings themselves remain the design's research claims,
+# carried with their evidence links in sources.lock.
 
 set -euo pipefail
 SD_SCRIPT=manifest
@@ -108,8 +109,18 @@ for name, engine, hint in ARTIFACTS:
 
 # --- provenance -------------------------------------------------------------
 #
-# license_verified is null on EVERY row, deliberately (design §8). The evidence
-# links live in sources.lock next to the pins they justify.
+# license_verified comes from sources.lock's `param license_verified` — the
+# owner's act (design §8), recorded in the reviewed file so a rebuild carries
+# it. Absent (or the literal "null") = every row ships null and publishing
+# blocks go-live. The evidence links live in sources.lock next to the pins
+# they justify; the verification dossier of record is in the orchestration
+# store (notes/2026-08-29-license-dossier.md).
+_lock_params = {l.split()[1]: l.split(None, 2)[2].strip()
+                for l in open(lock_path, encoding="utf-8")
+                if l.split() and l.split()[0] == "param" and len(l.split(None, 2)) > 2}
+LICENSE_VERIFIED = _lock_params.get("license_verified")
+if LICENSE_VERIFIED == "null":
+    LICENSE_VERIFIED = None
 tlc_months = sorted(k for k in [l.split()[1] for l in open(lock_path, encoding="utf-8")
                                 if l.split() and l.split()[0] == "url"]
                     if k.startswith("tlc-yellow-"))
@@ -125,7 +136,7 @@ provenance = [
          f"emit trips + daily and monthly rollups"),
         ("row_count", counts.get("trips", 0)),
         ("license", "NYC Open Data / freely usable (nyc.gov terms of use)"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
     collections.OrderedDict([
         ("dataset", "noaa_ghcn_daily"),
@@ -138,7 +149,7 @@ provenance = [
          "convert GHCN native units to mm / degC / m per s"),
         ("row_count", counts.get("observations", 0)),
         ("license", "US Government work, public domain (NOAA/NCEI)"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
     collections.OrderedDict([
         ("dataset", "noaa_ghcn_stations"),
@@ -148,7 +159,7 @@ provenance = [
         ("transform", "fixed-width slice of the five pinned station rows (id, name, lat, lon, elevation)"),
         ("row_count", counts.get("stations", 0)),
         ("license", "US Government work, public domain (NOAA/NCEI)"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
     collections.OrderedDict([
         ("dataset", "tlc_taxi_zones"),
@@ -158,7 +169,7 @@ provenance = [
         ("transform", "pass-through, dropping rows with a null borough/zone/service zone"),
         ("row_count", counts.get("zones", 0)),
         ("license", "NYC Open Data / freely usable (nyc.gov terms of use)"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
     collections.OrderedDict([
         ("dataset", "tlc_reference_codes"),
@@ -171,7 +182,7 @@ provenance = [
          "in the sample has a row"),
         ("row_count", counts.get("rate_codes", 0) + counts.get("payment_types", 0)),
         ("license", "NYC Open Data / freely usable (nyc.gov terms of use)"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
     collections.OrderedDict([
         ("dataset", "us_federal_holidays"),
@@ -184,7 +195,7 @@ provenance = [
          "if it disagrees with the committed OPM transcription"),
         ("row_count", counts.get("calendar", 0)),
         ("license", "Facts (statutory schedule); no licence claimed"),
-        ("license_verified", None),
+        ("license_verified", LICENSE_VERIFIED),
     ]),
 ]
 
