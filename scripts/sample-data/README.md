@@ -119,25 +119,27 @@ expected to be in exactly that state.
 ## Publish (owner's step)
 
 The bucket is named at publication time and is not in this repo. Substitute
-`<bucket>` in the two lines below — that is the whole edit.
+The published bucket is `datapipelines-co` (us-east-1, published 2026-08-29 with the
+licence gate stamped). A re-publication is a NEW version directory (v2, …) —
+never an overwrite of v1.
 
 ```bash
 cd scripts/sample-data/work/artifacts
-aws s3 cp . s3://<bucket>/sample-data/mobility/v1/ --recursive --acl public-read
-aws s3 ls s3://<bucket>/sample-data/mobility/v1/
+aws s3 cp . s3://datapipelines-co/sample-data/mobility/v1/ --recursive --acl public-read
+aws s3 ls s3://datapipelines-co/sample-data/mobility/v1/
 ```
 
 Then verify the published copy the way a consumer will, from a clean directory:
 
 ```bash
 mkdir -p /tmp/pub && cd /tmp/pub
-curl -fsSLO https://<bucket>.s3.amazonaws.com/sample-data/mobility/v1/manifest.json
+curl -fsSLO https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v1/manifest.json
 # ...and the four artifacts it lists, then:
 ./scripts/sample-data/verify.sh /tmp/pub
 ```
 
 Finally set `SAMPLE_BASE_URL` in `deploy/.env` to
-`https://<bucket>.s3.amazonaws.com/sample-data/mobility` (deployment.md
+`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility` (deployment.md
 Appendix B).
 
 ## Why this is not a gate task

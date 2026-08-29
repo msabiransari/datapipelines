@@ -527,8 +527,11 @@ example pipelines seeded into every new personal workspace.
 
 ### One command
 
-Fill in the `SAMPLE_*` block of [`deploy/.env.example`](../deploy/.env.example) —
-the artifact base URL, the version, and the demo login's passwords — then:
+The published artifacts live at
+`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v1/` (us-east-1;
+`./app.sh --start --demo` defaults to it). For the raw compose path, fill in the
+`SAMPLE_*` block of [`deploy/.env.example`](../deploy/.env.example) — the base
+URL above, `SAMPLE_VERSION=v1`, and the demo login's passwords — then:
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \

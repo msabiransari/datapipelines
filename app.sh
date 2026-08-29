@@ -22,8 +22,9 @@
 # with -Pmysql, because MySQL Connector/J is NOT in the default build (GPL +
 # FOSS exception, datasources.md §10.2) and the sample-weather datasource would
 # otherwise fail registration with datasource.driver_not_loaded. Missing SAMPLE_*
-# keys are appended to deploy/.env on first use; SAMPLE_BASE_URL must then be
-# pointed at the published bucket (deployment.md Appendix B).
+# keys are scaffolded into deploy/.env.demo on first use, with SAMPLE_BASE_URL
+# defaulting to the published bucket (deployment.md Appendix B) — zero edits
+# needed for the standard demo.
 
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
@@ -97,9 +98,9 @@ EOF
 # there are interpolated on every invocation, demo or not, and appending them
 # poisoned every later plain --start (023 review F1). Key-by-key and append-only;
 # a value the operator set in EITHER file is respected (deploy/.env wins — it is
-# passed last). SAMPLE_BASE_URL is left as a placeholder deliberately — only the
-# owner knows the published bucket, and a guess would silently load someone
-# else's data.
+# passed last). SAMPLE_BASE_URL defaults to the PUBLISHED bucket (deployment.md
+# Appendix B; licence gate stamped 2026-08-29) — override it in deploy/.env for
+# a mirror or a locally built artifact set.
 ensure_demo_env() {
   local added=0
   add_key() { # key value
@@ -108,7 +109,7 @@ ensure_demo_env() {
     printf '%s=%s\n' "$1" "$2" >> "$DEMO_ENV"
     added=1
   }
-  add_key SAMPLE_BASE_URL "https://<bucket>.s3.amazonaws.com/sample-data/mobility"
+  add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
   add_key SAMPLE_VERSION "v1"
   add_key SAMPLE_DB_USER "dp_demo_ro"
   add_key SAMPLE_PG_PASSWORD "$(openssl rand -base64 24)"
