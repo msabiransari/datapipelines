@@ -184,13 +184,15 @@ class DatasourceToolsTest {
             FakeDatasourceRegistry(
                 listOf(
                     McpFixtures.datasource(name = "global-pg"),
-                    McpFixtures.datasource(name = "own-pg")
+                    McpFixtures
+                        .datasource(name = "own-pg")
                         .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
 
         @Suppress("UNCHECKED_CAST")
         val global = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "global-pg")), authorCtx) as Map<String, Any?>
+
         @Suppress("UNCHECKED_CAST")
         val own = DatasourcesTestTool(registry).call(McpArguments(mapOf("name" to "own-pg")), authorCtx) as Map<String, Any?>
 

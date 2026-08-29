@@ -60,7 +60,15 @@ class DatasourceReferencesWiringTest {
     }
 
     private fun workspace(name: String) =
-        Workspace(UUID.randomUUID(), name, name, isPersonal = false, createdBy = UUID.randomUUID(), isDeleted = false, createdAt = Instant.EPOCH)
+        Workspace(
+            UUID.randomUUID(),
+            name,
+            name,
+            isPersonal = false,
+            createdBy = UUID.randomUUID(),
+            isDeleted = false,
+            createdAt = Instant.EPOCH,
+        )
 
     private fun row(boundTo: UUID?): DatasourceRow =
         mockk {

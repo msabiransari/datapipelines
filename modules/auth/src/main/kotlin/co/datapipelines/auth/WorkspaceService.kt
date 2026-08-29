@@ -289,8 +289,9 @@ class WorkspaceService(
      * principal joins (design §7). The email is resolved here so the caller's 404 mapping
      * (the house unknown-user stand-in — §13.7 has no `auth.user.not_found`) and the
      * membership write are one transaction of intent; unknown emails surface as
-     * [NoSuchElementException] with the email, which the web layer maps.
+     * [UnknownMemberEmailException] with the email, which the web layer maps.
      */
+    @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,

@@ -61,7 +61,12 @@ class RequiredScopeCoverageTest {
         val missing = mutableListOf<String>()
         uiControllers().forEach { controller ->
             val classLevelScope = controller.findAnnotation<RequiredScope>() != null
-            val classPath = controller.findAnnotation<RequestMapping>()?.value?.firstOrNull().orEmpty()
+            val classPath =
+                controller
+                    .findAnnotation<RequestMapping>()
+                    ?.value
+                    ?.firstOrNull()
+                    .orEmpty()
             controller.functions
                 .filter { isHttpHandler(it.javaMethod) }
                 .filter { fn ->
@@ -129,8 +134,10 @@ class RequiredScopeCoverageTest {
             .map(BeanDefinition::getBeanClassName)
             .filterNotNull()
             .map { Class.forName(it) }
-            .filter { it.protectionDomain.codeSource.location.path.contains("/main/") }
-            .map { it.kotlin }
+            .filter {
+                it.protectionDomain.codeSource.location.path
+                    .contains("/main/")
+            }.map { it.kotlin }
             .sortedBy { it.qualifiedName }
 
     private companion object {

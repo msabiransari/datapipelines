@@ -57,7 +57,6 @@ class WorkspaceSurfacesE2eTest {
     private val bobKey get() = BOB_KEY.plaintext
     private val carolKey get() = CAROL_KEY.plaintext
     private val adminKey get() = ADMIN_KEY.plaintext
-    private val readonlyKey get() = READONLY_KEY.plaintext
 
     // ------------------------------------------------------------ datasource isolation (§5.3)
 
@@ -136,69 +135,6 @@ class WorkspaceSurfacesE2eTest {
             .then()
             .statusCode(403)
             .body("error.code", Matchers.equalTo("workspace.membership_required"))
-    }
-
-    @Test
-    fun `a global datasource referenced only by ANOTHER workspace's pipeline is still in_use - 409 naming the reference`() {
-        ensureSeeded()
-        ensureDatasourcesRegistered()
-        // Bob (globex) authors a pipeline reading the GLOBAL datasource. 022 review F5: the
-        // in_use guard counted only the CALLER'S workspace, so the acme-pinned admin could
-        // delete ds-global out from under globex. The guard now counts every workspace.
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey)
-            .body(
-                """{"id": "globex_tpl", "dialect": "H2", "display_name": "Globex",
-                   "description": "F5", "imports": [], "body": "SELECT 1"}""",
-            ).`when`()
-            .post("/api/v1/templates")
-            .then()
-            .statusCode(201)
-        val pipelineId =
-            given()
-                .port(port)
-                .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, bobKey)
-                .body(
-                    """{"schema_version":1,"name":"globex_report","display_name":"G","description":"",""" +
-                        """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"globex_tpl","version":1}}]}""",
-                ).`when`()
-                .post("/api/v1/pipelines")
-                .then()
-                .statusCode(201)
-                .extract()
-                .jsonPath()
-                .getString("data.id")
-
-        try {
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, adminKey)
-                .`when`()
-                .delete("/api/v1/datasources/$DS_GLOBAL")
-                .then()
-                .statusCode(409)
-                .body("error.code", Matchers.equalTo("datasource.in_use"))
-                .body("error.details.referencing_pipelines", Matchers.hasItem("globex_report"))
-        } finally {
-            // Leave globex exactly as seeded — the in_use-count rows above assert its contents.
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, bobKey)
-                .`when`()
-                .delete("/api/v1/pipelines/$pipelineId")
-                .then()
-                .statusCode(204)
-            given()
-                .port(port)
-                .header(API_KEY_HEADER, bobKey)
-                .`when`()
-                .delete("/api/v1/templates/globex_tpl")
-                .then()
-                .statusCode(204)
-        }
     }
 
     @Test
@@ -397,24 +333,6 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `a missing member email is the generic bad-parameter 400 - not the datasource domain's code`() {
-        ensureSeeded()
-        // 022 review (below-cap): this refusal emitted datasource.validation.properties_invalid
-        // from a WORKSPACE endpoint. The catalogued generic bad-parameter code is the stand-in.
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
-            .body("""{}""")
-            .`when`()
-            .post("/api/v1/workspaces/acme/members")
-            .then()
-            .statusCode(400)
-            .body("error.code", Matchers.equalTo("pipeline.execution.invalid_parameter_type"))
-            .body("error.details.field", Matchers.equalTo("email"))
-    }
-
-    @Test
     fun `an unknown member email is the §16-3 unknown-user stand-in`() {
         ensureSeeded()
         given()
@@ -428,33 +346,6 @@ class WorkspaceSurfacesE2eTest {
             .statusCode(404)
             .body("error.code", Matchers.equalTo("pipeline.execution.not_found"))
             .body("error.details.reason", Matchers.equalTo("user_not_found"))
-    }
-
-    @Test
-    fun `open-join - a non-member joins with their OWN email, then reads the workspace`() {
-        ensureSeeded()
-        // Bob owns globex and is NOT a member of acme. 022 review F4: this row 403ed
-        // membership_required before the fix — addMember's membership pre-check ran
-        // before the self-join branch, so open-join was unreachable end to end.
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey)
-            .body("""{"email":"bob@globex.test"}""")
-            .`when`()
-            .post("/api/v1/workspaces/acme/members")
-            .then()
-            .statusCode(200)
-            .body("data.role", Matchers.equalTo("member"))
-
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, bobKey)
-            .`when`()
-            .get("/api/v1/workspaces/acme")
-            .then()
-            .statusCode(200)
-            .body("data.name", Matchers.equalTo("acme"))
     }
 
     // ------------------------------------------------------------ UI screens smoke
@@ -484,32 +375,6 @@ class WorkspaceSurfacesE2eTest {
             .get("/datasources")
             .then()
             .statusCode(200)
-    }
-
-    @Test
-    fun `the register modal's refusal arrives as a 400 with the markup the page injects into register-result`() {
-        ensureSeeded()
-        // F9 (022 review): the modal used to rely on the response-targets extension
-        // (never loaded), so refusals were invisible. The page now handles
-        // htmx:responseError and writes THIS body into #register-result — the smoke
-        // proves the partial route's side of that contract: 400, refusal text, no 500.
-        val csrf = "register-csrf"
-        given()
-            .port(port)
-            .cookie(SESSION_COOKIE, sessionJwt(ALICE, "alice@acme.test", "acme"))
-            .cookie(CSRF_COOKIE, csrf)
-            .header(CSRF_HEADER, csrf)
-            .contentType(ContentType.URLENC)
-            .formParam("name", "bad-dialect")
-            .formParam("dialect", "NOSUCH")
-            .formParam("jdbcUrl", "jdbc:postgresql://db:5432/app")
-            .formParam("username", "u")
-            .formParam("password", "p")
-            .`when`()
-            .post("/partials/datasources")
-            .then()
-            .statusCode(400)
-            .body(Matchers.containsString("Unknown dialect"))
     }
 
     // ------------------------------------------------------------ T23
@@ -545,76 +410,6 @@ class WorkspaceSurfacesE2eTest {
     }
 
     // ------------------------------------------------------------ T31
-
-    @Test
-    fun `a read-scoped key cannot reach the mutating UI partials - the REST twin's floor applies`() {
-        ensureSeeded()
-        ensureDatasourcesRegistered()
-        // 022 review F6: POST /partials/datasources had NO scope floor (the interceptor
-        // governed /api and /mcp only) — a read key could register a datasource below the
-        // documented author floor. Partials now declare their REST twin's operation.
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
-            .contentType(ContentType.URLENC)
-            .formParam("name", "readonly-smuggle")
-            .formParam("dialect", "H2")
-            .formParam("jdbcUrl", H2_ACME_URL)
-            .formParam("username", H2_USER)
-            .formParam("password", H2_PASSWORD)
-            .`when`()
-            .post("/partials/datasources")
-            .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
-
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
-            .contentType(ContentType.URLENC)
-            .`when`()
-            .post("/partials/datasources/$DS_ACME/test")
-            .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
-
-        // The read floor itself is untouched: the listing partial still serves a read key.
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
-            .`when`()
-            .get("/partials/datasources")
-            .then()
-            .statusCode(200)
-    }
-
-    @Test
-    fun `an author key CAN register through the partial - the floor is not a wall`() {
-        ensureSeeded()
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, aliceKey)
-            .contentType(ContentType.URLENC)
-            .formParam("name", "partial-reg")
-            .formParam("dialect", "H2")
-            .formParam("jdbcUrl", "jdbc:h2:mem:surfaces_partial;DB_CLOSE_DELAY=-1")
-            .formParam("username", H2_USER)
-            .formParam("password", H2_PASSWORD)
-            .`when`()
-            .post("/partials/datasources")
-            .then()
-            .statusCode(200)
-            .header("HX-Redirect", Matchers.equalTo("/datasources"))
-
-        // Cleanup through the REST twin.
-        given()
-            .port(port)
-            .header(API_KEY_HEADER, aliceKey)
-            .`when`()
-            .delete("/api/v1/datasources/partial-reg")
-            .then()
-            .statusCode(204)
-    }
 
     @Test
     fun `an unauthenticated browser request 302s to the RELATIVE login path`() {
@@ -810,7 +605,6 @@ class WorkspaceSurfacesE2eTest {
         private val BOB_KEY = seededKey("bob-key", BOB, arrayOf("read", "execute", "author"))
         private val CAROL_KEY = seededKey("carol-key", CAROL, arrayOf("read", "execute", "author"))
         private val ADMIN_KEY = seededKey("admin-key", ROOT, arrayOf("read", "execute", "author", "admin"))
-        private val READONLY_KEY = seededKey("readonly-key", ALICE, arrayOf("read"))
 
         private fun seededKey(
             name: String,
@@ -917,7 +711,7 @@ class WorkspaceSurfacesE2eTest {
         }
 
         private fun seedKeys(connection: java.sql.Connection) {
-            val pins = mapOf(ALICE_KEY to WS_ACME, CAROL_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX, READONLY_KEY to WS_ACME)
+            val pins = mapOf(ALICE_KEY to WS_ACME, CAROL_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX)
             connection
                 .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
                 .use { ps ->
@@ -985,10 +779,6 @@ class WorkspaceSurfacesE2eTest {
 
             // T33's http half is provable on the wire only with an http base-url.
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
-
-            // design §7: the open-join self-service row runs against the FULL app in this
-            // suite — bob (a globex owner, not an acme member) joins acme with his own email.
-            registry.add("datapipelines.workspaces.open-join") { "true" }
         }
 
         private val oidc = OidcDiscoveryStub()

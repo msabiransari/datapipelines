@@ -150,7 +150,7 @@ class WorkspacesUiController(
         try {
             block()
             "redirect:/workspaces?ok=$ok"
-        } catch (e: WorkspaceService.UnknownMemberEmailException) {
+        } catch (_: WorkspaceService.UnknownMemberEmailException) {
             // The template's `user_not_found` banner (022 review F8) — the exception is an
             // IllegalStateException, so the AuthException-only catch let it escape as a 500.
             "redirect:/workspaces?error=user_not_found"

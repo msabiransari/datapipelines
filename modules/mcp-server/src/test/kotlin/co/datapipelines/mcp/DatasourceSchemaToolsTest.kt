@@ -34,8 +34,7 @@ class DatasourceSchemaToolsTest {
     private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
 
     /** A gate registry where each of [names] is a GLOBAL datasource (visible to every key). */
-    private fun gateRegistry(vararg names: String) =
-        FakeDatasourceRegistry(names.map { McpFixtures.datasource(name = it) })
+    private fun gateRegistry(vararg names: String) = FakeDatasourceRegistry(names.map { McpFixtures.datasource(name = it) })
 
     private fun unreachable(name: String) = DatasourceUnreachableException(name, RuntimeException("Connection refused"))
 
@@ -44,7 +43,9 @@ class DatasourceSchemaToolsTest {
         val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
         every { introspector.schemas("pg-prod") } returns page
 
-        val payload = DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+        val payload =
+            DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down"))
+                .call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
 
         payload shouldBe page.toWireMap()
     }
@@ -54,7 +55,9 @@ class DatasourceSchemaToolsTest {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
         every { introspector.tables("pg-prod", "sales") } returns page
 
-        val payload = DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx)
+        val payload =
+            DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down"))
+                .call(McpArguments(mapOf("name" to "pg-prod", "schema" to "sales")), authorCtx)
 
         payload shouldBe page.toWireMap()
     }
@@ -68,7 +71,9 @@ class DatasourceSchemaToolsTest {
             )
         every { introspector.columns("pg-prod", "orders", null) } returns columns
 
-        val payload = DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
+        val payload =
+            DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down"))
+                .call(McpArguments(mapOf("name" to "pg-prod", "table" to "orders")), authorCtx)
 
         payload shouldBe columns.map { it.toWireMap() }
     }
@@ -76,7 +81,8 @@ class DatasourceSchemaToolsTest {
     @Test
     fun `get_columns without a table argument is invalid params`() {
         shouldThrow<McpError> {
-            DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
+            DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down"))
+                .call(McpArguments(mapOf("name" to "pg-prod")), authorCtx)
         }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
@@ -100,7 +106,8 @@ class DatasourceSchemaToolsTest {
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
+                    DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying"))
+                        .call(McpArguments(mapOf("name" to "nope", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
             },
         )
@@ -173,7 +180,8 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying"))
+                    .call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
             }
 
         assertAll(
@@ -273,7 +281,8 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying"))
+                    .call(McpArguments(mapOf("name" to "dw", "table" to "orders")), authorCtx)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
@@ -297,7 +306,8 @@ class DatasourceSchemaToolsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying")).call(McpArguments(mapOf("name" to "dying", "table" to "orders")), authorCtx)
+                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying"))
+                    .call(McpArguments(mapOf("name" to "dying", "table" to "orders")), authorCtx)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
@@ -317,17 +327,20 @@ class DatasourceSchemaToolsTest {
         assertAll(
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                    DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down"))
+                        .call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
+                    DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down"))
+                        .call(McpArguments(mapOf("name" to "down")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
             {
                 shouldThrow<DatapipelinesException> {
-                    DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down")).call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
+                    DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down"))
+                        .call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
                 }.code shouldBe PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE
             },
         )
@@ -372,7 +385,8 @@ class DatasourceSchemaToolsTest {
             FakeDatasourceRegistry(
                 listOf(
                     McpFixtures.datasource(name = "global-pg"),
-                    McpFixtures.datasource(name = "own-pg")
+                    McpFixtures
+                        .datasource(name = "own-pg")
                         .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
