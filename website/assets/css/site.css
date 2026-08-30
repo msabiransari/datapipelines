@@ -15,6 +15,11 @@
   padding-inline: var(--space-4);
 }
 
+/* Keep in-page anchor targets clear of the sticky header. */
+html {
+  scroll-padding-top: calc(var(--header-height) + var(--space-4));
+}
+
 @media (min-width: 48rem) {
   .container {
     padding-inline: var(--space-6);
@@ -286,19 +291,20 @@ code {
   margin: 0;
 }
 
-.hero-shot picture,
 .hero-shot img {
   display: block;
   width: 100%;
   height: auto;
   border-radius: var(--radius-lg);
-}
-
-.hero-shot picture {
-  overflow: hidden;
   border: var(--space-px) solid var(--border-default);
   background: var(--surface-inset);
   box-shadow: var(--shadow-lg);
+}
+
+.hero-shot figcaption {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 /* --------------------------------------------------------
@@ -493,7 +499,7 @@ code {
 
 .dg-box {
   fill: var(--surface-default);
-  stroke: var(--border-default);
+  stroke: var(--text-muted);
   stroke-width: 1.5;
 }
 
@@ -510,7 +516,7 @@ code {
 }
 
 .dg-sub {
-  fill: var(--text-muted);
+  fill: var(--text-secondary);
   font-family: var(--font-sans);
 }
 
@@ -526,14 +532,14 @@ code {
 
 .dg-frame {
   fill: none;
-  stroke: var(--border-default);
+  stroke: var(--text-muted);
   stroke-width: 1.5;
   stroke-dasharray: 6 5;
 }
 
 .dg-ghost {
   fill: var(--surface-inset);
-  stroke: var(--border-default);
+  stroke: var(--text-muted);
   stroke-width: 1.5;
   stroke-dasharray: 4 4;
 }
@@ -679,11 +685,25 @@ code {
   box-shadow: var(--shadow-md);
 }
 
+.shot-scroll:focus-visible {
+  outline: calc(var(--space-px) * 2) solid var(--border-focus);
+  outline-offset: var(--space-px);
+}
+
+/* Narrow screens: keep the shot legible and let it scroll sideways.
+   At the two-column breakpoint the column is narrower than 40rem,
+   so the floor is lifted and the image fills its column instead. */
 .shot-scroll img {
   display: block;
   width: 100%;
   min-width: 40rem;
   height: auto;
+}
+
+@media (min-width: 64rem) {
+  .shot-scroll img {
+    min-width: 0;
+  }
 }
 
 .shot figcaption {
