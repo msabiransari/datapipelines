@@ -40,6 +40,7 @@ Small, additive, likely to land soon after v1 ship. Rough priority order.
 
 | Feature | Source spec | Notes |
 |---|---|---|
+| **Result visualization & dashboards** (charts over pipeline results, in-product) | — (design pending) | Owner priority for the release after v1, stated 2026-08-29. Largely additive: the result API it builds on already exists (`GET /executions/{id}/result` — schema, rows, paging), so the work is chart configuration storage plus the rendering surface, not new execution plumbing. Distinct from §4's *Custom dashboards* row, which is operational monitoring (Grafana's job) — this is visualization of a pipeline's own results. |
 | **Parameterized SQL output** (templates emit `{sql, params}` for prepared statements) | templates §13 | Closes the SQL injection gap. Templates currently render to raw SQL strings; parameterized output is safer for user-controlled values. |
 | **Auto-create target table for write-back** (`output.auto_create: true`) | pipeline-contract §18 | For `output.target: "datasource"`: emit `CREATE TABLE IF NOT EXISTS` from ResultSet metadata before INSERT. Saves a preceding DDL node in the common case. |
 | **DuckDB as staging engine** (`settings.tempdb.engine: "DUCKDB"`) | pipeline-contract §18, staging §14 | Better for analytical workloads (large joins, wide aggregations). DuckDB is internally parallel, sidesteps the single-connection serialization concern. |
