@@ -2,8 +2,7 @@
    THEME: DARK
    ============================================================ */
 
-[data-theme="dark"],
-.dark {
+:root {
   color-scheme: dark;
 
   --_surface-page:            #0b0f19;
