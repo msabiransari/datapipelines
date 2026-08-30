@@ -195,8 +195,8 @@
           </figure>
         </div>
 
-        <!-- claim: release rehearsal shape — agent-created pipeline over ~4.9M NYC taxi rows (docs/deployment.md Appendix B) -->
-        <p class="how-footnote">This isn't a toy loop: our release rehearsal runs exactly this shape — an agent-created pipeline over ~4.9M NYC taxi rows.</p>
+        <!-- claim: the published demo dataset is ~4.9M sampled NYC taxi rows across three engines (docs/deployment.md Appendix B; scripts/sample-data/README.md) -->
+        <p class="how-footnote">This isn't a toy loop: the published demo set is ~4.9M sampled NYC taxi rows across Postgres, MySQL and SQLite — an agent authors and runs against exactly that.</p>
       </div>
     </section>
 
@@ -301,7 +301,7 @@
             </svg>
             <h3>Pipeline graph view</h3>
             <!-- claim: docs/pipeline-editor.md §1, §5–§7, §10 -->
-            <p>The editor renders the pipeline DAG, highlights nodes live from SSE, and shows a paged result preview. Execution itself is agent/REST-driven; the in-editor execute/cancel buttons are being repaired.</p>
+            <p>The editor renders the pipeline DAG with its settings, parameters and per-node detail. Running a pipeline from inside the editor — and the live node highlighting and result preview that follow from it — is being repaired; today execution is agent- and REST-driven.</p>
             <!-- claim: docs/pipeline-editor.md §11 -->
             <p>It's read-only in v1 by design: a visualization surface, not an authoring surface. Authoring is agent-first.</p>
           </article>
@@ -485,6 +485,7 @@
 
         <div class="roadmap-grid">
           <article class="roadmap-hero">
+            <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Result visualization & dashboards", the first row -->
             <span class="roadmap-badge">Coming soon</span>
             <h3>Result visualization &amp; dashboards</h3>
             <p>Charts and dashboards over pipeline results, in-product.</p>
