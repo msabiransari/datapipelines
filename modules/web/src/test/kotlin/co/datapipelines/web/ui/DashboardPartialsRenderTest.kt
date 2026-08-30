@@ -90,13 +90,14 @@ class DashboardPartialsRenderTest {
     fun `the dashboard page still renders its skeleton loaders`() {
         val application = JakartaServletWebApplication.buildApplication(MockServletContext())
         val exchange = application.buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
-        val context = WebContext(exchange).apply {
-            setVariable("_csrf", mapOf("token" to "t"))
-            setVariable("workspaceHeaderFragment", "")
-            setVariable("workspaceOptions", emptyList<Any>())
-            setVariable("activeWorkspace", null)
-            setVariable("activeTheme", "saas")
-        }
+        val context =
+            WebContext(exchange).apply {
+                setVariable("_csrf", mapOf("token" to "t"))
+                setVariable("workspaceHeaderFragment", "")
+                setVariable("workspaceOptions", emptyList<Any>())
+                setVariable("activeWorkspace", null)
+                setVariable("activeTheme", "saas")
+            }
 
         val html = engine.process("dashboard", context)
 

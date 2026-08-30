@@ -19,7 +19,10 @@ import java.util.UUID
  * SQLState-driven target-missing mapping.
  */
 class WritebackRowsTest {
-    /** The execution's workspace for the §5.3-scoped resolution (025 A5) — any workspace; the fake registry defaults to name-global visibility. */
+    /**
+     * The execution's workspace for the §5.3-scoped resolution (025 A5) — any workspace;
+     * the fake registry defaults to name-global visibility.
+     */
     private val workspaceId = UUID.randomUUID()
 
     private val schema =
@@ -63,7 +66,12 @@ class WritebackRowsTest {
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
         val idSchema = listOf(ColumnSchema("id", LogicalType.INTEGER))
 
-        runner.writebackRows(idSchema, sequenceOf(listOf(1)), NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE), workspaceId) shouldBe 1L
+        runner.writebackRows(
+            idSchema,
+            sequenceOf(listOf(1)),
+            NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE),
+            workspaceId,
+        ) shouldBe 1L
 
         DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
             connection.createStatement().use { statement ->

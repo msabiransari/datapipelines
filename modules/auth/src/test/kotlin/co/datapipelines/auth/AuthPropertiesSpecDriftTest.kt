@@ -53,6 +53,6 @@ class AuthPropertiesSpecDriftTest {
                 """^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""",
             )
 
-        val CONFIG_SPEC_PATH = "docs/configuration.md"
+        const val CONFIG_SPEC_PATH = "docs/configuration.md"
     }
 }

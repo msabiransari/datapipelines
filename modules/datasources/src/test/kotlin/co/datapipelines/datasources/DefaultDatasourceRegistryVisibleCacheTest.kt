@@ -3,13 +3,13 @@ package co.datapipelines.datasources
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
-import kotlin.time.Duration.Companion.seconds
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * `getVisible` serves from the §6.3 metadata cache (025 C4, the 022 review's perf note):

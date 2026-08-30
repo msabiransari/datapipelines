@@ -223,7 +223,9 @@ class DatasourceSchemaToolsTest {
                 every { connection.catalog } returns null
             }
 
-        val payload = DatasourcesGetTablesTool(real, FakeDatasourceRegistry(listOf(gated))).call(McpArguments(mapOf("name" to "down")), authorCtx)
+        val payload =
+            DatasourcesGetTablesTool(real, FakeDatasourceRegistry(listOf(gated)))
+                .call(McpArguments(mapOf("name" to "down")), authorCtx)
 
         payload shouldBe
             mapOf(
@@ -411,7 +413,8 @@ class DatasourceSchemaToolsTest {
                         .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
-        every { introspector.schemas(any<Datasource>()) } returns co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
+        every { introspector.schemas(any<Datasource>()) } returns
+            co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
         every { introspector.tables(any<Datasource>(), any()) } returns TablesPage(emptyList(), truncated = false)
         every { introspector.columns(any<Datasource>(), any(), any()) } returns emptyList()
 

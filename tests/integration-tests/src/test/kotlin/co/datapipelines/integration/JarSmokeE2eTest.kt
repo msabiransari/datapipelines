@@ -56,7 +56,7 @@ import javax.crypto.spec.SecretKeySpec
 class JarSmokeE2eTest {
     private val http: HttpClient = HttpClient.newHttpClient()
 
-    /** Boot state — instance vars under PER_CLASS lifecycle (one app per class run). */
+    /** Boot state — instance vars under PER_CLASS lifecycle (one app per run). */
     private var oidcStub: HttpServer? = null
     private var app: Process? = null
     private var appLog: File? = null
@@ -141,7 +141,8 @@ class JarSmokeE2eTest {
                         """
                         {"issuer":"$issuer","authorization_endpoint":"$issuer/authorize",
                         "token_endpoint":"$issuer/token","jwks_uri":"$issuer/jwks",
-                        "response_types_supported":["code"],"subject_types_supported":["public"],
+                        "response_types_supported":["code"],
+                        "subject_types_supported":["public"],
                         "id_token_signing_alg_values_supported":["RS256"]}
                         """.trimIndent().replace("\n", "")
                     val body = doc.toByteArray()
@@ -168,7 +169,10 @@ class JarSmokeE2eTest {
         while (System.currentTimeMillis() < deadline) {
             if (app!!.isAlive.not()) error("Jar died during boot — log:\n${log.readText()}")
             // A refused connection is "not up yet", not a failure — java.net.http throws.
-            val health = runCatching { request("/health", apiKey = null, accept = "application/json").second }.getOrNull()
+            val health =
+                runCatching {
+                    request("/health", apiKey = null, accept = "application/json").second
+                }.getOrNull()
             if (health == 200) return
             Thread.sleep(500)
         }
@@ -222,18 +226,37 @@ class JarSmokeE2eTest {
     private fun seed() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
             c.createStatement().use { s ->
-                s.execute("INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES ('$USER', 'smoke@test', 'Smoke', 'google', 'smoke-sub', TRUE, TRUE)")
-                s.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE', 'smoke', 'Smoke')")
-                s.execute("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$WORKSPACE', '$USER', 'owner')")
                 s.execute(
-                    "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted, created_by, is_readonly) " +
-                        "VALUES ('$SEEDED_DATASOURCE', 'Smoke DS', 'POSTGRES', '${postgres.jdbcUrl}', '${postgres.username}', 'x'::bytea, '$USER', TRUE)",
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, " +
+                        "is_active, is_admin) VALUES ('$USER', 'smoke@test', 'Smoke', 'google', " +
+                        "'smoke-sub', TRUE, TRUE)",
                 )
-                s.execute("INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version) VALUES ('$PIPELINE', 'smoke_pipe', 'Smoke Pipe', '', '$USER', '$WORKSPACE', 1)")
-                s.execute("INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) VALUES ('$PIPELINE', 1, '{\"name\":\"smoke_pipe\",\"nodes\":[],\"parameters\":{}}'::jsonb, '$USER')")
+                s.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE', 'smoke', 'Smoke')")
                 s.execute(
-                    "INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status, parameters_json, triggered_by, triggered_via, root_execution_id) " +
-                        "VALUES ('$SEEDED_EXECUTION', '$PIPELINE', 1, 'SUCCESS', '{}'::jsonb, '$USER', 'REST', '$SEEDED_EXECUTION')",
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                        "VALUES ('$WORKSPACE', '$USER', 'owner')",
+                )
+                s.execute(
+                    "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
+                        "password_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
+                        "'Smoke DS', 'POSTGRES', '${postgres.jdbcUrl}', '${postgres.username}', " +
+                        "'x'::bytea, '$USER', TRUE)",
+                )
+                s.execute(
+                    "INSERT INTO pipelines (id, name, display_name, description, owner_id, " +
+                        "workspace_id, current_version) VALUES ('$PIPELINE', 'smoke_pipe', " +
+                        "'Smoke Pipe', '', '$USER', '$WORKSPACE', 1)",
+                )
+                s.execute(
+                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) " +
+                        "VALUES ('$PIPELINE', 1, " +
+                        "'{\"name\":\"smoke_pipe\",\"nodes\":[],\"parameters\":{}}'::jsonb, '$USER')",
+                )
+                s.execute(
+                    "INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, " +
+                        "status, parameters_json, triggered_by, triggered_via, root_execution_id) " +
+                        "VALUES ('$SEEDED_EXECUTION', '$PIPELINE', 1, 'SUCCESS', '{}'::jsonb, " +
+                        "'$USER', 'REST', '$SEEDED_EXECUTION')",
                 )
             }
         }
@@ -245,8 +268,10 @@ class JarSmokeE2eTest {
         val header = b64("""{"alg":"HS256","typ":"JWT"}""")
         val payload =
             b64(
-                """{"sub":"$USER","email":"smoke@test","name":"Smoke","scopes":["read","execute","author","admin"],""" +
-                    """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond},"active_workspace":"smoke"}""",
+                """{"sub":"$USER","email":"smoke@test","name":"Smoke",""" +
+                    """"scopes":["read","execute","author","admin"],""" +
+                    """"iss":"datapipelines","iat":${now.epochSecond},""" +
+                    """"exp":${now.plusSeconds(3600).epochSecond},"active_workspace":"smoke"}""",
             )
         val signature =
             Mac.getInstance("HmacSHA256").run {
@@ -256,20 +281,25 @@ class JarSmokeE2eTest {
         return "$header.$payload.$signature"
     }
 
-    /** Mints the API key through the real endpoint: session cookie in, CSRF double-submit, plaintext out. */
+    /** Mints the API key through the real endpoint: session cookie, CSRF double-submit. */
     private fun mintApiKey(): String {
         val csrf =
-            HttpRequest.newBuilder(URI.create("$base/settings"))
+            HttpRequest
+                .newBuilder(URI.create("$base/settings"))
                 .header("Cookie", "dp_session=${sessionJwt()}")
                 .build()
         val csrfResponse = http.send(csrf, HttpResponse.BodyHandlers.ofString())
         val token =
-            csrfResponse.headers().allValues("Set-Cookie")
+            csrfResponse
+                .headers()
+                .allValues("Set-Cookie")
                 .firstOrNull { it.startsWith("dp_csrf=") }
-                ?.substringAfter("dp_csrf=")?.substringBefore(";")
+                ?.substringAfter("dp_csrf=")
+                ?.substringBefore(";")
                 ?: error("no dp_csrf issued: ${csrfResponse.statusCode()}")
         val mint =
-            HttpRequest.newBuilder(URI.create("$base/api/v1/auth/api-keys"))
+            HttpRequest
+                .newBuilder(URI.create("$base/api/v1/auth/api-keys"))
                 .header("Content-Type", "application/json")
                 .header("Cookie", "dp_session=${sessionJwt()}; dp_csrf=$token")
                 .header("DP-CSRF-Token", token)
@@ -291,7 +321,8 @@ class JarSmokeE2eTest {
         accept: String = "text/html",
     ): Pair<String, Int> {
         val builder =
-            HttpRequest.newBuilder(URI.create("$base$path"))
+            HttpRequest
+                .newBuilder(URI.create("$base$path"))
                 .header("Accept", accept)
         apiKey?.let { builder.header("DP-API-Key", it) }
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
@@ -343,9 +374,15 @@ class JarSmokeE2eTest {
         private val appPort: Int = 5580 + random.nextInt(100)
 
         private fun randomSecret(): String =
-            Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
+            Base64
+                .getEncoder()
+                .encodeToString(ByteArray(32).also { random.nextBytes(it) })
 
-        private fun b64(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(Charsets.UTF_8))
+        private fun b64(value: String): String =
+            Base64
+                .getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(value.toByteArray(Charsets.UTF_8))
 
         private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
     }

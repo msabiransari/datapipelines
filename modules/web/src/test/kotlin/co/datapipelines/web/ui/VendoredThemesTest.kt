@@ -7,8 +7,8 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import java.util.jar.JarOutputStream
 import java.net.URLClassLoader
+import java.util.jar.JarOutputStream
 import java.util.zip.ZipEntry
 
 /**

@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
@@ -74,23 +75,23 @@ class DatasourceSchemaControllerTest {
     @Test
     fun `schemas delegates to the introspector and serves the shared wire projection`() {
         val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = false)
-        every { introspector.schemas(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }) } returns page
+        every { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) } returns page
 
         val data = controller.schemas("pg-prod").data
 
         data shouldBe page.toWireMap()
-        verify(exactly = 1) { introspector.schemas(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }) }
+        verify(exactly = 1) { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) }
     }
 
     @Test
     fun `tables delegates to the introspector and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
-        every { introspector.tables(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }, "sales") } returns page
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") } returns page
 
         val data = controller.tables("pg-prod", schema = "sales").data
 
         data shouldBe page.toWireMap()
-        verify(exactly = 1) { introspector.tables(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }, "sales") }
+        verify(exactly = 1) { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") }
     }
 
     @Test
@@ -98,14 +99,18 @@ class DatasourceSchemaControllerTest {
         val columns =
             listOf(
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
-                ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
+                ColumnInfo(
+                    ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2),
+                    "numeric",
+                    emptyList(),
+                ),
             )
-        every { introspector.columns(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }, "orders", null) } returns columns
+        every { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null) } returns columns
 
         val data = controller.columns("pg-prod", "orders", schema = null).data
 
         data shouldBe columns.map { it.toWireMap() }
-        verify(exactly = 1) { introspector.columns(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }, "orders", null) }
+        verify(exactly = 1) { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null) }
     }
 
     @Test
@@ -125,7 +130,7 @@ class DatasourceSchemaControllerTest {
         // family and the RuntimeException pool-build family — PoolInitializationException on a
         // down database, which round 1 missed; that path is pinned by the introspector tests)
         // must surface as the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
-        every { introspector.tables(match<co.datapipelines.datasources.Datasource> { it.name == "pg-prod" }, null) } throws
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, null) } throws
             DatasourceUnreachableException("pg-prod", RuntimeException("Connection refused"))
 
         val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
@@ -187,7 +192,7 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
-    fun `a no-schema COLUMNS read on a datasource with no current schema is the catalogued 400 - not a merged answer`() {
+    fun `a no-schema COLUMNS read with no current schema is the catalogued 400 - not a merged answer`() {
         // The cannot-merge promise (§9.7) made mechanical and scoped (R4 F6): a MySQL
         // registration with a database-less URL yields no current schema, and an
         // unqualified COLUMNS read would merge same-named tables' columns across every
@@ -360,7 +365,7 @@ class DatasourceSchemaControllerTest {
         // different instance than this fixture; match by name, the registry's key.
         every {
             registry.poolFor(
-                match<co.datapipelines.datasources.Datasource> { it.name == name },
+                match<Datasource> { it.name == name },
             )
         } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {

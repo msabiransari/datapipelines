@@ -74,7 +74,7 @@ class McpResourceReader(
                 }
 
                 is McpResourceUri.DatasourceByName -> {
-                    json(uri, datasource(workspaceId, parsed.name, uri))
+                    json(uri, datasource(workspaceId, parsed.name))
                 }
 
                 is McpResourceUri.Execution -> {
@@ -122,11 +122,14 @@ class McpResourceReader(
         return McpSchema.TextResourceContents(uri, McpResourceCatalog.MIME_FREEMARKER_SQL, body, null)
     }
 
-    /** §5.3: by-name read of a datasource the pinned workspace cannot see is not-found, like every surface. */
+    /**
+     * §5.3: by-name read of a datasource the pinned workspace cannot see is not-found,
+     * like every surface. (025 C3: the gate's spelling is requireVisible; the not-found
+     * throw inside it answers with the resource's own shape.)
+     */
     private fun datasource(
         workspaceId: UUID,
         name: String,
-        uri: String,
     ): String {
         val datasource = datasources.requireVisible(name, workspaceId)
         return ExecutorJson.write(datasource.toMcpMetadata())

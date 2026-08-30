@@ -299,7 +299,10 @@ class ConfigValidator(
          * null inside every packaged deployment — the §7 theme startup check was silently
          * deferred in exactly the deployments that matter, the jars.
          */
-        private fun vendoredThemes(): Set<String>? = co.datapipelines.web.ui.VendoredThemes.names()?.toSet()
+        private fun vendoredThemes(): Set<String>? =
+            co.datapipelines.web.ui.VendoredThemes
+                .names()
+                ?.toSet()
 
         private fun requirePresent(
             value: String?,
