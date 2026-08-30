@@ -46,8 +46,17 @@ class LocalAdminSeedE2eTest {
 
     @Test
     fun `the zero-setup deployment end to end - seed, forced change, admin-created user`() {
-        // (1)+(2) — startup with zero OIDC, and the form-only login page.
-        val loginPage =
+        assertLoginPageIsLocalOnly()
+        val adminLogin = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
+        assertGateEngaged(adminLogin)
+        assertChangeReleasesGate(adminLogin)
+        adminCreatesUserWhoWalksTheSamePath(adminLogin)
+        assertRowStates()
+    }
+
+    /** (1)+(2) — startup with zero OIDC, and the form-only login page. */
+    private fun assertLoginPageIsLocalOnly() {
+        val html =
             given()
                 .port(port)
                 .`when`()
@@ -55,20 +64,21 @@ class LocalAdminSeedE2eTest {
                 .then()
                 .statusCode(200)
                 .extract()
-        val html = loginPage.asString()
+                .asString()
         html shouldContain "name=\"password\""
         html shouldNotContain ">or<"
         html shouldNotContain "/oauth2/authorization/"
+    }
 
-        // (3) — the seeded credential logs in, and the gate engages immediately.
-        val adminLogin = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
+    /** (3) — the seeded credential logs in, and the §5A.4 gate engages immediately. */
+    private fun assertGateEngaged(adminLogin: LoginResponse) {
         adminLogin.statusCode shouldBe 302
         adminLogin.location shouldBe "http://localhost:$port/"
         val adminSession = adminLogin.sessionCookie()
-        val adminCsrf = adminLogin.csrfToken
 
-        getNoFollow("/", adminSession).statusCode shouldBe 302
-        getNoFollow("/", adminSession).headers.getValue("Location") shouldBe "http://localhost:$port/settings/password"
+        val gated = getNoFollow("/", adminSession)
+        gated.statusCode shouldBe 302
+        gated.headers.getValue("Location") shouldBe "http://localhost:$port/settings/password"
         // The allowlisted screen itself answers.
         given()
             .port(port)
@@ -86,11 +96,14 @@ class LocalAdminSeedE2eTest {
                 .get("/api/v1/auth/me")
         apiResponse.statusCode shouldBe 403
         apiResponse.body().asString() shouldContain "auth.password.change_required"
+    }
 
-        // (4) — wrong current password: refused, still gated. Right one: the gate releases.
-        postPasswordChange(adminSession, adminCsrf, "not-the-seed", NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
+    /** (4) — wrong current password: refused, still gated. Right one: the gate releases. */
+    private fun assertChangeReleasesGate(adminLogin: LoginResponse) {
+        val adminSession = adminLogin.sessionCookie()
+        postPasswordChange(adminSession, adminLogin.csrfToken, "not-the-seed", NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
             .statusCode shouldBe 400
-        postPasswordChange(adminSession, adminCsrf, SEED_PASSWORD, NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
+        postPasswordChange(adminSession, adminLogin.csrfToken, SEED_PASSWORD, NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
             .statusCode shouldBe 200
         given()
             .port(port)
@@ -99,14 +112,16 @@ class LocalAdminSeedE2eTest {
             .get("/")
             .then()
             .statusCode(200)
+    }
 
-        // (5) — the admin creates a local user; the one-time password is shown once.
+    /** (5) — the admin creates a local user, whose one-time password walks the same forced-change path. */
+    private fun adminCreatesUserWhoWalksTheSamePath(adminLogin: LoginResponse) {
         val createResponse =
             given()
                 .port(port)
-                .cookie("dp_session", adminSession)
-                .cookie("dp_csrf", adminCsrf)
-                .header("DP-CSRF-Token", adminCsrf)
+                .cookie("dp_session", adminLogin.sessionCookie())
+                .cookie("dp_csrf", adminLogin.csrfToken)
+                .header("DP-CSRF-Token", adminLogin.csrfToken)
                 .contentType(ContentType.URLENC)
                 .formParam("email", CREATED_EMAIL)
                 .formParam("displayName", "Created User")
@@ -118,7 +133,6 @@ class LocalAdminSeedE2eTest {
                 "no one-time password in the create response"
             }.groupValues[1]
 
-        // The created user walks the same forced-change path.
         val userLogin = postLogin(CREATED_EMAIL, oneTime)
         userLogin.statusCode shouldBe 302
         val userSession = userLogin.sessionCookie()
@@ -132,8 +146,10 @@ class LocalAdminSeedE2eTest {
             .get("/")
             .then()
             .statusCode(200)
+    }
 
-        // And the row state matches the journey.
+    /** The row state matches the journey. */
+    private fun assertRowStates() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection
                 .prepareStatement("SELECT must_change_password, is_admin, provider FROM users WHERE email = ?")

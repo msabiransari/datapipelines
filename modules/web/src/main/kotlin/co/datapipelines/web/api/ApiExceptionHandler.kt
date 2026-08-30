@@ -15,6 +15,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 
 /**
@@ -175,6 +176,39 @@ class ApiExceptionHandler {
     }
 
     /**
+     * A controller's deliberate refusal carrying its own status — e.g. the 404 a
+     * disabled local login answers (auth.md §5A). The backstop's 500 would blame
+     * the server for a deliberate 4xx; the status comes from the exception and
+     * the envelope stays §4.2.
+     */
+    @ExceptionHandler(ResponseStatusException::class)
+    fun onResponseStatus(
+        error: ResponseStatusException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        val status = HttpStatus.resolve(error.statusCode.value()) ?: HttpStatus.INTERNAL_SERVER_ERROR
+        val notFound = status == HttpStatus.NOT_FOUND
+        if (status.is5xxServerError) {
+            log.error("{} {} {}: {}", status.value(), request.method, request.requestURI, error.reason, error)
+        } else {
+            log.debug("{} {} {}: {}", status.value(), request.method, request.requestURI, error.reason)
+        }
+        return ResponseEntity.status(status).contentType(JSON).body(
+            ApiErrorResponse.of(
+                code = if (notFound) PipelineErrorCodes.Execution.NOT_FOUND else INTERNAL_STAND_IN_CODE,
+                message = error.reason ?: status.reasonPhrase,
+                details = mapOf(ApiErrors.REASON to if (notFound) "endpoint_not_found" else "response_status"),
+                userMessage =
+                    if (notFound) {
+                        "We couldn't find that address."
+                    } else {
+                        GENERIC_STATUS_MESSAGE
+                    },
+            ),
+        )
+    }
+
+    /**
      * The backstop. Nothing reaches a client as a container error page.
      *
      * `Throwable` rather than `Exception`: an `Error` escaping a handler would otherwise bypass
@@ -242,5 +276,8 @@ class ApiExceptionHandler {
          * codes of its own; `details.reason` states what really happened. Reported as a spec gap.
          */
         const val INTERNAL_STAND_IN_CODE = PipelineErrorCodes.Execution.ABORTED
+
+        /** The non-technical message for a non-404 [ResponseStatusException]. */
+        const val GENERIC_STATUS_MESSAGE = "That action isn't available right now."
     }
 }
