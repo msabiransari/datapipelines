@@ -34,6 +34,25 @@ class UserSettingsController(
         return "settings/index"
     }
 
+    /**
+     * The change-password screen (auth.md §5A.4) — the one place the forced-change
+     * gate lets a `must_change_password` user reach. The submit endpoint is the
+     * `POST /partials/account/password` partial (scope-governed, §7.6).
+     */
+    @GetMapping("/settings/password")
+    fun changePassword(
+        model: Model,
+        request: HttpServletRequest,
+    ): String {
+        val principal = requirePrincipal()
+        val user = userRepository.findById(principal.userId)
+        model.addAttribute("user", user)
+        model.addAttribute("mustChange", user?.mustChangePassword == true)
+        model.addAttribute("hasLocalPassword", user?.hasLocalPassword == true)
+        model.addAttribute("activeTheme", themeResolver.resolve(request))
+        return "settings/password"
+    }
+
     @PatchMapping("/partials/profile/theme")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun updateTheme(

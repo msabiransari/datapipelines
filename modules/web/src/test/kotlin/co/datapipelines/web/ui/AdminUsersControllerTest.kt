@@ -1,7 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.LocalPasswordService
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -22,7 +24,8 @@ import java.util.UUID
 
 class AdminUsersControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = AdminUsersController(themeResolver)
+    private val authProperties = AuthProperties()
+    private val controller = AdminUsersController(themeResolver, authProperties)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -56,7 +59,8 @@ class AdminUsersControllerTest {
 
 class AdminUsersPartialControllerTest {
     private val userService = mockk<UserService>()
-    private val partialController = AdminUsersPartialController(userService)
+    private val localPasswordService = mockk<LocalPasswordService>()
+    private val partialController = AdminUsersPartialController(userService, localPasswordService)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -123,5 +127,54 @@ class AdminUsersPartialControllerTest {
         authenticate()
         val response = partialController.toggle(userId, "unknown_action")
         response.statusCode shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    @Test
+    fun `create local user returns the new row plus the one-time password notice`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+
+        val response = partialController.createLocalUser("new@example.com", "New")
+
+        response.statusCode shouldBe HttpStatus.OK
+        response.body shouldContain "ABCD-EFGH-JKLM"
+        response.body shouldContain "admin-notice"
+        response.body shouldContain "Test User"
+    }
+
+    @Test
+    fun `create local user with a taken email is a 409`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("taken@example.com", "", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.EmailTaken
+
+        val response = partialController.createLocalUser("taken@example.com", "")
+
+        response.statusCode shouldBe HttpStatus.CONFLICT
+    }
+
+    @Test
+    fun `reset password returns the row plus the one-time notice`() {
+        authenticate()
+        every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        val response = partialController.toggle(userId, "reset-password")
+
+        response.statusCode shouldBe HttpStatus.OK
+        response.body shouldContain "WXYZ-2345-ABCD"
+        response.body shouldContain "admin-notice"
+    }
+
+    @Test
+    fun `disable local and unlock swap the row`() {
+        authenticate()
+        every { localPasswordService.disableLocalAccess(userId, adminPrincipal.userId) } returns true
+        every { localPasswordService.unlock(userId, adminPrincipal.userId) } returns true
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        partialController.toggle(userId, "disable-local").statusCode shouldBe HttpStatus.OK
+        partialController.toggle(userId, "unlock").statusCode shouldBe HttpStatus.OK
     }
 }

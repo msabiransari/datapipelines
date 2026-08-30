@@ -366,5 +366,7 @@ class UserRepository(
             lastLoginAt = rs.getTimestamp("last_login_at")?.toInstant(),
             themePreference = rs.getString("theme_preference"),
             mustChangePassword = rs.getBoolean("must_change_password"),
+            hasLocalPassword = rs.getString("password_hash") != null,
+            lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
         )
 }

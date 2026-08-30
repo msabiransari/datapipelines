@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping
 @Controller
 class AdminUsersController(
     private val themeResolver: ThemeResolver,
+    private val authProperties: co.datapipelines.auth.AuthProperties,
 ) {
     @GetMapping("/admin/users")
     fun users(
@@ -29,6 +30,8 @@ class AdminUsersController(
                 .AccessDeniedException("Admin scope required")
         }
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        // The create-local-user form renders only when the method exists (§5A.1).
+        model.addAttribute("localEnabled", authProperties.local.enabled)
         return "admin/users"
     }
 

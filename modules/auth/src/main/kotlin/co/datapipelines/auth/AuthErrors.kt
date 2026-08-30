@@ -41,6 +41,9 @@ object AuthErrorCodes {
     const val CSRF_INVALID = "auth.csrf.invalid"
     const val LOGIN_DOMAIN_NOT_ALLOWED = "auth.login.domain_not_allowed"
     const val LOGIN_USER_INACTIVE = "auth.login.user_inactive"
+    const val LOGIN_BAD_CREDENTIALS = "auth.login.bad_credentials"
+    const val LOGIN_LOCKED = "auth.login.locked"
+    const val PASSWORD_CHANGE_REQUIRED = "auth.password.change_required"
 
     /**
      * The single system-wide rate-limit code ([Pipeline Contract §13.11]). It is
@@ -172,6 +175,21 @@ class CsrfInvalidException(
         "CSRF token missing or mismatched",
         "Your page is out of date. Reload it and try again.",
         details = mapOf("reason" to reason),
+    )
+
+/**
+ * A session principal whose `must_change_password` is TRUE called an API path
+ * (auth.md §5A.4) — the forced-change gate redirects browsers, but a JSON client
+ * gets the envelope instead. (Constant declared here; the §13.7 registry row,
+ * the [AuthErrorCodes.ALL] membership and the drift-test literals land in the
+ * single isolated catalog commit per the parallel-lane contract.)
+ */
+class PasswordChangeRequiredException :
+    AuthException(
+        AuthErrorCodes.PASSWORD_CHANGE_REQUIRED,
+        HTTP_FORBIDDEN,
+        "Password change is required before any other operation",
+        "You must set a new password before continuing.",
     )
 
 /** Per-IP login rate limit ([Pipeline Contract §13.11], auth.md §9). */

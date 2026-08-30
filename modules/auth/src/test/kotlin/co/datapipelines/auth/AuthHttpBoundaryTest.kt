@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
@@ -28,6 +29,10 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.ResponseBody
 import org.testcontainers.containers.PostgreSQLContainer
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.time.Instant
 import java.util.Base64
 import java.util.Date
@@ -56,12 +61,16 @@ class AuthHttpBoundaryTest {
 
     @Autowired private lateinit var servletContext: ServletContext
 
+    @LocalServerPort
+    private var port: Int = 0
+
     private val mapper = ObjectMapper()
 
     private lateinit var user: User
     private lateinit var readKey: String
     private lateinit var expiredKey: String
     private lateinit var session: String
+    private lateinit var mustChangeSession: String
 
     /**
      * Probe endpoints standing in for the controllers P6a will ship — this module owns
@@ -105,6 +114,16 @@ class AuthHttpBoundaryTest {
             @ResponseBody
             fun unannotated() = principalPayload()
 
+            /**
+             * A route no allowlist or matrix row has ever heard of — the §5A.4 pin:
+             * the forced password change gate must catch it WITHOUT being told about
+             * it, because that is the whole point of running ahead of every handler.
+             */
+            @GetMapping("/brand-new-route")
+            @ResponseBody
+            @Suppress("FunctionOnlyReturningConstant") // the body is irrelevant — the GATE before it is the assertion
+            fun brandNew() = "ok"
+
             @PostMapping("/mcp")
             @ResponseBody
             @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -144,6 +163,13 @@ class AuthHttpBoundaryTest {
                     Instant.now().minusSeconds(3600),
                 ).plaintext
         session = jwtService.issue(user)
+
+        // A user mid forced-change (§5A.4): the gate reads must_change_password
+        // from the row on every request, so seeding it here is enough.
+        val mustChangeUser =
+            UserRepository(jdbc).insert("mustchange@company.com", "Must Change", null, "local", "mustchange@company.com", isAdmin = false)
+        UserRepository(jdbc).setPassword(mustChangeUser.id, "not-a-real-hash", mustChange = true)
+        mustChangeSession = jwtService.issue(mustChangeUser)
     }
 
     // ---------------------------------------------------------------- helpers
@@ -428,6 +454,51 @@ class AuthHttpBoundaryTest {
         response.headers[HttpHeaders.SET_COOKIE]
             .orEmpty()
             .count { it.startsWith("${OidcSuccessHandler.SESSION_COOKIE}=") } shouldBe 1
+    }
+
+    // ------------------------------------------ forced password change gate (§5A.4)
+
+    @Test
+    fun `a brand-new route is still gated for a must-change user - the gate cannot be forgotten by a future controller`() {
+        // java.net.http with redirects NEVER followed: TestRestTemplate's default
+        // factory follows GET redirects (HttpURLConnection), so the 302 would
+        // surface as the target's 404 in this context — the redirect IS the
+        // assertion, so it must be observed raw.
+        val request =
+            HttpRequest
+                .newBuilder(URI.create("http://localhost:$port/brand-new-route"))
+                .header("Cookie", "dp_session=$mustChangeSession")
+                .GET()
+                .build()
+        val response =
+            HttpClient
+                .newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build()
+                .send(request, HttpResponse.BodyHandlers.ofString())
+
+        response.statusCode() shouldBe 302
+        response
+            .headers()
+            .firstValue("Location")
+            .orElse("")
+            .endsWith("/settings/password") shouldBe true
+    }
+
+    @Test
+    fun `the must-change gate answers the change-required envelope on the api surface`() {
+        val response =
+            call(HttpMethod.GET, "/api/v1/probe", headers(cookies = listOf("dp_session=$mustChangeSession")))
+
+        response.statusCode.value() shouldBe 403
+        code(response) shouldBe "auth.password.change_required"
+    }
+
+    @Test
+    fun `a compliant session is not gated`() {
+        call(HttpMethod.GET, "/brand-new-route", headers(cookies = listOf("dp_session=$session")))
+            .statusCode
+            .value() shouldBe 200
     }
 
     private fun rejectionCount(): Int =

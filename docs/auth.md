@@ -410,6 +410,8 @@ A local account is an ordinary `users` row whose `password_hash` holds an **Argo
 
 A local account's `provider` is the placeholder `'local'` (like `'bootstrap'`, §4.4 — a value with meaning, not an OIDC registration name): it marks "no OIDC identity is linked". If the person later signs in via OIDC with the same email, §4.2's linking step replaces the placeholder exactly as it replaces `'bootstrap'`; the local password stays valid alongside the OIDC identity unless an admin disables local access.
 
+**Admin operations** on the user-administration screen (§7.6 `USER_ADMINISTRATION`): **create a local user** (a random one-time password is shown to the admin exactly once, `must_change_password = TRUE`, audited `auth.user.created` — there is no email flow; the product has no SMTP, so an admin-driven reset is the whole account-recovery story), **reset a password** (new one-time credential, forces the change, clears the lockout — the unlock path for a sprayed-out account), **disable local access** (the hash is cleared and the account is OIDC-only again), and **unlock** (clears the lockout without touching the credential).
+
 ### 5A.2 Seeding the first admin
 
 A fresh local-accounts deployment has the chicken-and-egg §4.4 solves for OIDC: no admin exists to create the first account. Config seeds the **first admin only, never ordinary users** — passwords are not a config medium (config is plaintext in `docker compose config`, `docker inspect`, image layers and pasted issue reports, and offers no rotation, no revocation and no self-service). Every other account's credential lives hashed in the database, created by an admin from the user-administration screen.
@@ -429,7 +431,14 @@ Distinct from the per-IP login rate limit (§9, `rate_limit.exceeded`): that dam
 
 ### 5A.4 Forced password change
 
-*(Lands with the forced-change commit of this feature.)*
+Every seeded (§5A.2) and admin-reset credential is one-time: `users.must_change_password` is TRUE, and **the app refuses to proceed to any other screen until it is changed**. The mechanism is an MVC interceptor (`ForcedPasswordChangeInterceptor`) registered once for all paths — a filter/interceptor concern precisely so a future controller cannot forget it (a test adds a brand-new route and proves it is still gated). While the flag is set:
+
+- Browsers are redirected `302` to `/settings/password`; htmx requests get `HX-Redirect` (a 302 would swap a full page into a fragment target); API and MCP paths get a 403 `change_required` JSON envelope — a redirect is meaningless to a JSON client (the full code joins §9 and the §13.7 registry with this feature's catalog commit).
+- The allowlist is exactly: the change-password page and its endpoint, `/logout`, `/health`, `/ready`, and the public/static paths the change page needs to render.
+- **API-key principals are not gated** — an API key is a separate credential the user created deliberately; the forced change is about the human proving control of the interactive account.
+- The flag is read through the same ~60s liveness cache (D13); every password mutation evicts it immediately.
+
+The change itself (self-service, `POST /partials/account/password`) verifies the **current** password first — a hijacked session must not be able to rotate the credential — enforces the §5A.5 floor, clears `must_change_password`, and audits `auth.password.changed`.
 
 ### 5A.5 Enumeration resistance and the password policy
 
@@ -785,6 +794,11 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
 | `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures (§5A.3) |
 | `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential (§5A.2) |
+| `auth.password.changed` | User changed their own password (self-service or forced, §5A.4) |
+| `auth.password.reset` | Admin reset a user's password — new one-time credential (§5A.1) |
+| `auth.password.disabled` | Admin disabled a user's local access — account is OIDC-only (§5A.1) |
+| `auth.user.created` | Admin created a local account (§5A.1; details carry the acting admin) |
+| `auth.user.unlocked` | Admin cleared a local account's lockout (§5A.3) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
@@ -1003,6 +1017,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-30 | v2.10 | local password auth | **§5A (new): optional local password accounts** — admin-created only (no self-registration), Argon2id via the API-key `SecretHasher`, `provider = 'local'` placeholder, per-account lockout (§5A.3), config-seeded first admin with a forced first-login change (§5A.2/§5A.4), enumeration-resistant failures with timing equalization (§5A.5), `POST /login` converging on the OIDC session (§5A.6). §1/§2 Principle 1 amended honestly: identity delegated by default, the narrow local exception and WHY. §5.3 login page: form + divider + buttons, only enabled methods. §8.3: `/login` covers the local POST. §10.1 gains `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` are shared with OIDC. The local-auth error codes join §9 and the §13.7 registry (see the catalog commit). §14 postscript. |
 | 2026-08-28 | v2.9 | sample data, slice A | **§4.4 pre-provisioning:** when `datapipelines.bootstrap.datasources-file` is set, startup creates the configured bootstrap admin's row before serving traffic (placeholder `provider = 'bootstrap'` / `provider_subject` = the email, `display_name` from the local-part) so bootstrap-registered datasources have a real `created_by`. Grant-at-creation semantics are unchanged — this is the same single path firing earlier, one audit event across provision → restart → login. **§4.2 linking:** the update no longer rewrites `display_name` on every sign-in; it is set at row creation, and refreshed from the ID token's `name` claim only when the login completes a `provider = 'bootstrap'` placeholder |
 | 2026-08-26 | v2.8 | workspaces slice 2 | **Workspace resolution (design §5/§7):** §4.2 step 4 — login stamps `active_workspace` (last-used, else first membership, else freshly provisioned personal workspace under `auto-per-user`); §5.6 — `DP-Workspace` per-request switch, membership-checked (`403 workspace.membership_required`), API-key requests pin the key's workspace and refuse the header (`400 workspace.header_forbidden`); §7.4 — issuance restricted to the creator's workspaces; `workspace.*` codes catalogued in pipeline-contract §13.12. **§11.1:** stock config ships Google only; Microsoft becomes a commented single-tenant example — multi-tenant `/common` documented as unsupported in v1 (Nimbus refuses its `{tenantid}` discovery metadata at startup). |
 | 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |

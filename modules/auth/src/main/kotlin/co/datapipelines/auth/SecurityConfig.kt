@@ -42,10 +42,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(JwtProperties::class, AuthProperties::class)
+@Suppress("LongParameterList") // the wiring class — every parameter is an @Bean reference (019 precedent)
 class SecurityConfig(
     private val filters: AuthFilters,
     private val oidcSuccessHandler: OidcSuccessHandler,
     private val scopeInterceptor: ScopeInterceptor,
+    private val forcedPasswordChangeInterceptor: ForcedPasswordChangeInterceptor,
     private val authEntryPoint: AuthEntryPoint,
     private val authAccessDeniedHandler: AuthAccessDeniedHandler,
     private val auditLogoutHandler: AuditLogoutHandler,
@@ -169,6 +171,22 @@ class SecurityConfig(
         object : WebMvcConfigurer {
             override fun addInterceptors(registry: InterceptorRegistry) {
                 registry.addInterceptor(scopeInterceptor)
+            }
+        }
+
+    /**
+     * Registers the forced password change gate on the MVC pipeline (auth.md §5A.4)
+     * — ahead of EVERY handler except the single allowlist in
+     * [ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS], so a future controller is
+     * gated by default and cannot forget it.
+     */
+    @Bean
+    fun forcedChangeInterceptorConfigurer(): WebMvcConfigurer =
+        object : WebMvcConfigurer {
+            override fun addInterceptors(registry: InterceptorRegistry) {
+                registry
+                    .addInterceptor(forcedPasswordChangeInterceptor)
+                    .excludePathPatterns(ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS)
             }
         }
 

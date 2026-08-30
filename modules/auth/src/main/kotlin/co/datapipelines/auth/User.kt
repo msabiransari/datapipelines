@@ -40,4 +40,11 @@ data class User(
      * screen. Safe on the principal-facing type — a boolean, not a secret.
      */
     val mustChangePassword: Boolean = false,
+    /**
+     * Whether `password_hash IS NOT NULL` (metadata-db §4.1) — the flag, never the
+     * hash. Drives the user-administration table's local-access indicator (§5A.1).
+     */
+    val hasLocalPassword: Boolean = false,
+    /** `users.locked_until` — the lockout horizon (§5A.3), for the admin table. */
+    val lockedUntil: Instant? = null,
 )
