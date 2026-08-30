@@ -7,8 +7,10 @@
   /* ------------------------------------------------------
      Theme toggle
      Swaps the dp-theme stylesheet between auto / light /
-     dark. dark.css keys off [data-theme="dark"], so the
-     attribute is set only while dark.css is active.
+     dark. All theme files open on :root (027: dark.css was
+     re-vendored to match its siblings), so the swap alone
+     activates the theme; the data-theme attribute is kept
+     as harmless belt-and-braces for dark.
      ------------------------------------------------------ */
   var STORAGE_KEY = 'dp-site-theme';
   var THEME_DIR = 'assets/vendor/design-system/themes/';

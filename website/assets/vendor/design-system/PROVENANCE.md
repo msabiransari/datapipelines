@@ -8,8 +8,12 @@ re-copy.
 - **Source:** `modules/web/src/main/resources/static/vendor/design-system/`
   in <https://github.com/msabiransari/datapipelines>
 - **Copied at commit:** `d733f9a5a70a165ac0b27c7e88f60e283f45ce0a`
-- **Re-verified byte-identical at:** `a8cce57` (origin/main, 2026-08-29) —
-  `git show origin/main:<source-path> | shasum -a 256` matches every hash below.
+- **Re-copied at:** the 027 UI-repair round — `themes/dark.css` was fixed upstream
+  (design-system-starter `fix/dark-theme-root-scope`, mirrored into the app's
+  `modules/web/.../vendor` by `scripts/sync-design-system.sh`): the file now opens
+  on `:root` like its eight siblings instead of keying off `[data-theme="dark"]`,
+  which nothing on this site's file-swap architecture ever stamped at load time.
+  Byte-identical to the app's vendored copy at that round's branch tip.
 
 | File | SHA-256 |
 |---|---|
@@ -19,7 +23,7 @@ re-copy.
 | `icons.css` | `68b21794e9c5e0c6586fd30dae189d63e716cbeaa49a434f46a5db47b827a622` |
 | `themes/auto.css` | `761999df995d7923caa1a591bef407071cef7bdb1be3f609eedc2537c4d8dcc0` |
 | `themes/light.css` | `0802ba391d3cc209e5f95da35a418e6bbc48ec96b096b2531a6492cb592e1c10` |
-| `themes/dark.css` | `ead04337e892a1c98918d70103179daab95fea3973fc012b56a6faa7ef1b31fa` |
+| `themes/dark.css` | `fd01b40df5dc541a6db1fa46bf3a4fb719a391f08217cb2a8653c6ea74c5240a` |
 
 Deliberately **not** copied:
 
