@@ -73,6 +73,39 @@ tasks.register("resolveAndLockAll") {
 }
 
 // ---------------------------------------------------------------------------
+// Cold dependency-verification surface (025b/C2 — the CI `cold-verify` job).
+//
+// Gradle checks gradle/verification-metadata.xml ONLY for artifacts it
+// downloads in the current run, so a metadata gap is visible only to a cold
+// GRADLE_USER_HOME resolving the configuration that carries the artifact.
+// `bootJar` alone resolves just runtime graphs; the T30 gaps were mostly
+// test-only and tool-only artifacts. These tasks resolve EVERY resolvable
+// configuration of EVERY project — runtimeClasspath, testRuntimeClasspath,
+// the compile classpaths, the detekt/ktlint tool classpaths, Kover plumbing —
+// so a cold run verifies the whole dependency surface. Same
+// isCanBeResolved-guarded pattern as resolveAndLockAll above; a configuration
+// a project does not have simply never exists, so there is nothing to fail on.
+// ---------------------------------------------------------------------------
+val resolveDependencyVerificationSurface = tasks.register("resolveDependencyVerificationSurface") {
+    group = "verification"
+    description = "Resolves every resolvable configuration in every project; run against a cold GRADLE_USER_HOME to exercise verification-metadata.xml."
+}
+
+allprojects {
+    val resolveOwnDependencyVerificationSurface = tasks.register("resolveOwnDependencyVerificationSurface") {
+        group = "verification"
+        description = "Resolves every resolvable configuration of this project (the per-project half of :resolveDependencyVerificationSurface)."
+        notCompatibleWithConfigurationCache("Resolves configurations eagerly at execution time")
+        doLast {
+            configurations
+                .filter { it.isCanBeResolved }
+                .forEach { it.resolve() }
+        }
+    }
+    resolveDependencyVerificationSurface.configure { dependsOn(resolveOwnDependencyVerificationSurface) }
+}
+
+// ---------------------------------------------------------------------------
 // §4.2 enforcement — the allowed-dependency table, machine-checked.
 //
 // "A module's dependencies block MUST list a subset of its row below, and every
