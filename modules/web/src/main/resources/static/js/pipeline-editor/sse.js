@@ -16,6 +16,7 @@
     this.abortController = null;
     this.isConnected = false;
     this.connectionLost = false;
+    this.terminalSeen = false;
     this.pollCount = 0;
     this.maxPolls = 2;
     this.executionId = null;
@@ -25,6 +26,7 @@
     var self = this;
     self.executionId = executionId;
     self.connectionLost = false;
+    self.terminalSeen = false;
     self.pollCount = 0;
     self.isConnected = true;
     self.abortController = new AbortController();
@@ -84,7 +86,10 @@
         .then(function (result) {
           if (result.done) {
             self.isConnected = false;
-            if (!self.connectionLost) {
+            // A stream that ends AFTER a terminal event completed normally — §7.1.7:
+            // only a stream that ends WITHOUT one is connection loss. Treating every
+            // end as loss overwrote the success banner with "Connection lost" (027).
+            if (!self.connectionLost && !self.terminalSeen) {
               self.handleConnectionLoss();
             }
             return;
@@ -184,11 +189,13 @@
         break;
 
       case "pipeline_completed":
+        self.terminalSeen = true;
         editor.isExecuting = false;
         editor.setBanner("Pipeline completed successfully", "success");
         break;
 
       case "pipeline_failed":
+        self.terminalSeen = true;
         editor.isExecuting = false;
         editor.showError(payload.message || "Pipeline execution failed");
         break;
@@ -200,6 +207,7 @@
         break;
 
       case "execution_aborted":
+        self.terminalSeen = true;
         editor.isExecuting = false;
         if (editor.graph) {
           editor.graph.cy.nodes().forEach(function (node) {
@@ -268,7 +276,10 @@
       })
       .then(function (data) {
         if (!data) return;
-        var status = data.status || (data.data && data.data.status);
+        // The executions API reports UPPER-CASE statuses (SUCCESS/FAILED/RUNNING);
+        // the editor compared them case-sensitively against lowercase words, so
+        // even a successful recovery poll fell through to "Connection lost" (027).
+        var status = (data.status || (data.data && data.data.status) || "").toLowerCase();
         if (status === "completed" || status === "success") {
           self.editor.isExecuting = false;
           self.editor.setBanner("Pipeline completed", "success");
