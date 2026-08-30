@@ -301,11 +301,22 @@ blast radius, not feasibility:
   recorded v2 closure if stranded content becomes an operator-visible problem.
 
 What v1 ships instead: a **post-delete recount** in `WorkspaceService.delete` — content
-found after the soft delete emits `auth.workspace.stranded_content` (audit + ERROR log
-naming the recovery), so the strand is operator-visible instead of silent. The detector is
-best-effort (a commit landing after the recount still strands); the window itself is
-milliseconds wide and requires a concurrent create inside the exact workspace its owner is
-deleting.
+found after the soft delete emits the `auth.workspace.stranded_content` audit event plus an
+ERROR log naming the SQL recovery (un-delete the workspace or remove the stranded rows).
+The detector is best-effort and narrow: it sees only commits that land between the
+pre-delete count and the recount — a commit after the recount still strands, silently.
+
+The honest window is much wider than the check-then-act gap. Workspace and membership
+resolution are served by `AuthCache` — in-process per instance, TTL
+`datapipelines.auth.api-keys.cache-ttl-seconds` (default 60s, `AuthProperties`) — and
+`delete` evicts only the deleting instance's entries (`invalidateMemberships` /
+`invalidateWorkspace`); every other instance converges at TTL expiry. In the multi-instance
+deployment the docs ship, a member whose workspace was deleted on one instance keeps
+resolving it on another for up to one TTL — no concurrent create required, just ordinary
+traffic — and content written through that stale resolution strands after the recount,
+invisible to the detector. The accept-for-v1 call stands (the alternatives above are
+unchanged), but the cache-TTL window is what makes content-table triggers the recorded v2
+closure rather than optional hardening.
 
 - Admin invite/approval flow (`closed` + owner-adds-members covers v1).
 - Per-workspace roles beyond owner/member; per-datasource ACLs (ROADMAP).
