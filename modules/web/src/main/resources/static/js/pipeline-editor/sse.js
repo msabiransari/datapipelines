@@ -1,6 +1,16 @@
 (function () {
   "use strict";
 
+  // The dp_csrf cookie is JS-readable by design (CookieCsrfTokenRepository
+  // .withHttpOnlyFalse(), auth.md §8.4) — the double-submit pair for every
+  // cookie-authenticated state-changing fetch (pipeline-editor.md §7.2). Without
+  // the header the editor's Execute and Cancel were both rejected 403
+  // auth.csrf.invalid (024 T41, fixed 027).
+  function readCookie(name) {
+    var match = document.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]*)"));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
   function SseHandler(editor) {
     this.editor = editor;
     this.abortController = null;
@@ -29,7 +39,9 @@
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        "DP-CSRF-Token": readCookie("dp_csrf"),
       },
+      credentials: "same-origin",
       body: body,
       signal: self.abortController.signal,
     })
@@ -200,7 +212,12 @@
       self.abortController.abort();
     }
     self.isConnected = false;
-    fetch("/api/v1/executions/" + self.executionId, { method: "DELETE" })
+    // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
+    fetch("/api/v1/executions/" + self.executionId, {
+      method: "DELETE",
+      headers: { "DP-CSRF-Token": readCookie("dp_csrf") },
+      credentials: "same-origin",
+    })
       .catch(function () {});
   };
 
