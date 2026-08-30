@@ -4,8 +4,14 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * A row of `users` (metadata-db §4.1). OIDC-authenticated; no password column.
- * [provider] is free text — the OIDC registration name the deployment configured.
+ * A row of `users` (metadata-db §4.1). Authenticated via OIDC, or via an optional
+ * local password (auth.md §5A) — the Argon2id hash itself is deliberately NOT on
+ * this type: it is a secret, loaded only by [UserRepository.findLocalCredential]
+ * on the login path, so it can never leak into a log line or a JSON payload that
+ * serializes a principal.
+ *
+ * [provider] is free text — the OIDC registration name the deployment configured,
+ * or a placeholder with meaning ([UserService.BOOTSTRAP_PROVIDER], [UserService.LOCAL_PROVIDER]).
  *
  * [email] is always the lowercase-normalized address (auth.md §4.2): provider case
  * differences must not fork one human into two rows.
@@ -28,4 +34,10 @@ data class User(
      * which is not the same as materializing today's default into the row.
      */
     val themePreference: String? = null,
+    /**
+     * `users.must_change_password` (metadata-db §4.1, auth.md §5A.4): while TRUE the
+     * forced-change gate redirects every authenticated route to the change-password
+     * screen. Safe on the principal-facing type — a boolean, not a secret.
+     */
+    val mustChangePassword: Boolean = false,
 )

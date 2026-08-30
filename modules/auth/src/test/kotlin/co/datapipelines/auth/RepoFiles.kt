@@ -28,13 +28,16 @@ object RepoFiles {
     const val MIGRATION_PATH = "modules/app/src/main/resources/db/migration/V1__initial_schema.sql"
 
     /**
-     * V1 plus the `workspaces` re-key (V4), in version order — the suites that exercise
-     * [ApiKeyRepository] need the `api_keys.workspace_id` column and its FK parent.
+     * V1 plus the `workspaces` re-key (V4) and the local-auth columns (V5), in
+     * version order — the suites that exercise [ApiKeyRepository] need the
+     * `api_keys.workspace_id` column and its FK parent, and every [User] read maps
+     * the V5 `must_change_password` column.
      */
     val MIGRATION_PATHS =
         listOf(
             MIGRATION_PATH,
             "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
+            "modules/app/src/main/resources/db/migration/V5__local_password_auth.sql",
         )
 
     const val AUTH_SPEC_PATH = "docs/auth.md"

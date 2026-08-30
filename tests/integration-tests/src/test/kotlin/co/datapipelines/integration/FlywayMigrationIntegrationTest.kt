@@ -58,6 +58,35 @@ class FlywayMigrationIntegrationTest {
                 "2|datasource introspection include schemas|true",
                 "3|execution lineage|true",
                 "4|workspaces rekey|true",
+                "5|local password auth|true",
+            )
+    }
+
+    @Test
+    fun `V5 adds the local password auth columns to users`() {
+        // metadata-db §4.1 (auth.md §5A): password_hash NULL = OIDC-only account;
+        // must_change_password forces the first-login change; failed_login_count and
+        // locked_until back the per-account lockout. All additive — existing rows keep
+        // password_hash NULL and behave exactly as before.
+        val columns =
+            query(
+                """
+                SELECT column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'users'
+                   AND column_name IN ('password_hash', 'password_changed_at', 'must_change_password',
+                                       'failed_login_count', 'locked_until')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "failed_login_count|NO|0",
+                "locked_until|YES|NONE",
+                "must_change_password|NO|false",
+                "password_changed_at|YES|NONE",
+                "password_hash|YES|NONE",
             )
     }
 

@@ -21,8 +21,8 @@ import java.time.Instant
 
 /**
  * [UserRepository], [ApiKeyRepository] and [AuditLogger] against a real Postgres
- * running the **shipped** migrations V1 + V4 (metadata-db §4.1/§4.2/§4.3 — V4 adds the
- * `api_keys.workspace_id` pin). The migrations are executed off disk rather than via Flyway —
+ * running the **shipped** migrations V1 + V4 + V5 (metadata-db §4.1/§4.2/§4.3 — V4 adds the
+ * `api_keys.workspace_id` pin, V5 the local password auth columns). The migrations are executed off disk rather than via Flyway —
  * domain modules carry no Flyway dependency (module-structure §3.1 rule 2), the same
  * discipline as the sibling `PipelineRepositoryIntegrationTest`.
  */
@@ -198,6 +198,88 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `an unknown key id reads as null`() {
         keys.findById("dpk_DOESNOTEXIST").shouldBeNull()
+    }
+
+    // ------------------------------------------------------------ Local password auth (V5, §5A)
+
+    @Test
+    fun `an OIDC-only account has no local credential until a password is set`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+
+        users.findLocalCredential("alice@company.com").shouldBeNull()
+        checkNotNull(users.findById(u.id)).mustChangePassword.shouldBeFalse()
+
+        users.setPassword(u.id, "argon2-hash-1", mustChange = true)
+
+        val credential = checkNotNull(users.findLocalCredential("alice@company.com"))
+        credential.userId shouldBe u.id
+        credential.passwordHash shouldBe "argon2-hash-1"
+        credential.failedLoginCount shouldBe 0
+        credential.lockedUntil.shouldBeNull()
+        val reloaded = checkNotNull(users.findById(u.id))
+        reloaded.mustChangePassword.shouldBeTrue()
+        reloaded.lastLoginAt.shouldBeNull()
+    }
+
+    @Test
+    fun `failed logins lock at the threshold atomically and success clears the lockout`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(u.id, "argon2-hash-1", mustChange = false)
+
+        val first = users.recordLocalLoginFailure(u.id, maxFailures = 3, lockMinutes = 15)
+        first.failedLoginCount shouldBe 1
+        first.lockedUntil.shouldBeNull()
+        users.recordLocalLoginFailure(u.id, maxFailures = 3, lockMinutes = 15).lockedUntil.shouldBeNull()
+
+        val third = users.recordLocalLoginFailure(u.id, maxFailures = 3, lockMinutes = 15)
+        third.failedLoginCount shouldBe 3
+        third.lockedUntil.shouldNotBeNull()
+
+        users.recordLocalLoginSuccess(u.id)
+        val cleared = checkNotNull(users.findLocalCredential("alice@company.com"))
+        cleared.failedLoginCount shouldBe 0
+        cleared.lockedUntil.shouldBeNull()
+        checkNotNull(users.findById(u.id)).lastLoginAt.shouldNotBeNull()
+    }
+
+    @Test
+    fun `setPassword after a lockout clears it so the new credential is usable`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(u.id, "argon2-hash-1", mustChange = false)
+        users.recordLocalLoginFailure(u.id, maxFailures = 1, lockMinutes = 15).lockedUntil.shouldNotBeNull()
+
+        users.setPassword(u.id, "argon2-hash-2", mustChange = true)
+
+        val credential = checkNotNull(users.findLocalCredential("alice@company.com"))
+        credential.passwordHash shouldBe "argon2-hash-2"
+        credential.failedLoginCount shouldBe 0
+        credential.lockedUntil.shouldBeNull()
+    }
+
+    @Test
+    fun `clearPassword removes local access and reports the transition once`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(u.id, "argon2-hash-1", mustChange = true)
+
+        users.clearPassword(u.id).shouldBeTrue()
+        users.clearPassword(u.id).shouldBeFalse()
+
+        users.findLocalCredential("alice@company.com").shouldBeNull()
+        checkNotNull(users.findById(u.id)).mustChangePassword.shouldBeFalse()
+    }
+
+    @Test
+    fun `clearLockout resets the counters and reports the transition once`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(u.id, "argon2-hash-1", mustChange = false)
+        users.recordLocalLoginFailure(u.id, maxFailures = 1, lockMinutes = 15)
+
+        users.clearLockout(u.id).shouldBeTrue()
+        users.clearLockout(u.id).shouldBeFalse()
+
+        val credential = checkNotNull(users.findLocalCredential("alice@company.com"))
+        credential.failedLoginCount shouldBe 0
+        credential.lockedUntil.shouldBeNull()
     }
 
     private fun dataSource(): DriverManagerDataSource =
