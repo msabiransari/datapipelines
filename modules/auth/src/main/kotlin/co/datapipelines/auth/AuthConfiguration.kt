@@ -67,6 +67,15 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
     ): LocalAuthService = LocalAuthService(userRepository, secretHasher, authProperties, auditLogger)
 
+    @Bean
+    fun localAdminSeeder(
+        userRepository: UserRepository,
+        userService: UserService,
+        secretHasher: SecretHasher,
+        authProperties: AuthProperties,
+        auditLogger: AuditLogger,
+    ): LocalAdminSeeder = LocalAdminSeeder(userRepository, userService, secretHasher, authProperties, auditLogger)
+
     /**
      * [lastUsedWorkspaceStore] is an `ObjectProvider`: the Redis implementation lives in
      * `web` (module-structure §3.1 rule 3), so auth-only contexts (the module's own test

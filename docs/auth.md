@@ -131,7 +131,7 @@ For internal-only deployments, **always set the allowlist** to prevent random Go
 
 ### 4.4 Bootstrap admin
 
-A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) and no local login — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11):
+A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11; extended 2026-08-29 to seed the first admin's local credential, §5A.2):
 
 - The operator sets `datapipelines.auth.bootstrap-admin-email` ([Configuration §3.4](configuration.md#34-auth)) before first start.
 - When a user row is **created** (first provisioning, §4.2) and its lowercase-normalized email matches the configured value (compared case-insensitively), `is_admin` is set true. The grant fires **only at row creation**: a later login changes nothing, the flag is never *revoked* by this path, and after an admin deliberately revokes admin (`auth.user.admin_revoked`, §10.1) this path never re-grants it — re-instating admin is an explicit §16.3 operation.
@@ -412,7 +412,12 @@ A local account's `provider` is the placeholder `'local'` (like `'bootstrap'`, �
 
 ### 5A.2 Seeding the first admin
 
-*(Lands with the bootstrap commit of this feature — see §4.4 and [Configuration §3.4](configuration.md#34-auth).)*
+A fresh local-accounts deployment has the chicken-and-egg §4.4 solves for OIDC: no admin exists to create the first account. Config seeds the **first admin only, never ordinary users** — passwords are not a config medium (config is plaintext in `docker compose config`, `docker inspect`, image layers and pasted issue reports, and offers no rotation, no revocation and no self-service). Every other account's credential lives hashed in the database, created by an admin from the user-administration screen.
+
+- `datapipelines.auth.local.bootstrap-password-hash` — the preferred form: a **pre-computed Argon2id hash**, produced by `./gradlew :modules:auth:hashPassword` (prompts, or reads `DATAPIPELINES_SEED_PASSWORD`; never take the password as a shell argument — it would leak into shell history and the process table). The plaintext never has to sit in a config file.
+- `datapipelines.auth.local.bootstrap-password` — the plaintext alternative, accepted because a zero-setup demo should be one command. It is never logged and never audited.
+
+Both forms land on the `bootstrap-admin-email` account (created through the single §4.4 creation path, so the admin grant and its audit event fire exactly as for OIDC) and **always** seed with `must_change_password = TRUE`: the app refuses to proceed to any other screen until the seeded credential is replaced (§5A.4). Seeding is **create-if-absent and idempotent** — a restart never resets a changed password, and an account that already exists is left untouched. And the seeded credential cannot survive silently: every startup where the bootstrap-admin account still has `must_change_password = TRUE` logs a WARN (`event=auth.local.one_time_credential_pending`). Startup refuses the ambiguous shapes ([Configuration §7](configuration.md#7-config-validation)): both forms set, a seed without `local.enabled`, or a seed without `bootstrap-admin-email` — each naming both keys.
 
 ### 5A.3 Lockout
 
@@ -779,6 +784,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 | `auth.login.oidc_error` | OIDC provider returned an error |
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
 | `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures (§5A.3) |
+| `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential (§5A.2) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |

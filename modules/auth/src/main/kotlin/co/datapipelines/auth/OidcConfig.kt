@@ -52,7 +52,9 @@ class OidcConfig {
         if (providers.isEmpty()) {
             if (authProperties.local.enabled) {
                 log.info("No OIDC providers configured; local password accounts are enabled (auth.md §5A)")
-                return InMemoryClientRegistrationRepository(emptyList())
+                // InMemoryClientRegistrationRepository refuses an EMPTY list, and the
+                // interface is functional — a null-answer repository is the honest empty.
+                return ClientRegistrationRepository { null }
             }
             error(
                 "No OIDC providers configured. Set datapipelines.auth.oidc.providers in config, " +

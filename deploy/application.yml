@@ -3,9 +3,12 @@ datapipelines:
     base-url: http://localhost:8080
     oidc:
       providers:
+        # client-id/secret default to EMPTY: an unset entry is ignored with a WARN
+        # (OidcConfig, configuration.md §7), so a local-accounts-only deployment
+        # starts with zero OIDC providers. Set the vars to enable the provider.
         - name: google
-          client-id: ${GOOGLE_CLIENT_ID}
-          client-secret: ${GOOGLE_CLIENT_SECRET}
+          client-id: ${GOOGLE_CLIENT_ID:}
+          client-secret: ${GOOGLE_CLIENT_SECRET:}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
         # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the
@@ -19,3 +22,11 @@ datapipelines:
         #   client-secret: ${MICROSOFT_CLIENT_SECRET}
         #   issuer-uri: https://login.microsoftonline.com/{tenant-id}/v2.0
         #   display-name: "Sign in with Microsoft"
+    # Optional local password accounts (auth.md §5A), disabled by default. The
+    # seed keys configure the FIRST ADMIN's initial credential only (the
+    # bootstrap-admin-email account) and force a first-login change; the hash
+    # form is preferred (./gradlew :modules:auth:hashPassword).
+    local:
+      enabled: ${DATAPIPELINES_AUTH_LOCAL_ENABLED:false}
+      bootstrap-password-hash: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH:}
+      bootstrap-password: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD:}

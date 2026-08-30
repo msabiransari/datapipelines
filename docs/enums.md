@@ -266,6 +266,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.login.oidc_error` | OIDC provider returned an error |
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
 | `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
+| `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |

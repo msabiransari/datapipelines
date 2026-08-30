@@ -91,8 +91,10 @@ REDIS_PASSWORD=$(openssl rand -base64 24)
 JWT_SECRET=${jwt:-$(openssl rand -base64 32)}
 ENCRYPTION_KEY=${enc:-$(openssl rand -base64 32)}
 DATAPIPELINES_AUTH_BASE_URL=${base:-http://localhost:8080}
-GOOGLE_CLIENT_ID=${gid:-your-google-client-id}
-GOOGLE_CLIENT_SECRET=${gsec:-your-google-client-secret}
+# Empty = the stock google provider is ignored (configuration.md §7): startup then
+# needs local accounts enabled (deploy/.env.example, auth.md §5A) or real creds here.
+GOOGLE_CLIENT_ID=${gid:-}
+GOOGLE_CLIENT_SECRET=${gsec:-}
 # This email becomes admin at its FIRST login (auth.md §4.4). Deliberately NOT
 # written as an empty assignment when unknown: a later env file could never
 # override an empty value here (compose precedence), and the demo's placeholder
@@ -103,7 +105,7 @@ DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=${domains:-}
 EOF
   # Strip the blank line the empty substitution leaves behind.
   sed -i.bak '/^$/d' "$DEPLOY_ENV" && rm -f "$DEPLOY_ENV.bak"
-  echo "==> wrote $DEPLOY_ENV — review it; Google creds must be real for login to work"
+  echo "==> wrote $DEPLOY_ENV — review it; set Google creds for OIDC login, or enable local accounts (see deploy/.env.example)"
 }
 
 # Scaffold missing demo keys into deploy/.env.demo — NEVER into deploy/.env: keys
@@ -131,6 +133,13 @@ ensure_demo_env() {
   add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
   add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"
   add_key DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED "false"
+  # Zero-setup login (auth.md §5A): the demo needs NO OIDC client at all. Local
+  # accounts are enabled and the FIRST ADMIN gets a documented one-time password —
+  # the app forces a change at first login (§5A.4), so the fixed value is a demo
+  # convenience, not a standing credential. The admin email key below names the
+  # account this seed lands on (§3.4 cross-key rule).
+  add_key DATAPIPELINES_AUTH_LOCAL_ENABLED "true"
+  add_key DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD "demo-admin"
   # The bootstrap ACTOR (auth.md §4.4/§6.1): registration needs a users row for
   # datasources.created_by, and startup fail-fasts without one (the §3.18
   # cross-key rule) — which broke the zero-edit demo on a machine with no
@@ -217,10 +226,13 @@ start() {
   echo "==> UP — http://localhost:8080"
   if ((DEMO)); then
     cat <<'EOM'
-==> demo data loaded. Log in once (the OIDC provider in deploy/.env) and your
-    personal workspace is provisioned with the example pipelines. To point an
-    agent at it: log in -> mint an API key in the UI -> give the agent
-    http://localhost:8080/mcp with that key. See docs/deployment.md Appendix B.
+==> demo data loaded. Log in at http://localhost:8080 with the LOCAL account
+    demo-admin@demo.local / demo-admin — no OIDC client needed; you'll be asked
+    to set a new password on first sign-in (auth.md §5A). (An OIDC provider from
+    deploy/.env works too, if you configured one.) Your personal workspace is
+    provisioned with the example pipelines. To point an agent at it: log in ->
+    mint an API key in the UI -> give the agent http://localhost:8080/mcp with
+    that key. See docs/deployment.md Appendix B.
 EOM
   fi
 }

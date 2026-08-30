@@ -155,7 +155,9 @@ The app **fail-fasts** on startup if any of the following is missing. Full defin
 2. Redis: `datapipelines.redis.host`.
 3. `datapipelines.jwt.secret` — internal JWT signing secret.
 4. `datapipelines.db.encryption-key` — AES-256 master key for datasource credentials. **There is no fallback source**: no KMS lookup, no auto-generated key file. Lose it and every stored datasource credential is unrecoverable, so it belongs in a secret manager and in the operator's backup plan. (KMS sourcing is a [ROADMAP §2](ROADMAP.md#2-v11-candidates) item.)
-5. **At least one OIDC provider** under `datapipelines.auth.oidc.providers`, each with `client-id`, `client-secret`, and `issuer-uri`. There is no local password login; the first admin comes only from `datapipelines.auth.bootstrap-admin-email` ([Auth §4.4](auth.md#44-bootstrap-admin)). With zero providers the `ClientRegistrationRepository` bean fails construction and the context never starts ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.2](auth.md#52-clientregistration-bean-built-at-startup)). The client-id/secret env var names are chosen by the deployment (`GOOGLE_CLIENT_ID`, `OKTA_CLIENT_ID`, …) — they are the one deliberate exception to the derivation rule above.
+5. **At least one authentication method**: a fully-configured OIDC provider under `datapipelines.auth.oidc.providers` (each with `client-id`, `client-secret`, and `issuer-uri`), **or** local password accounts (`datapipelines.auth.local.enabled=true`, [Auth §5A](auth.md#5a-local-password-accounts-optional)). The first admin comes from `datapipelines.auth.bootstrap-admin-email` either way ([Auth §4.4](auth.md#44-bootstrap-admin)). A provider entry whose `client-id` is empty is ignored with a WARN, not counted. The client-id/secret env var names are chosen by the deployment (`GOOGLE_CLIENT_ID`, `OKTA_CLIENT_ID`, …) — they are the one deliberate exception to the derivation rule above.
+
+   **The operator's first-admin story with local accounts** (no IdP): set `datapipelines.auth.bootstrap-admin-email` to the admin address, enable `datapipelines.auth.local.enabled`, and seed the one-time credential — preferably as a pre-computed hash from `./gradlew :modules:auth:hashPassword` into `datapipelines.auth.local.bootstrap-password-hash` (the plaintext form exists for demos). Hand the password to the admin out-of-band; the app forces a change at first login ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)), and a deployment still running the seeded credential announces itself with a startup WARN. Every account after the first is created by an admin on the user-administration screen — there is no self-registration and no email reset (the product has no SMTP): a forgotten password means an admin resets it there, which issues a new one-time credential under the same forced-change rule.
 
 Everything else has a default and is optional.
 
@@ -452,9 +454,10 @@ services:
       # Losing this makes every stored datasource credential unrecoverable.
       DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
 
-      # REQUIRED: at least ONE OIDC provider must be configured, or startup fails
-      # (auth.md §5.2 — no local password login; set DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL
-      #  to make your OIDC user the first admin — auth.md §4.4).
+      # REQUIRED: at least ONE authentication method (ConfigValidator §7) — an OIDC
+      # provider configured below, or local accounts (auth.md §5A: set
+      # DATAPIPELINES_AUTH_LOCAL_ENABLED=true plus a one-time seed for
+      # DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL, which names the first admin either way).
       # These names are referenced by the providers list in application.yml below;
       # Google is only an example — Microsoft/Okta/Keycloak/any OIDC IdP works.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -565,9 +568,12 @@ for you.
 
 ### Point an agent at it — three steps
 
-1. **Log in** at `http://localhost:8080` with the OIDC provider configured in
-   `deploy/.env`. The first login provisions your personal workspace and seeds
-   the example pipelines into it.
+1. **Log in** at `http://localhost:8080` with the **local account**
+   `demo-admin@demo.local` / `demo-admin` — the demo needs **no OIDC client at
+   all** ([Auth §5A](auth.md#5a-local-password-accounts-optional)); the app asks
+   you to set a new password on first sign-in. (An OIDC provider configured in
+   `deploy/.env` works too.) The first login provisions your personal workspace
+   and seeds the example pipelines into it.
 2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
    is shown exactly once.
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
@@ -578,7 +584,10 @@ for you.
 ### What the demo profile turns on
 
 The profile adds a `mysql` service and two one-shot loaders, and points the app
-at the files they place on a read-only volume. It also sets the §7 demo posture:
+at the files they place on a read-only volume. It enables **local password
+accounts** with a documented one-time seed (`demo-admin@demo.local` /
+`demo-admin`, forced to change at first login — [Auth §5A.2](auth.md#5a2-seeding-the-first-admin)),
+so the demo needs no OIDC client. It also sets the §7 demo posture:
 `auto-per-user` provisioning (every visitor gets their own workspace) and
 `member-datasources-enabled=false` (an open datasource form on a public server is
 an SSRF and port-scan primitive — demo users get the seeded datasources only).
@@ -640,3 +649,4 @@ operator.
 | 2026-08-05 | v1.0 draft | initial draft | Initial deployment spec sketch — Docker image, infra requirements, configuration, deployment patterns, upgrade/rollback, security checklist |
 | 2026-08-05 | v1.1 | horizontal scaling | Added multi-instance horizontal scaling section. Application is stateless for all CRUD/UI/MCP/auth. In-flight executions are instance-local (acceptable for short-running pipelines). No sticky sessions required. Added multi-instance checklist. Added LB idle-timeout + SSE heartbeat note. |
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.15](SPEC-REVIEW-2026-08.md#215-deploymentmd): §5 env-var tables replaced by the startup-requirements list + pointer to configuration.md; the inline-vs-claim-check threshold key (superseded by the D9 result keys) and every other key configuration.md does not define were deleted [D8]; §4.2 rewritten as the result store with required `maxmemory-policy noeviction` and a sizing model [D9]; §8.3.1/§8.3.2 graceful-shutdown mechanism (readiness fail → drain to `execution-timeout-seconds` → `cancelAll(shutdown)` → exit) with k8s `preStop` + `terminationGracePeriodSeconds`, accepted loss stated [D7]; §6.2 instance-local story updated to cancel-on-disconnect + cross-instance cancel via Redis flag [D7]; Appendix A compose made bootable (OIDC provider env vars, Redis password wired to `requirepass`, noeviction, mounted provider YAML); new §3.5 JDBC driver matrix (bundled vs `-Poracle`/`-Pmysql` vs `lib/` drop-in); new §6.6 resource sizing (heap, container limit, `-XX:MaxRAMPercentage`); `-Duser.timezone=UTC` made normative in the image and bare-JVM entrypoints ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)); §6.2 diagram residue and §11 malformed bullet fixed |
+| 2026-08-29 | v1.3 | local password auth | §5.1 item 5 becomes "at least one authentication method": OIDC provider OR local accounts (auth.md §5A), with the operator's first-admin story for the no-IdP case (hash-seeded one-time credential, forced first-login change, admin resets — no SMTP, no self-registration). Appendix A compose comment and Appendix B quickstart updated: the demo now logs in with a local account (`demo-admin@demo.local` / `demo-admin`, one-time) and needs no OIDC client. |
