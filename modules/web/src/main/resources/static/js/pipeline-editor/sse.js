@@ -70,7 +70,9 @@
       .catch(function (err) {
         if (err.name === "AbortError") return;
         self.isConnected = false;
-        self.handleConnectionLoss();
+        // A teardown error AFTER a terminal event is noise, not loss — the
+        // async SSE context can error on completion; §7.1.7 applies here too.
+        if (!self.terminalSeen) self.handleConnectionLoss();
       });
   };
 
@@ -129,7 +131,9 @@
         .catch(function (err) {
           if (err.name === "AbortError") return;
           self.isConnected = false;
-          self.handleConnectionLoss();
+          // Same guard as the stream-end branch: a reader error after a
+          // terminal event must not resurrect the loss path (027).
+          if (!self.terminalSeen) self.handleConnectionLoss();
         });
     }
 
