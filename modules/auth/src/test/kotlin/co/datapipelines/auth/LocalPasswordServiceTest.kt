@@ -46,7 +46,7 @@ class LocalPasswordServiceTest {
         audit = AuditLogger(jdbc, ObjectMapper())
         val cache = AuthCache(AuthProperties())
         userService = UserService(users, cache, AuthProperties(), audit)
-        service = LocalPasswordService(users, userService, hasher, cache, audit)
+        service = LocalPasswordService(users, userService, hasher, cache, audit, AuthProperties())
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         jdbc.jdbcTemplate.execute("TRUNCATE audit_log")
     }
@@ -89,6 +89,56 @@ class LocalPasswordServiceTest {
             .mustChangePassword
             .shouldBeTrue()
         auditEvents("auth.password.changed") shouldBe 0
+    }
+
+    /**
+     * The oracle guard. Before this, `changeOwn` verified the current password with NO
+     * lockout check, NO failure counting and NO audit on failure — while `POST /login`
+     * had all three. That made the change endpoint an unmetered, silent brute-force
+     * oracle sitting beside a fully-defended login path, and (until the session gate on
+     * the controller) it was reachable with a leaked read-scoped API key.
+     *
+     * Asserted at the PERSISTED level, not on a spy: the counter is read back out of the
+     * database, because the defect was precisely that nothing was written.
+     */
+    @Test
+    fun `a wrong current password is counted and audited on the same lockout counter as login`() {
+        val user = localUser("a@company.com", OLD_PASSWORD)
+
+        service.changeOwn(user.id, "not-the-password", NEW_PASSWORD) shouldBe
+            LocalPasswordService.ChangeResult.WrongCurrentPassword
+
+        users.findLocalCredential("a@company.com").shouldNotBeNull().failedLoginCount shouldBe 1
+        auditEvents("auth.password.change_failed") shouldBe 1
+    }
+
+    @Test
+    fun `repeated wrong current passwords lock the account, and the lock then short-circuits the check`() {
+        val user = localUser("a@company.com", OLD_PASSWORD)
+
+        // The AuthProperties default is 5 consecutive failures.
+        repeat(5) {
+            service.changeOwn(user.id, "not-the-password", NEW_PASSWORD) shouldBe
+                LocalPasswordService.ChangeResult.WrongCurrentPassword
+        }
+
+        users.findLocalCredential("a@company.com").shouldNotBeNull().lockedUntil.shouldNotBeNull()
+
+        // Once locked, even the CORRECT password is refused without an Argon2 verify — the
+        // lock must be a brake, not a CPU amplifier, exactly as the login path treats it.
+        service.changeOwn(user.id, OLD_PASSWORD, NEW_PASSWORD) shouldBe LocalPasswordService.ChangeResult.AccountLocked
+        hasher.verify(users.findLocalCredential("a@company.com").shouldNotBeNull().passwordHash, OLD_PASSWORD).shouldBeTrue()
+    }
+
+    @Test
+    fun `a successful change clears the failure counter`() {
+        val user = localUser("a@company.com", OLD_PASSWORD)
+        service.changeOwn(user.id, "not-the-password", NEW_PASSWORD)
+        users.findLocalCredential("a@company.com").shouldNotBeNull().failedLoginCount shouldBe 1
+
+        service.changeOwn(user.id, OLD_PASSWORD, NEW_PASSWORD) shouldBe LocalPasswordService.ChangeResult.Success
+
+        users.findLocalCredential("a@company.com").shouldNotBeNull().failedLoginCount shouldBe 0
     }
 
     @Test
@@ -142,6 +192,7 @@ class LocalPasswordServiceTest {
                 hasher,
                 AuthCache(AuthProperties()),
                 audit,
+                AuthProperties(),
             )
 
         val result = grantingService.createLocalUser("root@company.com", "Root", ACTOR)

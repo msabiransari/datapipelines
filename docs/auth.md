@@ -466,6 +466,26 @@ Passwords are compared only through `SecretHasher.verify` (constant-time-ish at 
 
 On success the flow converges with OIDC: the same `JwtService.issue` mints the same `dp_session` cookie, the same §4.2-step-4 workspace resolution runs (`auto-per-user` provisioning included), the same `auth.login.success` audit event is written (with `provider: "local"` in the details), and `is_active` is re-checked exactly as on the OIDC path (a deactivated account with the correct password gets the `inactive` banner — safe to reveal because the caller just proved the password). The `must_change_password` flag does not block the login; it engages the §5A.4 gate after it.
 
+### 5A.7 Credential minting is session-only
+
+Any operation that **mints or rotates a usable interactive credential** refuses an API-key principal with `auth.session.required` (§13.7), regardless of scope. The set is exactly:
+
+| Operation | Surface |
+|---|---|
+| Create local user | `POST /partials/admin/users` |
+| Reset a user's password | `PATCH /partials/admin/users/{id}/reset-password` |
+| Disable local access | `PATCH /partials/admin/users/{id}/disable-local` |
+| Unlock an account | `PATCH /partials/admin/users/{id}/unlock` |
+| Change own password | `POST /partials/account/password` |
+
+**Why scope cannot express this.** `AuthenticatedPrincipal.isAdmin` is *defined as* holding the `admin` scope, so a scope test sees a `dpk_` key and a browser session as one principal. `ApiKeyFilter` applies no path test and `ApiKeyCredentialMatcher` makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with a single header. It could then create a local admin, read the one-time password out of the response body, and sign in — trading a revocable, workspace-pinned, non-interactive credential for a `dp_session` that is **not** pinned and that **outlives revocation of the key that created it**. That defeats the ~60s revocation contract in §8, which is the entire answer to a leaked agent key (§2, principle 5).
+
+The self-service change is the same shape one floor down: its `CHANGE_OWN_PASSWORD` floor is "any authenticated", so without this rule a leaked **read**-scoped key could guess its owner's password and, on a hit, rotate it into a full takeover.
+
+**Deliberately excluded:** `activate`, `deactivate`, `promote`, `demote`. These administer users without ever emitting a credential, and are already ratified for keys through the documented `/api/v1/auth/users` REST surface (§7.6 `USER_ADMINISTRATION`). The line this draws is credential-minting, not privilege.
+
+**Second layer.** Because a hijacked *session* is still a threat, `LocalPasswordService.changeOwn` also consults the §5A.3 lockout before any Argon2 work, counts failures on the same counter as `POST /login`, and audits them (`auth.password.change_failed`, `auth.password.change_locked`). Before this it had none of the three, making it an unmetered, unaudited guessing oracle beside a fully-defended login path.
+
 ## 6. Session Tokens (Internal JWT)
 
 ### 6.1 JWT format

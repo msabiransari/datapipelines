@@ -300,6 +300,7 @@ object PipelineErrorCodes {
         const val LOGIN_BAD_CREDENTIALS = "auth.login.bad_credentials"
         const val LOGIN_LOCKED = "auth.login.locked"
         const val PASSWORD_CHANGE_REQUIRED = "auth.password.change_required"
+        const val SESSION_REQUIRED = "auth.session.required"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */

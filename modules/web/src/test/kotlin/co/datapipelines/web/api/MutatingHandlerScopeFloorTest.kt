@@ -183,10 +183,12 @@ class MutatingHandlerScopeFloorTest {
                 // first time here — and the guard did its job by refusing it. That is the
                 // parallel-lane failure this test is for.
                 "UserSettingsController#changeOwnPassword" to
-                    "own-resource: the account is the principal's own by construction (no payload-chosen target), and " +
-                    "the CURRENT password is verified in LocalPasswordService — so a hijacked session cannot rotate " +
-                    "the credential. 'Any authenticated' is the documented §7.6 floor, the MANAGE_OWN_API_KEYS " +
-                    "convention for rotating one's own credential",
+                    "session-only by construction, then own-resource. The read floor was NOT sufficient on its own: " +
+                    "the handler now refuses any non-OIDC principal (auth.session.required), because a leaked " +
+                    "read-scoped key could otherwise guess the owner's password here — unmetered, since changeOwn " +
+                    "had no lockout — and on a hit rotate it into an interactive takeover. With the key class refused " +
+                    "the floor is moot for the credential that could abuse it, and the CURRENT password is still " +
+                    "verified (now lockout-counted) so a hijacked session cannot rotate it either",
                 "WorkspacesUiController#switch" to
                     "session-only by construction (requireSessionPrincipal): an API key is refused before the session " +
                     "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",

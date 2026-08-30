@@ -44,6 +44,7 @@ object AuthErrorCodes {
     const val LOGIN_BAD_CREDENTIALS = "auth.login.bad_credentials"
     const val LOGIN_LOCKED = "auth.login.locked"
     const val PASSWORD_CHANGE_REQUIRED = "auth.password.change_required"
+    const val SESSION_REQUIRED = "auth.session.required"
 
     /**
      * The single system-wide rate-limit code ([Pipeline Contract §13.11]). It is
@@ -67,6 +68,7 @@ object AuthErrorCodes {
             LOGIN_BAD_CREDENTIALS,
             LOGIN_LOCKED,
             PASSWORD_CHANGE_REQUIRED,
+            SESSION_REQUIRED,
         )
 
     /**
@@ -193,6 +195,34 @@ class PasswordChangeRequiredException :
         HTTP_FORBIDDEN,
         "Password change is required before any other operation",
         "You must set a new password before continuing.",
+    )
+
+/**
+ * An API-key principal reached an operation that MINTS OR ROTATES an interactive
+ * credential: admin local-account creation, admin password reset, `disable-local`,
+ * `unlock`, and the self-service password change.
+ *
+ * Why scope is not enough here. `AuthenticatedPrincipal.isAdmin` is *defined as*
+ * holding [Scope.ADMIN], so a scope test cannot distinguish a browser session from a
+ * `dpk_` key — and a key that can mint a local account reads that account's one-time
+ * password straight out of the response body, then signs in with it. That trades a
+ * revocable, workspace-pinned, non-interactive credential for a permanent `dp_session`
+ * which is NOT pinned and which outlives revocation of the key that created it,
+ * defeating the whole revocation contract keys exist under (auth.md §2, §8).
+ *
+ * This is the same escalation class 96240ed closed on the workspace UI actions with a
+ * session check; [WorkspaceSessionRequiredException] is its workspace-scoped sibling.
+ * The programmatic path for keys stays the `/api/v1/auth/users` REST surface, which administers users
+ * WITHOUT ever emitting a usable credential.
+ */
+class SessionRequiredException(
+    operation: String,
+) : AuthException(
+        AuthErrorCodes.SESSION_REQUIRED,
+        HTTP_FORBIDDEN,
+        "Credential-minting operation '$operation' is session-only; an API key cannot drive it",
+        "This action needs an interactive sign-in. Sign in and try again.",
+        details = mapOf("operation" to operation),
     )
 
 /** Per-IP login rate limit ([Pipeline Contract §13.11], auth.md §9). */

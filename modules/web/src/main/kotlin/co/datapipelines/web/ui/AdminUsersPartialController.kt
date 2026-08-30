@@ -1,10 +1,12 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserService
 import co.datapipelines.web.api.currentPrincipal
 import org.slf4j.LoggerFactory
@@ -50,7 +52,7 @@ class AdminUsersPartialController(
         @RequestParam email: String,
         @RequestParam(required = false, defaultValue = "") displayName: String,
     ): ResponseEntity<String> {
-        requireAdmin()
+        requireSessionAdmin("create-local-user")
         if (email.isBlank() || !email.contains('@')) {
             return ResponseEntity.badRequest().body(errorSpan("A valid email address is required"))
         }
@@ -76,7 +78,14 @@ class AdminUsersPartialController(
 
         // reset-password has its own response shape (the row PLUS the one-time
         // password notice) — handled outside the row-swap when below.
-        if (action == "reset-password") return resetPassword(userId, actor)
+        if (action == "reset-password") {
+            requireSessionAdmin(action)
+            return resetPassword(userId, actor)
+        }
+        // The credential-minting subset of the row-swap actions. `unlock` clears a lockout
+        // and `disable-local` removes the local credential — both change who can hold an
+        // interactive session, so neither is drivable by a key. See [requireSessionAdmin].
+        if (action in CREDENTIAL_ACTIONS) requireSessionAdmin(action)
 
         when (action) {
             "activate" -> {
@@ -235,8 +244,47 @@ class AdminUsersPartialController(
         }
     }
 
+    /**
+     * Admin scope PLUS an interactive session, for the operations that mint or rotate a
+     * usable credential: `createLocalUser`, `reset-password`, `disable-local`, `unlock`.
+     *
+     * [requireAdmin] alone cannot gate these. `AuthenticatedPrincipal.isAdmin` is *defined
+     * as* holding [Scope.ADMIN], so a scope test sees a `dpk_` key and a browser session as
+     * the same principal — and `ApiKeyFilter` has no path test while `ApiKeyCredentialMatcher`
+     * makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with one
+     * header. It could then create a local admin, read the one-time password out of the
+     * response body ([oneTimeNotice]), sign in, and hold a `dp_session` that is not workspace-
+     * pinned and survives revocation of the key that made it.
+     *
+     * Deliberately NOT applied to `activate`/`deactivate`/`promote`/`demote`: those are
+     * pre-026 behaviour, already ratified for keys through the documented
+     * `/api/v1/auth/users` REST twin (§7.6 USER_ADMINISTRATION), and none of them emits a
+     * credential. The line this draws is credential-minting, not privilege.
+     */
+    private fun requireSessionAdmin(operation: String) {
+        requireAdmin()
+        val principal = currentPrincipal()
+        if (principal.authMethod != AuthMethod.OIDC) {
+            log.info(
+                "Credential-minting operation {} refused for non-session principal user={} method={}",
+                operation,
+                principal.userId,
+                principal.authMethod,
+            )
+            throw SessionRequiredException(operation)
+        }
+    }
+
     private companion object {
         private val log = LoggerFactory.getLogger(AdminUsersPartialController::class.java)
+
+        /**
+         * The `toggle` actions that mint or rotate an interactive credential and are
+         * therefore session-only. `reset-password` is gated at its own early return above
+         * (it has a different response shape), so it is deliberately absent here — the
+         * companion test asserts the FULL session-only set to keep the two in step.
+         */
+        val CREDENTIAL_ACTIONS = setOf("disable-local", "unlock")
         const val MIN_LIMIT = 1
         const val MAX_LIMIT = 100
         const val USER_ID_PREFIX_LEN = 8

@@ -104,6 +104,9 @@ object ApiErrorCatalog {
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
             // not the family's 403: it answers "not authenticated", not "forbidden".
             PipelineErrorCodes.Auth.LOGIN_BAD_CREDENTIALS to HttpStatus.UNAUTHORIZED,
+            // §13.7 — 403 like the auth family default, wired explicitly so the code owns a
+            // row rather than being absorbed by the default (the 025 A2 convention).
+            PipelineErrorCodes.Auth.SESSION_REQUIRED to HttpStatus.FORBIDDEN,
             // §13.12's CRUD codes break the workspace.* family default (403, the resolution
             // codes) — the surfaces slice's rows each carry their own status.
             // SESSION_REQUIRED is 403 like the family default, but wired explicitly so the

@@ -3,6 +3,7 @@ package co.datapipelines.auth
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DuplicateKeyException
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -23,6 +24,7 @@ class LocalPasswordService(
     private val secretHasher: SecretHasher,
     private val authCache: AuthCache,
     private val auditLogger: AuditLogger,
+    private val authProperties: AuthProperties,
 ) {
     private val log = LoggerFactory.getLogger(LocalPasswordService::class.java)
 
@@ -39,6 +41,13 @@ class LocalPasswordService(
 
         /** The account has no local password to change (OIDC-only). */
         data object NoLocalAccount : ChangeResult
+
+        /**
+         * The account is inside its §5A.3 lockout window, so the current-password check
+         * was not attempted. Without this, `changeOwn` is a brute-force oracle that the
+         * lockout on `POST /login` does not cover.
+         */
+        data object AccountLocked : ChangeResult
     }
 
     sealed interface CreateResult {
@@ -65,8 +74,40 @@ class LocalPasswordService(
         val user = userRepository.findById(userId)
         val credential = user?.let { userRepository.findLocalCredential(it.email) }
         if (user == null || credential == null) return ChangeResult.NoLocalAccount
+
+        // The §5A.3 lockout is consulted BEFORE any Argon2 work, exactly as the login path
+        // does it: a locked account must cost an attacker nothing to probe, or the lock
+        // becomes a CPU amplifier instead of a brake.
+        val lockedUntil = credential.lockedUntil
+        if (lockedUntil != null && lockedUntil.isAfter(Instant.now())) {
+            auditLogger.log(
+                "auth.password.change_failed",
+                userId = userId,
+                details = mapOf("reason" to "locked"),
+            )
+            return ChangeResult.AccountLocked
+        }
         policyViolation(newPassword)?.let { return ChangeResult.PolicyViolation(it) }
         if (!secretHasher.verify(credential.passwordHash, currentPassword)) {
+            // Counted and audited on the SAME counter as login (auth.md §5A.3). Before this,
+            // the endpoint verified the current password with no lockout, no counting and no
+            // audit on failure — an unmetered, silent guessing oracle sitting beside a login
+            // path that was fully defended.
+            val failure =
+                userRepository.recordLocalLoginFailure(
+                    userId,
+                    authProperties.local.lockout.maxFailures,
+                    authProperties.local.lockout.durationMinutes,
+                )
+            authCache.invalidateUser(userId)
+            auditLogger.log(
+                "auth.password.change_failed",
+                userId = userId,
+                details = mapOf("reason" to "bad_current_password"),
+            )
+            if (failure.lockedUntil != null) {
+                auditLogger.log("auth.password.change_locked", userId = userId)
+            }
             return ChangeResult.WrongCurrentPassword
         }
         userRepository.setPassword(userId, secretHasher.hash(newPassword), mustChange = false)

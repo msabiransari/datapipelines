@@ -38,5 +38,7 @@ class LocalAuthConfiguration {
         secretHasher: SecretHasher,
         authCache: AuthCache,
         auditLogger: AuditLogger,
-    ): LocalPasswordService = LocalPasswordService(userRepository, userService, secretHasher, authCache, auditLogger)
+        authProperties: AuthProperties,
+    ): LocalPasswordService =
+        LocalPasswordService(userRepository, userService, secretHasher, authCache, auditLogger, authProperties)
 }

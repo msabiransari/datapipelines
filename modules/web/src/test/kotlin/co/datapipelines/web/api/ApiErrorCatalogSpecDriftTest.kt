@@ -76,8 +76,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 026 to 87 (§13.7's three local-auth rows) — so neither lane's number is right for
          * the merged document. Re-derived at merge from the merged spec, which is the only
          * way a hand-maintained count survives a parallel merge (P8).
+         *
+         * 88 → 89 in the post-merge 026 security fix: §13.7 gains `auth.session_required`,
+         * landed in the SAME commit as its constant and catalog row (MISTAKES.md — a
+         * catalogued code split from its constant leaves `main` red between the two).
          */
-        const val SECTION_13_ROW_COUNT = 88
+        const val SECTION_13_ROW_COUNT = 89
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
         const val SECTION_12_CODE_COUNT = 47

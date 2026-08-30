@@ -1,11 +1,14 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserRepository
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -91,6 +94,14 @@ class UserSettingsController(
      * `CHANGE_OWN_PASSWORD` (§7.6 — any authenticated principal, own account by
      * construction). Answers htmx fragments, never redirects: the change screen
      * swaps them into `#password-change-result`.
+     *
+     * SESSION-ONLY. The scope floor is "any authenticated", and API keys are CSRF-exempt
+     * and authenticate on every path, so without this gate a leaked READ-scoped `dpk_` key
+     * could guess its owner's password here — and on a hit, rotate it and take the
+     * interactive account. Rotating the credential that backs a browser session is never
+     * something a non-interactive key legitimately does; the key's own lifecycle is
+     * `/api/v1/auth/keys`. The rate-limit and lockout hardening in
+     * [LocalPasswordService.changeOwn] is the second layer, for a hijacked session.
      */
     @PostMapping("/partials/account/password")
     @RequiredScope(ScopeMatrix.RestOperation.CHANGE_OWN_PASSWORD)
@@ -100,6 +111,9 @@ class UserSettingsController(
         @RequestParam confirmPassword: String,
     ): ResponseEntity<String> {
         val principal = requirePrincipal()
+        if (principal.authMethod != AuthMethod.OIDC) {
+            throw SessionRequiredException("change-own-password")
+        }
         if (newPassword != confirmPassword) {
             return ResponseEntity.badRequest().body(errorSpan("The new passwords do not match"))
         }
@@ -121,6 +135,12 @@ class UserSettingsController(
 
             is LocalPasswordService.ChangeResult.NoLocalAccount -> {
                 ResponseEntity.badRequest().body(errorSpan("This account has no local password"))
+            }
+
+            is LocalPasswordService.ChangeResult.AccountLocked -> {
+                ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                    errorSpan("Too many failed attempts — this account is temporarily locked. Try again later."),
+                )
             }
         }
     }
