@@ -12,6 +12,7 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry
@@ -56,6 +57,11 @@ class SecurityConfig(
     private val log = LoggerFactory.getLogger(SecurityConfig::class.java)
 
     @Bean
+    // One line over detekt's LongMethod cap after the 027 CSRF-stability block landed
+    // inline — same call as PipelineExecutor's suppress: the filter chain reads as one
+    // vertical narrative (csrf → authz → session → logout); splitting a customizer out
+    // would hide the CSRF config's coupling to the repository/handler lines above it.
+    @Suppress("LongMethod")
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { csrf ->
@@ -65,6 +71,19 @@ class SecurityConfig(
                 csrf.csrfTokenRepository(csrfTokenRepository())
                 csrf.csrfTokenRequestHandler(CsrfTokenRequestAttributeHandler())
                 csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher())
+                // 027 (024 T41's browser family): Spring's default composite includes
+                // CsrfAuthenticationStrategy, written for server-side session
+                // repositories — it ROTATES the token, and DELETES the cookie when
+                // loadToken() finds none. It fires whenever the security context changes
+                // during a request, and with per-request JWT authentication (the 60s
+                // AuthCache re-check) that is EVERY authenticated request: observed live,
+                // any htmx partial response (the dashboard auto-loads two) wiped dp_csrf,
+                // so every subsequent browser mutation 403'd auth.csrf.invalid against the
+                // stale token its page had rendered. Double-submit needs the cookie
+                // STABLE; this chain has no server session to protect, so the strategy
+                // is neutered. The cookie is minted by the first render that materializes
+                // the deferred token (the login page) and never rewritten afterwards.
+                csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
             }.authorizeHttpRequests { auth ->
                 auth
                     // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
