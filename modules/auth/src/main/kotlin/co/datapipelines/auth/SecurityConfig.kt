@@ -92,7 +92,13 @@ class SecurityConfig(
                     ).permitAll()
                     .anyRequest()
                     .authenticated()
-            }.oauth2Login { oauth ->
+            }
+
+        // OIDC login is wired ONLY when providers are configured (auth.md §5A): a
+        // local-accounts-only deployment has no ClientRegistrations, no discovery,
+        // and no /oauth2 endpoints — the filter chain below is identical either way.
+        if (authProperties.oidc.providers.any { it.clientId.isNotBlank() }) {
+            http.oauth2Login { oauth ->
                 oauth.successHandler(oidcSuccessHandler)
                 oauth.failureHandler { request, response, exception ->
                     // The user gets an opaque `oidc_error` (never provider internals), but the
@@ -113,7 +119,11 @@ class SecurityConfig(
                     // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.
                     it.authorizationRequestResolver(authorizationRequestResolver)
                 }
-            }.addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
+            }
+        }
+
+        http
+            .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
             // Workspace resolution (design §5) runs once a credential has authenticated:

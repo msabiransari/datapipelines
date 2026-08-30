@@ -34,6 +34,7 @@ data class AuthProperties(
     val allowlist: Allowlist = Allowlist(),
     val apiKeys: ApiKeys = ApiKeys(),
     val rateLimit: RateLimit = RateLimit(),
+    val local: Local = Local(),
     /** Configuration §3.4 / auth.md §4.4. `null` = no bootstrap admin. */
     val bootstrapAdminEmail: String? = null,
 ) {
@@ -69,6 +70,32 @@ data class AuthProperties(
 
     data class RateLimit(
         val loginPerMinute: Int = 10,
+    )
+
+    /**
+     * Optional local username/password accounts (Configuration §3.4, auth.md §5A).
+     * Disabled by default: an OIDC-only deployment behaves exactly as before.
+     *
+     * [bootstrapPasswordHash] / [bootstrapPassword] seed the FIRST ADMIN ONLY (the
+     * `bootstrap-admin-email` user) — never ordinary users; passwords are not a
+     * config medium, so every other credential lives hashed in the database. The
+     * pre-computed Argon2id hash is the preferred form; the plaintext variant
+     * exists for zero-setup demos and always forces a first-login change.
+     */
+    data class Local(
+        val enabled: Boolean = false,
+        val bootstrapPasswordHash: String? = null,
+        val bootstrapPassword: String? = null,
+        val lockout: Lockout = Lockout(),
+    )
+
+    /**
+     * Per-account lockout (auth.md §5A.3) — distinct from the per-IP/route
+     * [RateLimit], which cannot stop a slow spray against one account.
+     */
+    data class Lockout(
+        val maxFailures: Int = 5,
+        val durationMinutes: Long = 15,
     )
 
     /**

@@ -90,8 +90,13 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.auth.allowlist.domains` | (empty) | Comma-separated allowed email domains. Binds to `List<String>` (comma-split; empty string = empty list = open provisioning) |
 | `datapipelines.auth.api-keys.cache-ttl-seconds` | `60` | Cache TTL for validated API keys and user `is_active` checks ([Auth §11.4](auth.md#114-api-key-validation-cache)) |
 | `datapipelines.auth.api-keys.default-scopes` | `read` | Default scope for new API keys |
-| `datapipelines.auth.rate-limit.login-per-minute` | `10` | Per-IP OIDC login attempts per minute |
+| `datapipelines.auth.rate-limit.login-per-minute` | `10` | Per-IP login attempts per minute (OIDC and local) |
 | `datapipelines.auth.bootstrap-admin-email` | (none) | Bootstrap admin: when a user with exactly this email is provisioned via OIDC first login, `is_admin` is set true (idempotent, audit-logged as `auth.user.admin_granted` with actor `bootstrap`). The ONLY way a fresh deployment gets its first admin — "first login wins" is explicitly rejected ([Auth §4.4](auth.md#44-bootstrap-admin)) |
+| `datapipelines.auth.local.enabled` | `false` | Optional local username/password accounts ([Auth §4](auth.md#4-user-identity) local accounts) — a second sign-in method for deployments without an IdP. Disabled = the deployment behaves exactly as OIDC-only |
+| `datapipelines.auth.local.bootstrap-password-hash` | (none) | Initial credential for the FIRST ADMIN ONLY (the `bootstrap-admin-email` account), as a pre-computed Argon2id hash — the preferred form (produce one with the `hashPassword` Gradle task, [Deployment §5](deployment.md#5-configuration)). Seeding is create-if-absent and idempotent, forces a first-login change, and never applies to ordinary users — passwords are not a config medium |
+| `datapipelines.auth.local.bootstrap-password` | (none) | Plaintext alternative to the hash form, accepted for zero-setup demos: always sets `must_change_password`, is never logged, and startup is refused when both forms are set |
+| `datapipelines.auth.local.lockout.max-failures` | `5` | Consecutive failed local logins that lock the account — per-account, complementing the per-IP `rate-limit.login-per-minute`, which cannot stop a slow spray against one account |
+| `datapipelines.auth.local.lockout.duration-minutes` | `15` | How long a locked account refuses local login. An admin unlock or password reset clears the lock early |
 
 ### 3.5 Results
 
@@ -287,14 +292,16 @@ datapipelines:
   auth:
     oidc:
       providers:
+        # client-id defaulting to empty = the entry is IGNORED with a WARN (§7);
+        # a local-accounts-only deployment starts with zero OIDC providers.
         - name: google
-          client-id: ${GOOGLE_CLIENT_ID}
-          client-secret: ${GOOGLE_CLIENT_SECRET}
+          client-id: ${GOOGLE_CLIENT_ID:}
+          client-secret: ${GOOGLE_CLIENT_SECRET:}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
         - name: microsoft
-          client-id: ${MICROSOFT_CLIENT_ID}
-          client-secret: ${MICROSOFT_CLIENT_SECRET}
+          client-id: ${MICROSOFT_CLIENT_ID:}
+          client-secret: ${MICROSOFT_CLIENT_SECRET:}
           issuer-uri: https://login.microsoftonline.com/common/v2.0
           display-name: "Sign in with Microsoft"
         # Add more providers as needed (Okta, Auth0, Keycloak, etc.)
@@ -307,6 +314,13 @@ datapipelines:
       default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
     rate-limit:
       login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
+    local:
+      enabled: ${DATAPIPELINES_AUTH_LOCAL_ENABLED:false}
+      bootstrap-password-hash: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH:}
+      bootstrap-password: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD:}
+      lockout:
+        max-failures: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_MAX_FAILURES:5}
+        duration-minutes: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_DURATION_MINUTES:15}
 
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
@@ -429,7 +443,9 @@ On startup, the app validates:
 - `DATAPIPELINES_JWT_SECRET` ≥ 32 bytes decoded.
 - `DATAPIPELINES_DB_ENCRYPTION_KEY` is exactly 32 bytes decoded.
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
-- At least one OIDC provider with non-empty `client-id`, `client-secret`, and `issuer-uri`.
+- At least one authentication method: a fully-configured OIDC provider (non-empty `client-id`, `client-secret`, and `issuer-uri`) or `datapipelines.auth.local.enabled=true`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
+- `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
+- `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
 - `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
@@ -451,3 +467,4 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | 2026-08-12 | v1.2 | dev infra ports | §6 dev profile now targets host ports 5434 (Postgres) / 6381 (Redis) instead of the colliding defaults 5432/6379; added the dev-host-ports note. Operator-facing keys and production defaults unchanged. |
 | 2026-08-17 | v1.3 | pipeline composition | Added §3.16 `datapipelines.pipelines.max-composition-depth` (default 5) — the depth guard for PIPELINE-node composition |
 | 2026-08-28 | v1.4 | sample data, slice A | Added §3.18 Bootstrap: `datapipelines.bootstrap.datasources-file` and `datapipelines.bootstrap.examples-file` (both unset = off), the cross-key rule pairing `datasources-file` with `datapipelines.auth.bootstrap-admin-email`, and the matching §7 validation bullet and §5 template block. Backfills the §3.17 Workspaces row this log was missing (added 2026-08-26 with slice 019, keys unchanged here) |
+| 2026-08-29 | v1.5 | local password auth | Added §3.4 `datapipelines.auth.local.*`: `enabled`, `bootstrap-password-hash` / `bootstrap-password` (first-admin seed only, forced first-login change), `lockout.max-failures` / `lockout.duration-minutes` — plus the §5 template block. The §7 "at least one OIDC provider" rule becomes "at least one authentication method"; a provider entry with an empty `client-id` is now ignored with a WARN instead of counting (the stock `google` entry binds empty when its env vars are unset, so a local-accounts-only deployment starts with zero providers). `rate-limit.login-per-minute` description widened to OIDC and local |

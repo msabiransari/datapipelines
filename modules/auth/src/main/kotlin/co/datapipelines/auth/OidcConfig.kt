@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.oauth2.client.registration.ClientRegistration
@@ -26,11 +27,34 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
  */
 @Configuration
 class OidcConfig {
+    private val log = LoggerFactory.getLogger(OidcConfig::class.java)
+
     @Bean
     fun clientRegistrationRepository(authProperties: AuthProperties): ClientRegistrationRepository {
-        val providers = authProperties.oidc.providers
+        // A provider entry with a blank client-id is IGNORED with a WARN, not an
+        // error (configuration.md §7): the stock application.yml ships a `google`
+        // entry whose client-id defaults to empty, and a local-accounts deployment
+        // must start with zero OIDC providers. A typo'd env var name therefore
+        // degrades one provider to a log line — visible — while "no authentication
+        // method at all" remains a ConfigValidator startup refusal.
+        val providers =
+            authProperties.oidc.providers.filter { provider ->
+                if (provider.clientId.isBlank()) {
+                    log.warn(
+                        "OIDC provider '{}' ignored: client-id is empty (set its client-id or remove the entry)",
+                        provider.name.ifBlank { "<unnamed>" },
+                    )
+                    false
+                } else {
+                    true
+                }
+            }
         if (providers.isEmpty()) {
-            error("No OIDC providers configured. Set datapipelines.auth.oidc.providers in config.")
+            if (authProperties.local.enabled) {
+                log.info("No OIDC providers configured; local password accounts are enabled (auth.md §5A)")
+                return InMemoryClientRegistrationRepository(emptyList())
+            }
+            error("No OIDC providers configured. Set datapipelines.auth.oidc.providers in config, or enable local accounts (datapipelines.auth.local.enabled).")
         }
         val baseUrl = requireBaseUrl(authProperties)
         return InMemoryClientRegistrationRepository(providers.map { toRegistration(it, baseUrl) })

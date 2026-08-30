@@ -42,7 +42,7 @@ class ConfigValidator(
     }
 
     companion object {
-        private const val CHECK_COUNT = 10
+        private const val CHECK_COUNT = 11
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -64,6 +64,7 @@ class ConfigValidator(
             checkDevProfileGuard(snapshot, violations)
             checkWorkspacesProvisioningMode(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
+            checkLocalAuth(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             return ValidationReport(violations, warnings)
         }
@@ -130,19 +131,92 @@ class ConfigValidator(
             }
         }
 
-        /** §7 — at least one fully-configured OIDC provider (auth.md §11.1). */
+        /**
+         * §7 — at least one authentication method: a fully-configured OIDC provider
+         * (auth.md §11.1) or local password accounts (§3.4, auth.md §5A).
+         *
+         * An entry with a blank `client-id` is IGNORED here exactly as at [OidcConfig]
+         * (the stock `google` entry binds empty when its env vars are unset) — a typo'd
+         * env var degrades one provider to that WARN, while "nothing to log in with at
+         * all" stays a refusal. The per-field checks apply only to entries the operator
+         * demonstrably meant to configure (a present client-id).
+         */
         private fun checkOidcProviders(
             snapshot: ConfigSnapshot,
             violations: MutableList<String>,
         ) {
-            if (snapshot.oidcProviders.isEmpty()) {
-                violations += "datapipelines.auth.oidc.providers is empty; §7 requires at least one provider."
+            if (snapshot.oidcProviders.none { it.clientId.isNotBlank() } && !snapshot.localEnabled) {
+                violations +=
+                    "no authentication method configured: datapipelines.auth.oidc.providers has no fully-configured " +
+                    "provider and datapipelines.auth.local.enabled is not true; §7 requires at least one."
             }
             snapshot.oidcProviders.forEach { provider ->
+                if (provider.clientId.isBlank()) return@forEach
                 val label = provider.name.ifBlank { "<unnamed>" }
-                if (provider.clientId.isBlank()) violations += "OIDC provider '$label': client-id is empty."
                 if (provider.clientSecret.isBlank()) violations += "OIDC provider '$label': client-secret is empty."
                 if (provider.issuerUri.isBlank()) violations += "OIDC provider '$label': issuer-uri is empty."
+            }
+        }
+
+        /**
+         * §7 / §3.4 — local password accounts (auth.md §5A). The seed keys configure the
+         * FIRST ADMIN's initial credential only, and the checks keep that narrow:
+         *
+         *  - both seed forms set → ambiguous — name both keys;
+         *  - a seed without `datapipelines.auth.local.enabled` → the operator meant one thing;
+         *  - a seed without `datapipelines.auth.bootstrap-admin-email` → the §3.18 pattern:
+         *    the credential has no account to land on, so startup refuses naming both keys;
+         *  - the lockout bounds must be positive integers.
+         *
+         * The snapshot carries only PRESENCE flags for the seed values — the plaintext
+         * password must never appear in a validation message or a logged snapshot.
+         */
+        private fun checkLocalAuth(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (snapshot.localBootstrapPasswordSet && snapshot.localBootstrapPasswordHashSet) {
+                violations +=
+                    "datapipelines.auth.local.bootstrap-password and " +
+                    "datapipelines.auth.local.bootstrap-password-hash are both set; choose one (§3.4) — " +
+                    "the pre-computed hash form is preferred."
+            }
+            val seedSet = snapshot.localBootstrapPasswordSet || snapshot.localBootstrapPasswordHashSet
+            if (seedSet && !snapshot.localEnabled) {
+                violations +=
+                    "a local bootstrap credential is set but datapipelines.auth.local.enabled is not true (§3.4); " +
+                    "set enabled=true or remove the seed."
+            }
+            if (seedSet && snapshot.bootstrapAdminEmail.isNullOrBlank()) {
+                val seedKey =
+                    if (snapshot.localBootstrapPasswordHashSet) {
+                        "datapipelines.auth.local.bootstrap-password-hash"
+                    } else {
+                        "datapipelines.auth.local.bootstrap-password"
+                    }
+                violations +=
+                    "$seedKey is set but datapipelines.auth.bootstrap-admin-email is not (§3.4): " +
+                    "the seeded credential lands on that user's account. Set both keys, or neither."
+            }
+            checkLocalLockoutBounds(snapshot, violations)
+        }
+
+        /** §7 / §3.4 — the lockout bounds must be positive integers (raw strings, named violations). */
+        private fun checkLocalLockoutBounds(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            snapshot.localLockoutMaxFailures?.let { raw ->
+                val parsed = raw.trim().toIntOrNull()
+                if (parsed == null || parsed < 1) {
+                    violations += "datapipelines.auth.local.lockout.max-failures '$raw' is not a positive integer (§3.4)."
+                }
+            }
+            snapshot.localLockoutDurationMinutes?.let { raw ->
+                val parsed = raw.trim().toLongOrNull()
+                if (parsed == null || parsed < 1) {
+                    violations += "datapipelines.auth.local.lockout.duration-minutes '$raw' is not a positive integer (§3.4)."
+                }
             }
         }
 
@@ -262,6 +336,15 @@ class ConfigValidator(
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
                 bootstrapAdminEmail = environment.getProperty("datapipelines.auth.bootstrap-admin-email"),
+                localEnabled = environment.getProperty("datapipelines.auth.local.enabled", Boolean::class.java) ?: false,
+                // Presence flags ONLY — the seed values are credentials and must never
+                // reach a validation message or the logged snapshot.
+                localBootstrapPasswordSet =
+                    !environment.getProperty("datapipelines.auth.local.bootstrap-password").isNullOrBlank(),
+                localBootstrapPasswordHashSet =
+                    !environment.getProperty("datapipelines.auth.local.bootstrap-password-hash").isNullOrBlank(),
+                localLockoutMaxFailures = environment.getProperty("datapipelines.auth.local.lockout.max-failures"),
+                localLockoutDurationMinutes = environment.getProperty("datapipelines.auth.local.lockout.duration-minutes"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -372,6 +455,14 @@ internal data class ConfigSnapshot(
     val bootstrapExamplesFile: String?,
     /** §3.4 — read here only for the §3.18 cross-key rule; auth owns its semantics. */
     val bootstrapAdminEmail: String?,
+    /** §3.4 — local password accounts enabled (auth.md §5A). */
+    val localEnabled: Boolean = false,
+    /** Presence ONLY (§7 checkLocalAuth) — the seed values are credentials, never carried. */
+    val localBootstrapPasswordSet: Boolean = false,
+    val localBootstrapPasswordHashSet: Boolean = false,
+    /** Raw strings so a non-numeric value becomes a NAMED violation instead of a binder crash. */
+    val localLockoutMaxFailures: String? = null,
+    val localLockoutDurationMinutes: String? = null,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -394,6 +485,11 @@ internal data class ConfigSnapshot(
             "bootstrapDatasourcesFile=$bootstrapDatasourcesFile, " +
             "bootstrapExamplesFile=$bootstrapExamplesFile, " +
             "bootstrapAdminEmail=$bootstrapAdminEmail, " +
+            "localEnabled=$localEnabled, " +
+            "localBootstrapPasswordSet=$localBootstrapPasswordSet, " +
+            "localBootstrapPasswordHashSet=$localBootstrapPasswordHashSet, " +
+            "localLockoutMaxFailures=$localLockoutMaxFailures, " +
+            "localLockoutDurationMinutes=$localLockoutDurationMinutes, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes)"
 }

@@ -338,6 +338,101 @@ class ConfigValidatorTest {
             .shouldBeEmpty()
     }
 
+    // ------------------------------------------------------------------ §3.4 local auth
+
+    @Test
+    fun `local accounts enabled with zero OIDC providers is a valid configuration`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(oidcProviders = emptyList(), localEnabled = true))
+
+        report.violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a provider entry with a blank client-id is ignored, not a violation`() {
+        // The stock application.yml google entry binds exactly this shape when
+        // GOOGLE_CLIENT_ID is unset (it now defaults to empty) — a local-accounts
+        // deployment must not be refused over a provider it never configured.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    oidcProviders =
+                        listOf(
+                            OidcProviderSnapshot(name = "google", clientId = "  ", issuerUri = "https://accounts.google.com"),
+                        ),
+                    localEnabled = true,
+                ),
+            )
+
+        report.violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `both local seed forms set names both keys`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    localEnabled = true,
+                    localBootstrapPasswordSet = true,
+                    localBootstrapPasswordHashSet = true,
+                    bootstrapAdminEmail = "admin@example.com",
+                ),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password")
+        report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password-hash")
+    }
+
+    @Test
+    fun `a local seed without local enabled is refused`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(localBootstrapPasswordSet = true, bootstrapAdminEmail = "admin@example.com"),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.auth.local.enabled")
+    }
+
+    @Test
+    fun `a local seed without a bootstrap admin email names BOTH keys`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(localEnabled = true, localBootstrapPasswordHashSet = true, bootstrapAdminEmail = null),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password-hash")
+        report.violations.single().shouldContain("datapipelines.auth.bootstrap-admin-email")
+    }
+
+    @Test
+    fun `the local lockout bounds must be positive integers`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(localEnabled = true, localLockoutMaxFailures = "0", localLockoutDurationMinutes = "abc"),
+            )
+
+        report.violations.shouldHaveSize(2)
+        report.violations.forEach { it.shouldContain("lockout") }
+    }
+
+    @Test
+    fun `a fully configured local seed passes`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    localEnabled = true,
+                    localBootstrapPasswordSet = true,
+                    bootstrapAdminEmail = "admin@example.com",
+                    localLockoutMaxFailures = "5",
+                    localLockoutDurationMinutes = "15",
+                ),
+            )
+
+        report.violations.shouldBeEmpty()
+    }
+
     @Test
     fun `jdbc host parsing covers ports, failover lists and IPv6`() {
         ConfigValidator.jdbcHost("jdbc:postgresql://db.internal:5432/dp") shouldBe "db.internal"
