@@ -160,11 +160,13 @@ class WorkspacesUiControllerTest {
 
     /**
      * The escalation this gate exists for (022 review finding, orchestrator-verified
-     * 2026-08-29): an API key authenticates on EVERY path and is CSRF-exempt, and these
-     * handlers' floors are `Scope.READ` — so before the gate a READ-scoped key could POST
-     * /workspace/switch and get back a `dp_session` cookie stamped with `scopesFor(user)`,
-     * i.e. the USER's author/admin scopes, and for ANY workspace the user belongs to (the
-     * skeleton-key outcome D3's header refusal exists to prevent).
+     * 2026-08-29): an API key authenticates on EVERY path and is CSRF-exempt, and
+     * [WorkspacesUiController.switch]'s floor is `Scope.READ` by design (WORKSPACES_READ)
+     * — so without the gate a READ-scoped key could POST /workspace/switch and get back a
+     * `dp_session` cookie stamped with `scopesFor(user)`, i.e. the USER's author/admin
+     * scopes, and for ANY workspace the user belongs to (the skeleton-key outcome D3's
+     * header refusal exists to prevent). The sibling actions are `author`-floored since
+     * the 025 defect round; the gate stays as their session-only second line.
      *
      * The mocks below would let the switch SUCCEED: remove the gate and the cookie
      * assertion goes red, which is what makes this a pin rather than a tautology.

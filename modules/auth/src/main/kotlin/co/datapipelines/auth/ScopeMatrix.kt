@@ -83,19 +83,25 @@ object ScopeMatrix {
         WORKSPACES_READ(Scope.READ),
 
         /**
-         * "Create a workspace (per provisioning mode)" (§7.6, design §7/§9): the scope
-         * floor is any-authenticated; the per-mode refusal (`closed` → non-admin) is
-         * [WorkspaceCreationForbiddenException], raised by the handler.
+         * "Create a workspace (per provisioning mode)" (§7.6, design §7/§9): `author` is
+         * the scope floor, the same privilege class as [MUTATE_WORKSPACE_DATASOURCES] —
+         * creation MUTATES the workspace set, and an API key authenticates on every path
+         * CSRF-exempt, so a `read` floor let a leaked read key mint workspaces outright
+         * (025 defect round). The per-mode refusal (`closed` → non-admin) is
+         * [WorkspaceCreationForbiddenException], raised by the handler — a provisioning
+         * mode is not expressible in a scope.
          */
-        WORKSPACE_CREATE(Scope.READ),
+        WORKSPACE_CREATE(Scope.AUTHOR),
 
         /**
-         * "Update a workspace / manage its members" (§7.6, design §5.4/§9): any
-         * authenticated principal may REACH the operation; ownership (workspace `owner`
-         * role or global admin) is enforced by the handler — a role is not a scope, and
-         * the `read` floor keeps the matrix from overstating what the scope system checks.
+         * "Update a workspace / manage its members" (§7.6, design §5.4/§9): `author`, the
+         * same privilege class as [MUTATE_WORKSPACE_DATASOURCES] — renaming a workspace or
+         * editing its membership IS workspace mutation. The real gates stay in-handler:
+         * ownership (workspace `owner` role or global admin) and, for a key principal, the
+         * pinned-workspace check (§5.6, design D3) — a role and a credential pin are not
+         * expressible as scopes.
          */
-        MANAGE_WORKSPACE(Scope.READ),
+        MANAGE_WORKSPACE(Scope.AUTHOR),
     }
 
     /**

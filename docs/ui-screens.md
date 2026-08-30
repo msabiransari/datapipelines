@@ -302,7 +302,7 @@ Content: table of all users (email, display_name, provider, is_active, is_admin,
 | Attribute | Value |
 |---|---|
 | URL | `GET /workspaces` |
-| Auth required | Yes (`read`; ownership/mode gates enforced server-side per [REST §17](rest-api.md#17-workspace-endpoints)) |
+| Auth required | Yes (`author` for the create/manage actions — [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative); ownership/mode gates enforced server-side per [REST §17](rest-api.md#17-workspace-endpoints)) |
 | Purpose | Create/join workspaces per provisioning mode; manage members of owned workspaces; switch the active workspace |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card` |
 | JS | One `onchange` submit on the navbar switcher (`<noscript>` fallback button included) |

@@ -43,6 +43,13 @@ fun interface WorkspaceContentCheck {
  * gets a real 404 [WorkspaceNotFoundException]. Management refusals (a member who is not
  * the owner) reuse the 403 so a workspace's existence stays unprobeable.
  *
+ * ## The pinned-workspace rule (auth.md §5.6, design D3)
+ * The four management paths ([updateDisplayName], [delete], [addMember], [removeMember])
+ * refuse an API-key principal whose pinned workspace differs from the path-name target —
+ * the same no-oracle 403, so "pinned elsewhere" and "not a member" stay indistinguishable.
+ * [create] is exempt (no target exists yet; the caller gains ownership of a NEW workspace
+ * only) and sessions are untouched (their active workspace is switchable by design).
+ *
  * ## Personal-workspace names (design §7)
  * Derived from the lowercased email local-part, sanitized to the `[a-z0-9_-]+` (1–63)
  * name rule, and collision-suffixed (`alice`, `alice-2`, `alice-3`, …) because the
@@ -232,6 +239,7 @@ class WorkspaceService(
         name: String,
         displayName: String,
     ): Workspace {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val updated =
@@ -273,6 +281,7 @@ class WorkspaceService(
         principal: AuthenticatedPrincipal,
         name: String,
     ) {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
@@ -327,6 +336,9 @@ class WorkspaceService(
         name: String,
         email: String,
     ): WorkspaceMemberRow {
+        // The pin runs before the open-join branch too: a key pinned to A must not
+        // self-join into B — the pin governs the TARGET, not the role being added.
+        requirePinnedWorkspace(principal, name)
         val normalized = email.trim().lowercase()
         val selfJoin = normalized == principal.email
         val workspace =
@@ -379,6 +391,7 @@ class WorkspaceService(
         name: String,
         userId: UUID,
     ) {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val target =
@@ -402,6 +415,30 @@ class WorkspaceService(
     ): Boolean {
         if (principal.isAdmin) return true
         return memberships(principal.userId).any { it.workspaceId == workspace.id && it.role == WorkspaceRole.OWNER }
+    }
+
+    /**
+     * The pinned-workspace rule for key principals (auth.md §5.6, design D3): an API key's
+     * workspace is fixed at issuance, so a key may manage ONLY the workspace it is pinned
+     * to. Authorizing against the user's whole membership set instead — as these handlers
+     * address their target by path name — would let a key pinned to A manage B whenever its
+     * owner belongs to both, defeating the pin `WorkspaceResolutionFilter` hard-refuses
+     * `DP-Workspace` to protect (025 review, blocking). Sessions are untouched: their
+     * active workspace is switchable by design, so no pin exists to honor.
+     *
+     * The refusal is the SAME no-oracle 403 [requireOwnerOrAdmin] raises — "pinned
+     * elsewhere" and "not a member" must stay indistinguishable, or the pin itself becomes
+     * an existence oracle. [create] is deliberately exempt: there is no target workspace
+     * yet, creation grants the caller ownership of a NEW workspace only, and the §7.6
+     * `author` floor plus the per-mode refusal are its gates.
+     */
+    private fun requirePinnedWorkspace(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ) {
+        if (principal.authMethod == AuthMethod.API_KEY && principal.workspaceName != name) {
+            throw WorkspaceMembershipRequiredException()
+        }
     }
 
     /**

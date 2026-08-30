@@ -394,6 +394,17 @@ authored-content operations (pipelines, templates, executions) are scoped to it.
   **rejected** (`400 workspace.header_forbidden`), never silently ignored: a header-
   switchable agent key would make every leaked key a skeleton key across the user's
   workspaces (design D3), and a quietly dropped header would train agents on a lie.
+- **The pin also governs workspace management.** The workspace-management endpoints
+  (§7.6 "Update a workspace / manage its members") address their target by path NAME, so
+  for a key principal the service refuses any target other than the key's pinned
+  workspace — the same no-oracle `403 workspace.membership_required` a non-member gets,
+  so "pinned elsewhere" and "not a member" stay indistinguishable. Without this, a key
+  pinned to workspace A could rename, delete, or edit the membership of workspace B
+  whenever its owner belongs to both — the D3 skeleton key by another door. Sessions are
+  untouched (their active workspace is switchable by design), and **create is exempt**:
+  there is no target workspace yet, creation grants the caller ownership of a NEW
+  workspace only, and the `author` floor plus the per-mode provisioning refusal are its
+  gates.
 - **Zero memberships** (possible under `closed` provisioning): the request proceeds with
   no workspace; every workspace-scoped operation then answers
   `403 workspace.membership_required`.
@@ -580,8 +591,8 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Set own theme preference | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | any authenticated |
 | User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke admin) | `admin` |
 | List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
-| Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | any authenticated |
-| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler | any authenticated |
+| Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | `author` |
+| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 
 **MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 

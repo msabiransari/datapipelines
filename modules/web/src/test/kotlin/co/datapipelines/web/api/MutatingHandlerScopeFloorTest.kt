@@ -22,9 +22,10 @@ import kotlin.reflect.full.functions
 import kotlin.reflect.jvm.javaMethod
 
 /**
- * The mutating-floor guard (025 defect round, A1): every POST/PUT/PATCH/DELETE handler
- * must carry an operation whose §7.6 floor sits ABOVE `read` — unless the operation is on
- * the explicit allowlist below, each entry justified in place.
+ * The mutating-floor guard (025 defect round, A1; re-keyed to handlers in the 025b
+ * fix round): every POST/PUT/PATCH/DELETE handler must carry an operation whose §7.6
+ * floor sits ABOVE `read` — unless the HANDLER is on the explicit allowlist below, each
+ * entry justified in place.
  *
  * Why this test exists when [RequiredScopeCoverageTest] already passes: coverage asserts
  * an annotation EXISTS, not what it permits. An API key authenticates on EVERY path
@@ -35,32 +36,52 @@ import kotlin.reflect.jvm.javaMethod
  * `/api`, `/partials` and `/mcp`; a mis-floored mutation is invisible to every existing
  * check (the "coverage ≠ existence" trap, MISTAKES.md).
  *
- * The allowlist is operations, not paths: the enum is the §7.6 unit, and every handler
- * declaring an allowlisted operation is covered by that operation's justification.
+ * The allowlist is keyed on individual HANDLERS (`"ControllerClass#method"`), not on
+ * operations. The operation-keyed version is how five `WorkspacesController` mutations
+ * slipped through (025 review, blocking): one `MANAGE_WORKSPACE` entry silently exempted
+ * every handler declaring that operation — including REST handlers an API key CAN reach —
+ * behind a justification written for the session-only UI twins. Two handlers sharing one
+ * operation must never be exempted by one entry. The second test below is the
+ * non-vacuity half: every allowlist key must resolve to a discovered read-floored
+ * mutating handler, so a stale, misspelled, or since-raised entry fails the build
+ * instead of exempting nothing (a guard that exempts nothing is exactly how the
+ * operation-keyed version rotted).
  *
  * Born red: `PATCH /partials/profile/theme` mutated behind `READ_RESOURCES` until it got
- * its own `PROFILE_PREFERENCE` row (same commit as this test).
+ * its own `PROFILE_PREFERENCE` row (same commit as this test). Falsified again in 025b:
+ * re-lowering `WORKSPACE_CREATE`/`MANAGE_WORKSPACE` to `read` names the five
+ * `WorkspacesController` handlers.
  */
 class MutatingHandlerScopeFloorTest {
     @Test
     fun `every mutating handler sits above the read floor or is allowlisted`() {
         val offenders = mutableListOf<String>()
-        allControllers().forEach { controller ->
-            val classOperation = controller.findAnnotation<RequiredScope>()?.value
-            controller.functions
-                .filter { mutatingMethodOf(it.javaMethod) != null }
-                .forEach { fn ->
-                    val operation = fn.findAnnotation<RequiredScope>()?.value ?: classOperation
-                    val where = "${controller.simpleName}#${fn.name}"
-                    if (operation == null) {
-                        offenders += "$where: mutating handler declares NO @RequiredScope"
-                    } else if (operation.minScope == Scope.READ && operation !in READ_FLOORED_MUTATIONS) {
-                        offenders +=
-                            "$where: mutating handler is floored at read via ${operation.name}"
-                    }
-                }
+        discoveredMutatingHandlers().forEach { handler ->
+            val operation = handler.operation
+            if (operation == null) {
+                offenders += "${handler.where}: mutating handler declares NO @RequiredScope"
+            } else if (operation.minScope == Scope.READ && handler.where !in READ_FLOORED_MUTATION_HANDLERS) {
+                offenders +=
+                    "${handler.where}: mutating handler is floored at read via ${operation.name}"
+            }
         }
         offenders shouldBe emptyList()
+    }
+
+    /**
+     * Non-vacuity: every allowlist entry must be a REAL, currently read-floored mutating
+     * handler. An entry whose handler was raised above `read`, renamed, or deleted
+     * exempts nothing — and silently rotting entries are how the operation-keyed
+     * allowlist came to certify a lie, so they fail here.
+     */
+    @Test
+    fun `every allowlist entry is a discovered read-floored mutating handler`() {
+        val readFloored =
+            discoveredMutatingHandlers()
+                .filter { it.operation?.minScope == Scope.READ }
+                .map { it.where }
+                .toSet()
+        (READ_FLOORED_MUTATION_HANDLERS.keys - readFloored) shouldBe emptySet()
     }
 
     /** The scan sees the module's controllers — an empty scan would prove nothing. */
@@ -71,41 +92,54 @@ class MutatingHandlerScopeFloorTest {
             "co.datapipelines.web.ui.WorkspacesUiController"
     }
 
+    private data class DiscoveredHandler(
+        val where: String,
+        val operation: ScopeMatrix.RestOperation?,
+    )
+
+    private fun discoveredMutatingHandlers(): List<DiscoveredHandler> =
+        allControllers().flatMap { controller ->
+            val classOperation = controller.findAnnotation<RequiredScope>()?.value
+            controller.functions
+                .filter { mutatingMethodOf(it.javaMethod) != null }
+                .map { fn ->
+                    DiscoveredHandler(
+                        where = "${controller.simpleName}#${fn.name}",
+                        operation = fn.findAnnotation<RequiredScope>()?.value ?: classOperation,
+                    )
+                }
+        }
+
     /**
-     * The deliberate read-floored mutations, each with its reason. Adding an entry here
-     * requires the same three things the existing entries have: a §7.6 row, a KDoc on the
-     * [ScopeMatrix.RestOperation] constant arguing why `read` is honest, and an in-handler
-     * guard that is the REAL control for whoever the floor lets through.
+     * The deliberate read-floored mutation handlers, `"ControllerClass#method"` → the
+     * reason `read` is honest FOR THAT HANDLER. Adding an entry requires the same three
+     * things the existing entries have: a §7.6 row, a KDoc on the
+     * [ScopeMatrix.RestOperation] constant arguing why `read` is honest, and an
+     * in-handler guard that is the REAL control for whoever the floor lets through —
+     * plus this per-handler justification, because the operation's KDoc cannot know
+     * which credential each of its handlers is reachable by.
      */
     private companion object {
-        /**
-         * Own-resource mutations: the handler resolves the caller's own userId; the §7.4
-         * subset check in `ApiKeyService.issue` is the real privilege guard (a read key
-         * mints only read keys), revocation is scoped to the caller's own keys in SQL,
-         * and the theme write has no payload-chosen target.
-         */
-        val MANAGE_OWN_API_KEYS = ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS
-        val PROFILE_PREFERENCE = ScopeMatrix.RestOperation.PROFILE_PREFERENCE
-
-        /**
-         * The one POST on WORKSPACES_READ is `/workspace/switch`, which is session-only
-         * (`requireSessionPrincipal()`, 96240ed) — an API key cannot reach it at all and a
-         * session carries CSRF; the floor is moot for the credential that could abuse it.
-         */
-        val WORKSPACES_READ = ScopeMatrix.RestOperation.WORKSPACES_READ
-
-        /**
-         * "Any authenticated may REACH it; role/mode decides": creation is refused per
-         * provisioning mode in-handler (`closed` → non-admin 403), and every management
-         * path is owner-or-admin in `WorkspaceService` (the no-oracle 403). A key acts as
-         * its creator's userId, so an owner's key exercising owner rights is the
-         * documented key-as-actor model.
-         */
-        val WORKSPACE_CREATE = ScopeMatrix.RestOperation.WORKSPACE_CREATE
-        val MANAGE_WORKSPACE = ScopeMatrix.RestOperation.MANAGE_WORKSPACE
-
-        val READ_FLOORED_MUTATIONS: Set<ScopeMatrix.RestOperation> =
-            setOf(MANAGE_OWN_API_KEYS, PROFILE_PREFERENCE, WORKSPACES_READ, WORKSPACE_CREATE, MANAGE_WORKSPACE)
+        val READ_FLOORED_MUTATION_HANDLERS: Map<String, String> =
+            mapOf(
+                "AuthController#createKey" to
+                    "own-resource: issuance resolves the caller's own userId, and the §7.4 subset check in " +
+                    "ApiKeyService.issue (a read key mints only read keys) is the real privilege guard — " +
+                    "'any authenticated' IS the documented floor for managing one's own keys (§7.6)",
+                "AuthController#revokeKey" to
+                    "own-resource: revocation is scoped to the caller's own keys in SQL " +
+                    "(ApiKeyService.revoke(keyId, caller.userId)); no payload-chosen target beyond the caller's own key",
+                "ApiKeysPartialController#create" to
+                    "the /partials twin of AuthController#createKey — same own-resource issuance, same §7.4 subset guard",
+                "ApiKeysPartialController#revoke" to
+                    "the /partials twin of AuthController#revokeKey — same own-resource, SQL-scoped revocation",
+                "UserSettingsController#updateTheme" to
+                    "own-resource: the write targets the caller's own user row (the handler resolves the caller's " +
+                    "userId); there is no payload-chosen target",
+                "WorkspacesUiController#switch" to
+                    "session-only by construction (requireSessionPrincipal): an API key is refused before the session " +
+                    "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",
+            )
 
         const val BASE_PACKAGE = "co.datapipelines.web"
 
