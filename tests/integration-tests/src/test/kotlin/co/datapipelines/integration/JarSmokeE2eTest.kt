@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import com.sun.net.httpserver.HttpServer
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -45,7 +46,8 @@ import javax.crypto.spec.SecretKeySpec
  *
  * Covered: every screen renders 200 from the PACKAGED classpath with real seeded data
  * behind it (dashboard + both dashboard partials, settings with the theme listing,
- * datasources with a NON-EMPTY listing, one execution detail), and the error page chain
+ * datasources with a NON-EMPTY listing, one execution detail, and 025b's two asset-heaviest
+ * screens — the pipeline editor and the template editor), and the error page chain
  * (/error renders the failure page, the B3 cascade). Not covered: JavaScript execution
  * (htmx swaps, the OOB theme exchange) — this is an HTTP contract smoke; the browser
  * behaviors stay with the unit/E2E layers. The jar is rebuilt by the `bootJar` dependency
@@ -98,8 +100,17 @@ class JarSmokeE2eTest {
     fun `settings renders from the jar - the T21 class`() {
         val (body, status) = get("/settings")
         status shouldBe 200
-        // B1: the vendored theme listing resolved from the jar's nested classpath.
-        body shouldContain "saas"
+        // B1 (025b): the listing must come from REAL jar-classpath enumeration, not the
+        // controller's DEFAULT_THEMES fallback — the old `shouldContain "saas"` was satisfied
+        // by the fallback itself (its first entry) and by the layout's themes/saas.css link,
+        // so it was blind to exactly the silent-fallback failure it guarded. The vendored set
+        // and the fallback carry the SAME nine names, so membership cannot observe
+        // enumeration. ORDER can: the resolver returns the names SORTED (auto first, forest
+        // before light), the fallback is hand-ordered (saas first, light before forest) — the
+        // two inversions below are only producible by real enumeration.
+        body shouldContain "value=\"auto\""
+        body.indexOf("value=\"auto\"") shouldBeLessThan body.indexOf("value=\"saas\"")
+        body.indexOf("value=\"forest\"") shouldBeLessThan body.indexOf("value=\"light\"")
         noneCarriesErrorMarkers("/settings")
     }
 
@@ -116,6 +127,25 @@ class JarSmokeE2eTest {
         status shouldBe 200
         body shouldContain "smoke"
         noneCarriesErrorMarkers("/executions/$SEEDED_EXECUTION")
+    }
+
+    @Test
+    fun `the pipeline editor renders from the jar - the asset-heaviest screen`() {
+        val (body, status) = get("/pipelines/$PIPELINE/editor")
+        status shouldBe 200
+        // The seeded pipeline's JSON is embedded for the client-side graph — real content,
+        // not an editor shell over a missing record.
+        body shouldContain "smoke_pipe"
+        body shouldContain "pipeline-editor"
+        noneCarriesErrorMarkers("/pipelines/$PIPELINE/editor")
+    }
+
+    @Test
+    fun `the template editor renders from the jar`() {
+        val (body, status) = get("/templates/$SEEDED_TEMPLATE/editor")
+        status shouldBe 200
+        body shouldContain "Smoke Template"
+        noneCarriesErrorMarkers("/templates/$SEEDED_TEMPLATE/editor")
     }
 
     @Test
@@ -258,6 +288,16 @@ class JarSmokeE2eTest {
                         "VALUES ('$SEEDED_EXECUTION', '$PIPELINE', 1, 'SUCCESS', '{}'::jsonb, " +
                         "'$USER', 'REST', '$SEEDED_EXECUTION')",
                 )
+                s.execute(
+                    "INSERT INTO templates (id, workspace_id, name, display_name, description, " +
+                        "current_version, created_by) VALUES ('$TEMPLATE', '$WORKSPACE', " +
+                        "'$SEEDED_TEMPLATE', 'Smoke Template', '', 1, '$USER')",
+                )
+                s.execute(
+                    "INSERT INTO template_versions (template_id, version, engine, dialect, body, " +
+                        "created_by) VALUES ('$TEMPLATE', 1, 'freemarker', 'POSTGRES', " +
+                        "'SELECT 1 AS smoke', '$USER')",
+                )
             }
         }
     }
@@ -345,8 +385,10 @@ class JarSmokeE2eTest {
         val USER = UUID.randomUUID().toString()
         val WORKSPACE = UUID.randomUUID().toString()
         val PIPELINE = UUID.randomUUID().toString()
+        val TEMPLATE = UUID.randomUUID().toString()
         const val SEEDED_EXECUTION = "44444444-4444-4444-4444-444444444444"
         const val SEEDED_DATASOURCE = "smoke_ds"
+        const val SEEDED_TEMPLATE = "smoke_tpl"
         const val REDIS_PORT = 6379
         const val APP_BOOT_TIMEOUT_MS = 120_000L
 
