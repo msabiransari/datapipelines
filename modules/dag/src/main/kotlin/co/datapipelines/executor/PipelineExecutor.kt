@@ -643,6 +643,7 @@ class PipelineExecutor(
             // minted a fresh random id and the family could not be joined by the one field that
             // exists to join it.
             correlationId = request.correlationId,
+            workspaceId = request.workspaceId,
         )
     }
 

@@ -3,7 +3,6 @@ package co.datapipelines.config
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.core.env.Environment
-import org.springframework.core.io.ClassPathResource
 import java.util.Base64
 
 /**
@@ -295,22 +294,15 @@ class ConfigValidator(
         /**
          * The vendored theme names, or **null** when the design-system assets are not on the
          * classpath at all (pre-P8) — the difference between "validate" and "nothing to validate
-         * against". Theme CSS files live under `themes/` (e.g. `themes/saas.css`); inside a jar
-         * there is no directory listing, so the configured theme's own CSS file is probed instead.
+         * against". Enumerated jar-safe through [VendoredThemes.names] (025 B1, the T21 class):
+         * this used to resolve the directory through `ClassPathResource.file`, which returns
+         * null inside every packaged deployment — the §7 theme startup check was silently
+         * deferred in exactly the deployments that matter, the jars.
          */
-        private fun vendoredThemes(): Set<String>? {
-            val root = ClassPathResource(THEME_ROOT)
-            if (!root.exists()) return null
-            val baseDir = runCatching { root.file }.getOrNull() ?: return null
-            val themesDir =
-                baseDir
-                    .listFiles { f -> f.isDirectory && f.name == "themes" }
-                    ?.firstOrNull() ?: return null
-            return themesDir
-                .listFiles { f -> f.isFile && f.name.endsWith(".css") }
-                ?.map { it.name.removeSuffix(".css") }
+        private fun vendoredThemes(): Set<String>? =
+            co.datapipelines.web.ui.VendoredThemes
+                .names()
                 ?.toSet()
-        }
 
         private fun requirePresent(
             value: String?,

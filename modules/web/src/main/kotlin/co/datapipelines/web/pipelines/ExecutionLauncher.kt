@@ -235,7 +235,7 @@ class ExecutionLauncher(
         val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)
 
         scope.launch {
-            runExecution(executor, request, emitter, sse, executionId)
+            runExecution(executor, request, emitter, sse, executionId, workspaceId)
         }
         return sse
     }
@@ -255,6 +255,7 @@ class ExecutionLauncher(
         emitter: WebEventEmitter,
         sse: SseEmitter,
         executionId: UUID?,
+        workspaceId: UUID,
     ) {
         try {
             val result =
@@ -264,6 +265,10 @@ class ExecutionLauncher(
                         pipelineVersion = request.pipelineVersion,
                         pipeline = request.pipeline,
                         userId = request.principal.userId,
+                        // The pipeline's workspace IS the execution's workspace (025 A5):
+                        // runtime datasource resolution scopes by it, matching save-time
+                        // validation. Same value the engine was built with, two lines up.
+                        workspaceId = workspaceId,
                         parameters = request.parameters,
                         idempotencyKey = request.idempotencyKey,
                         resultTtlSeconds = request.resultTtlSeconds,

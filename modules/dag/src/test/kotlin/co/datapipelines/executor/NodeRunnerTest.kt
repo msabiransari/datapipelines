@@ -413,6 +413,7 @@ class NodeRunnerTest {
             userId = UUID.randomUUID(),
             rootExecutionId = executionId,
             directSink = directSink,
+            workspaceId = UUID.randomUUID(),
         )
 
     private suspend fun failureOf(

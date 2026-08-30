@@ -24,6 +24,15 @@ object WorkspaceErrorCodes {
     const val HEADER_FORBIDDEN = "workspace.header_forbidden"
 
     /**
+     * 403 — an API-key principal reached a session-only workspace action (the UI's
+     * create/join/members/delete/switch). Same refusal family as [HEADER_FORBIDDEN] but
+     * its own condition: the request carried no `DP-Workspace` to refuse — the CREDENTIAL
+     * class is wrong, and for `switch` the stake is credential minting (a `dp_session`
+     * stamped from the user's scopes), which a key must never obtain.
+     */
+    const val SESSION_REQUIRED = "workspace.session_required"
+
+    /**
      * 404 — an unknown workspace name, for a principal who could otherwise see any workspace
      * (a global `admin`, design §8). For everyone else unknown and non-member are the same
      * 403 [MEMBERSHIP_REQUIRED] — no existence oracle (the 019 precedent).
@@ -41,7 +50,16 @@ object WorkspaceErrorCodes {
 
     /** The full §13.12 set — the spec-drift test asserts this equals the doc. */
     val ALL: Set<String> =
-        setOf(MEMBERSHIP_REQUIRED, CREATION_FORBIDDEN, HEADER_FORBIDDEN, NOT_FOUND, NAME_INVALID, DUPLICATE_NAME, IN_USE)
+        setOf(
+            MEMBERSHIP_REQUIRED,
+            CREATION_FORBIDDEN,
+            HEADER_FORBIDDEN,
+            SESSION_REQUIRED,
+            NOT_FOUND,
+            NAME_INVALID,
+            DUPLICATE_NAME,
+            IN_USE,
+        )
 }
 
 /**
@@ -82,6 +100,21 @@ class WorkspaceHeaderForbiddenException :
         HTTP_BAD_REQUEST,
         "DP-Workspace is not accepted on API-key requests; the key's workspace is pinned at issuance",
         "API keys are pinned to one workspace. Remove the DP-Workspace header and try again.",
+    )
+
+/**
+ * An API-key principal reached a SESSION-ONLY workspace action (025 A2): the UI's
+ * create/join/members/delete/switch. `switch` is the sharp case — it MINTS a `dp_session`
+ * from `scopesFor(user)`, so admitting a key there trades a read-scoped credential for an
+ * author/admin session (the skeleton-key outcome D3's header refusal exists to prevent).
+ * The REST surface under `/api/v1/workspaces` is the programmatic path for keys.
+ */
+class WorkspaceSessionRequiredException :
+    AuthException(
+        WorkspaceErrorCodes.SESSION_REQUIRED,
+        HTTP_FORBIDDEN,
+        "Workspace UI actions are session-only; an API key cannot drive them or mint a session",
+        "API keys use the workspace REST API. Sign in to manage workspaces from the UI.",
     )
 
 /**

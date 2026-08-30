@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
@@ -41,7 +42,7 @@ class DatasourceSchemaToolsTest {
     @Test
     fun `get_schemas threads its arguments and serves the shared wire projection`() {
         val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
-        every { introspector.schemas("pg-prod") } returns page
+        every { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) } returns page
 
         val payload =
             DatasourcesGetSchemasTool(introspector, gateRegistry("pg-prod", "down"))
@@ -53,7 +54,7 @@ class DatasourceSchemaToolsTest {
     @Test
     fun `get_tables threads its arguments and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
-        every { introspector.tables("pg-prod", "sales") } returns page
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") } returns page
 
         val payload =
             DatasourcesGetTablesTool(introspector, gateRegistry("pg-prod", "down"))
@@ -69,7 +70,7 @@ class DatasourceSchemaToolsTest {
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
                 ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
             )
-        every { introspector.columns("pg-prod", "orders", null) } returns columns
+        every { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null) } returns columns
 
         val payload =
             DatasourcesGetColumnsTool(introspector, gateRegistry("pg-prod", "down"))
@@ -173,14 +174,23 @@ class DatasourceSchemaToolsTest {
         // merge; it keeps working — see the next test.)
         val meta = mockk<java.sql.DatabaseMetaData>()
         every { meta.searchStringEscape } returns "\\"
+        val gated =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "down",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            )
         val real =
-            realIntrospectorOver(meta) { connection ->
+            realIntrospectorOver(meta, datasource = gated) { connection ->
                 every { connection.catalog } returns null
             }
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                DatasourcesGetColumnsTool(real, gateRegistry("down", "dw", "dying"))
+                DatasourcesGetColumnsTool(real, FakeDatasourceRegistry(listOf(gated)))
                     .call(McpArguments(mapOf("name" to "down", "table" to "orders")), authorCtx)
             }
 
@@ -199,12 +209,23 @@ class DatasourceSchemaToolsTest {
         every { meta.searchStringEscape } returns "\\"
         val tablesRs = McpFixtures.tablesResultSet("db1", "orders", schemaColumn = "TABLE_CAT")
         every { meta.getTables(null, null, "%", any<Array<String>>()) } returns tablesRs
+        val gated =
+            co.datapipelines.datasources.Datasource(
+                name = "down",
+                displayName = "down",
+                dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                jdbcUrl = "jdbc:mysql://db.internal:3306",
+                username = "app",
+                password = "secret",
+            )
         val real =
-            realIntrospectorOver(meta) { connection ->
+            realIntrospectorOver(meta, datasource = gated) { connection ->
                 every { connection.catalog } returns null
             }
 
-        val payload = DatasourcesGetTablesTool(real, gateRegistry("down")).call(McpArguments(mapOf("name" to "down")), authorCtx)
+        val payload =
+            DatasourcesGetTablesTool(real, FakeDatasourceRegistry(listOf(gated)))
+                .call(McpArguments(mapOf("name" to "down")), authorCtx)
 
         payload shouldBe
             mapOf(
@@ -242,7 +263,9 @@ class DatasourceSchemaToolsTest {
         connectionSetup(connection)
         val registry = mockk<DatasourceRegistry>()
         every { registry.get(datasource.name) } returns datasource
-        every { registry.poolFor(datasource) } returns
+        // The gated path (025 C3) hands the introspector the VISIBILITY GATE's snapshot,
+        // a different instance than this fixture — match by name, the registry's key.
+        every { registry.poolFor(match<co.datapipelines.datasources.Datasource> { it.name == datasource.name }) } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {
                 override val name: String = datasource.name
 
@@ -320,9 +343,9 @@ class DatasourceSchemaToolsTest {
         // DatasourceUnreachableException wraps both failure families (SQLException at the
         // lease, RuntimeException at pool build — the Hikari path is pinned by the
         // introspector tests); the tools translate the one type.
-        every { introspector.schemas("down") } throws unreachable("down")
-        every { introspector.tables("down", null) } throws unreachable("down")
-        every { introspector.columns("down", "orders", null) } throws unreachable("down")
+        every { introspector.schemas(match<Datasource> { it.name == "down" }) } throws unreachable("down")
+        every { introspector.tables(match<Datasource> { it.name == "down" }, null) } throws unreachable("down")
+        every { introspector.columns(match<Datasource> { it.name == "down" }, "orders", null) } throws unreachable("down")
 
         assertAll(
             {
@@ -390,9 +413,10 @@ class DatasourceSchemaToolsTest {
                         .copy(workspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"),
                 ),
             )
-        every { introspector.schemas(any()) } returns co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
-        every { introspector.tables(any(), any()) } returns TablesPage(emptyList(), truncated = false)
-        every { introspector.columns(any(), any(), any()) } returns emptyList()
+        every { introspector.schemas(any<Datasource>()) } returns
+            co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
+        every { introspector.tables(any<Datasource>(), any()) } returns TablesPage(emptyList(), truncated = false)
+        every { introspector.columns(any<Datasource>(), any(), any()) } returns emptyList()
 
         assertAll(
             { DatasourcesGetSchemasTool(introspector, registry).call(McpArguments(mapOf("name" to "global-pg")), authorCtx) },

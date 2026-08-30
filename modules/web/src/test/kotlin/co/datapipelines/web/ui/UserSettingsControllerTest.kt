@@ -26,7 +26,7 @@ import java.util.UUID
 class UserSettingsControllerTest {
     private val userRepository = mockk<UserRepository>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = UserSettingsController(userRepository, themeResolver)
+    private val controller = UserSettingsController(userRepository, themeResolver, UiProperties(theme = "forest"))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -86,16 +86,32 @@ class UserSettingsControllerTest {
         authenticate()
         every { userRepository.setThemePreference(userId, "ocean") } just runs
 
-        val response = controller.updateTheme("ocean")
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val result = controller.updateTheme("ocean", model)
 
-        response.statusCode shouldBe HttpStatus.OK
-        response.body shouldContain "Theme updated"
+        // 025 C1: the response is a RENDERED fragment, never a hand-built string carrying
+        // an unprocessed th:href — the raw string's OOB <span> was swapped over the
+        // layout's real stylesheet link and dropped the page's theme CSS until reload.
+        result shouldBe "partials/theme-swap"
+        model["theme"] shouldBe "ocean"
+    }
+
+    @Test
+    fun `a blank theme clears the preference and swaps to the DEPLOYMENT default - not a hardcoded name`() {
+        authenticate()
+        every { userRepository.setThemePreference(userId, null) } just runs
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        controller.updateTheme("", model) shouldBe "partials/theme-swap"
+
+        model["theme"] shouldBe "forest"
     }
 
     @Test
     fun `update theme rejects unknown value`() {
         authenticate()
-        val response = controller.updateTheme("bogus_theme")
+        @Suppress("UNCHECKED_CAST")
+        val response = controller.updateTheme("bogus_theme", ExtendedModelMap()) as org.springframework.http.ResponseEntity<String>
 
         response.statusCode shouldBe HttpStatus.BAD_REQUEST
         response.body shouldContain "Unknown theme"

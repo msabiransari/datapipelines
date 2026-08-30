@@ -8,10 +8,10 @@ import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
-import co.datapipelines.auth.WorkspaceErrorCodes
 import co.datapipelines.auth.WorkspaceProvisioningMode
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.auth.sessionCookie
 import jakarta.servlet.http.HttpServletRequest
@@ -174,42 +174,34 @@ class WorkspacesUiController(
      * The session-only gate for every MUTATING action on this controller (D3).
      *
      * These are browser form posts; the REST surface under `/api/v1/workspaces` is the
-     * programmatic one.
-     * An API-key principal must never drive them, and [switch] is the sharp case: it MINTS
-     * a `dp_session` cookie from `scopesFor(user)` — the USER's scopes, not the KEY's — so
-     * without this gate a `read`-scoped agent key could trade itself for an author/admin
-     * session, and a key pinned to one workspace could mint a session for another. That is
-     * exactly the skeleton-key outcome [co.datapipelines.auth.WorkspaceResolutionFilter]
-     * refuses `DP-Workspace` to prevent; a key's workspace is pinned at issuance, and
-     * scope is a property of the credential, not of its owner.
+     * programmatic one. An API-key principal must never drive them, and [switch] is the
+     * sharp case: it MINTS a `dp_session` cookie from `scopesFor(user)` — the USER's
+     * scopes, not the KEY's — so without this gate a `read`-scoped agent key could trade
+     * itself for an author/admin session, and a key pinned to one workspace could mint a
+     * session for another. That is exactly the skeleton-key outcome
+     * [co.datapipelines.auth.WorkspaceResolutionFilter] refuses `DP-Workspace` to prevent;
+     * a key's workspace is pinned at issuance, and scope is a property of the credential,
+     * not of its owner.
      *
      * Reachable at all because an API key authenticates on EVERY path (`ApiKeyFilter` has
-     * no path test) and is CSRF-exempt (`ApiKeyCredentialMatcher`), while these handlers'
-     * `@RequiredScope` floors are `Scope.READ` — so the annotation passes a read key
-     * through. The floors themselves are the wider question (the sibling routes are
-     * role-gated in-handler, so their exposure is bounded); this gate closes the
-     * credential-minting hole outright and is deliberately independent of them.
+     * no path test) and is CSRF-exempt (`ApiKeyCredentialMatcher`). [switch] additionally
+     * stays floored at `Scope.READ` by design (WORKSPACES_READ, §7.6), so the annotation
+     * alone would pass a read key straight into the session mint — this gate is what
+     * refuses it. The sibling workspace actions have been floored at `author` since the
+     * 025 defect round, so the interceptor stops a read key before them; the gate remains
+     * their deliberate second line (scope is a property of the credential, and these are
+     * browser form posts a key must never drive, whatever floor the matrix carries).
      *
-     * Carries the catalogued `workspace.header_forbidden` code — the same refusal CLASS
-     * (an API key may not change its pinned workspace context), reused rather than adding
-     * a code, because a new code requires the pipeline-contract constant, the §13.12 doc
-     * row and the drift counts in one commit. A dedicated `workspace.session_required`
-     * is the recorded follow-up.
+     * Carries the dedicated `workspace.session_required` (§13.12, 025 A2). The 96240ed
+     * hotfix reused `workspace.header_forbidden` because a new code needs the constant,
+     * the doc row and the drift counts in one commit — too much for a pre-merge hotfix;
+     * this is the recorded follow-up landing it properly.
      */
     private fun requireSessionPrincipal(): AuthenticatedPrincipal {
         val principal = requirePrincipal()
         if (principal.authMethod != AuthMethod.OIDC) {
-            throw AuthException(
-                WorkspaceErrorCodes.HEADER_FORBIDDEN,
-                HTTP_BAD_REQUEST,
-                "Workspace actions are session-only; an API key's workspace is pinned at issuance (D3)",
-                "API keys are pinned to one workspace. Use the REST API with a key, or sign in to switch.",
-            )
+            throw WorkspaceSessionRequiredException()
         }
         return principal
-    }
-
-    private companion object {
-        const val HTTP_BAD_REQUEST = 400
     }
 }

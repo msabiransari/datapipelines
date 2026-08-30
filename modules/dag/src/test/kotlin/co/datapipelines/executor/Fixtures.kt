@@ -72,6 +72,7 @@ object Fixtures {
     fun request(
         pipeline: Pipeline,
         userId: UUID = UUID.randomUUID(),
+        workspaceId: UUID = UUID.randomUUID(),
         resultTtlSeconds: Long? = null,
         correlationId: UUID? = null,
     ): ExecuteRequest =
@@ -80,6 +81,7 @@ object Fixtures {
             pipelineVersion = 1,
             pipeline = pipeline,
             userId = userId,
+            workspaceId = workspaceId,
             resultTtlSeconds = resultTtlSeconds,
             correlationId = correlationId,
         )
@@ -306,6 +308,13 @@ class InMemoryCancellationFlags : CancellationFlags {
 class FakeDatasourceRegistry(
     private val datasources: Map<String, Datasource>,
     private val liveEntries: Map<String, Datasource> = datasources,
+    /**
+     * The §5.3 visibility answer when the executor's workspace scoping is under test
+     * (NodeRunnerWorkspaceScopeTest): name → the workspaces that may see it. Empty (the
+     * default) means "visible to everyone", i.e. the interface's name-global default —
+     * so every other test keeps the pre-workspaces semantics without a workspace model.
+     */
+    private val visibleTo: Map<String, Set<UUID>> = emptyMap(),
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -314,6 +323,16 @@ class FakeDatasourceRegistry(
     override fun list(dialect: Dialect?): List<Datasource> = datasources.values.toList()
 
     override fun get(name: String): Datasource? = datasources[name]
+
+    override fun getVisible(
+        name: String,
+        workspaceId: UUID,
+    ): Datasource? =
+        if (visibleTo.isEmpty()) {
+            get(name)
+        } else {
+            datasources[name]?.takeIf { workspaceId in (visibleTo[name] ?: emptySet()) }
+        }
 
     override fun getLive(name: String): Datasource? = liveEntries[name]
 

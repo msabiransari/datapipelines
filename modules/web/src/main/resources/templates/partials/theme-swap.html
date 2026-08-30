@@ -1,0 +1,11 @@
+<th:block xmlns:th="http://www.thymeleaf.org">
+  <!--
+    The theme-swap response (025 C1), RENDERED — never hand-built HTML. Two elements:
+    the confirmation span (swapped into #theme-status by the select's hx-target) and the
+    OOB stylesheet link that replaces the layout's #theme-link. Rendering is what makes
+    the href correct: @{...} prepends the context path, which a hand-built string would
+    drop under a non-root deployment.
+  -->
+  <span style="color:var(--accent-success);font-size:var(--text-sm)">Theme updated to <span th:text="${theme}">theme</span></span>
+  <link id="theme-link" rel="stylesheet" hx-swap-oob="outerHTML"
+        th:href="@{/vendor/design-system/themes/{theme}.css(theme=${theme})}">

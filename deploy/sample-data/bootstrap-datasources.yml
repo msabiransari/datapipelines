@@ -59,11 +59,9 @@ datasources:
     # They are non-empty anyway because datasources.md §9
     # (`datasource.validation.password_missing`) rejects a null-or-EMPTY password
     # on create, and bootstrap registration goes through that same save path with
-    # no startup-only shortcut (§8A.3). The §8A.1 example in datasources.md shows
-    # `username: "" / password: ""` for exactly this entry; that example does not
-    # register — verified by booting it, which fail-fasts with "A password is
-    # required on create." (recorded for the doc owner; the doc is not this
-    # lane's to amend).
+    # no startup-only shortcut (§8A.3). (The §8A.1 doc example briefly showed
+    # `username: "" / password: ""` for this entry and could not register —
+    # boot-verified as T38; the doc example was fixed 2026-08-29 to this shape.)
     #
     # This is NOT a credential and is NOT a secret: nothing authenticates with
     # it, and there is nothing it could grant access to.

@@ -86,4 +86,14 @@ object McpNotFound {
 internal fun DatasourceRegistry.requireVisible(
     name: String,
     ctx: McpToolContext,
-): Datasource = getVisible(name, ctx.principal.requireWorkspace().id) ?: throw McpNotFound.datasource(name)
+): Datasource = requireVisible(name, ctx.principal.requireWorkspace().id)
+
+/**
+ * The same gate for callers holding the workspace as data (the resource reader) — 025 C3
+ * also unified the two inline `getVisible ?: throw` spellings onto this one home, so the
+ * gate has a single spelling across the surface.
+ */
+internal fun DatasourceRegistry.requireVisible(
+    name: String,
+    workspaceId: UUID,
+): Datasource = getVisible(name, workspaceId) ?: throw McpNotFound.datasource(name)

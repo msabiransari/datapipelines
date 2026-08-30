@@ -154,6 +154,7 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Workspace.MEMBERSHIP_REQUIRED,
                 PipelineErrorCodes.Workspace.CREATION_FORBIDDEN,
                 PipelineErrorCodes.Workspace.HEADER_FORBIDDEN,
+                PipelineErrorCodes.Workspace.SESSION_REQUIRED,
                 PipelineErrorCodes.Workspace.NOT_FOUND,
                 PipelineErrorCodes.Workspace.IN_USE,
             )

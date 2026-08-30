@@ -10,6 +10,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * `WritebackRunner.writebackRows` — the composition write-back path (design §4.2): a parent
@@ -18,6 +19,12 @@ import java.sql.DriverManager
  * SQLState-driven target-missing mapping.
  */
 class WritebackRowsTest {
+    /**
+     * The execution's workspace for the §5.3-scoped resolution (025 A5) — any workspace;
+     * the fake registry defaults to name-global visibility.
+     */
+    private val workspaceId = UUID.randomUUID()
+
     private val schema =
         listOf(
             ColumnSchema("id", LogicalType.INTEGER),
@@ -34,6 +41,7 @@ class WritebackRowsTest {
                 schema,
                 sequenceOf(listOf(1, "a"), listOf(2, "b"), listOf(3, null)),
                 NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                workspaceId,
             )
 
         written shouldBe 3L
@@ -58,7 +66,12 @@ class WritebackRowsTest {
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
         val idSchema = listOf(ColumnSchema("id", LogicalType.INTEGER))
 
-        runner.writebackRows(idSchema, sequenceOf(listOf(1)), NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE)) shouldBe 1L
+        runner.writebackRows(
+            idSchema,
+            sequenceOf(listOf(1)),
+            NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE),
+            workspaceId,
+        ) shouldBe 1L
 
         DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
             connection.createStatement().use { statement ->
@@ -80,6 +93,7 @@ class WritebackRowsTest {
                     listOf(ColumnSchema("id", LogicalType.INTEGER)),
                     sequenceOf(listOf(1)),
                     NodeOutput.Datasource("wb", "nope", WriteMode.APPEND),
+                    workspaceId,
                 )
             }
 
@@ -100,6 +114,7 @@ class WritebackRowsTest {
                     listOf(ColumnSchema("id", LogicalType.INTEGER)),
                     sequenceOf(listOf(1)),
                     NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    workspaceId,
                 )
             }
 
@@ -123,6 +138,7 @@ class WritebackRowsTest {
                 listOf(ColumnSchema("id", LogicalType.INTEGER)),
                 failing,
                 NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                workspaceId,
             )
         }
 

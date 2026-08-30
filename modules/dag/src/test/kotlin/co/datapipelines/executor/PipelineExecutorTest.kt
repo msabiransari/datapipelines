@@ -403,6 +403,67 @@ class PipelineExecutorTest {
             }
         }
 
+    /**
+     * 025 A5's propagation pin: `ExecuteRequest.workspaceId` must reach the node runners'
+     * [NodeExecutionContext] — `NodeRunnerWorkspaceScopeTest` proves the GATE on a hand-built
+     * context; this proves the executor actually CARRIES the workspace end to end. The registry
+     * sees the datasource only in the request's workspace W, so SUCCESS is possible only when the
+     * context the runner received really carried W — a `nodeContext` that substituted any other
+     * id (a fresh one, the wrong field) fails this execution as `datasource_not_found`.
+     */
+    @Test
+    fun `the request's workspace scopes datasource resolution through the full executor`() =
+        runBlocking<Unit> {
+            val workspace = UUID.randomUUID()
+            val source = h2Datasource("ws_src", listOf("CREATE TABLE ws_src (n INT)", "INSERT INTO ws_src VALUES (1), (2)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("ws_src" to source),
+                    visibleTo = mapOf("ws_src" to setOf(workspace)),
+                )
+
+            harness(mapOf("caller" to "SELECT n FROM ws_src"), registry = registry).use { h ->
+                val result =
+                    h.executor.execute(
+                        Fixtures.request(
+                            Fixtures.pipeline(listOf(Fixtures.node("caller", source = "ws_src"))),
+                            workspaceId = workspace,
+                        ),
+                    )
+
+                result.status shouldBe ExecutionStatus.SUCCESS
+                result.nodeStats.single().rowsOut shouldBe 2
+            }
+        }
+
+    /** The negative half, same path: the name exists, but only in a workspace this execution is not in. */
+    @Test
+    fun `a datasource bound to another workspace fails the execution as datasource_not_found`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("ws_hidden", listOf("CREATE TABLE ws_hidden (n INT)", "INSERT INTO ws_hidden VALUES (1)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("ws_hidden" to source),
+                    visibleTo = mapOf("ws_hidden" to setOf(UUID.randomUUID())),
+                )
+
+            harness(mapOf("caller" to "SELECT n FROM ws_hidden"), registry = registry).use { h ->
+                val failure =
+                    shouldThrow<PipelineExecutionFailed> {
+                        h.executor.execute(
+                            Fixtures.request(
+                                Fixtures.pipeline(listOf(Fixtures.node("caller", source = "ws_hidden"))),
+                                workspaceId = UUID.randomUUID(),
+                            ),
+                        )
+                    }
+
+                failure.failedNodeId shouldBe "caller"
+                failure.errorCode shouldBe PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
+                h.emitter.count(SseEventType.PIPELINE_COMPLETED) shouldBe 0
+            }
+        }
+
     /** A factory that fails the way staging does when it cannot open its database (§3.1). */
     private object FailingStagingFactory : StagingFactory {
         override fun create(

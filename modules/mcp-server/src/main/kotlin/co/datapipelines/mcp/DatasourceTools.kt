@@ -103,8 +103,7 @@ class DatasourcesGetTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        val workspaceId = ctx.principal.requireWorkspace().id
-        return (datasources.getVisible(name, workspaceId) ?: throw McpNotFound.datasource(name)).toMcpMetadata()
+        return datasources.requireVisible(name, ctx).toMcpMetadata()
     }
 }
 
@@ -147,8 +146,10 @@ class DatasourcesTestTool(
         ctx: McpToolContext,
     ): Any {
         val name = args.requiredString("name")
-        datasources.requireVisible(name, ctx)
-        val result = datasources.testConnection(name) ?: throw McpNotFound.datasource(name)
+        // C3: the gate's snapshot is the datasource the probe runs against — no second,
+        // unscoped name resolution between the visibility decision and the probe.
+        val gated = datasources.requireVisible(name, ctx)
+        val result = datasources.testConnection(gated) ?: throw McpNotFound.datasource(name)
         return mapOf(
             "connected" to result.connected,
             "server_version" to result.serverVersion,

@@ -1,6 +1,7 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.datasources.ColumnInfo
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
@@ -49,14 +50,21 @@ class DatasourceSchemaControllerTest {
                 null,
                 org.springframework.security.core.authority.AuthorityUtils.NO_AUTHORITIES,
             )
-        io.mockk.every { registry.getVisible(any(), workspaceId) } returns
-            co.datapipelines.datasources.Datasource(
-                name = "visible",
-                displayName = "Visible",
-                dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
-                jdbcUrl = "jdbc:postgresql://db:5432/app",
-                username = "readonly",
-            )
+        // The gate returns the row the caller asked for by name (C3: that snapshot is
+        // exactly what the controller hands the introspector).
+        // C3: the gate's snapshot is what the controller hands the introspector — its
+        // dialect drives the routing, so the gated row mirrors the fixture dialect
+        // (MYSQL default below, matching realIntrospectorOver's historical shape).
+        io.mockk.every { registry.getVisible(any(), workspaceId) } answers
+            {
+                co.datapipelines.datasources.Datasource(
+                    name = firstArg(),
+                    displayName = "Visible",
+                    dialect = co.datapipelines.typesystem.Dialect.MYSQL,
+                    jdbcUrl = "jdbc:mysql://db.internal:3306/app",
+                    username = "app",
+                )
+            }
     }
 
     @org.junit.jupiter.api.AfterEach
@@ -67,23 +75,23 @@ class DatasourceSchemaControllerTest {
     @Test
     fun `schemas delegates to the introspector and serves the shared wire projection`() {
         val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = false)
-        every { introspector.schemas("pg-prod") } returns page
+        every { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) } returns page
 
         val data = controller.schemas("pg-prod").data
 
         data shouldBe page.toWireMap()
-        verify(exactly = 1) { introspector.schemas("pg-prod") }
+        verify(exactly = 1) { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) }
     }
 
     @Test
     fun `tables delegates to the introspector and serves the shared wire projection`() {
         val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
-        every { introspector.tables("pg-prod", "sales") } returns page
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") } returns page
 
         val data = controller.tables("pg-prod", schema = "sales").data
 
         data shouldBe page.toWireMap()
-        verify(exactly = 1) { introspector.tables("pg-prod", "sales") }
+        verify(exactly = 1) { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") }
     }
 
     @Test
@@ -91,14 +99,18 @@ class DatasourceSchemaControllerTest {
         val columns =
             listOf(
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList()),
-                ColumnInfo(ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2), "numeric", emptyList()),
+                ColumnInfo(
+                    ColumnSchema("amount", LogicalType.DECIMAL, precision = 10, scale = 2),
+                    "numeric",
+                    emptyList(),
+                ),
             )
-        every { introspector.columns("pg-prod", "orders", null) } returns columns
+        every { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null) } returns columns
 
         val data = controller.columns("pg-prod", "orders", schema = null).data
 
         data shouldBe columns.map { it.toWireMap() }
-        verify(exactly = 1) { introspector.columns("pg-prod", "orders", null) }
+        verify(exactly = 1) { introspector.columns(match<Datasource> { it.name == "pg-prod" }, "orders", null) }
     }
 
     @Test
@@ -118,7 +130,7 @@ class DatasourceSchemaControllerTest {
         // family and the RuntimeException pool-build family — PoolInitializationException on a
         // down database, which round 1 missed; that path is pinned by the introspector tests)
         // must surface as the §13.8 code (HTTP 502 via the catalog), never as the 500 backstop.
-        every { introspector.tables("pg-prod", null) } throws
+        every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, null) } throws
             DatasourceUnreachableException("pg-prod", RuntimeException("Connection refused"))
 
         val thrown = shouldThrow<DatapipelinesException> { controller.tables("pg-prod", schema = null) }
@@ -180,7 +192,7 @@ class DatasourceSchemaControllerTest {
     }
 
     @Test
-    fun `a no-schema COLUMNS read on a datasource with no current schema is the catalogued 400 - not a merged answer`() {
+    fun `a no-schema COLUMNS read with no current schema is the catalogued 400 - not a merged answer`() {
         // The cannot-merge promise (§9.7) made mechanical and scoped (R4 F6): a MySQL
         // registration with a database-less URL yields no current schema, and an
         // unqualified COLUMNS read would merge same-named tables' columns across every
@@ -297,6 +309,17 @@ class DatasourceSchemaControllerTest {
                 registry,
             )
 
+        // The gate answers with the fixture's own H2 shape — the gated snapshot's dialect
+        // drives the current-schema routing (C3).
+        io.mockk.every { registry.getVisible("h2-prod", workspaceId) } returns
+            co.datapipelines.datasources.Datasource(
+                name = "h2-prod",
+                displayName = "h2-prod",
+                dialect = co.datapipelines.typesystem.Dialect.H2,
+                jdbcUrl = "jdbc:h2:mem:appprod",
+                username = "app",
+            )
+
         val thrown = shouldThrow<DatapipelinesException> { controller.columns("h2-prod", "orders", schema = null) }
 
         assertAll(
@@ -338,7 +361,13 @@ class DatasourceSchemaControllerTest {
             )
         val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
         every { registry.get(name) } returns datasource
-        every { registry.poolFor(datasource) } returns
+        // The gated path (025 C3) hands the introspector the GATE's snapshot — a
+        // different instance than this fixture; match by name, the registry's key.
+        every {
+            registry.poolFor(
+                match<Datasource> { it.name == name },
+            )
+        } returns
             object : co.datapipelines.datasources.pooling.ConnectionPool {
                 override val name: String = name
 

@@ -15,6 +15,7 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
 import java.sql.Types
+import java.util.UUID
 
 /** Streams a DQL node's ResultSet into an external datasource table (dag-executor.md §6.4.3). */
 interface WritebackRunner {
@@ -26,11 +27,15 @@ interface WritebackRunner {
      *   required for the same reason `Staging.stage` takes it (staging §3.2): values must be read
      *   through the source dialect's canonical mapping, or a `getObject` on a driver-object column
      *   ships Java identity text into the target table. Reported as a spec clarification.
+     * @param workspaceId the execution's workspace (025 A5): the target resolves through
+     *   §5.3 visibility — a datasource the workspace cannot see is `datasource_not_found`,
+     *   not a silent write.
      */
     fun writeback(
         resultSet: ResultSet,
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
+        workspaceId: UUID,
     ): Long
 
     /**
@@ -43,11 +48,14 @@ interface WritebackRunner {
      * dialect parameter: decoding and source-dialect mapping happened in the child's executor, so
      * there is no cursor and no metadata left to map — the same relationship
      * `ResultStore.materializeRows` has to `materialize`.
+     *
+     * @param workspaceId as [writeback]: the execution's workspace, scoping target resolution.
      */
     fun writebackRows(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
+        workspaceId: UUID,
     ): Long
 }
 
@@ -74,29 +82,36 @@ class JdbcWritebackRunner(
         resultSet: ResultSet,
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
+        workspaceId: UUID,
     ): Long {
         val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
-        return writeAll(output, columns) { connection, table -> streamInsert(connection, table, columns, resultSet) }
+        return writeAll(output, workspaceId, columns) { connection, table -> streamInsert(connection, table, columns, resultSet) }
     }
 
     override fun writebackRows(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
-    ): Long = writeAll(output, schema) { connection, table -> insertRows(connection, table, schema, rows) }
+        workspaceId: UUID,
+    ): Long = writeAll(output, workspaceId, schema) { connection, table -> insertRows(connection, table, schema, rows) }
 
     /**
      * The shared write-back shell (§6.4.3): datasource resolution, the identifier guards, and the
      * single-transaction write (`REPLACE` truncates and inserts together, so a failure never
      * leaves the target table empty) around whichever row source [insert] drains.
+     *
+     * Resolution is workspace-scoped (025 A5, design §5.3): the target must be VISIBLE to the
+     * execution's workspace, else `datasource_not_found` — a write into a row the workspace
+     * cannot see was the execution-path twin of the save-time gap.
      */
     private fun writeAll(
         output: NodeOutput.Datasource,
+        workspaceId: UUID,
         columns: List<ColumnSchema>,
         insert: (Connection, String) -> Long,
     ): Long {
         val datasource =
-            registry.get(output.datasource)
+            registry.getVisible(output.datasource, workspaceId)
                 ?: throw datasourceNotFound(output.datasource)
         refuseIfReadonly(output)
         // Both identifier guards report the WRITE-BACK phase code: a bad generated identifier here

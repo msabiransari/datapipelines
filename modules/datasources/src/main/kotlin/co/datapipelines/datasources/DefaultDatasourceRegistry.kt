@@ -61,10 +61,16 @@ class DefaultDatasourceRegistry(
 
     override fun get(name: String): Datasource? = cache.get(name) { repository.findByName(it)?.toDatasource() }
 
+    /**
+     * Served from the §6.3 cache like [get] (025 C4, the 022 review's perf note): this is
+     * the control plane's hot path — every REST GET and every save-time validation — and
+     * was the one registry read going straight to the repository. Keyed (workspaceId,
+     * name); misses never cached; invalidated with the name across every workspace.
+     */
     override fun getVisible(
         name: String,
         workspaceId: UUID,
-    ): Datasource? = repository.findVisibleByName(name, workspaceId)?.toDatasource()
+    ): Datasource? = cache.getVisible(workspaceId, name) { repository.findVisibleByName(it, workspaceId)?.toDatasource() }
 
     /**
      * The D10 flip window made structural (workspaces §6 layer 2a): one direct indexed PK read

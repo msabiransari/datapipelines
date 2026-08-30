@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -53,6 +54,14 @@ class DatasourceMetadataCache(
     private val entries = ConcurrentHashMap<String, Entry>()
 
     /**
+     * The (workspaceId, name)-keyed §5.3 read (025 C4): `getVisible` is the control
+     * plane's hot path (every REST GET, every save-time validation) and was the one
+     * registry read with no cache. Same disciplines as [get]: misses never cached,
+     * expiry bounds staleness, local invalidation on write.
+     */
+    private val visibleEntries = ConcurrentHashMap<Pair<UUID, String>, Entry>()
+
+    /**
      * The cached datasource for [name], loading and storing it via [loader] on a miss **or on an
      * expired entry**. A load that returns null leaves nothing behind (§6.3: misses are never
      * cached), and also drops any expired entry that was still sitting in the map.
@@ -60,27 +69,52 @@ class DatasourceMetadataCache(
     fun get(
         name: String,
         loader: (String) -> Datasource?,
+    ): Datasource? = lookup(entries, name) { loader(name) }
+
+    /**
+     * The cached datasource for [name] VISIBLE to [workspaceId], loading via [loader] on a
+     * miss or expiry. The key is the pair — two workspaces resolve one global datasource
+     * through independent entries, so an invalidation or expiry in one cannot serve the
+     * other a row it must not see or a row past its bound.
+     */
+    fun getVisible(
+        workspaceId: UUID,
+        name: String,
+        loader: (String) -> Datasource?,
+    ): Datasource? = lookup(visibleEntries, workspaceId to name) { loader(name) }
+
+    /** The shared get-or-load over whichever [map] and [key] — one discipline, two keys. */
+    private fun <K> lookup(
+        map: ConcurrentHashMap<K, Entry>,
+        key: K,
+        loader: () -> Datasource?,
     ): Datasource? {
-        val cached = entries[name]
+        val cached = map[key]
         if (cached != null && ticker() < cached.expiresAt) return cached.datasource
-        val loaded = loader(name)
+        val loaded = loader()
         if (loaded == null) {
             // The row is gone; the stale entry must not outlive it.
-            if (cached != null) entries.remove(name)
+            if (cached != null) map.remove(key)
             return null
         }
-        entries[name] = Entry(loaded, ticker() + ttl.inWholeNanoseconds)
+        map[key] = Entry(loaded, ticker() + ttl.inWholeNanoseconds)
         return loaded
     }
 
-    /** Drops [name] — called on every create, update and delete (§6.3). */
+    /**
+     * Drops [name] — called on every create, update and delete (§6.3). Both maps: a write
+     * invalidates the name for every workspace that had it cached, not just the writer's
+     * own view of it.
+     */
     fun invalidate(name: String) {
         entries.remove(name)
+        visibleEntries.keys.removeIf { it.second == name }
     }
 
     /** Drops everything (key rotation, tests, and any bulk write the registry does not model). */
     fun invalidateAll() {
         entries.clear()
+        visibleEntries.clear()
     }
 
     /**

@@ -126,9 +126,17 @@ class ScopeInterceptor(
         return false
     }
 
-    private companion object {
+    companion object {
+        /**
+         * The governed-prefix constants, shared with the build-time guards in `web`
+         * (RequiredScopeCoverageTest, 025 C6): the runtime deny and the compile-time
+         * coverage check must own ONE spelling, or they drift — the interceptor denying
+         * `/partials/` while the test scanned `/partials` (broader by one character) was
+         * exactly the shape a drift would leave behind.
+         */
         const val API_PREFIX = "/api/"
         const val PARTIALS_PREFIX = "/partials/"
-        const val HTTP_FORBIDDEN = 403
+
+        private const val HTTP_FORBIDDEN = 403
     }
 }

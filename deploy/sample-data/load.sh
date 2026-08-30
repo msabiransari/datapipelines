@@ -74,7 +74,44 @@ WORK="$SAMPLE_DIR/.artifacts/$VERSION"
 # D6 layer 3). CREATED HERE, never assumed to exist.
 DEMO_USER="${SAMPLE_DB_USER:-dp_demo_ro}"
 
+# Every value the SQL below interpolates (023 F6). VERSION is also constrained by
+# the manifest equality check, but the guard here is what the SQL itself relies on.
+require_sql_safe DEMO_USER "$DEMO_USER"
+require_sql_safe VERSION "$VERSION"
+
 wants() { case ",$ENGINES," in *",$1,"*) return 0 ;; esac; [ -z "$ENGINES" ]; }
+
+# F8 (023): the old `wants X && command -v client` read a MISSING CLIENT BINARY as
+# "engine not wanted" — a one-shot loader could exit 0 having loaded nothing. An
+# engine the caller NAMED (or the default set, when nothing loadable exists at
+# all) whose client is absent is now fatal; only the documented default
+# ("every engine this image can reach") may skip an engine for a missing binary,
+# and a run that loaded NOTHING dies at the end regardless.
+require_client() { # <engine> <binary>
+  command -v "$2" >/dev/null 2>&1 && return 0
+  if [ -n "$ENGINES" ]; then
+    die "$1 is in --engines but this image has no '$2' — the engine cannot be loaded here"
+  fi
+  log "  $1 skipped — no $2 in this image (default: every engine this image can reach)"
+  return 1
+}
+
+LOADED_ANY=0
+
+# F6 (023): operator env values are interpolated into superuser SQL below. An
+# allowlist, not escaping: the values are operator-controlled deployment facts,
+# and one conservative charset keeps both engines' quoting rules out of scope.
+# Anything else dies naming the variable and the legal characters.
+require_sql_safe() { # <label> <value> <charset-description>
+  case "$2" in
+    '') die "$1 is empty" ;;
+    *[!A-Za-z0-9_.:@+-]*)
+      die "$1 contains characters outside [A-Za-z0-9_.:@+-] — it is interpolated into
+  superuser SQL by this loader, and the charset is the injection guard (023 F6).
+  Value begins: $(printf '%s' "$2" | head -c 8)…" ;;
+    *) ;;
+  esac
+}
 
 # --- fetch ------------------------------------------------------------------
 # curl on the mysql image, busybox wget on the postgres image. Whichever exists.
@@ -165,12 +202,15 @@ log "all $count artifact(s) verified"
 
 # --- 3: engines -------------------------------------------------------------
 
-if wants postgres && command -v psql >/dev/null 2>&1; then
+if wants postgres && require_client postgres psql; then
   step "postgres"
   : "${PGHOST:?PGHOST must name the Postgres host}"
   : "${PGUSER:?PGUSER must name a superuser able to CREATE DATABASE and CREATE ROLE}"
   : "${SAMPLE_PG_PASSWORD:?SAMPLE_PG_PASSWORD must be set — it is the password of the demo login}"
   SAMPLE_PG_DB="${SAMPLE_PG_DB:-dp_sample_trips}"
+  require_sql_safe SAMPLE_PG_PASSWORD "$SAMPLE_PG_PASSWORD"
+  require_sql_safe SAMPLE_PG_DB "$SAMPLE_PG_DB"
+  LOADED_ANY=1
 
   psql_admin() { psql -v ON_ERROR_STOP=1 -qtA -d "${PGDATABASE:-postgres}" "$@"; }
   psql_sample() { psql -v ON_ERROR_STOP=1 -qtA -d "$SAMPLE_PG_DB" "$@"; }
@@ -186,7 +226,13 @@ if wants postgres && command -v psql >/dev/null 2>&1; then
     log "  SKIP — _sample_meta already records version $VERSION"
   else
     log "  pg_restore $SAMPLE_PG_DB"
-    pg_restore --no-owner --no-privileges --exit-on-error -d "$SAMPLE_PG_DB" "$WORK/pg-trips.dump"
+    # --clean --if-exists (023 F2): without it an INTERRUPTED restore left tables
+    # behind with no marker, and every later run died on "already exists" — the
+    # documented v1->v2 upgrade path (marker names a different version, restore
+    # runs over the old tables) was the same wedge. Dropping what exists first
+    # makes a re-run always safe, which is the loader's stated contract.
+    pg_restore --clean --if-exists --no-owner --no-privileges --exit-on-error \
+      -d "$SAMPLE_PG_DB" "$WORK/pg-trips.dump"
 
     log "  creating SELECT-only login $DEMO_USER"
     # Created, not assumed (design §5). The grants are the whole point: SELECT on
@@ -226,12 +272,15 @@ EOSQL
   fi
 fi
 
-if wants mysql && command -v mysql >/dev/null 2>&1; then
+if wants mysql && require_client mysql mysql; then
   step "mysql"
   : "${MYSQL_HOST:?MYSQL_HOST must name the MySQL host}"
   : "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set — the loader creates a database and a role}"
   : "${SAMPLE_MYSQL_PASSWORD:?SAMPLE_MYSQL_PASSWORD must be set — it is the password of the demo login}"
   SAMPLE_MYSQL_DB="${SAMPLE_MYSQL_DB:-dp_sample_weather}"
+  require_sql_safe SAMPLE_MYSQL_PASSWORD "$SAMPLE_MYSQL_PASSWORD"
+  require_sql_safe SAMPLE_MYSQL_DB "$SAMPLE_MYSQL_DB"
+  LOADED_ANY=1
 
   # MYSQL_PWD rather than -p on the command line: an argv password is visible in
   # `ps` to every process in the container.
@@ -269,6 +318,7 @@ fi
 
 if wants sqlite; then
   step "sqlite + app-visible files"
+  LOADED_ANY=1
   # No server, no login: the file is mounted read-only into the app container and
   # the datasource sets the driver's read-only open mode as well
   # (datasources.md §8A.4). "Loading" is placing the verified file.
@@ -298,6 +348,13 @@ if wants sqlite; then
     chmod 0444 "$SAMPLE_DIR/bootstrap-datasources.yml"
     log "  placed $SAMPLE_DIR/bootstrap-datasources.yml"
   fi
+fi
+
+# F8's silent-success case: a run that loaded NO engine at all is a failure —
+# the default engine set means "every engine this image can reach", and an image
+# that can reach none of them has not loaded the demo.
+if [ "$LOADED_ANY" -ne 1 ]; then
+  die "no engine was loaded — no client binary for any requested engine was found in this image"
 fi
 
 step "load complete (version $VERSION)"

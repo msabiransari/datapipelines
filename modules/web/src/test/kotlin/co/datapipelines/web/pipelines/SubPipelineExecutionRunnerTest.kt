@@ -71,9 +71,9 @@ class SubPipelineExecutionRunnerTest {
     private val parentExecutionId = UUID.randomUUID()
     private val parentRootId = UUID.randomUUID()
     private val parentUserId = UUID.randomUUID()
+    private val parentWorkspaceId = UUID.randomUUID()
     private val parentCorrelationId = UUID.randomUUID()
     private val childRecordId = UUID.randomUUID()
-    private val workspaceId = UUID.randomUUID()
 
     private val staging: Staging = H2StagingFactory(H2StagingProperties()).create(parentExecutionId)
 
@@ -114,7 +114,6 @@ class SubPipelineExecutionRunnerTest {
         )
 
     private fun stubRegistry() {
-        every { executionRepository.workspaceOfExecution(parentExecutionId) } returns workspaceId
         every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns childRecord()
         every { pipelines.findVersionBody(any(), childRecordId, 4) } returns childBody
     }
@@ -157,6 +156,7 @@ class SubPipelineExecutionRunnerTest {
             compositionDepth = compositionDepth,
             directSink = directSink,
             correlationId = parentCorrelationId,
+            workspaceId = parentWorkspaceId,
         )
 
     /**
@@ -244,6 +244,9 @@ class SubPipelineExecutionRunnerTest {
             request.parentNodeId shouldBe "revenue"
             request.rootExecutionId shouldBe parentRootId
             request.compositionDepth shouldBe 1
+            // Composition inherits the parent's workspace (§5.3, 025 A5): carried on the context,
+            // no longer re-fetched from the parent execution's row.
+            request.workspaceId shouldBe parentWorkspaceId
             request.executionId shouldNotBe null
             result.childExecutionId shouldBe request.executionId
         }
@@ -391,7 +394,6 @@ class SubPipelineExecutionRunnerTest {
     @Test
     fun `a pinned reference that vanished from the registry fails as a child failure, not an NPE`() =
         runTest {
-            every { executionRepository.workspaceOfExecution(parentExecutionId) } returns workspaceId
             every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns null
 
             val thrown =
@@ -531,7 +533,7 @@ class SubPipelineExecutionRunnerTest {
                 }
 
             thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
-            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any()) }
+            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any()) }
         }
 
     @Test
@@ -623,7 +625,7 @@ class SubPipelineExecutionRunnerTest {
         runTest {
             stubRegistry()
             val output = NodeOutput.Datasource("warehouse", "revenue", WriteMode.APPEND)
-            every { writebackRunner.writebackRows(any(), any(), output) } answers
+            every { writebackRunner.writebackRows(any(), any(), output, any()) } answers
                 {
                     secondArg<Sequence<List<Any?>>>().count().toLong()
                 }
@@ -636,7 +638,7 @@ class SubPipelineExecutionRunnerTest {
             val result = runner(stub).run(pipelineNode(output = output), context())
 
             result.rowsOut shouldBe 2
-            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output) }
+            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId) }
         }
 
     @Test

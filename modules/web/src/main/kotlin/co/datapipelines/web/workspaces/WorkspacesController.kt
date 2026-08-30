@@ -28,10 +28,12 @@ import java.util.UUID
  * The workspace endpoints (rest-api.md §17; workspaces design §9).
  *
  * [WorkspaceService] owns every rule — provisioning modes, the no-oracle 403/404 split,
- * owner-or-admin management, open-join, `workspace.in_use` — and this controller binds
- * payloads and projects responses, exactly the house division of labor. `read` is the
- * scope floor for every row (the §7.6 convention for "any authenticated"); the real
- * gates are the service's membership/role checks, default-deny.
+ * owner-or-admin management, the pinned-workspace check for key principals (§5.6, D3),
+ * open-join, `workspace.in_use` — and this controller binds payloads and projects
+ * responses, exactly the house division of labor. The read rows stay floored at `read`
+ * (the §7.6 convention for "any authenticated"); the five mutations are floored at
+ * `author` (025 defect round — a `read`-scoped API key authenticates on every path
+ * CSRF-exempt, so the floor, not only the service's role checks, must refuse it).
  */
 @RestController
 @RequestMapping("/api/v1/workspaces")

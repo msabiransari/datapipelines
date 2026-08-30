@@ -1,0 +1,113 @@
+# GitHub Actions CI (025 E1/E2, closing O2/O3; 025b review round). Free on public repos.
+#
+# WHAT RUNS WHERE —
+#
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon):
+#     ./gradlew build ktlintCheck detekt   — the standard gate: assemble, unit tests,
+#         ktlint, detekt, module-dependency verification, Kover. Only the E2E
+#         integration suite is EXCLUDED (-x :tests:integration-tests:test); the rest
+#         of the unit suite runs, and 21 test files across 7 module source sets start
+#         Testcontainers — so this job needs Docker. The original Docker-free
+#         ("hermetic") design intent was dropped deliberately (025b/C1): excluding
+#         those 21 files across 7 modules would leave real unit coverage unrun, and
+#         Docker on ubuntu-latest is reliable.
+#     ./scripts/docs-audit.sh               — pure doc-structure checks, no network.
+#
+#   integration (ubuntu-latest, Docker available and used):
+#     ./gradlew integrationTest             — the Testcontainers E2E suite AND the
+#         JarSmokeE2eTest fat-jar boot smoke (its bootJar dependency is wired onto the
+#         test task, so it always exercises the current tree). Deliberately a separate
+#         job, not folded into gate: it adds several GB of images and minutes on top
+#         of the unit suite — keeping it apart is what keeps `gate` fast and
+#         required-check-ready.
+#
+#   cold-verify (E2, the T30 guard; no Docker, NO Gradle cache):
+#     ./gradlew help :modules:app:bootJar resolveDependencyVerificationSurface
+#                                     — against a COLD GRADLE_USER_HOME.
+#         Gradle verifies verification-metadata.xml entries ONLY for artifacts it
+#         DOWNLOADS, so warm caches — local or CI-cached — make metadata gaps
+#         structurally invisible; a cold resolve is the only run that sees them (31
+#         missing entries survived every warm gate until a containerized cold build).
+#         Scope, stated honestly (widened 025b/C2): `help` resolves the
+#         settings/root/buildSrc plugin graphs, `:modules:app:bootJar` resolves the
+#         boot classpath, and resolveDependencyVerificationSurface resolves EVERY
+#         resolvable configuration of EVERY project — runtimeClasspath AND
+#         testRuntimeClasspath, the detekt/ktlint tool classpaths, Kover plumbing —
+#         because test-only and tool-only artifacts were most of what T30 found, and
+#         `bootJar` alone only ever touches runtime graphs. This job must NOT use the
+#         Gradle cache action and must not inherit a warmed home.
+#
+# WHAT IS DELIBERATELY NOT HERE —
+#   scripts/sample-data/verify.sh   Docker + GBs + minutes; a documented build-record
+#                                   procedure (its own header), not a per-PR stage.
+#   container-scan.sh / vuln-scan.sh network-dependent scanner stages; run locally or
+#                                   as a scheduled job when the owner wants them.
+#   secret-scan.sh                  needs the gitleaks binary; the pre-push hook is
+#                                   the enforcement point (DEVELOPMENT.md).
+#
+# Branch protection (E3, owner-owned — see the 025 handback): require `gate` on main,
+# PRs only. `integration` and `cold-verify` are strong signals but slower; requiring
+# them is the owner's call once their typical duration is known.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Supply-chain minimum (025b/C3): no job pushes, writes issues/PRs, or publishes —
+# read-only repository content is the entire need. (setup-gradle's cache uses the
+# Actions cache service token, not GITHUB_TOKEN scopes, so it is unaffected.)
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
+        run: ./gradlew build ktlintCheck detekt -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+      - name: docs audit
+        run: ./scripts/docs-audit.sh
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: integration tests + fat-jar smoke (Testcontainers; Docker required)
+        run: ./gradlew integrationTest
+
+  cold-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      # NO setup-gradle cache here — a warm cache is exactly the blind spot this job
+      # exists to close. GRADLE_USER_HOME points at a fresh dir so every dependency,
+      # POM and module-metadata file is downloaded and therefore VERIFIED.
+      - name: cold-cache dependency verification (the T30 guard)
+        env:
+          GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
+        run: ./gradlew help :modules:app:bootJar resolveDependencyVerificationSurface

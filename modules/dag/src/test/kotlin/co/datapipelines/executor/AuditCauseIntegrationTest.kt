@@ -94,6 +94,7 @@ class AuditCauseIntegrationTest {
             tempdbDialect = Dialect.H2,
             userId = UUID.randomUUID(),
             rootExecutionId = executionId,
+            workspaceId = UUID.randomUUID(),
         )
 
     private fun source(): Datasource =

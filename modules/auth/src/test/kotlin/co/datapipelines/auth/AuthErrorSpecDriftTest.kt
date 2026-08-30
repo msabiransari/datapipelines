@@ -59,6 +59,7 @@ class AuthErrorSpecDriftTest {
                 WorkspaceErrorCodes.CREATION_FORBIDDEN to
                     WorkspaceCreationForbiddenException(WorkspaceProvisioningMode.CLOSED).status,
                 WorkspaceErrorCodes.HEADER_FORBIDDEN to WorkspaceHeaderForbiddenException().status,
+                WorkspaceErrorCodes.SESSION_REQUIRED to WorkspaceSessionRequiredException().status,
                 WorkspaceErrorCodes.NOT_FOUND to WorkspaceNotFoundException("x").status,
                 WorkspaceErrorCodes.NAME_INVALID to WorkspaceNameInvalidException("X!").status,
                 WorkspaceErrorCodes.DUPLICATE_NAME to WorkspaceDuplicateNameException("x").status,

@@ -1,6 +1,7 @@
 package co.datapipelines.web.api
 
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.auth.ScopeInterceptor
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveAtLeastSize
 import io.kotest.matchers.shouldBe
@@ -142,6 +143,12 @@ class RequiredScopeCoverageTest {
 
     private companion object {
         const val BASE_PACKAGE = "co.datapipelines.web"
-        const val PARTIALS_PREFIX = "/partials"
+
+        /**
+         * The runtime's own constant (025 C6): the interceptor's default-deny and this
+         * build-time scan owned two spellings (`/partials/` vs `/partials`) and could
+         * drift apart — one shared home now.
+         */
+        val PARTIALS_PREFIX = ScopeInterceptor.PARTIALS_PREFIX
     }
 }

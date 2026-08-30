@@ -33,3 +33,11 @@ dependencies {
     // every module's sources, so they live in the cross-module test suite.
     testImplementation(libs.konsist)
 }
+
+// 025 B4: the jar smoke (JarSmokeE2eTest) boots the REAL bootJar — the packaged
+// classpath, not exploded classes. The task dependency guarantees the jar exists and is
+// current whenever the suite runs; the test itself fails with build instructions if the
+// file is missing (never silently skips — a guard that can skip is not a guard).
+tasks.named("test") {
+    dependsOn(":modules:app:bootJar")
+}

@@ -58,10 +58,18 @@ class WorkspaceSurfacesFixRoundE2eTest {
         ensureSeeded()
         // Bob owns globex and is NOT a member of acme. This row 403ed membership_required
         // before the fix — addMember's membership pre-check ran before the self-join branch.
+        //
+        // Driven by a SESSION, not a key: self-service join is a human act and the shipped
+        // UI is session-gated (WorkspacesUiController.requireSessionPrincipal). Driving it
+        // with a key is what forced the exemption that let a pinned key write a membership
+        // row into any workspace — see the sibling test below.
+        val csrf = "join-csrf"
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey)
+            .cookie(SESSION_COOKIE, sessionJwt(BOB, "bob@globex.test", "globex"))
+            .cookie(CSRF_COOKIE, csrf)
+            .header(CSRF_HEADER, csrf)
             .body("""{"email":"bob@globex.test"}""")
             .`when`()
             .post("/api/v1/workspaces/acme/members")
@@ -71,12 +79,37 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, bobKey)
+            .cookie(SESSION_COOKIE, sessionJwt(BOB, "bob@globex.test", "globex"))
             .`when`()
             .get("/api/v1/workspaces/acme")
             .then()
             .statusCode(200)
             .body("data.name", Matchers.equalTo("acme"))
+    }
+
+    /**
+     * The other half of F4, and the reason the exemption is session-only.
+     *
+     * The open-join branch resolves the target by NAME with `read()`'s membership check
+     * deliberately skipped. Exempting API keys from the pin therefore let a key pinned to
+     * globex write a `workspace_members` row into ANY live workspace — a row that outlives
+     * revocation of the key, and that alone passes the membership checks in `read` and
+     * `members`, neither of which consults the pin. One leaked agent key could then walk
+     * every workspace's roster (emails, display names, user ids) at scope `read`.
+     */
+    @Test
+    fun `F4b - open-join does NOT exempt an API key from its workspace pin`() {
+        ensureSeeded()
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, bobKey) // pinned to globex
+            .body("""{"email":"bob@globex.test"}""")
+            .`when`()
+            .post("/api/v1/workspaces/acme/members")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("workspace.membership_required"))
     }
 
     @Test

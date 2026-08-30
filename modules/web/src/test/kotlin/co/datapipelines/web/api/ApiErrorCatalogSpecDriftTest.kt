@@ -71,10 +71,11 @@ class ApiErrorCatalogSpecDriftTest {
         val VALIDATION_ROW_REGEX = Regex("""^\| `(pipeline\.validation\.[a-z_]+)`\s*\|""")
 
         /**
-         * §13.2–§13.12's row count on 2026-08-28 (workspaces surfaces added §13.12's 4
+         * §13.2–§13.12's row count on 2026-08-29 (025 A2 added §13.12's
+         * `workspace.session_required`; workspaces surfaces added §13.12's 4
          * CRUD rows, §13.8's `workspace_forbidden`, §13.9's template `duplicate_name`).
          */
-        const val SECTION_13_ROW_COUNT = 84
+        const val SECTION_13_ROW_COUNT = 85
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
         const val SECTION_12_CODE_COUNT = 47

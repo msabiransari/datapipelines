@@ -43,6 +43,15 @@ fun interface WorkspaceContentCheck {
  * gets a real 404 [WorkspaceNotFoundException]. Management refusals (a member who is not
  * the owner) reuse the 403 so a workspace's existence stays unprobeable.
  *
+ * ## The pinned-workspace rule (auth.md §5.6, design D3)
+ * The four management paths ([updateDisplayName], [delete], [addMember], [removeMember])
+ * refuse an API-key principal whose pinned workspace differs from the path-name target —
+ * the same no-oracle 403, so "pinned elsewhere" and "not a member" stay indistinguishable.
+ * Exempt (no EXISTING workspace is overreached): [create] (no target exists yet; the
+ * caller gains ownership of a NEW workspace only) and the `open-join` self-join in
+ * [addMember] (only the caller's OWN membership, in a workspace the deployment declared
+ * open). Sessions are untouched (their active workspace is switchable by design).
+ *
  * ## Personal-workspace names (design §7)
  * Derived from the lowercased email local-part, sanitized to the `[a-z0-9_-]+` (1–63)
  * name rule, and collision-suffixed (`alice`, `alice-2`, `alice-3`, …) because the
@@ -232,6 +241,7 @@ class WorkspaceService(
         name: String,
         displayName: String,
     ): Workspace {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val updated =
@@ -254,11 +264,26 @@ class WorkspaceService(
      * still owns non-deleted pipelines/templates/datasources ([WorkspaceContentCheck]).
      * Owner-or-admin. Every member's membership cache is invalidated so the disappearance is
      * immediate, not a 60s surprise.
+     *
+     * ## The accepted check-then-act race (022/F10, 025 A3 — design §11 documents the decision)
+     *
+     * The content count and the soft delete are not one transaction, and cannot be: the
+     * counted tables belong to three other modules (module-structure §4.2), reached through
+     * the [WorkspaceContentCheck] port. A content-creating request that resolved this
+     * workspace before the soft delete and commits after the count strands its rows —
+     * invisible to every listing (memberships join `is_deleted = FALSE`), with the name
+     * permanently taken. Closing it requires either a cross-module locking protocol every
+     * content-save path joins, or content-table triggers whose refusals map to no catalogued
+     * code — both rejected for v1 in the design note. What v1 DOES do is detect: a
+     * post-delete recount that finds content emits `auth.workspace.stranded_content`
+     * (audit + ERROR log) instead of leaving the strand silent. The detector is
+     * best-effort — a commit landing after the recount still strands silently.
      */
     fun delete(
         principal: AuthenticatedPrincipal,
         name: String,
     ) {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
@@ -272,6 +297,22 @@ class WorkspaceService(
             userId = principal.userId,
             details = mapOf("workspace" to name),
         )
+        // The race detector (see KDoc): best-effort, never a refusal — the deletion stands.
+        val stranded = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
+        if (stranded.isNotEmpty()) {
+            log.error(
+                "Workspace '{}' was deleted but {} landed concurrently and is now stranded " +
+                    "(invisible to listings, name held). Recover by SQL: un-delete the workspace " +
+                    "or remove the stranded rows.",
+                name,
+                stranded,
+            )
+            auditLogger.log(
+                event = "auth.workspace.stranded_content",
+                userId = principal.userId,
+                details = mapOf("workspace" to name, "counts" to stranded),
+            )
+        }
     }
 
     /** The member listing (design §9): any member of the workspace, or a global admin. */
@@ -299,8 +340,25 @@ class WorkspaceService(
     ): WorkspaceMemberRow {
         val normalized = email.trim().lowercase()
         val selfJoin = normalized == principal.email
+        // SESSION principals only. The exemption exists so a human can use the shipped
+        // self-service join, and that UI is session-gated already
+        // (`WorkspacesUiController.requireSessionPrincipal`) — so no key needs it.
+        //
+        // Extending it to API keys was a real hole, caught in review before merge: the
+        // open-join branch below resolves the target by NAME with read()'s membership
+        // check deliberately skipped, so a key pinned to G could write a
+        // `workspace_members` row into any live workspace A. That row then outlives
+        // revocation of the key, and membership alone passes the checks in `read` and
+        // `members` — neither of which consults the pin — so the joined workspace's full
+        // roster (emails, display names, user ids) is readable at scope `read`, for every
+        // workspace in the deployment. The KDoc's "it touches only the caller's OWN
+        // membership" was true; "no existing workspace is overreached" was not.
+        val openSelfJoin = selfJoin && workspacesProperties.openJoin && principal.authMethod != AuthMethod.API_KEY
+        if (!openSelfJoin) {
+            requirePinnedWorkspace(principal, name)
+        }
         val workspace =
-            if (selfJoin && workspacesProperties.openJoin) {
+            if (openSelfJoin) {
                 // design §7 self-service: resolve the target WITHOUT read()'s membership
                 // pre-check — it would 403 every non-member before the self-join branch
                 // ever ran (022 review F4: open-join was unreachable). Under open-join
@@ -349,6 +407,7 @@ class WorkspaceService(
         name: String,
         userId: UUID,
     ) {
+        requirePinnedWorkspace(principal, name)
         val workspace = read(principal, name)
         requireOwnerOrAdmin(principal, workspace)
         val target =
@@ -372,6 +431,33 @@ class WorkspaceService(
     ): Boolean {
         if (principal.isAdmin) return true
         return memberships(principal.userId).any { it.workspaceId == workspace.id && it.role == WorkspaceRole.OWNER }
+    }
+
+    /**
+     * The pinned-workspace rule for key principals (auth.md §5.6, design D3): an API key's
+     * workspace is fixed at issuance, so a key may manage ONLY the workspace it is pinned
+     * to. Authorizing against the user's whole membership set instead — as these handlers
+     * address their target by path name — would let a key pinned to A manage B whenever its
+     * owner belongs to both, defeating the pin `WorkspaceResolutionFilter` hard-refuses
+     * `DP-Workspace` to protect (025 review, blocking). Sessions are untouched: their
+     * active workspace is switchable by design, so no pin exists to honor.
+     *
+     * The refusal is the SAME no-oracle 403 [requireOwnerOrAdmin] raises — "pinned
+     * elsewhere" and "not a member" must stay indistinguishable, or the pin itself becomes
+     * an existence oracle. Two exemptions, both because there is no EXISTING workspace the
+     * key could overreach into: [create] (there is no target workspace yet; creation grants
+     * the caller ownership of a NEW workspace only, and the §7.6 `author` floor plus the
+     * per-mode refusal are its gates) and the `open-join` self-join in [addMember] (it
+     * touches only the caller's OWN membership in a workspace the deployment declared open;
+     * the joiner enters as `member`, and the key's active workspace stays pinned).
+     */
+    private fun requirePinnedWorkspace(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ) {
+        if (principal.authMethod == AuthMethod.API_KEY && principal.workspaceName != name) {
+            throw WorkspaceMembershipRequiredException()
+        }
     }
 
     /**
