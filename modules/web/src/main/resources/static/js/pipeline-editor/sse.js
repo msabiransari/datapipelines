@@ -30,8 +30,17 @@
     self.abortController = new AbortController();
 
     var url = "/api/v1/pipelines/" + pipelineId + "/execute";
+    // §7.2: typed JSON via collectParameters(), never the raw overrides — the
+    // parameter panel seeds every declared key with "" (init.js), and sending the
+    // blanks as-is 400s pipeline.execution.invalid_parameter_type on any pipeline
+    // whose defaulted parameters were left untouched (observed on the seeded
+    // revenue_by_borough, 027). collectParameters skips blanks and coerces wire
+    // types, so the server's declared defaults apply.
+    var parameters = window.collectParameters
+      ? window.collectParameters(self.editor)
+      : self.editor.parameterOverrides;
     var body = JSON.stringify({
-      parameters: self.editor.parameterOverrides,
+      parameters: parameters,
     });
 
     fetch(url, {
