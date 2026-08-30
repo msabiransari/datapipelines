@@ -47,8 +47,10 @@ fun interface WorkspaceContentCheck {
  * The four management paths ([updateDisplayName], [delete], [addMember], [removeMember])
  * refuse an API-key principal whose pinned workspace differs from the path-name target —
  * the same no-oracle 403, so "pinned elsewhere" and "not a member" stay indistinguishable.
- * [create] is exempt (no target exists yet; the caller gains ownership of a NEW workspace
- * only) and sessions are untouched (their active workspace is switchable by design).
+ * Exempt (no EXISTING workspace is overreached): [create] (no target exists yet; the
+ * caller gains ownership of a NEW workspace only) and the `open-join` self-join in
+ * [addMember] (only the caller's OWN membership, in a workspace the deployment declared
+ * open). Sessions are untouched (their active workspace is switchable by design).
  *
  * ## Personal-workspace names (design §7)
  * Derived from the lowercased email local-part, sanitized to the `[a-z0-9_-]+` (1–63)
@@ -336,13 +338,19 @@ class WorkspaceService(
         name: String,
         email: String,
     ): WorkspaceMemberRow {
-        // The pin runs before the open-join branch too: a key pinned to A must not
-        // self-join into B — the pin governs the TARGET, not the role being added.
-        requirePinnedWorkspace(principal, name)
         val normalized = email.trim().lowercase()
         val selfJoin = normalized == principal.email
+        val openSelfJoin = selfJoin && workspacesProperties.openJoin
+        if (!openSelfJoin) {
+            // The pin governs MANAGEMENT of an existing workspace. The open-join
+            // self-join is exempt for the same reason create is: it touches only the
+            // caller's OWN membership, in a workspace the deployment has declared open
+            // to every authenticated principal — the joiner enters as `member`, never
+            // owner, and the key's active workspace stays pinned regardless.
+            requirePinnedWorkspace(principal, name)
+        }
         val workspace =
-            if (selfJoin && workspacesProperties.openJoin) {
+            if (openSelfJoin) {
                 // design §7 self-service: resolve the target WITHOUT read()'s membership
                 // pre-check — it would 403 every non-member before the self-join branch
                 // ever ran (022 review F4: open-join was unreachable). Under open-join
@@ -428,9 +436,12 @@ class WorkspaceService(
      *
      * The refusal is the SAME no-oracle 403 [requireOwnerOrAdmin] raises — "pinned
      * elsewhere" and "not a member" must stay indistinguishable, or the pin itself becomes
-     * an existence oracle. [create] is deliberately exempt: there is no target workspace
-     * yet, creation grants the caller ownership of a NEW workspace only, and the §7.6
-     * `author` floor plus the per-mode refusal are its gates.
+     * an existence oracle. Two exemptions, both because there is no EXISTING workspace the
+     * key could overreach into: [create] (there is no target workspace yet; creation grants
+     * the caller ownership of a NEW workspace only, and the §7.6 `author` floor plus the
+     * per-mode refusal are its gates) and the `open-join` self-join in [addMember] (it
+     * touches only the caller's OWN membership in a workspace the deployment declared open;
+     * the joiner enters as `member`, and the key's active workspace stays pinned).
      */
     private fun requirePinnedWorkspace(
         principal: AuthenticatedPrincipal,

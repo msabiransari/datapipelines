@@ -18,10 +18,12 @@ import java.util.UUID
  *
  * The refusal reuses the owner-or-admin check's no-oracle 403: "pinned elsewhere" and
  * "not a member" must stay indistinguishable, or the pin itself becomes an existence
- * oracle. Sessions are untouched — their active workspace is switchable by design —
- * and `create` is exempt: there is no target workspace yet, creation grants the caller
- * ownership of a NEW workspace only, and the `author` floor plus the per-mode refusal
- * are its gates.
+ * oracle. Sessions are untouched — their active workspace is switchable by design. Two
+ * exemptions, both because no EXISTING workspace is overreached: `create` (there is no
+ * target workspace yet; creation grants the caller ownership of a NEW workspace only,
+ * and the `author` floor plus the per-mode refusal are its gates) and the `open-join`
+ * self-join (it touches only the caller's OWN membership in a workspace the deployment
+ * declared open; the joiner enters as `member`).
  */
 class WorkspaceKeyPinTest {
     private val repository = mockk<WorkspaceRepository>(relaxed = true)
@@ -133,6 +135,27 @@ class WorkspaceKeyPinTest {
         val notAMember = shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(session(), "ghost", "X") }
         val pinnedElsewhere = shouldThrow<WorkspaceMembershipRequiredException> { service.updateDisplayName(key(), "globex", "X") }
         (pinnedElsewhere.code to pinnedElsewhere.status) shouldBe (notAMember.code to notAMember.status)
+    }
+
+    @Test
+    fun `an api key pinned to acme can self-join globex under open-join - the pin governs management, not joining`() {
+        stubOwnedWorld()
+        val openJoinService =
+            WorkspaceService(
+                repository,
+                userRepository,
+                AuthCache(AuthProperties()),
+                WorkspacesProperties(openJoin = true),
+                null,
+                auditLogger,
+                null,
+                contentCheck,
+            )
+        // Self-join (the caller's OWN email) into an open-join workspace touches only the
+        // caller's own membership in a workspace the deployment declared open — exempt
+        // from the pin for the same reason create is (022 F4's row keeps working; the
+        // E2E covers it end-to-end). Adding ANOTHER user stays refused (above).
+        openJoinService.addMember(key(), "globex", "alice@company.com")
     }
 
     @Test

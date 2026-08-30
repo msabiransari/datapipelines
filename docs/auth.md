@@ -401,10 +401,13 @@ authored-content operations (pipelines, templates, executions) are scoped to it.
   so "pinned elsewhere" and "not a member" stay indistinguishable. Without this, a key
   pinned to workspace A could rename, delete, or edit the membership of workspace B
   whenever its owner belongs to both — the D3 skeleton key by another door. Sessions are
-  untouched (their active workspace is switchable by design), and **create is exempt**:
-  there is no target workspace yet, creation grants the caller ownership of a NEW
-  workspace only, and the `author` floor plus the per-mode provisioning refusal are its
-  gates.
+  untouched (their active workspace is switchable by design). Two exemptions, both
+  because no EXISTING workspace is overreached: **create** (there is no target workspace
+  yet, creation grants the caller ownership of a NEW workspace only, and the `author`
+  floor plus the per-mode provisioning refusal are its gates) and the **`open-join`
+  self-join** (adding the caller's OWN email to a workspace the deployment declared open
+  touches only the caller's own membership — the joiner enters as `member`, and the
+  key's active workspace stays pinned).
 - **Zero memberships** (possible under `closed` provisioning): the request proceeds with
   no workspace; every workspace-scoped operation then answers
   `403 workspace.membership_required`.
