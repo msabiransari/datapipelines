@@ -24,6 +24,10 @@
 
     if (payload.columns) self.columns = payload.columns;
     if (payload.rows) self.rows = payload.rows;
+    // The template gates the table on `resultPanel.data` — a value nothing ever
+    // set, so the panel rendered its chrome (header, TTL, pagination) over an
+    // eternally hidden table (027). Materialize it from the loaded page.
+    self.data = { columns: self.columns, rows: self.rows };
     if (payload.total_pages !== undefined) self.totalPages = payload.total_pages;
     self.page = payload.page || 1;
     self.hasPrev = self.page > 1;
@@ -82,6 +86,7 @@
   ResultPanel.prototype.syncToEditor = function () {
     var rp = this.editor.resultPanel;
     rp.visible = this.visible;
+    rp.data = this.data;
     rp.columns = this.columns;
     rp.rows = this.rows;
     rp.page = this.page;
