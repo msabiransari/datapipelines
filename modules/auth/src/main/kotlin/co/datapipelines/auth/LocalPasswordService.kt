@@ -72,9 +72,30 @@ class LocalPasswordService(
         newPassword: String,
     ): ChangeResult {
         val user = userRepository.findById(userId)
-        val credential = user?.let { userRepository.findLocalCredential(it.email) }
-        if (user == null || credential == null) return ChangeResult.NoLocalAccount
+        val credential =
+            user?.let { userRepository.findLocalCredential(it.email) }
+                ?: return ChangeResult.NoLocalAccount
 
+        rejectionFor(userId, credential, currentPassword, newPassword)?.let { return it }
+
+        userRepository.setPassword(userId, secretHasher.hash(newPassword), mustChange = false)
+        authCache.invalidateUser(userId)
+        auditLogger.log("auth.password.changed", userId = userId)
+        return ChangeResult.Success
+    }
+
+    /**
+     * The three ways a self-service change is refused, in the order the login path uses,
+     * or `null` when the change may proceed. Split out of [changeOwn] so the happy path
+     * reads as one statement — and so each refusal carries its own audit trail beside the
+     * condition that produced it.
+     */
+    private fun rejectionFor(
+        userId: UUID,
+        credential: LocalCredential,
+        currentPassword: String,
+        newPassword: String,
+    ): ChangeResult? {
         // The §5A.3 lockout is consulted BEFORE any Argon2 work, exactly as the login path
         // does it: a locked account must cost an attacker nothing to probe, or the lock
         // becomes a CPU amplifier instead of a brake.
@@ -110,10 +131,7 @@ class LocalPasswordService(
             }
             return ChangeResult.WrongCurrentPassword
         }
-        userRepository.setPassword(userId, secretHasher.hash(newPassword), mustChange = false)
-        authCache.invalidateUser(userId)
-        auditLogger.log("auth.password.changed", userId = userId)
-        return ChangeResult.Success
+        return null
     }
 
     /**

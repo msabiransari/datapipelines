@@ -122,7 +122,11 @@ class LocalPasswordServiceTest {
                 LocalPasswordService.ChangeResult.WrongCurrentPassword
         }
 
-        users.findLocalCredential("a@company.com").shouldNotBeNull().lockedUntil.shouldNotBeNull()
+        users
+            .findLocalCredential("a@company.com")
+            .shouldNotBeNull()
+            .lockedUntil
+            .shouldNotBeNull()
 
         // Once locked, even the CORRECT password is refused without an Argon2 verify — the
         // lock must be a brake, not a CPU amplifier, exactly as the login path treats it.
