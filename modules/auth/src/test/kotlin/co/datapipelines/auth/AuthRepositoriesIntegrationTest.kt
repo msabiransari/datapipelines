@@ -269,6 +269,22 @@ class AuthRepositoriesIntegrationTest {
     }
 
     @Test
+    fun `an expired lock resets the failure count instead of re-locking on the next mistake`() {
+        val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(u.id, "argon2-hash-1", mustChange = false)
+        users.recordLocalLoginFailure(u.id, maxFailures = 2, lockMinutes = 15)
+        users.recordLocalLoginFailure(u.id, maxFailures = 2, lockMinutes = 15).lockedUntil.shouldNotBeNull()
+
+        // The lock does its time...
+        jdbc.jdbcTemplate.update("UPDATE users SET locked_until = NOW() - INTERVAL '1 minute' WHERE id = '${u.id}'")
+
+        // ...and the next failure starts a FRESH budget at 1 rather than re-locking.
+        val afterExpiry = users.recordLocalLoginFailure(u.id, maxFailures = 2, lockMinutes = 15)
+        afterExpiry.failedLoginCount shouldBe 1
+        afterExpiry.lockedUntil.shouldBeNull()
+    }
+
+    @Test
     fun `clearLockout resets the counters and reports the transition once`() {
         val u = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
         users.setPassword(u.id, "argon2-hash-1", mustChange = false)

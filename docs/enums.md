@@ -260,10 +260,12 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 | Value | Trigger |
 |---|---|
-| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
-| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
+| `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
@@ -278,7 +280,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
 
-> There are no password or lockout events — the system has no local passwords ([Auth §2](auth.md#2-design-principles)).
+> Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
 **Datasource audit events** (same `audit_log` table, defined in [Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)):
 

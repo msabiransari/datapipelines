@@ -94,14 +94,16 @@ htmx and its `response-targets` extension are **vendored** into `static/vendor/`
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /login` |
+| URL | `GET /login` (page), `POST /login` (local password form) |
 | Auth required | No |
-| Purpose | OIDC login — renders one button per configured provider |
-| Design primitives | `.ds-card`, `.ds-button--secondary` |
-| JS | None (static links to `/oauth2/authorization/{provider-name}`) |
+| Purpose | Sign-in — one username/password form, then a divider, then one button per configured OIDC provider; only the enabled methods render |
+| Design primitives | `.ds-card`, `.ds-input`, `.ds-button--primary`, `.ds-button--secondary` |
+| JS | None (plain form POST to `/login`; static links to `/oauth2/authorization/{provider-name}`) |
 | htmx | None |
 
-Content: centered card with app logo + one button per configured OIDC provider. Buttons are **dynamic** — the controller reads the `ClientRegistrationRepository` and passes the provider list to Thymeleaf. A deployment with Google + Okta shows two buttons; a deployment with only Keycloak shows one. Button text is the `display-name` from the provider config ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.3](auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). No hardcoded provider names anywhere in the UI.
+Content: centered card with app logo. When local accounts are enabled ([Auth §5A](auth.md#5a-local-password-accounts-optional)), an email+password form (with the `_csrf` hidden field) comes first; a plain "or" divider separates it from the provider buttons — one form, then the divider, then the buttons, never tabs. Only the methods actually enabled render: an OIDC-only deployment shows just the buttons (no form, no divider, exactly as before); a local-only deployment shows just the form. Provider buttons are **dynamic** — the controller reads the `ClientRegistrationRepository` and passes the provider list to Thymeleaf; button text is the `display-name` from the provider config ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.3](auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). No hardcoded provider names anywhere in the UI.
+
+Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not_allowed`, `oidc_error` (OIDC); `credentials` (unknown email or wrong password — deliberately identical, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)), `locked` (per-account lockout), `inactive` (deactivated account, either method).
 
 ### 4.2 Dashboard
 

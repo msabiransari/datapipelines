@@ -220,6 +220,14 @@ class UserService(
          */
         const val BOOTSTRAP_PROVIDER = "bootstrap"
 
+        /**
+         * `users.provider` of an admin-created local account (auth.md §5A): no OIDC
+         * identity exists, so — like [BOOTSTRAP_PROVIDER] — this is a placeholder with
+         * meaning, replaced by §4.2's linking step if the person later signs in via
+         * OIDC with the same email.
+         */
+        const val LOCAL_PROVIDER = "local"
+
         /** auth.md §4.2 — one canonical form for every lookup, store and comparison. */
         private fun normalize(email: String): String = email.trim().lowercase()
     }

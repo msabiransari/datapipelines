@@ -73,6 +73,23 @@ class LoginRateLimitFilterTest {
     }
 
     @Test
+    fun `the local password POST to the login path is metered like the OIDC paths`() {
+        // auth.md §5A: the POST /login form endpoint inherits the same per-IP damper
+        // as the OIDC paths (the `/login` prefix), so a fast spray is capped per IP
+        // and the per-account lockout only needs to stop the slow one.
+        fun postLogin(): MockHttpServletResponse {
+            val request = MockHttpServletRequest("POST", "/login")
+            request.remoteAddr = "10.0.0.7"
+            val response = MockHttpServletResponse()
+            filter.doFilter(request, response, MockFilterChain())
+            return response
+        }
+
+        repeat(limit) { postLogin().status shouldBe 200 }
+        postLogin().status shouldBe 429
+    }
+
+    @Test
     fun `a zero or negative configured limit disables the filter`() {
         val disabled =
             LoginRateLimitFilter(

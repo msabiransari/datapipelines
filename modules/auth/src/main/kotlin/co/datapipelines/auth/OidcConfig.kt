@@ -54,7 +54,10 @@ class OidcConfig {
                 log.info("No OIDC providers configured; local password accounts are enabled (auth.md §5A)")
                 return InMemoryClientRegistrationRepository(emptyList())
             }
-            error("No OIDC providers configured. Set datapipelines.auth.oidc.providers in config, or enable local accounts (datapipelines.auth.local.enabled).")
+            error(
+                "No OIDC providers configured. Set datapipelines.auth.oidc.providers in config, " +
+                    "or enable local accounts (datapipelines.auth.local.enabled).",
+            )
         }
         val baseUrl = requireBaseUrl(authProperties)
         return InMemoryClientRegistrationRepository(providers.map { toRegistration(it, baseUrl) })

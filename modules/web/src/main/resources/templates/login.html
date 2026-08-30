@@ -20,7 +20,34 @@
         <div th:if="${#strings.equals(error, 'oidc_error')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
           Login failed. Please try again.
         </div>
+        <div th:if="${#strings.equals(error, 'credentials')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+          Invalid email or password.
+        </div>
+        <div th:if="${#strings.equals(error, 'locked')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+          This account is temporarily locked. Try again later or contact an administrator.
+        </div>
       </th:block>
+
+      <!-- Local password form (auth.md §5A) — rendered only when local accounts are
+           enabled; an OIDC-only deployment renders exactly what it always has. One
+           form, then a divider, then the provider buttons — never tabs. -->
+      <form th:if="${localEnabled}" method="post" th:action="@{/login}" style="text-align: left;">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}" />
+        <label for="login-email" style="display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-xs);">Email</label>
+        <input id="login-email" type="email" name="email" class="ds-input" style="width: 100%; margin-bottom: var(--gap-sm);"
+               required autocomplete="username" />
+        <label for="login-password" style="display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-xs);">Password</label>
+        <input id="login-password" type="password" name="password" class="ds-input" style="width: 100%; margin-bottom: var(--gap-md);"
+               required autocomplete="current-password" />
+        <button type="submit" class="ds-button ds-button-primary" style="display: block; width: 100%;">Sign in</button>
+      </form>
+
+      <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}"
+           style="display: flex; align-items: center; gap: var(--gap-sm); margin: var(--gap-md) 0; color: var(--text-secondary); font-size: var(--text-sm);">
+        <span style="flex: 1; border-top: 1px solid var(--border-default);"></span>
+        <span>or</span>
+        <span style="flex: 1; border-top: 1px solid var(--border-default);"></span>
+      </div>
 
       <th:block th:each="provider : ${providers}">
         <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"

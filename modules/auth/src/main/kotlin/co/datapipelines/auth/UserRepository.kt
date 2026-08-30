@@ -278,6 +278,10 @@ class UserRepository(
      * `locked_until` [lockMinutes] into the future. Atomic in a single
      * UPDATE...RETURNING so concurrent sprays cannot lose increments and slide
      * under the lockout threshold.
+     *
+     * An EXPIRED lock resets the count to 1 (the attempt happening now): the lock
+     * did its time, so the account gets a fresh [maxFailures] budget instead of
+     * re-locking on the very next mistake forever.
      */
     fun recordLocalLoginFailure(
         id: UUID,
@@ -288,11 +292,15 @@ class UserRepository(
             .query(
                 """
                 UPDATE users
-                   SET failed_login_count = failed_login_count + 1,
+                   SET failed_login_count = CASE
+                           WHEN locked_until IS NOT NULL AND locked_until <= NOW() THEN 1
+                           ELSE failed_login_count + 1 END,
                        locked_until = CASE
-                           WHEN failed_login_count + 1 >= :max_failures
+                           WHEN (CASE
+                               WHEN locked_until IS NOT NULL AND locked_until <= NOW() THEN 1
+                               ELSE failed_login_count + 1 END) >= :max_failures
                            THEN NOW() + (:lock_minutes * INTERVAL '1 minute')
-                           ELSE locked_until END,
+                           ELSE NULL END,
                        updated_at = NOW()
                  WHERE id = :id
                 RETURNING failed_login_count, locked_until

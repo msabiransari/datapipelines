@@ -98,28 +98,7 @@ class SecurityConfig(
         // local-accounts-only deployment has no ClientRegistrations, no discovery,
         // and no /oauth2 endpoints — the filter chain below is identical either way.
         if (authProperties.oidc.providers.any { it.clientId.isNotBlank() }) {
-            http.oauth2Login { oauth ->
-                oauth.successHandler(oidcSuccessHandler)
-                oauth.failureHandler { request, response, exception ->
-                    // The user gets an opaque `oidc_error` (never provider internals), but the
-                    // failure itself is NOT swallowed (rules/02): without this line every
-                    // authorization-request-not-found, invalid_grant or PKCE mismatch is
-                    // indistinguishable from a §4.2 rejection at the success handler.
-                    log.warn(
-                        "OIDC login failed at {}: {}",
-                        request.requestURI,
-                        (exception as? OAuth2AuthenticationException)?.error?.let { "${it.errorCode}: ${it.description}" }
-                            ?: exception.toString(),
-                        exception,
-                    )
-                    response.sendRedirect("${request.contextPath}/login?error=oidc_error")
-                }
-                oauth.authorizationEndpoint {
-                    it.authorizationRequestRepository(authorizationRequestRepository)
-                    // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.
-                    it.authorizationRequestResolver(authorizationRequestResolver)
-                }
-            }
+            configureOidcLogin(http)
         }
 
         http
@@ -142,6 +121,34 @@ class SecurityConfig(
             }
 
         return http.build()
+    }
+
+    /**
+     * The OIDC login wiring (auth.md §8), applied only when at least one provider is
+     * configured — see the call site. The opaque `oidc_error` redirect never leaks
+     * provider internals, but the failure itself is NOT swallowed (rules/02): without
+     * the warn line every authorization-request-not-found, invalid_grant or PKCE
+     * mismatch is indistinguishable from a §4.2 rejection at the success handler.
+     */
+    private fun configureOidcLogin(http: HttpSecurity) {
+        http.oauth2Login { oauth ->
+            oauth.successHandler(oidcSuccessHandler)
+            oauth.failureHandler { request, response, exception ->
+                log.warn(
+                    "OIDC login failed at {}: {}",
+                    request.requestURI,
+                    (exception as? OAuth2AuthenticationException)?.error?.let { "${it.errorCode}: ${it.description}" }
+                        ?: exception.toString(),
+                    exception,
+                )
+                response.sendRedirect("${request.contextPath}/login?error=oidc_error")
+            }
+            oauth.authorizationEndpoint {
+                it.authorizationRequestRepository(authorizationRequestRepository)
+                // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.
+                it.authorizationRequestResolver(authorizationRequestResolver)
+            }
+        }
     }
 
     /**

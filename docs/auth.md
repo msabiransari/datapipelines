@@ -11,13 +11,13 @@
 
 This spec defines **how users authenticate** (OIDC via any provider — Google, Microsoft, Okta, Auth0, Keycloak, etc.), **how sessions work** (internal JWT after OIDC login), **how agents authenticate** (API keys), **what authenticated principals can do** (scopes), and the **Spring Security wiring** that ties it all together.
 
-The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect. No local passwords are stored. After OIDC login, the server issues its own JWT for stateless session management.
+The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect **by default**; deployments without an IdP may additionally enable optional local password accounts (§5A), stored as Argon2id hashes. After any login, the server issues its own JWT for stateless session management.
 
 ---
 
 ## 2. Design Principles
 
-1. **No passwords.** Identity is delegated to an external OIDC provider. The server never sees or stores user passwords.
+1. **Identity is delegated by default; local accounts are the narrow exception.** The server never sees or stores OIDC user passwords — identity belongs to the external provider. The one exception (§5A): a deployment with no IdP at all would otherwise be unusable — evaluating the product required registering an OAuth client before seeing a single screen, the biggest adoption barrier the product had. For that deployment shape, optional local accounts exist: admin-created only (no self-registration), stored as Argon2id hashes (never plaintext, never in config beyond the one-time first-admin seed), forced to rotate seeded/reset credentials at first login, and off unless explicitly enabled. An OIDC-only deployment behaves exactly as before.
 2. **Generic OIDC, not provider-specific.** Any OIDC-compliant provider works — Google, Microsoft, Okta, Auth0, Keycloak, Ping, AWS Cognito, etc. The deployment configures which provider(s) to enable; the code is provider-agnostic.
 3. **OIDC for humans, API keys for agents.** Users log in via browser (OIDC redirect flow). Agents (Claude, GLM, Copilot) authenticate via API keys issued from the UI.
 4. **Internal JWT after OIDC.** Once OIDC validates the user, the server issues its own JWT (8h TTL). The JWT is the session — any instance can validate it statelessly. OIDC tokens are NOT used for ongoing session management.
@@ -272,6 +272,8 @@ class LoginController(
 
 The login page shows **only the providers the deployment configured** — one button, two buttons, or five buttons. No hardcoded provider names.
 
+When local accounts are enabled (§5A), the page gains a username/password form **before** the provider buttons, separated by a simple divider — one form, then the divider, then the buttons, never tabs (tabs hide half the methods behind a click and add state to a page that should have none). Only the methods actually enabled render: an OIDC-only deployment shows exactly the page above (no form, no divider), a local-only deployment shows the form with no divider and no buttons. Failure states arrive as `?error=` banners (`credentials`, `locked`, `inactive` — same idiom as the OIDC banners).
+
 ### 5.4 OIDC redirect flow (Spring Security handles automatically)
 
 ```
@@ -397,6 +399,44 @@ authored-content operations (pipelines, templates, executions) are scoped to it.
 - **Zero memberships** (possible under `closed` provisioning): the request proceeds with
   no workspace; every workspace-scoped operation then answers
   `403 workspace.membership_required`.
+
+## 5A. Local password accounts (optional)
+
+Local username/password authentication is the **optional second sign-in method** for deployments without an IdP (§2 Principle 1). It is disabled by default (`datapipelines.auth.local.enabled`, [Configuration §3.4](configuration.md#34-auth)); a deployment with only OIDC configured behaves exactly as before this section existed. With no OIDC providers and local accounts enabled, the deployment starts and serves the whole product with zero external setup — the zero-setup path.
+
+### 5A.1 Accounts
+
+A local account is an ordinary `users` row whose `password_hash` holds an **Argon2id** encoded hash (metadata-db §4.1) produced by the same `SecretHasher` API keys use (§7.2) — no second hashing library, no hand-rolled parameters. `password_hash IS NULL` means OIDC-only: that account can **never** authenticate locally. There is **no self-registration** — a local account exists because an admin created it on the user-administration screen, or because it is the config-seeded bootstrap admin (§5A.2). The email domain allowlist (§4.3) governs OIDC exactly as today; admin creation is itself the gate for local accounts, so the allowlist does not re-apply there.
+
+A local account's `provider` is the placeholder `'local'` (like `'bootstrap'`, §4.4 — a value with meaning, not an OIDC registration name): it marks "no OIDC identity is linked". If the person later signs in via OIDC with the same email, §4.2's linking step replaces the placeholder exactly as it replaces `'bootstrap'`; the local password stays valid alongside the OIDC identity unless an admin disables local access.
+
+### 5A.2 Seeding the first admin
+
+*(Lands with the bootstrap commit of this feature — see §4.4 and [Configuration §3.4](configuration.md#34-auth).)*
+
+### 5A.3 Lockout
+
+Distinct from the per-IP login rate limit (§9, `rate_limit.exceeded`): that damper is IP/route-scoped and cannot stop a **slow spray against one account** from many addresses. After `datapipelines.auth.local.lockout.max-failures` (default 5) **consecutive** failed local logins, the account locks for `datapipelines.auth.local.lockout.duration-minutes` (default 15):
+
+- While locked, an attempt does **no Argon2 work** and does not touch the failure count — a spray cannot keep the lock warm or spend the server's native hashing memory. Even the correct password is refused until the lock expires.
+- An expired lock starts a **fresh** failure budget (the count resets on the next failure rather than re-locking instantly forever).
+- A successful login clears the counters. The lock engagement is audited as `auth.login.locked` (§10.1), and an admin can clear it early (unlock or password reset on the user-administration screen).
+
+### 5A.4 Forced password change
+
+*(Lands with the forced-change commit of this feature.)*
+
+### 5A.5 Enumeration resistance and the password policy
+
+Unknown email, an OIDC-only account, and a wrong password are the **same outcome**: the same `Invalid email or password.` banner, the same redirect, the same HTTP status, and — just as important — the **same cost**. The no-row path still runs one Argon2 verification against a dummy hash, so response timing cannot tell "no such account" from "wrong password". Failure audit events carry no credential material.
+
+Passwords are compared only through `SecretHasher.verify` (constant-time-ish at the hash layer). The policy floor for user-chosen passwords (self-service change) is **12 characters minimum** and 128 maximum: length is the factor that resists offline cracking (NIST 800-63B), composition rules push users to predictable patterns, and the maximum bounds Argon2 input cost. Seeded/admin-generated one-time passwords are random and always force a change at first login, so the floor does not apply to them.
+
+### 5A.6 The login flow
+
+`POST /login` (form fields `email`, `password`, plus the `dp_csrf` double-submit token — §8.4) is public (§8.3) and metered by the same per-IP `LoginRateLimitFilter` as the OIDC paths (`/login` prefix). It is deliberately **not** under a scope-governed path: it is the authentication ceremony itself, so no principal exists for the ScopeInterceptor to check yet — exactly like the OIDC callback it mirrors.
+
+On success the flow converges with OIDC: the same `JwtService.issue` mints the same `dp_session` cookie, the same §4.2-step-4 workspace resolution runs (`auto-per-user` provisioning included), the same `auth.login.success` audit event is written (with `provider: "local"` in the details), and `is_active` is re-checked exactly as on the OIDC path (a deactivated account with the correct password gets the `inactive` banner — safe to reveal because the caller just proved the password). The `must_change_password` flag does not block the login; it engages the §5A.4 gate after it.
 
 ## 6. Session Tokens (Internal JWT)
 
@@ -679,7 +719,7 @@ If neither API key nor JWT is present (and the path requires auth), the Authoriz
 |---|---|
 | `/health`, `/ready` | Health checks for orchestrators |
 | `/info` | Build info |
-| `/login`, `/login/**` | Login page + error redirects |
+| `/login`, `/login/**` | Login page + error redirects + the local password POST (§5A) |
 | `/oauth2/**` | OIDC authorization + callback |
 | `/vendor/**`, `/css/**`, `/js/**` | Static assets (design system, Cytoscape, Alpine, app CSS/JS) |
 
@@ -733,10 +773,12 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 
 | Event | Trigger |
 |---|---|
-| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
-| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
+| `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures (§5A.3) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
@@ -935,6 +977,8 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | `users.provider`, `users.provider_subject` | New fields for OIDC identity |
 | Email domain allowlist | New — restricts who can log in |
 | JWT, API keys, scopes, audit log | **Unchanged** |
+
+*Postscript (v2.10):* optional local accounts returned in §5A — narrower than v1.0's: admin-created only (no self-registration), Argon2id via the API-key `SecretHasher`, per-account lockout, forced rotation of seeded/reset credentials, off by default.
 
 ---
 
