@@ -99,10 +99,14 @@
 
           for (var i = 0; i < lines.length; i++) {
             var line = lines[i];
-            if (line.startsWith("event: ")) {
-              eventType = line.substring(7).trim();
-            } else if (line.startsWith("data: ")) {
-              eventData = line.substring(6);
+            // SSE field values may carry ONE optional leading space after the colon
+            // (WHATWG spec) — the app's emitter writes `event:name` without it, so
+            // matching only "event: " never dispatched a single event and every
+            // execution ended as "Connection lost" (027). Accept both forms.
+            if (line.indexOf("event:") === 0) {
+              eventType = line.substring(6).trim();
+            } else if (line.indexOf("data:") === 0) {
+              eventData = line.substring(5).trim();
             } else if (line === "" && eventType) {
               self.dispatch(eventType, eventData);
               eventType = null;
