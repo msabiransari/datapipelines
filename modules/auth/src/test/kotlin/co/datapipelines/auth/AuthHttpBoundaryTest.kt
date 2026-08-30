@@ -380,6 +380,30 @@ class AuthHttpBoundaryTest {
         response.statusCode.value() shouldBe 200
     }
 
+    /**
+     * 027 (024 T41's browser family): the dp_csrf cookie must SURVIVE authenticated
+     * responses untouched. Spring's default composite runs CsrfAuthenticationStrategy
+     * whenever the security context changes during a request — with per-request JWT
+     * authentication that is every authenticated request — and that strategy ROTATES
+     * the token or DELETES the cookie outright (observed live: htmx partial responses
+     * wiped dp_csrf, so every subsequent browser mutation 403'd against the token its
+     * page had rendered). A double-submit cookie is only usable if it is stable, so
+     * this asserts NO dp_csrf Set-Cookie at all leaves an authenticated response.
+     */
+    @Test
+    fun `an authenticated response leaves the dp_csrf cookie untouched - no rotate, no delete`() {
+        val response =
+            call(
+                HttpMethod.GET,
+                "/api/v1/probe",
+                headers(cookies = listOf("dp_session=$session", "dp_csrf=the-real-token")),
+            )
+
+        response.statusCode.value() shouldBe 200
+        val csrfCookies = response.headers[HttpHeaders.SET_COOKIE].orEmpty().filter { it.startsWith("dp_csrf") }
+        csrfCookies.shouldBeEmpty()
+    }
+
     @Test
     fun `an api-key state change needs no csrf token at all`() {
         call(HttpMethod.POST, "/api/v1/probe", headers(apiKey = readKey)).statusCode.value() shouldBe 200

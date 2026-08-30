@@ -16,3 +16,13 @@
   --edge-active-stroke: var(--accent-primary, #2563eb);
   --edge-idle-stroke: var(--text-secondary, #6b7280);
 }
+
+/* The body canvas, re-asserted AFTER Bootstrap (this file loads last, §3.4): Bootstrap's
+   reboot declares body { background-color: var(--bs-body-bg); color: var(--bs-body-color) }
+   — concrete white — and had it been the final sheet the page would paint white under
+   every theme, dark included (024 T40 cause 2). base.css already paints <html> with these
+   tokens; this restores what the reboot covers. */
+body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+}

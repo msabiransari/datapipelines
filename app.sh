@@ -146,9 +146,12 @@ ensure_demo_env() {
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
   add_key SAMPLE_VERSION "v1"
   add_key SAMPLE_DB_USER "dp_demo_ro"
-  add_key SAMPLE_PG_PASSWORD "$(openssl rand -base64 24)"
-  add_key SAMPLE_MYSQL_PASSWORD "$(openssl rand -base64 24)"
-  add_key SAMPLE_MYSQL_ROOT_PASSWORD "$(openssl rand -base64 24)"
+  # hex, NOT base64: the loader's require_sql_safe allowlist (023 F6, load.sh)
+  # rejects the +/ base64 emits — a scaffolded base64 password killed the demo
+  # loader at startup since the guard landed (found by the 027 demo E2E).
+  add_key SAMPLE_PG_PASSWORD "$(openssl rand -hex 24)"
+  add_key SAMPLE_MYSQL_PASSWORD "$(openssl rand -hex 24)"
+  add_key SAMPLE_MYSQL_ROOT_PASSWORD "$(openssl rand -hex 24)"
   add_key DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE "/srv/sample/bootstrap-datasources.yml"
   add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
   add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"

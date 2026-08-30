@@ -149,16 +149,15 @@ class UserSettingsController(
 
     companion object {
         /**
-         * The vendored theme names for the settings screen and the theme write's validation.
-         * [VendoredThemes.names] enumerates the design-system CSS jar-safe (025 B1 — the T21
-         * class: this used to resolve the classpath dir through `File(...)` and 500'd /settings
-         * inside a packaged deployment); the fallback list covers a classpath with no vendored
-         * assets (pre-P8).
+         * The vendored theme names for the settings screen and the theme write's validation
+         * (025 B1, 027): [VendoredThemes.names] enumerates the design-system CSS jar-safe.
+         * NO hard-coded fallback list — a third copy of what the sync script already guards
+         * in both directions is a drift risk, and it would LIE: a classpath with no vendored
+         * assets cannot serve any theme it names. Null (assets absent) surfaces as an empty
+         * listing; the blank theme value still clears a preference back to the deployment
+         * default, and any non-blank write against an empty listing is rejected as unknown.
          */
-        fun listAvailableThemes(): List<String> = VendoredThemes.names() ?: DEFAULT_THEMES
-
-        private val DEFAULT_THEMES =
-            listOf("saas", "dark", "light", "ocean", "forest", "professional", "minimal", "healthcare", "auto")
+        fun listAvailableThemes(): List<String> = VendoredThemes.names().orEmpty()
     }
 
     private fun requirePrincipal(): AuthenticatedPrincipal =

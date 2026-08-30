@@ -74,6 +74,24 @@ WORK="$SAMPLE_DIR/.artifacts/$VERSION"
 # D6 layer 3). CREATED HERE, never assumed to exist.
 DEMO_USER="${SAMPLE_DB_USER:-dp_demo_ro}"
 
+# Defined BEFORE its first use: a94dc9b (025 C5) placed the calls above the
+# definition and the loader died at line 79 with "require_sql_safe: not found"
+# before this round — bash needs a function defined before it is CALLED.
+# F6 (023): operator env values are interpolated into superuser SQL below. An
+# allowlist, not escaping: the values are operator-controlled deployment facts,
+# and one conservative charset keeps both engines' quoting rules out of scope.
+# Anything else dies naming the variable and the legal characters.
+require_sql_safe() { # <label> <value> <charset-description>
+  case "$2" in
+    '') die "$1 is empty" ;;
+    *[!A-Za-z0-9_.:@+-]*)
+      die "$1 contains characters outside [A-Za-z0-9_.:@+-] — it is interpolated into
+  superuser SQL by this loader, and the charset is the injection guard (023 F6).
+  Value begins: $(printf '%s' "$2" | head -c 8)…" ;;
+    *) ;;
+  esac
+}
+
 # Every value the SQL below interpolates (023 F6). VERSION is also constrained by
 # the manifest equality check, but the guard here is what the SQL itself relies on.
 require_sql_safe DEMO_USER "$DEMO_USER"
@@ -97,21 +115,6 @@ require_client() { # <engine> <binary>
 }
 
 LOADED_ANY=0
-
-# F6 (023): operator env values are interpolated into superuser SQL below. An
-# allowlist, not escaping: the values are operator-controlled deployment facts,
-# and one conservative charset keeps both engines' quoting rules out of scope.
-# Anything else dies naming the variable and the legal characters.
-require_sql_safe() { # <label> <value> <charset-description>
-  case "$2" in
-    '') die "$1 is empty" ;;
-    *[!A-Za-z0-9_.:@+-]*)
-      die "$1 contains characters outside [A-Za-z0-9_.:@+-] — it is interpolated into
-  superuser SQL by this loader, and the charset is the injection guard (023 F6).
-  Value begins: $(printf '%s' "$2" | head -c 8)…" ;;
-    *) ;;
-  esac
-}
 
 # --- fetch ------------------------------------------------------------------
 # curl on the mysql image, busybox wget on the postgres image. Whichever exists.
