@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
@@ -143,16 +144,33 @@ class MutatingHandlerScopeFloorTest {
 
         const val BASE_PACKAGE = "co.datapipelines.web"
 
-        /** The mutating HTTP verb annotation a handler carries, or null for read verbs. */
+        /**
+         * The mutating HTTP verb a handler carries, or null for read verbs.
+         *
+         * The generic `@RequestMapping(method = [...])` form is checked too, and that is
+         * not defensive coding: without it a handler written that way is invisible HERE
+         * while the sibling coverage guard sees it, so it would ship mutating-and-
+         * under-floored with every guard green and no allowlist entry to review. A guard
+         * blind to a shape is the "coverage ≠ existence" trap this test exists to close.
+         */
         fun mutatingMethodOf(method: java.lang.reflect.Method?): String? {
             if (method == null) return null
-            return listOf(
-                PostMapping::class.java to "POST",
-                PutMapping::class.java to "PUT",
-                PatchMapping::class.java to "PATCH",
-                DeleteMapping::class.java to "DELETE",
-            ).firstOrNull { method.getAnnotation(it.first) != null }?.second
+            val direct =
+                listOf(
+                    PostMapping::class.java to "POST",
+                    PutMapping::class.java to "PUT",
+                    PatchMapping::class.java to "PATCH",
+                    DeleteMapping::class.java to "DELETE",
+                ).firstOrNull { method.getAnnotation(it.first) != null }?.second
+            if (direct != null) return direct
+            return method
+                .getAnnotation(RequestMapping::class.java)
+                ?.method
+                ?.map { it.name }
+                ?.firstOrNull { it in MUTATING_VERBS }
         }
+
+        private val MUTATING_VERBS = setOf("POST", "PUT", "PATCH", "DELETE")
     }
 
     private fun allControllers(): List<KClass<*>> =

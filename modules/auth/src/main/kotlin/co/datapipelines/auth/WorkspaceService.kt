@@ -340,13 +340,21 @@ class WorkspaceService(
     ): WorkspaceMemberRow {
         val normalized = email.trim().lowercase()
         val selfJoin = normalized == principal.email
-        val openSelfJoin = selfJoin && workspacesProperties.openJoin
+        // SESSION principals only. The exemption exists so a human can use the shipped
+        // self-service join, and that UI is session-gated already
+        // (`WorkspacesUiController.requireSessionPrincipal`) — so no key needs it.
+        //
+        // Extending it to API keys was a real hole, caught in review before merge: the
+        // open-join branch below resolves the target by NAME with read()'s membership
+        // check deliberately skipped, so a key pinned to G could write a
+        // `workspace_members` row into any live workspace A. That row then outlives
+        // revocation of the key, and membership alone passes the checks in `read` and
+        // `members` — neither of which consults the pin — so the joined workspace's full
+        // roster (emails, display names, user ids) is readable at scope `read`, for every
+        // workspace in the deployment. The KDoc's "it touches only the caller's OWN
+        // membership" was true; "no existing workspace is overreached" was not.
+        val openSelfJoin = selfJoin && workspacesProperties.openJoin && principal.authMethod != AuthMethod.API_KEY
         if (!openSelfJoin) {
-            // The pin governs MANAGEMENT of an existing workspace. The open-join
-            // self-join is exempt for the same reason create is: it touches only the
-            // caller's OWN membership, in a workspace the deployment has declared open
-            // to every authenticated principal — the joiner enters as `member`, never
-            // owner, and the key's active workspace stays pinned regardless.
             requirePinnedWorkspace(principal, name)
         }
         val workspace =

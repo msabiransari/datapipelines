@@ -138,7 +138,7 @@ class WorkspaceKeyPinTest {
     }
 
     @Test
-    fun `an api key pinned to acme can self-join globex under open-join - the pin governs management, not joining`() {
+    fun `open-join does NOT exempt an api key from the pin - the exemption is session-only`() {
         stubOwnedWorld()
         val openJoinService =
             WorkspaceService(
@@ -151,11 +151,22 @@ class WorkspaceKeyPinTest {
                 null,
                 contentCheck,
             )
-        // Self-join (the caller's OWN email) into an open-join workspace touches only the
-        // caller's own membership in a workspace the deployment declared open — exempt
-        // from the pin for the same reason create is (022 F4's row keeps working; the
-        // E2E covers it end-to-end). Adding ANOTHER user stays refused (above).
-        openJoinService.addMember(key(), "globex", "alice@company.com")
+        // This assertion was INVERTED before merge (orchestrator review of 025b). The
+        // exemption originally covered API keys too, on the reasoning that a self-join
+        // "touches only the caller's own membership". That is true and insufficient: the
+        // open-join branch resolves the target by NAME with read()'s membership check
+        // deliberately skipped, so a key pinned to acme could write a `workspace_members`
+        // row into ANY live workspace. The row outlives revocation of the key, and
+        // membership alone satisfies `read` and `members` — neither consults the pin — so
+        // one leaked agent key could walk every workspace's roster at scope `read`.
+        //
+        // The exemption exists for the shipped self-service UI, which is session-gated
+        // (WorkspacesUiController.requireSessionPrincipal), so no key needs it.
+        shouldThrow<WorkspaceMembershipRequiredException> {
+            openJoinService.addMember(key(), "globex", "alice@company.com")
+        }
+        // ...and a SESSION still joins, so the feature itself is intact.
+        openJoinService.addMember(session(), "globex", "alice@company.com")
     }
 
     @Test
