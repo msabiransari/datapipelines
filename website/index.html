@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>datapipelines.co — Agent-native Data Pipelines</title>
+  <meta name="description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
+  <link rel="canonical" href="https://datapipelines.co/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://datapipelines.co/">
+  <meta property="og:title" content="datapipelines.co — Agent-native Data Pipelines">
+  <meta property="og:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
+  <meta property="og:image" content="https://datapipelines.co/assets/img/execution-result.png">
+  <meta property="og:image:width" content="1440">
+  <meta property="og:image:height" content="1000">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="datapipelines.co — Agent-native Data Pipelines">
+  <meta name="twitter:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
+  <meta name="twitter:image" content="https://datapipelines.co/assets/img/execution-result.png">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20width='24'%20height='24'%20rx='5'%20fill='black'/%3E%3Ccircle%20cx='7'%20cy='12'%20r='2'%20fill='white'/%3E%3Ccircle%20cx='17'%20cy='7'%20r='2'%20fill='white'/%3E%3Ccircle%20cx='17'%20cy='17'%20r='2'%20fill='white'/%3E%3Cpath%20d='M8.6%2010.9%2015.4%207.9M8.6%2013.1l6.8%203' %20stroke='white'%20stroke-width='1.6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/vendor/design-system/tokens.css">
+  <link rel="stylesheet" href="assets/vendor/design-system/base.css">
+  <link rel="stylesheet" href="assets/vendor/design-system/motion.css">
+  <link id="dp-theme" rel="stylesheet" href="assets/vendor/design-system/themes/auto.css">
+  <link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="7" cy="12" r="2.4" fill="currentColor"/>
+          <circle cx="17" cy="7" r="2.4" fill="currentColor"/>
+          <circle cx="17" cy="17" r="2.4" fill="currentColor"/>
+          <path d="M8.9 10.9 15.2 8M8.9 13.1 15.2 16" stroke="currentColor" stroke-width="1.6" fill="none"/>
+        </svg>
+        <span>datapipelines.co</span>
+      </a>
+      <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
+      <nav class="nav-wide" aria-label="Primary">
+        <a href="#how-it-works">How it works</a>
+        <a href="#capabilities">Features</a>
+        <a href="#demo">Demo</a>
+        <a href="#security">Security</a>
+        <a href="#roadmap">Roadmap</a>
+        <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
+      </nav>
+      <details class="nav-mobile">
+        <summary aria-label="Open menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+          </svg>
+        </summary>
+        <nav class="menu" aria-label="Primary mobile">
+          <a href="#how-it-works">How it works</a>
+          <a href="#capabilities">Features</a>
+          <a href="#demo">Demo</a>
+          <a href="#security">Security</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ============================ HERO ============================ -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy ds-animate-slide-up">
+          <h1 id="hero-title" class="ds-display">Agent-native Data Pipelines</h1>
+          <p class="hero-sub">Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).</p>
+          <!-- claim: docs/deployment.md Appendix B -->
+          <div class="code-block">
+            <pre><code>./app.sh --start --demo</code></pre>
+            <button type="button" class="copy-btn" hidden>Copy</button>
+          </div>
+          <p class="hero-note">One command, real NYC data.</p>
+          <div class="btn-row">
+            <a class="btn btn-primary" href="#demo">Get started</a>
+            <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M8 4v12m8-8v8M8 4a2 2 0 1 0 .01 0M8 4h5l3 3m0 0h2a2 2 0 1 1-.01 0M8 16a2 2 0 1 0 .01 0" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+              </svg>
+              GitHub
+            </a>
+          </div>
+        </div>
+        <figure class="hero-shot ds-animate-fade-in">
+          <!-- screenshot: execution detail of a real SUCCESS run of the seeded rainy_vs_dry_ridership pipeline, triggered over REST with an API key (untouched capture) -->
+          <img src="assets/img/execution-result.png" width="1440" height="1000" alt="Execution detail for the seeded rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
+          <figcaption>A real SUCCESS execution, triggered over REST with an API key — exactly the agent flow. Rows included, so the agent can check its own work.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============================ HOW IT WORKS ============================ -->
+    <section class="section" id="how-it-works" aria-labelledby="how-title">
+      <div class="container">
+        <p class="kicker">The agent loop</p>
+        <h2 id="how-title" class="ds-headline">How it works</h2>
+        <p class="section-lede">Agents are first-class principals here — not a plugin bolted onto a human UI. Your agent gets its own scoped credentials, its own protocol surface, and errors it can parse without scraping stack traces.</p>
+
+        <div class="how-grid">
+          <ol class="steps">
+            <li>
+              <h3>Mint an API key</h3>
+              <!-- claim: docs/ui-screens.md §4.10, docs/auth.md §7.4 -->
+              <p>Create it in the UI or with <code>POST /api/v1/auth/api-keys</code>.</p>
+              <!-- claim: docs/auth.md §7.1–7.6 -->
+              <p>Keys are shown once, stored Argon2id-hashed, carry hierarchical scopes (<code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>) and are pinned to one workspace.</p>
+            </li>
+            <li>
+              <h3>Point the agent at <code>/mcp</code></h3>
+              <!-- claim: docs/mcp-server.md §4.1 -->
+              <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
+              <!-- claim: docs/mcp-server.md §6.2.1–6.2.18 -->
+              <p>Exactly 18 tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
+            </li>
+            <li>
+              <h3>Author as a JSON contract</h3>
+              <!-- claim: docs/pipeline-contract.md §3.1 -->
+              <p>The agent creates a SQL template and a pipeline as declarative JSON — nodes, dependencies, parameters. Diffs review like code, because they are.</p>
+            </li>
+            <li>
+              <h3>Execute and watch</h3>
+              <!-- claim: docs/rest-api.md §6 -->
+              <p>Execution streams per-milestone events over SSE, with heartbeats, so the agent knows where things stand.</p>
+            </li>
+            <li>
+              <h3>Read row-level results</h3>
+              <!-- claim: docs/mcp-server.md §6.2.15 -->
+              <p><code>executions_get_result</code> returns the actual rows. The agent verifies its own work instead of asserting success.</p>
+            </li>
+          </ol>
+
+          <figure class="how-figure">
+            <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
+              <title id="flow-title">Agent-to-engine flow</title>
+              <desc id="flow-desc">An AI agent with a scoped API key talks to the /mcp endpoint (18 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+              <defs>
+                <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
+                </marker>
+              </defs>
+
+              <rect class="dg-box" x="30" y="16" width="300" height="56" rx="8"/>
+              <text class="dg-label" x="180" y="40" font-size="14" text-anchor="middle">Your AI agent</text>
+              <text class="dg-sub" x="180" y="58" font-size="11" text-anchor="middle">scoped API key · pinned to one workspace</text>
+
+              <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
+
+              <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
+              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle">/mcp — 18 MCP tools</text>
+              <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
+
+              <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>
+
+              <rect class="dg-box" x="30" y="176" width="300" height="56" rx="8"/>
+              <text class="dg-label" x="180" y="200" font-size="14" text-anchor="middle">Pipeline — versioned JSON contract</text>
+              <text class="dg-sub" x="180" y="218" font-size="11" text-anchor="middle">templates · nodes · depends_on · parameters</text>
+
+              <path class="dg-arrow" d="M180 232 V252" marker-end="url(#dg-arrowhead)"/>
+
+              <g>
+                <path class="dg-box" d="M40 260 h60 v44 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="70" cy="260" rx="30" ry="8"/>
+                <path class="dg-box" d="M150 260 h60 v44 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="180" cy="260" rx="30" ry="8"/>
+                <path class="dg-box" d="M260 260 h60 v44 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="290" cy="260" rx="30" ry="8"/>
+              </g>
+              <text class="dg-label" x="70" y="330" font-size="11" text-anchor="middle">PostgreSQL</text>
+              <text class="dg-label" x="180" y="330" font-size="11" text-anchor="middle">MySQL</text>
+              <text class="dg-label" x="290" y="330" font-size="11" text-anchor="middle">SQLite</text>
+              <text class="dg-sub" x="180" y="348" font-size="10" text-anchor="middle">+ SQL Server, Oracle, DuckDB, H2</text>
+
+              <path class="dg-arrow" d="M70 352 L174 378" marker-end="url(#dg-arrowhead)"/>
+              <path class="dg-arrow" d="M180 358 V378" marker-end="url(#dg-arrowhead)"/>
+              <path class="dg-arrow" d="M290 352 L186 378" marker-end="url(#dg-arrowhead)"/>
+
+              <rect class="dg-box" x="30" y="380" width="300" height="56" rx="8"/>
+              <text class="dg-label" x="180" y="404" font-size="14" text-anchor="middle">Per-execution staging tempdb</text>
+              <text class="dg-sub" x="180" y="422" font-size="11" text-anchor="middle">isolated in-memory H2 · joins across engines</text>
+
+              <path class="dg-arrow" d="M180 436 V456" marker-end="url(#dg-arrowhead)"/>
+
+              <rect class="dg-box-accent" x="30" y="460" width="300" height="56" rx="8"/>
+              <text class="dg-label" x="180" y="484" font-size="14" text-anchor="middle">Row-level results + stable error codes</text>
+              <text class="dg-sub" x="180" y="502" font-size="11" text-anchor="middle">back to the agent, machine-readable</text>
+            </svg>
+          </figure>
+        </div>
+
+        <!-- claim: the published demo dataset is ~4.9M sampled NYC taxi rows across three engines (docs/deployment.md Appendix B; scripts/sample-data/README.md) -->
+        <p class="how-footnote">This isn't a toy loop: the published demo set is ~4.9M sampled NYC taxi rows across Postgres, MySQL and SQLite — an agent authors and runs against exactly that.</p>
+      </div>
+    </section>
+
+    <!-- ============================ FEATURES ============================ -->
+    <section class="section" id="capabilities" aria-labelledby="cap-title">
+      <div class="container">
+        <p class="kicker">Shipped, not promised</p>
+        <h2 id="cap-title" class="ds-headline">What's in the box</h2>
+        <p class="section-lede">Each card cites the spec section it comes from — view source and spot-check us. Caveats included where they exist — honesty is the brand.</p>
+
+        <div class="features-grid ds-stagger-children">
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <h3>Versioned JSON contracts</h3>
+            <!-- claim: docs/pipeline-contract.md §3.1, §14, §15 -->
+            <p>Pipelines are declarative JSON — <code>schema_version</code>, nodes, <code>depends_on</code>, parameters, settings. Every update mints a new immutable integer version, and the contract is additive-only.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9 7 4 12l5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>Freemarker SQL templates</h3>
+            <!-- claim: docs/templates.md §4.2–§6 -->
+            <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved. Templates version immutably, pipelines pin versions, and library templates import declaratively.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <ellipse cx="12" cy="6" rx="7" ry="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M5 6v12a7 2.6 0 0 0 14 0V6M5 12a7 2.6 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <h3>Seven SQL dialects</h3>
+            <!-- claim: docs/datasources.md §4.1 -->
+            <p>PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite and H2 — one contract, seven engines.</p>
+            <!-- claim: docs/datasources.md §10, docs/deployment.md §3.5 -->
+            <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 5h4l5 7-5 7H3M14 12h7M18 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>Cross-engine staging joins</h3>
+            <!-- claim: docs/staging.md §1, §3.1 -->
+            <p>Each execution gets its own isolated in-memory H2 tempdb — created at start, destroyed at end. Nodes stage ResultSets there, so downstream nodes join across engines.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <h3>Pipeline composition</h3>
+            <!-- claim: docs/pipeline-contract.md §4.9, docs/dag-executor.md §6.6 -->
+            <p>A <code>PIPELINE</code> node executes a version-pinned child pipeline as a linked child execution — in-process, with lineage and family cancellation.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="4" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="13" y="4" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="4" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="13" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <h3>Workspaces &amp; team isolation</h3>
+            <!-- claim: docs/auth.md §5.6, docs/metadata-db.md §4.12 -->
+            <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; roles are owner and member.</p>
+            <!-- claim: docs/ui-screens.md §4.13, docs/rest-api.md §17 -->
+            <p>The management UI ships: create, switch, manage members, a navbar switcher and add-by-email.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M12 12h9M17 12v3M20 12v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <h3>OIDC SSO + scoped agent keys</h3>
+            <!-- claim: docs/auth.md §5.1, §7.1–7.6 -->
+            <p>Humans sign in through OIDC SSO. Agents get their own API keys with hierarchical scopes — separate principals, separate blast radii.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>Live execution streams</h3>
+            <!-- claim: docs/rest-api.md §6 -->
+            <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. No stream resumption — a dropped connection means starting a new execution.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="6" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="12" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8.2 6h7.6M7.3 7.9l3.4 8M16.7 7.9l-3.4 8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <h3>Pipeline graph view</h3>
+            <!-- claim: docs/pipeline-editor.md §1, §5–§7, §10 -->
+            <p>The editor renders the pipeline DAG with its settings, parameters and per-node detail. Running a pipeline from inside the editor — and the live node highlighting and result preview that follow from it — is being repaired; today execution is agent- and REST-driven.</p>
+            <!-- claim: docs/pipeline-editor.md §11 -->
+            <p>It's read-only in v1 by design: a visualization surface, not an authoring surface. Authoring is agent-first.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>Read-only datasource governance</h3>
+            <!-- claim: docs/datasources.md §5.7 -->
+            <p><code>is_readonly</code> forbids write-shaped uses — enforced at save time, at an executor backstop, and as Hikari <code>readOnly</code>. Admin-gated on globals. The flag is a contract, not containment: pair it with a SELECT-only DB user.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="6" y="3" width="12" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <h3>Append-only audit log</h3>
+            <!-- claim: docs/auth.md §10, docs/datasources.md §7.4 -->
+            <p>Logins, key lifecycle, scope denials, user admin, workspace events and credential decryption points — recorded with actor, cause and source IP.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M3 8h18M7 13l2 2-2 2M12 17h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3>Catalogued error contract</h3>
+            <!-- claim: docs/pipeline-contract.md §13, docs/rest-api.md §4.2, docs/mcp-server.md §9 -->
+            <p>Failures arrive as stable <code>{domain}.{entity}.{failure}</code> codes in a uniform error envelope — a catalog enforced against the code by drift tests, and the same codes over MCP. Agents get errors they can branch on, not prose to parse.</p>
+          </article>
+
+        </div>
+
+        <p class="features-pointer">Charts and dashboards are next — <a href="#roadmap">see the roadmap</a>.</p>
+      </div>
+    </section>
+
+    <!-- ============================ DEMO DATA ============================ -->
+    <section class="section" id="demo" aria-labelledby="demo-title">
+      <div class="container">
+        <p class="kicker">The demo is the quickstart</p>
+        <h2 id="demo-title" class="ds-headline">Real NYC data, one command</h2>
+        <!-- claim: docs/deployment.md Appendix B -->
+        <p class="section-lede"><code>./app.sh --start --demo</code> builds the jar, downloads the published mobility/v1 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds two example pipelines — <code>revenue_by_borough</code> and <code>rainy_vs_dry_ridership</code>.</p>
+
+        <div class="demo-grid">
+          <div class="demo-copy">
+            <!-- claim: docs/deployment.md Appendix B, scripts/sample-data/README.md -->
+            <ul class="fact-list">
+              <li><strong>PostgreSQL</strong> — ~4.9M hash-sampled TLC yellow-taxi rows, plus rollups.</li>
+              <li><strong>MySQL</strong> — NOAA GHCN-Daily weather for 5 NYC stations.</li>
+              <li><strong>SQLite</strong> — a reference database.</li>
+              <li><strong>Deterministic build</strong> — every source URL and SHA-256 pinned; hash-based sampling, never random.</li>
+              <li><strong>Checksummed manifest</strong> — with provenance recorded per source, behind a pre-publication license gate.</li>
+            </ul>
+            <p class="demo-note">Same command, same bytes, same rows — every time. Your agent gets a reproducible sandbox with something real to chew on.</p>
+          </div>
+
+          <figure class="demo-figure">
+            <svg class="diagram" viewBox="0 0 360 300" role="img" aria-labelledby="staging-title staging-desc">
+              <title id="staging-title">Three-engine staging join</title>
+              <desc id="staging-desc">PostgreSQL taxi data, MySQL weather data and a SQLite reference database each stage ResultSets into a per-execution in-memory H2 tempdb, which produces a joined result for the seeded example pipelines.</desc>
+              <defs>
+                <marker id="dg-arrowhead-2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
+                </marker>
+              </defs>
+
+              <g>
+                <path class="dg-box" d="M40 24 h60 v40 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="70" cy="24" rx="30" ry="8"/>
+                <path class="dg-box" d="M150 24 h60 v40 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="180" cy="24" rx="30" ry="8"/>
+                <path class="dg-box" d="M260 24 h60 v40 a30 8 0 0 1 -60 0 z"/>
+                <ellipse class="dg-box" cx="290" cy="24" rx="30" ry="8"/>
+              </g>
+              <text class="dg-label" x="70" y="82" font-size="11" text-anchor="middle">PostgreSQL</text>
+              <text class="dg-sub" x="70" y="96" font-size="10" text-anchor="middle">~4.9M taxi rows</text>
+              <text class="dg-label" x="180" y="82" font-size="11" text-anchor="middle">MySQL</text>
+              <text class="dg-sub" x="180" y="96" font-size="10" text-anchor="middle">NYC weather</text>
+              <text class="dg-label" x="290" y="82" font-size="11" text-anchor="middle">SQLite</text>
+              <text class="dg-sub" x="290" y="96" font-size="10" text-anchor="middle">reference DB</text>
+
+              <path class="dg-arrow" d="M70 104 L168 136" marker-end="url(#dg-arrowhead-2)"/>
+              <path class="dg-arrow" d="M180 104 V136" marker-end="url(#dg-arrowhead-2)"/>
+              <path class="dg-arrow" d="M290 104 L192 136" marker-end="url(#dg-arrowhead-2)"/>
+              <text class="dg-sub" x="120" y="128" font-size="10" text-anchor="middle">staged ResultSets</text>
+
+              <rect class="dg-box-accent" x="30" y="140" width="300" height="52" rx="8"/>
+              <text class="dg-label" x="180" y="162" font-size="13" text-anchor="middle">Per-execution tempdb</text>
+              <text class="dg-sub" x="180" y="179" font-size="10" text-anchor="middle">in-memory H2 · created at start, destroyed at end</text>
+
+              <path class="dg-arrow" d="M180 192 V212" marker-end="url(#dg-arrowhead-2)"/>
+
+              <rect class="dg-box" x="30" y="216" width="300" height="52" rx="8"/>
+              <text class="dg-label" x="180" y="238" font-size="13" text-anchor="middle">Joined result</text>
+              <text class="dg-sub" x="180" y="255" font-size="10" text-anchor="middle">revenue_by_borough · rainy_vs_dry_ridership</text>
+            </svg>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ SCREENSHOTS ============================ -->
+    <section class="section" id="screenshots" aria-labelledby="shots-title">
+      <div class="container">
+        <p class="kicker">No mockups</p>
+        <h2 id="shots-title" class="ds-headline">What it looks like</h2>
+        <p class="section-lede">Actual screens from the running app. Wide shots scroll sideways on small screens instead of shrinking into confetti.</p>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: pipeline editor rendering the DAG of the seeded revenue_by_borough pipeline (untouched capture) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Pipeline editor screenshot — scrolls horizontally on narrow screens">
+              <img src="assets/img/editor-light.png" width="1440" height="900" alt="The pipeline editor for revenue_by_borough: a settings and parameters panel on the left, and the pipeline DAG on the right — two staging nodes, stage_trips_monthly and stage_zones, both feeding the borough_revenue node, with the Execute button at top right." loading="lazy">
+            </div>
+            <figcaption>The pipeline editor — the seeded revenue_by_borough DAG, with settings and parameters. Untouched capture of the current build.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: datasources page — the three seeded global+readonly demo datasources (SQLite reference, Postgres taxi, MySQL weather) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Datasources screenshot — scrolls horizontally on narrow screens">
+              <img src="assets/img/datasources.png" width="1440" height="900" alt="The datasources page listing the three seeded demo datasources — sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) — all global, all read-only, each with Test and View actions." loading="lazy">
+            </div>
+            <figcaption>Datasources — three engines, one registry, governed read-only. Fewer charts than a BI tool, more honesty.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ SECURITY ============================ -->
+    <section class="section" id="security" aria-labelledby="sec-title">
+      <div class="container">
+        <p class="kicker">Your infra, your rules</p>
+        <h2 id="sec-title" class="ds-headline">Security &amp; self-hosting</h2>
+        <p class="section-lede">Runs on your hardware, under your policies. The defaults are paranoid so you don't have to be.</p>
+
+        <ul class="fact-list sec-list">
+          <li>
+            <!-- claim: docs/auth.md §8.3 -->
+            <strong>Authenticated by default.</strong> Every endpoint requires auth unless it's explicitly allowlisted.
+          </li>
+          <li>
+            <!-- claim: docs/datasources.md §7.1 -->
+            <strong>Encrypted credentials.</strong> Datasource passwords are AES-256-GCM encrypted with the row name bound as AAD — and the app refuses to start without a valid key.
+          </li>
+          <li>
+            <!-- claim: docs/deployment.md Appendix B, §9 -->
+            <strong>Least privilege as the documented pattern.</strong> The demo provisions a SELECT-only database login; the same pattern is documented for your own datasources.
+          </li>
+          <li>
+            <strong>TLS is your job.</strong> Terminate TLS at your own proxy — we don't pretend a built-in would fit every network.
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ OPEN SOURCE ============================ -->
+    <section class="section" id="open-source" aria-labelledby="oss-title">
+      <div class="container">
+        <p class="kicker">Fork it</p>
+        <h2 id="oss-title" class="ds-headline">Open source, honestly licensed</h2>
+        <!-- claim: LICENSE, CLA.md, CONTRIBUTING.md -->
+        <p class="section-lede">datapipelines.co is AGPL-3.0. Use and deploy it freely, including commercially. If you modify it and offer it over a network, publish your modifications under the AGPL — that's the whole deal.</p>
+        <p class="oss-cla">Contributing takes a one-time individual CLA: add a <code>Signed-CLA</code> line to your first PR, per <code>CONTRIBUTING.md</code>.</p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="https://github.com/msabiransari/datapipelines">Star or fork on GitHub</a>
+          <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines/tree/main/docs">Read the docs</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ ROADMAP ============================ -->
+    <section class="section" id="roadmap" aria-labelledby="roadmap-title">
+      <div class="container">
+        <p class="kicker">What's next</p>
+        <h2 id="roadmap-title" class="ds-headline">Roadmap</h2>
+        <p class="section-lede">Planned work — no dates promised. Everything here is explicitly future-tense; the rest of this page describes what ships today, caveats attached.</p>
+
+        <div class="roadmap-grid">
+          <article class="roadmap-hero">
+            <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Result visualization & dashboards", the first row -->
+            <span class="roadmap-badge">Coming soon</span>
+            <h3>Result visualization &amp; dashboards</h3>
+            <p>Charts and dashboards over pipeline results, in-product.</p>
+            <svg class="diagram roadmap-placeholder" viewBox="0 0 360 200" role="img" aria-labelledby="ph-title ph-desc">
+              <title id="ph-title">Placeholder for upcoming charts and dashboards</title>
+              <desc id="ph-desc">An abstract dashed placeholder frame with ghost bar shapes and a coming soon label — deliberately not a real chart.</desc>
+              <rect class="dg-frame" x="20" y="16" width="320" height="168" rx="10"/>
+              <rect class="dg-ghost" x="70" y="104" width="34" height="56" rx="4"/>
+              <rect class="dg-ghost" x="130" y="72" width="34" height="88" rx="4"/>
+              <rect class="dg-ghost" x="190" y="120" width="34" height="40" rx="4"/>
+              <rect class="dg-ghost" x="250" y="88" width="34" height="72" rx="4"/>
+              <text class="dg-sub" x="180" y="46" font-size="12" text-anchor="middle">charts &amp; dashboards live here — coming soon</text>
+            </svg>
+          </article>
+
+          <ul class="roadmap-list">
+            <li class="roadmap-item">
+              <h3>DuckDB as a sample-data engine and staging engine</h3>
+              <!-- claim: docs/superpowers/specs/2026-08-16-sample-data-design.md D2, docs/ROADMAP.md §2 -->
+              <p>The DuckDB SQL dialect already ships; using it to host sample data and to back the staging tempdb is planned.</p>
+            </li>
+            <li class="roadmap-item">
+              <h3>Workspace invite / approval workflow</h3>
+              <!-- claim: docs/superpowers/specs/2026-08-16-workspaces-design.md §11 -->
+              <p>Member management already ships (add-by-email, owner/member roles); the invite-and-approval flow on top is planned.</p>
+            </li>
+            <li class="roadmap-item">
+              <h3>Per-datasource ACLs</h3>
+              <!-- claim: docs/ROADMAP.md §3.8 -->
+              <p>Fine-grained access per datasource, beyond workspace roles and key scopes.</p>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
+        <a href="https://github.com/msabiransari/datapipelines/tree/main/docs">Docs</a>
+      </nav>
+      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br>© 2026 datapipelines.co</p>
+    </div>
+  </footer>
+
+  <script src="assets/js/site.js"></script>
+</body>
+</html>

@@ -53,6 +53,8 @@ against the code by drift tests. Start with:
 - [`docs/rest-api.md`](docs/rest-api.md) — REST surface
 - [`docs/auth.md`](docs/auth.md) — authentication and the scope matrix
 
+The marketing site lives in [`website/`](website/) — static HTML/CSS, deployable to any static host.
+
 ## Using, deploying, contributing
 
 Deploy and use it freely, as-is, commercial use included — no permission

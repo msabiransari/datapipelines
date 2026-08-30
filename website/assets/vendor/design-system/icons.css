@@ -1,0 +1,23 @@
+/* ============================================================
+   ICON SYSTEM
+   Framework-agnostic SVG icon utilities.
+   Usage:
+     <svg class="ds-icon ds-icon-md" aria-hidden="true">
+       <use href="path/to/sprite.svg#check"></use>
+     </svg>
+   ============================================================ */
+
+.ds-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: var(--icon-size, 1em);
+  height: var(--icon-size, 1em);
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.ds-icon-xs { --icon-size: var(--icon-xs); }
+.ds-icon-sm { --icon-size: var(--icon-sm); }
+.ds-icon-md { --icon-size: var(--icon-md); }
+.ds-icon-lg { --icon-size: var(--icon-lg); }
+.ds-icon-xl { --icon-size: var(--icon-xl); }
