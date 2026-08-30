@@ -101,7 +101,12 @@ class WebSurfaceConfiguration {
     fun executionStreamRegistry(
         properties: SseProperties,
         cancellationService: ExecutionCancellationService,
-    ): ExecutionStreamRegistry = ExecutionStreamRegistry(properties, cancellationService, ExecutorJson.mapper)
+        // SseJson, not ExecutorJson: this mapper is the SSE WIRE encoder (ExecutionStream.send).
+        // A DATE/TIME parameter reaches execution_started as java.time, and ExecutorJson has no
+        // jsr310 — worse, InvalidDefinitionException IS an IOException, which send() catches as
+        // "client disconnected", so the stream dies AND cancel-on-disconnect aborts a healthy
+        // execution ~30s later. T36, second path (the f659f4a fix covered only the replay log).
+    ): ExecutionStreamRegistry = ExecutionStreamRegistry(properties, cancellationService, SseJson.mapper)
 
     @Bean
     fun webMetrics(
@@ -238,7 +243,8 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
             idempotencyStore = idempotencyStore,
             idempotency = idempotency,
-            mapper = ExecutorJson.mapper,
+            // Feeds ExecutionStream too (ExecutionLauncher:249) — same reason as above.
+            mapper = SseJson.mapper,
             metrics = metrics,
             scope = scope,
             subPipelineRunner = subPipelineRunner,

@@ -407,7 +407,7 @@ A long `execution-timeout-seconds` therefore has a real deployment cost: it is a
 
 ## 10. Distribution License
 
-- **Code**: Apache License 2.0 (permissive, business-friendly, compatible with all our dependencies).
+- **Code**: AGPL-3.0 (see [LICENSE](../LICENSE); contributions under the [CLA](../CLA.md)).
 - **Dependencies**: only those with compatible licenses bundled by default. Oracle and MySQL drivers optional via Gradle profile (operator's responsibility to accept their licenses).
 
 LICENSE and NOTICE files at repo root.

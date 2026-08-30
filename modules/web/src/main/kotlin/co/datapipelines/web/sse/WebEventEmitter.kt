@@ -12,7 +12,6 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
-import co.datapipelines.executor.ExecutorJson
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -161,7 +160,11 @@ class WebEventEmitter(
                 eventId = eventId,
                 type = event.type,
                 timestamp = event.timestamp,
-                payloadJson = ExecutorJson.write(payload),
+                // SseJson: the payload carries resolved parameters, so a DATE/TIME pipeline puts
+                // java.time values here. ExecutorJson cannot serialize them and the runCatching
+                // below swallows the failure — which is why this silently dropped execution_started
+                // from the durable record instead of failing loudly. T36, third path.
+                payloadJson = SseJson.mapper.writeValueAsString(payload),
             )
         }.onFailure { log.warn("Durable event {} for execution {} not written.", name, event.executionId, it) }
 
@@ -207,7 +210,7 @@ class WebEventEmitter(
                 }
 
                 is PipelineFailed -> {
-                    Triple(ExecutionStatus.FAILED, event.failedNodeId, ExecutorJson.write(event.error))
+                    Triple(ExecutionStatus.FAILED, event.failedNodeId, SseJson.mapper.writeValueAsString(event.error))
                 }
 
                 is ExecutionAborted -> {
@@ -230,7 +233,7 @@ class WebEventEmitter(
                 status = status,
                 completedAt = event.timestamp,
                 durationMs = durationMsOf(event),
-                nodeStatsJson = ExecutorJson.write(nodeStats),
+                nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
                 failedNodeId = failedNodeId,
                 errorJson = errorJson,
             )
