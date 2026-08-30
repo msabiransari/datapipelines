@@ -83,7 +83,8 @@ CREATE TABLE users (
     email               TEXT        NOT NULL UNIQUE,
     display_name        TEXT        NOT NULL,
     profile_picture_url TEXT,
-    provider            TEXT        NOT NULL,              -- OIDC registration name (free text: 'google', 'okta', 'company-sso', etc.)
+    provider            TEXT        NOT NULL,              -- OIDC registration name (free text: 'google', 'okta', 'company-sso', etc.),
+                                                           -- or a placeholder with meaning: 'bootstrap' (pre-provisioned, auth.md §4.4), 'local' (admin-created, §5A)
     provider_subject    TEXT        NOT NULL,              -- OIDC 'sub' claim
     is_active           BOOLEAN     NOT NULL DEFAULT TRUE,
     is_admin            BOOLEAN     NOT NULL DEFAULT FALSE,
@@ -104,7 +105,7 @@ CREATE UNIQUE INDEX uq_users_provider_subject ON users(provider, provider_subjec
 **Notes:**
 - `email` is UNIQUE — one account per email, regardless of provider. If a user logs in via Google first, then Okta with the same email, the record is updated (provider switches). The UNIQUE constraint's implicit index (`users_email_key`) is the login lookup path; no separate index is created.
 - `(provider, provider_subject)` is also UNIQUE — one record per OIDC identity.
-- `provider` is free text (no CHECK constraint) — stores whatever registration name the deployment configured. See [Auth spec §5.1](auth.md#51-provider-configuration-generic).
+- `provider` is free text (no CHECK constraint) — stores whatever OIDC registration name the deployment configured, or one of two placeholders with meaning: `'bootstrap'` (pre-provisioned, never logged in — [Auth §4.4](auth.md#44-bootstrap-admin)) and `'local'` (admin-created local account — [Auth §5A.1](auth.md#5a1-accounts)). See [Auth spec §5.1](auth.md#51-provider-configuration-generic).
 - `is_active` is **read on every authenticated request**, not only at login: both the JWT filter and the API-key filter re-check it through the 60-second lookup cache described in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13). Deactivating a user therefore takes effect within ~1 minute without any token revocation step. Practical consequence for this table: reads of `users` by `id` are hot and cached — do not add columns whose staleness for 60s would be unsafe.
 - `theme_preference` is a **stored user preference, not session state** — it survives logout and follows the user across browsers, which session storage would not. Written by the profile screen (`PATCH /partials/profile/theme` → `UPDATE users`, [UI Screens §4.11](ui-screens.md#411-user-settings)).
   - **`NULL` is meaningful:** it means "no explicit choice — use the deployment default [`datapipelines.ui.theme`](configuration.md#310-ui)". It is not the same as storing the default's current value: a NULL row *follows* the deployment default when an operator changes it, whereas a materialized copy would silently pin the user to yesterday's default. This is why the column is nullable with no DEFAULT.
