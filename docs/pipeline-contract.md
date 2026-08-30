@@ -793,8 +793,11 @@ Defined and described in [Auth §9](auth.md#9-auth-errors); cataloged here as th
 | `auth.session.expired` | 401 | Session JWT past its expiry |
 | `auth.scope.insufficient` | 403 | Principal lacks required scope for this operation |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched (browser flows) |
-| `auth.login.domain_not_allowed` | 403 | OIDC login rejected: email domain not in allowlist |
-| `auth.login.user_inactive` | 403 | OIDC login rejected: account deactivated |
+| `auth.login.domain_not_allowed` | 403 | Login rejected: email domain not in allowlist (OIDC) |
+| `auth.login.user_inactive` | 403 | Login rejected: account deactivated (OIDC or local) |
+| `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
+| `auth.login.locked` | 403 | Local login rejected: account locked after consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
+| `auth.password.change_required` | 403 | Session principal must change password before any other operation ([Auth §5A.4](auth.md#5a4-forced-password-change)) |
 
 ### 13.8 Datasource
 
@@ -1118,3 +1121,4 @@ Out of scope for v1.1, tracked for future:
 | 2026-08-11 | v1.3 | gate C review | Additive §13 rows: `template.not_found` (404) and `datasource.not_found` (404) — read/mutate-path misses previously borrowed `pipeline.validation.*` codes, which are 400s for write-time validation. Adjudicated answer to the catalog gap flagged by mcp-server's McpNotFound and web's ApiErrors. |
 | 2026-08-17 | v1.4 | pipeline composition | `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a separate child execution and consumes its caller result (§4.9 node shape, §8.5 execution behavior). New §12.9 composition validations; §13.4 gains `pipeline.node.child_execution_failed` and `pipeline.node.composition_depth_exceeded`; §12.4 `type_invalid` enum widened. Additive per §15.2 (§15.1 records the additions). |
 | 2026-08-27 | v1.5 | workspaces readonly slice | §12.5 gains `pipeline.validation.datasource_readonly` and §13.4 gains `pipeline.node.datasource_readonly` (workspaces design 2026-08-16 §6, D6/D10): a datasource flagged `is_readonly` forbids the three write-shaped uses — save-time (400, `details` triple of node id + datasource name + shape) and at execution (500, the live-registry per-node backstop covering the D10 flip window and composed children). Additive; DQL reads and everything `tempdb` untouched. |
+| 2026-08-30 | v1.6 | local password auth | §13.7 gains three local-auth rows: `auth.login.bad_credentials` (401), `auth.login.locked` (403), `auth.password.change_required` (403) — defined in auth.md §9/§5A. The two existing `auth.login.*` descriptions reworded to name the method (OIDC or local). |

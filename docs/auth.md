@@ -433,7 +433,7 @@ Distinct from the per-IP login rate limit (§9, `rate_limit.exceeded`): that dam
 
 Every seeded (§5A.2) and admin-reset credential is one-time: `users.must_change_password` is TRUE, and **the app refuses to proceed to any other screen until it is changed**. The mechanism is an MVC interceptor (`ForcedPasswordChangeInterceptor`) registered once for all paths — a filter/interceptor concern precisely so a future controller cannot forget it (a test adds a brand-new route and proves it is still gated). While the flag is set:
 
-- Browsers are redirected `302` to `/settings/password`; htmx requests get `HX-Redirect` (a 302 would swap a full page into a fragment target); API and MCP paths get a 403 `change_required` JSON envelope — a redirect is meaningless to a JSON client (the full code joins §9 and the §13.7 registry with this feature's catalog commit).
+- Browsers are redirected `302` to `/settings/password`; htmx requests get `HX-Redirect` (a 302 would swap a full page into a fragment target); API and MCP paths get the `403 auth.password.change_required` envelope (§9) — a redirect is meaningless to a JSON client.
 - The allowlist is exactly: the change-password page and its endpoint, `/logout`, `/health`, `/ready`, and the public/static paths the change page needs to render.
 - **API-key principals are not gated** — an API key is a separate credential the user created deliberately; the forced change is about the human proving control of the interactive account.
 - The flag is read through the same ~60s liveness cache (D13); every password mutation evicts it immediately.
@@ -635,6 +635,7 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
 | Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | any authenticated |
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler | any authenticated |
+| Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
 
 **MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
@@ -764,8 +765,11 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 
 | Code | HTTP | Description |
 |---|---|---|
-| `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist |
-| `auth.login.user_inactive` | 403 | User account deactivated |
+| `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist (OIDC) |
+| `auth.login.user_inactive` | 403 | User account deactivated (OIDC or local) |
+| `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical (§5A.5) |
+| `auth.login.locked` | 403 | Local account locked after consecutive failures (§5A.3) |
+| `auth.password.change_required` | 403 | Session principal must change password before any other operation (§5A.4) |
 | `auth.login.oidc_error` | 500 | OIDC provider returned an error during login |
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |

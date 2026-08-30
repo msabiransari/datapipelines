@@ -86,6 +86,17 @@ object ScopeMatrix {
          * the `read` floor keeps the matrix from overstating what the scope system checks.
          */
         MANAGE_WORKSPACE(Scope.READ),
+
+        /**
+         * "Change own password — any authenticated" (§7.6, §5A.4): the honest floor
+         * is [Scope.READ], the "any authenticated principal" convention of
+         * [MANAGE_OWN_API_KEYS] — every session may rotate its OWN credential. The
+         * real guards live in the handler and `LocalPasswordService`: the current
+         * password is verified (a hijacked session cannot rotate), and the account
+         * is the principal's own by construction. A mutating endpoint on a governed
+         * path with an honest floor — the §5A lane contract, not a shortcut around it.
+         */
+        CHANGE_OWN_PASSWORD(Scope.READ),
     }
 
     /**

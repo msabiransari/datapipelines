@@ -72,9 +72,11 @@ class ApiErrorCatalogSpecDriftTest {
 
         /**
          * §13.2–§13.12's row count on 2026-08-28 (workspaces surfaces added §13.12's 4
-         * CRUD rows, §13.8's `workspace_forbidden`, §13.9's template `duplicate_name`).
+         * CRUD rows, §13.8's `workspace_forbidden`, §13.9's template `duplicate_name`),
+         * +3 on 2026-08-30 for §13.7's local-auth rows (`auth.login.bad_credentials`,
+         * `auth.login.locked`, `auth.password.change_required`).
          */
-        const val SECTION_13_ROW_COUNT = 84
+        const val SECTION_13_ROW_COUNT = 87
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
         const val SECTION_12_CODE_COUNT = 47

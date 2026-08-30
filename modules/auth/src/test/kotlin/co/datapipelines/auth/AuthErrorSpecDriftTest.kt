@@ -44,6 +44,11 @@ class AuthErrorSpecDriftTest {
                 AuthErrorCodes.CSRF_INVALID to 403,
                 AuthErrorCodes.LOGIN_DOMAIN_NOT_ALLOWED to 403,
                 AuthErrorCodes.LOGIN_USER_INACTIVE to 403,
+                // The local-auth codes surface as login redirects rather than envelopes
+                // (like the two above), so their statuses are pinned as literals.
+                AuthErrorCodes.LOGIN_BAD_CREDENTIALS to 401,
+                AuthErrorCodes.LOGIN_LOCKED to 403,
+                AuthErrorCodes.PASSWORD_CHANGE_REQUIRED to PasswordChangeRequiredException().status,
             )
         exceptionStatus.forEach { (code, status) ->
             (code to status) shouldBe (code to docStatus.getValue(code))

@@ -297,6 +297,9 @@ object PipelineErrorCodes {
         const val CSRF_INVALID = "auth.csrf.invalid"
         const val LOGIN_DOMAIN_NOT_ALLOWED = "auth.login.domain_not_allowed"
         const val LOGIN_USER_INACTIVE = "auth.login.user_inactive"
+        const val LOGIN_BAD_CREDENTIALS = "auth.login.bad_credentials"
+        const val LOGIN_LOCKED = "auth.login.locked"
+        const val PASSWORD_CHANGE_REQUIRED = "auth.password.change_required"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */

@@ -64,6 +64,9 @@ object AuthErrorCodes {
             CSRF_INVALID,
             LOGIN_DOMAIN_NOT_ALLOWED,
             LOGIN_USER_INACTIVE,
+            LOGIN_BAD_CREDENTIALS,
+            LOGIN_LOCKED,
+            PASSWORD_CHANGE_REQUIRED,
         )
 
     /**
