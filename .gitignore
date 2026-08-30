@@ -77,6 +77,9 @@ scripts/sample-data/work/
 # in-progress tree.
 .worktrees/
 
+# Playwright MCP page snapshots (per-developer browser-automation scratch)
+.playwright-mcp/
+
 # --- Local AI-assistant state (per-developer, never shared) ---
 .claude/
 .kimi-code/
