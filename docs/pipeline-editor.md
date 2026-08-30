@@ -86,8 +86,11 @@ The active theme is resolved **per request**, not fixed at deployment: `${active
 <link rel="stylesheet" href="/vendor/design-system/base.css">
 <link rel="stylesheet" href="/vendor/design-system/motion.css">
 <link rel="stylesheet" href="/vendor/design-system/primitives.css">
-<link rel="stylesheet" href="/css/app.css">                <!-- app-specific -->
+<link rel="stylesheet" href="/webjars/bootstrap/5.3.8/css/bootstrap.min.css">  <!-- grid/utilities/modal -->
+<link rel="stylesheet" href="/css/app.css">                <!-- app-specific, LAST -->
 ```
+
+Bootstrap sits BETWEEN the design system and `app.css`: its reboot declares `body { background-color: var(--bs-body-bg) }` — concrete white — and were it the final sheet it would paint `<body>` white under every theme (024 T40; `app.css` re-asserts `background-color: var(--surface-page); color: var(--text-primary)` over it). Every theme file, `dark.css` included, opens on `:root`: the swap loads exactly one file, so a theme takes effect by being loaded — no `data-theme` attribute is involved anywhere.
 
 Theme switching at runtime: swap the `href` of `#theme-link`. All tokens cascade instantly — no page reload.
 
@@ -1345,7 +1348,7 @@ async function handleConnectionLoss(executionId) {
 
 ### 15.2 Explicit cancellation
 
-While an execution is running, the Execute button is replaced by **Cancel**, which issues `DELETE /api/v1/executions/{execution_id}` ([REST API §10.4](rest-api.md#104-cancel-execution); scope `execute` + ownership).
+While an execution is running, the Execute button is replaced by **Cancel**, which issues `DELETE /api/v1/executions/{execution_id}` ([REST API §10.4](rest-api.md#104-cancel-execution); scope `execute` + ownership) — a cookie-authenticated state-changing call, so it carries the same `DP-CSRF-Token` double-submit header as execute (§7.2, [Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)).
 
 - The `204` acknowledges the *request*, not completion. The UI shows "Cancelling…" and waits for the `execution_aborted` event on the still-open stream, which is what actually finalizes the graph (§6.3).
 - Cancellation works from any server instance (it travels via a Redis flag), so completion can lag by up to one heartbeat interval. The UI must not assume the `204` means the nodes have stopped.

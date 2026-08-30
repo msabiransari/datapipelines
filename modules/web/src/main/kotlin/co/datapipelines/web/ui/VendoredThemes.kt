@@ -15,8 +15,10 @@ import java.io.File
  * entries through the classloader (Spring Boot's `LaunchedURLClassLoader` included), so
  * the SAME code lists themes exploded or packaged.
  *
- * Null means "no vendored theme assets on this classpath at all" (pre-P8) — the callers
- * own what that implies (settings falls back to the default list; §7 defers the check).
+ * Null means "no vendored theme assets on this classpath at all" — the callers
+ * own what that implies (settings shows an EMPTY listing — no fallback list, 027:
+ * a classpath without the assets cannot serve any theme it would name; §7 defers
+ * the startup check).
  */
 object VendoredThemes {
     internal const val THEME_DIR = "static/vendor/design-system/themes"

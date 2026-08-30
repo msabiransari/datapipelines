@@ -12,11 +12,14 @@
   <link th:href="@{/vendor/design-system/base.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
-  <link th:href="@{/css/app.css}" rel="stylesheet">
 
+  <!-- Bootstrap AFTER the design system, BEFORE app.css (§3.4 load order): its reboot
+       must not be the last word — it paints <body> Bootstrap-white for every theme,
+       masking the theme's --surface-page canvas (app.css re-asserts the tokens). -->
   <link rel="stylesheet"
         th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}"
         media="screen">
+  <link th:href="@{/css/app.css}" rel="stylesheet">
 </head>
 <body
     th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'"
