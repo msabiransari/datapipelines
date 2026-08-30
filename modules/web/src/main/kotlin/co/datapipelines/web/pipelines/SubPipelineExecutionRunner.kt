@@ -131,7 +131,9 @@ class SubPipelineExecutionRunner(
         val startedAt = Instant.now()
         val ref = requireRef(node)
         checkDepth(node, childPipelineDepth(ctx))
-        val workspaceId = parentWorkspace(node, ctx)
+        // The child resolves in the PARENT execution's workspace (design §3: cross-workspace
+        // references do not exist) — carried down on the context since 025 A5, so no lookup.
+        val workspaceId = ctx.workspaceId
         val (record, child) = loadChild(node, ref, workspaceId)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
@@ -152,27 +154,6 @@ class SubPipelineExecutionRunner(
             childExecutionId = childExecutionId,
         )
     }
-
-    /**
-     * The workspace the child resolves in — the PARENT execution's workspace (design §3:
-     * cross-workspace references do not exist). `dag`'s frozen [NodeExecutionContext] cannot
-     * carry it down, so it is derived from the parent execution's row (whose pipeline's
-     * `workspace_id` is the scope, §5.3). A missing row means the parent's bookkeeping is
-     * gone — corruption, reported like a vanished reference.
-     */
-    private fun parentWorkspace(
-        node: ExecutableNode,
-        ctx: NodeExecutionContext,
-    ): UUID =
-        executionRepository.workspaceOfExecution(ctx.executionId)
-            ?: throw childFailure(
-                node,
-                childExecutionId = null,
-                message =
-                    "The parent execution '${ctx.executionId}' has no recorded workspace; " +
-                        "a running execution's row cannot vanish, so this indicates corruption.",
-                cause = null,
-            )
 
     /**
      * The pinned reference — non-null by save-time validation (§12.9); the guard keeps a

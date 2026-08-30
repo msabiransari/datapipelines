@@ -36,9 +36,10 @@ data class ExecutionContext(
     val parametersJson: String,
     /**
      * The workspace this execution runs in — its pipeline's workspace (design §5.3). Carried
-     * explicitly because `dag`'s frozen request/context types cannot: the emitter needs it for
-     * its workspace-scoped execution-row reads, and the composition runner derives a child's
-     * workspace from the parent execution's row instead.
+     * explicitly because the emitter only ever sees EVENTS, never the request or the node
+     * context (the `EventEmitter` port is a single `emit(event)`), so the `workspaceId` the
+     * request/context types carry since 025 A5 cannot reach it. It scopes the execution-row
+     * read that derives an aborted execution's duration (`findById` is workspace-scoped).
      */
     val workspaceId: UUID,
     /**

@@ -196,24 +196,6 @@ class ExecutionRepository(
                 MAPPER,
             ).singleOrNull()
 
-    /**
-     * The workspace an execution belongs to — its pipeline's `workspace_id` (design §5.3).
-     * The composition runner resolves a PIPELINE node's child reference in the PARENT
-     * execution's workspace, and `dag`'s frozen request/context types cannot carry it down.
-     */
-    fun workspaceOfExecution(executionId: UUID): UUID? =
-        jdbc
-            .query(
-                """
-                SELECT p.workspace_id
-                  FROM pipeline_executions e
-                  JOIN pipelines p ON p.id = e.pipeline_id
-                 WHERE e.execution_id = :executionId
-                """.trimIndent(),
-                mapOf("executionId" to executionId),
-            ) { rs, _ -> rs.getObject("workspace_id", UUID::class.java) }
-            .singleOrNull()
-
     /** Executions for one pipeline, newest first — the `idx_executions_pipeline` access path. Scoped to [workspaceId]. */
     fun findByPipeline(
         workspaceId: UUID,
