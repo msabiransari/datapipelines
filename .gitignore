@@ -80,6 +80,11 @@ scripts/sample-data/work/
 # Playwright MCP page snapshots (per-developer browser-automation scratch)
 .playwright-mcp/
 
+# Ad-hoc browser-verification screenshots dropped at the repo root. Root-anchored,
+# never a blanket `*.png`: the marketing site's own images under website/assets/img
+# are tracked and must stay that way.
+/*.png
+
 # --- Local AI-assistant state (per-developer, never shared) ---
 .claude/
 .kimi-code/
