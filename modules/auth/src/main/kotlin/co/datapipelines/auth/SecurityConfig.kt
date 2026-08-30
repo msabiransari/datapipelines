@@ -42,10 +42,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(JwtProperties::class, AuthProperties::class)
+@Suppress("LongParameterList") // the wiring class — every parameter is an @Bean reference (019 precedent)
 class SecurityConfig(
     private val filters: AuthFilters,
     private val oidcSuccessHandler: OidcSuccessHandler,
     private val scopeInterceptor: ScopeInterceptor,
+    private val forcedPasswordChangeInterceptor: ForcedPasswordChangeInterceptor,
     private val authEntryPoint: AuthEntryPoint,
     private val authAccessDeniedHandler: AuthAccessDeniedHandler,
     private val auditLogoutHandler: AuditLogoutHandler,
@@ -92,28 +94,17 @@ class SecurityConfig(
                     ).permitAll()
                     .anyRequest()
                     .authenticated()
-            }.oauth2Login { oauth ->
-                oauth.successHandler(oidcSuccessHandler)
-                oauth.failureHandler { request, response, exception ->
-                    // The user gets an opaque `oidc_error` (never provider internals), but the
-                    // failure itself is NOT swallowed (rules/02): without this line every
-                    // authorization-request-not-found, invalid_grant or PKCE mismatch is
-                    // indistinguishable from a §4.2 rejection at the success handler.
-                    log.warn(
-                        "OIDC login failed at {}: {}",
-                        request.requestURI,
-                        (exception as? OAuth2AuthenticationException)?.error?.let { "${it.errorCode}: ${it.description}" }
-                            ?: exception.toString(),
-                        exception,
-                    )
-                    response.sendRedirect("${request.contextPath}/login?error=oidc_error")
-                }
-                oauth.authorizationEndpoint {
-                    it.authorizationRequestRepository(authorizationRequestRepository)
-                    // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.
-                    it.authorizationRequestResolver(authorizationRequestResolver)
-                }
-            }.addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
+            }
+
+        // OIDC login is wired ONLY when providers are configured (auth.md §5A): a
+        // local-accounts-only deployment has no ClientRegistrations, no discovery,
+        // and no /oauth2 endpoints — the filter chain below is identical either way.
+        if (authProperties.oidc.providers.any { it.clientId.isNotBlank() }) {
+            configureOidcLogin(http)
+        }
+
+        http
+            .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
             // Workspace resolution (design §5) runs once a credential has authenticated:
@@ -135,6 +126,34 @@ class SecurityConfig(
     }
 
     /**
+     * The OIDC login wiring (auth.md §8), applied only when at least one provider is
+     * configured — see the call site. The opaque `oidc_error` redirect never leaks
+     * provider internals, but the failure itself is NOT swallowed (rules/02): without
+     * the warn line every authorization-request-not-found, invalid_grant or PKCE
+     * mismatch is indistinguishable from a §4.2 rejection at the success handler.
+     */
+    private fun configureOidcLogin(http: HttpSecurity) {
+        http.oauth2Login { oauth ->
+            oauth.successHandler(oidcSuccessHandler)
+            oauth.failureHandler { request, response, exception ->
+                log.warn(
+                    "OIDC login failed at {}: {}",
+                    request.requestURI,
+                    (exception as? OAuth2AuthenticationException)?.error?.let { "${it.errorCode}: ${it.description}" }
+                        ?: exception.toString(),
+                    exception,
+                )
+                response.sendRedirect("${request.contextPath}/login?error=oidc_error")
+            }
+            oauth.authorizationEndpoint {
+                it.authorizationRequestRepository(authorizationRequestRepository)
+                // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.
+                it.authorizationRequestResolver(authorizationRequestResolver)
+            }
+        }
+    }
+
+    /**
      * CSRF token in a JS-readable `dp_csrf` cookie; SPA echoes it in `DP-CSRF-Token`.
      * `Secure` follows the base-url scheme (T33) — see [AuthProperties.secureCookies].
      */
@@ -152,6 +171,22 @@ class SecurityConfig(
         object : WebMvcConfigurer {
             override fun addInterceptors(registry: InterceptorRegistry) {
                 registry.addInterceptor(scopeInterceptor)
+            }
+        }
+
+    /**
+     * Registers the forced password change gate on the MVC pipeline (auth.md §5A.4)
+     * — ahead of EVERY handler except the single allowlist in
+     * [ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS], so a future controller is
+     * gated by default and cannot forget it.
+     */
+    @Bean
+    fun forcedChangeInterceptorConfigurer(): WebMvcConfigurer =
+        object : WebMvcConfigurer {
+            override fun addInterceptors(registry: InterceptorRegistry) {
+                registry
+                    .addInterceptor(forcedPasswordChangeInterceptor)
+                    .excludePathPatterns(ForcedPasswordChangeInterceptor.EXCLUDE_PATTERNS)
             }
         }
 

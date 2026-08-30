@@ -135,6 +135,12 @@ class AuthConfiguration {
     ): ScopeInterceptor = ScopeInterceptor(authErrorWriter, auditLogger)
 
     @Bean
+    fun forcedPasswordChangeInterceptor(
+        userService: UserService,
+        authErrorWriter: AuthErrorWriter,
+    ): ForcedPasswordChangeInterceptor = ForcedPasswordChangeInterceptor(userService, authErrorWriter)
+
+    @Bean
     fun cookieOAuth2AuthorizationRequestRepository(
         jwtService: JwtService,
         objectMapper: ObjectMapper,

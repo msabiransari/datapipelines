@@ -75,7 +75,7 @@ Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_k
 
 ### 4.1 `users`
 
-OIDC-authenticated users. Provisioned automatically on first login via Google or Microsoft. See [Auth spec §4](auth.md#4-user-identity).
+OIDC-authenticated users, plus optional local password accounts (auth.md §5A). OIDC users are provisioned automatically on first login; local accounts are created by an admin or seeded as the bootstrap admin. See [Auth spec §4](auth.md#4-user-identity).
 
 ```sql
 CREATE TABLE users (
@@ -83,11 +83,17 @@ CREATE TABLE users (
     email               TEXT        NOT NULL UNIQUE,
     display_name        TEXT        NOT NULL,
     profile_picture_url TEXT,
-    provider            TEXT        NOT NULL,              -- OIDC registration name (free text: 'google', 'okta', 'company-sso', etc.)
+    provider            TEXT        NOT NULL,              -- OIDC registration name (free text: 'google', 'okta', 'company-sso', etc.),
+                                                           -- or a placeholder with meaning: 'bootstrap' (pre-provisioned, auth.md §4.4), 'local' (admin-created, §5A)
     provider_subject    TEXT        NOT NULL,              -- OIDC 'sub' claim
     is_active           BOOLEAN     NOT NULL DEFAULT TRUE,
     is_admin            BOOLEAN     NOT NULL DEFAULT FALSE,
     theme_preference    TEXT,                                 -- NULL = use the deployment default
+    password_hash       TEXT,                                 -- NULL = OIDC-only account; Argon2id when set (V5, auth.md §5A)
+    password_changed_at TIMESTAMPTZ,                          -- when the current hash was set (V5)
+    must_change_password BOOLEAN    NOT NULL DEFAULT FALSE,   -- forced-change gate (V5, auth.md §5A.4)
+    failed_login_count  INTEGER     NOT NULL DEFAULT 0,       -- consecutive local-login failures (V5)
+    locked_until        TIMESTAMPTZ,                          -- per-account lockout horizon (V5, auth.md §5A.3)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_login_at       TIMESTAMPTZ
@@ -99,13 +105,15 @@ CREATE UNIQUE INDEX uq_users_provider_subject ON users(provider, provider_subjec
 **Notes:**
 - `email` is UNIQUE — one account per email, regardless of provider. If a user logs in via Google first, then Okta with the same email, the record is updated (provider switches). The UNIQUE constraint's implicit index (`users_email_key`) is the login lookup path; no separate index is created.
 - `(provider, provider_subject)` is also UNIQUE — one record per OIDC identity.
-- `provider` is free text (no CHECK constraint) — stores whatever registration name the deployment configured. See [Auth spec §5.1](auth.md#51-provider-configuration-generic).
+- `provider` is free text (no CHECK constraint) — stores whatever OIDC registration name the deployment configured, or one of two placeholders with meaning: `'bootstrap'` (pre-provisioned, never logged in — [Auth §4.4](auth.md#44-bootstrap-admin)) and `'local'` (admin-created local account — [Auth §5A.1](auth.md#5a1-accounts)). See [Auth spec §5.1](auth.md#51-provider-configuration-generic).
 - `is_active` is **read on every authenticated request**, not only at login: both the JWT filter and the API-key filter re-check it through the 60-second lookup cache described in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13). Deactivating a user therefore takes effect within ~1 minute without any token revocation step. Practical consequence for this table: reads of `users` by `id` are hot and cached — do not add columns whose staleness for 60s would be unsafe.
 - `theme_preference` is a **stored user preference, not session state** — it survives logout and follows the user across browsers, which session storage would not. Written by the profile screen (`PATCH /partials/profile/theme` → `UPDATE users`, [UI Screens §4.11](ui-screens.md#411-user-settings)).
   - **`NULL` is meaningful:** it means "no explicit choice — use the deployment default [`datapipelines.ui.theme`](configuration.md#310-ui)". It is not the same as storing the default's current value: a NULL row *follows* the deployment default when an operator changes it, whereas a materialized copy would silently pin the user to yesterday's default. This is why the column is nullable with no DEFAULT.
   - **No CHECK constraint.** Valid values are the theme list in [Configuration §3.10](configuration.md#310-ui), validated by the application on write. A CHECK here would mean a migration every time a theme is added, and would reject rows that were valid when written if a theme were ever retired — the wrong failure mode for a cosmetic preference.
 - `updated_at` is set by the application in every UPDATE (§2) — including deactivation, login (`last_login_at`), and the theme PATCH.
-- No password column. Identity is fully delegated to OIDC.
+- `password_hash` (V5) holds the Argon2id encoded hash of a local account's password ([Auth §5A](auth.md#5a-local-password-accounts-optional), same `SecretHasher` as API keys, §7.2). **`NULL` means OIDC-only** — such an account can never authenticate locally, and every pre-V5 row backfilled NULL. The plaintext password is never stored, never logged, and (except the one-time bootstrap seed, auth.md §5A.2) never in config.
+- `must_change_password` (V5) is set TRUE by every seed/admin-reset and cleared only by the self-service change; while TRUE the forced-change gate redirects every authenticated route to the change-password screen (auth.md §5A.4).
+- `failed_login_count` / `locked_until` (V5) back the per-account lockout (auth.md §5A.3): consecutive failures increment the count, the count reaching the configured maximum sets `locked_until`, and a successful login or an admin reset clears both. No CHECK constraint — the bounds are applied by the repository's atomic UPDATE, the same application-maintained discipline as `updated_at` (§2).
 
 ### 4.2 `api_keys`
 
@@ -639,7 +647,8 @@ modules/app/src/main/resources/db/migration/
 ├── V2__datasource_introspection_include_schemas.sql
 ├── V3__execution_lineage.sql
 ├── V4__workspaces_rekey.sql        ← workspaces + workspace_members; workspace_id on pipelines/templates/api_keys/datasources; templates surrogate re-key
-└── V5__...                         ← future migrations
+├── V5__local_password_auth.sql     ← users gains password_hash / password_changed_at / must_change_password / failed_login_count / locked_until (auth.md §5A)
+└── V6__...                         ← future migrations
 ```
 
 ### 7.2 V1 migration
@@ -752,3 +761,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-08-16 | v1.3 | V3 migration | §4.6 `pipeline_executions` gains the composition-lineage columns `parent_execution_id` (self-FK), `parent_node_id`, `root_execution_id` (migration V3, design doc 2026-08-13-pipeline-node-type §5) — `root_execution_id` backfilled to `execution_id` and NOT NULL going forward, so family queries and cancellation never special-case NULL; new explicit index `idx_executions_root`; `chk_triggered_via` widened with `'PIPELINE'`. |
 | 2026-08-26 | v1.4 | V4 migration | Workspaces, slice 1 (design doc 2026-08-16-workspaces-design §3/§4, D2/D9; re-base resolutions R1/R2 recorded here, amending that spec's PROPOSED DDL). New tables §4.11 `workspaces` and §4.12 `workspace_members`; the `default` workspace is seeded with the well-known constant UUID `defa0000-0000-0000-0000-000000000001` (R2 — deterministic across deployments and greppable; a boot-time DB lookup or a config key was considered and rejected) and `created_by` NULL (R1 — NULL = system-provisioned; the spec's `NOT NULL` gave the seed no user to reference on a fresh install). §4.4 `pipelines` gains `workspace_id NOT NULL` backfilled to `default`; name uniqueness moves from global (`pipelines_name_key`) to per-workspace via the explicitly named `uq_pipelines_workspace_name` — same mechanism (plain UNIQUE constraint, soft-deleted rows included). §4.8 `templates` re-keys onto a surrogate `id UUID` PK; the TEXT id becomes `name`, unique per workspace (`uq_templates_workspace_name`); `idx_templates_active` follows the rename onto `name`. §4.9 `template_versions.template_id` re-keys onto the surrogate (same FK name and `ON DELETE CASCADE`); pipeline-JSON and `imports_json` `{id, version}` refs keep meaning the human id (`name`) — stored payloads not rewritten. §4.10 `datasources` gains `workspace_id UUID NULL` (NULL = global; existing rows backfill NULL, D9) and `is_readonly NOT NULL DEFAULT FALSE` — columns only, no datasources-module change in this slice. §4.2 `api_keys` gains `workspace_id NOT NULL` backfilled to `default` (D3 pinning). §3 ERD, §5 index table, §6.1 example, and §7.1 file list updated (the §7.1 list also stops showing the stale `V2__seed_admin_user.sql` placeholder — V2/V3 are the introspection and lineage migrations). |
 | 2026-08-28 | §4.10 prose refresh | The "columns land here, module unchanged / enforcement arrives with the readonly slice" note is history: the surfaces slice put `workspace_id` and `is_readonly` on the entity, in the repository's INSERT/UPDATE/read-join SQL, and made visibility (`bound-to-active OR global`) a repository-level predicate. No DDL change in this note. |
+| 2026-08-29 | v1.5 | V5 migration | §4.1 `users` gains the local password auth columns (migration V5, auth.md §5A): `password_hash TEXT NULL` (NULL = OIDC-only account; Argon2id via the same `SecretHasher` as API keys), `password_changed_at TIMESTAMPTZ NULL`, `must_change_password BOOLEAN NOT NULL DEFAULT FALSE` (the forced-change gate), and the per-account lockout pair `failed_login_count INTEGER NOT NULL DEFAULT 0` / `locked_until TIMESTAMPTZ NULL`. Additive only — existing rows backfill NULL/defaults and behave exactly as before; no new indexes (the login lookup keys off the existing UNIQUE `email`); the "No password column" note is replaced by the password/lockout notes. |

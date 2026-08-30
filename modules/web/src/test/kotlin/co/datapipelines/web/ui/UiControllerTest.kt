@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthProperties
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -12,7 +13,8 @@ import org.springframework.ui.ExtendedModelMap
 class UiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val oidcRegistrations = mockk<OidcRegistrations>()
-    private val controller = UiController(themeResolver, oidcRegistrations)
+    private val authProperties = AuthProperties()
+    private val controller = UiController(themeResolver, oidcRegistrations, authProperties)
 
     private fun mockRequest() = mockk<HttpServletRequest>()
 
@@ -51,6 +53,23 @@ class UiControllerTest {
         controller.login(model, request)
 
         model["error"] shouldBe "oidc_error"
+    }
+
+    @Test
+    fun `login page exposes whether local password login is enabled`() {
+        every { oidcRegistrations.providers() } returns emptyList()
+        every { themeResolver.resolve(any()) } returns "saas"
+        val request = mockRequest()
+        every { request.getParameter("error") } returns null
+
+        val disabledModel = ExtendedModelMap()
+        UiController(themeResolver, oidcRegistrations, AuthProperties()).login(disabledModel, request)
+        disabledModel["localEnabled"] shouldBe false
+
+        val enabledModel = ExtendedModelMap()
+        val localOn = AuthProperties(local = AuthProperties.Local(enabled = true))
+        UiController(themeResolver, oidcRegistrations, localOn).login(enabledModel, request)
+        enabledModel["localEnabled"] shouldBe true
     }
 
     @Test

@@ -4,6 +4,20 @@
 <th:block th:fragment="content">
   <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0 0 var(--gap-lg) 0">User Management</h1>
 
+  <!-- Out-of-band target for one-time password notices (create / reset). -->
+  <div id="admin-notice"></div>
+
+  <form th:if="${localEnabled}" method="post"
+        hx-post="/partials/admin/users"
+        hx-target="#user-table-body"
+        hx-swap="afterbegin"
+        style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
+    <input type="email" name="email" class="ds-input" placeholder="new-user@example.com" required style="flex:1;max-width:280px">
+    <input type="text" name="displayName" class="ds-input" placeholder="Display name (optional)" style="flex:1;max-width:220px">
+    <button type="submit" class="ds-button ds-button-primary ds-button-sm">Create local user</button>
+    <span style="color:var(--text-secondary);font-size:var(--text-xs)">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
+  </form>
+
   <div style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
     <input type="text" id="userSearch" class="ds-input" placeholder="Search by email or name" style="flex:1;max-width:320px"
            hx-get="/partials/admin/users"
@@ -23,11 +37,12 @@
           <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Email</th>
           <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Status</th>
           <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Role</th>
+          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Local</th>
           <th style="text-align:right;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Actions</th>
         </tr>
       </thead>
       <tbody id="user-table-body">
-        <tr><td colspan="6" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
+        <tr><td colspan="7" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
           <span class="htmx-indicator">Loading users...</span>
         </td></tr>
       </tbody>

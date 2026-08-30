@@ -66,6 +66,7 @@ object ApiErrorCatalog {
             "auth.scope." to HttpStatus.FORBIDDEN,
             "auth.csrf." to HttpStatus.FORBIDDEN,
             "auth.login." to HttpStatus.FORBIDDEN,
+            "auth.password." to HttpStatus.FORBIDDEN,
             "datasource.validation." to HttpStatus.BAD_REQUEST,
             "template.validation." to HttpStatus.BAD_REQUEST,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
@@ -100,6 +101,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
+            // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
+            // not the family's 403: it answers "not authenticated", not "forbidden".
+            PipelineErrorCodes.Auth.LOGIN_BAD_CREDENTIALS to HttpStatus.UNAUTHORIZED,
             // §13.12's CRUD codes break the workspace.* family default (403, the resolution
             // codes) — the surfaces slice's rows each carry their own status.
             // SESSION_REQUIRED is 403 like the family default, but wired explicitly so the

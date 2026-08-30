@@ -39,3 +39,13 @@ dependencies {
 tasks.named<Test>("test") {
     systemProperty("jdk.httpclient.allowRestrictedHeaders", "cookie")
 }
+
+// Prints the Argon2id hash for datapipelines.auth.local.bootstrap-password-hash
+// (auth.md §5A.2). Reads DATAPIPELINES_SEED_PASSWORD or prompts — never a shell
+// argument, which would leak the password into history and the process table.
+tasks.register<JavaExec>("hashPassword") {
+    group = "application"
+    description = "Prints the Argon2id hash of DATAPIPELINES_SEED_PASSWORD (or a prompted password) for the local-admin seed key."
+    mainClass.set("co.datapipelines.auth.PasswordHashToolKt")
+    classpath = sourceSets["main"].runtimeClasspath
+}

@@ -3,7 +3,26 @@ package co.datapipelines.auth
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
+import java.time.Instant
 import java.util.UUID
+
+/**
+ * The `users` fields the local login path needs (auth.md §5A, metadata-db §4.1),
+ * including the Argon2id [passwordHash] — deliberately NOT part of [User], so the
+ * secret exists only between this query and the `SecretHasher.verify` call.
+ */
+data class LocalCredential(
+    val userId: UUID,
+    val passwordHash: String,
+    val failedLoginCount: Int,
+    val lockedUntil: Instant?,
+)
+
+/** Post-update state of one failed local-login attempt (auth.md §5A.3). */
+data class LocalLoginFailure(
+    val failedLoginCount: Int,
+    val lockedUntil: Instant?,
+)
 
 /**
  * `users` persistence (metadata-db §4.1) via `NamedParameterJdbcTemplate` — no JPA
@@ -163,6 +182,151 @@ class UserRepository(
         )
     }
 
+    /**
+     * The local-login credential fields (auth.md §5A, metadata-db §4.1) — the ONLY
+     * read path that surfaces `password_hash`, kept off [User] so the secret cannot
+     * leak through a serialized principal. Returns null when no such row exists OR
+     * the account is OIDC-only (`password_hash IS NULL`): the login service collapses
+     * both to the same "bad credentials" outcome, so the two are indistinguishable
+     * to a caller (and to an attacker probing for valid emails).
+     */
+    fun findLocalCredential(email: String): LocalCredential? =
+        jdbc
+            .query(
+                """
+                SELECT id, password_hash, failed_login_count, locked_until
+                  FROM users
+                 WHERE email = :email AND password_hash IS NOT NULL
+                """.trimIndent(),
+                MapSqlParameterSource("email", email.trim().lowercase()),
+            ) { rs, _ ->
+                LocalCredential(
+                    userId = rs.getObject("id", UUID::class.java),
+                    passwordHash = rs.getString("password_hash"),
+                    failedLoginCount = rs.getInt("failed_login_count"),
+                    lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+                )
+            }.firstOrNull()
+
+    /**
+     * Sets (or replaces) the local password: stores the Argon2id [hash], stamps
+     * `password_changed_at`, sets `must_change_password` per [mustChange] (TRUE for
+     * every seed and admin reset — the credential was chosen by someone other than
+     * its user), and clears any lockout so the new credential is immediately usable.
+     */
+    fun setPassword(
+        id: UUID,
+        hash: String,
+        mustChange: Boolean,
+    ) {
+        jdbc.update(
+            """
+            UPDATE users
+               SET password_hash = :hash,
+                   password_changed_at = NOW(),
+                   must_change_password = :must_change,
+                   failed_login_count = 0,
+                   locked_until = NULL,
+                   updated_at = NOW()
+             WHERE id = :id
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("hash", hash)
+                .addValue("must_change", mustChange),
+        )
+    }
+
+    /**
+     * Removes local access (auth.md §5A): the account becomes OIDC-only again.
+     * Returns true only on a real transition (a hash was present), so the caller
+     * audits what changed, not every click (§10.1).
+     */
+    fun clearPassword(id: UUID): Boolean =
+        jdbc.update(
+            """
+            UPDATE users
+               SET password_hash = NULL,
+                   password_changed_at = NULL,
+                   must_change_password = FALSE,
+                   failed_login_count = 0,
+                   locked_until = NULL,
+                   updated_at = NOW()
+             WHERE id = :id AND password_hash IS NOT NULL
+            """.trimIndent(),
+            MapSqlParameterSource("id", id),
+        ) > 0
+
+    /** Successful local login: clears the lockout counters and stamps last_login_at. */
+    fun recordLocalLoginSuccess(id: UUID) {
+        jdbc.update(
+            """
+            UPDATE users
+               SET failed_login_count = 0,
+                   locked_until = NULL,
+                   last_login_at = NOW(),
+                   updated_at = NOW()
+             WHERE id = :id
+            """.trimIndent(),
+            MapSqlParameterSource("id", id),
+        )
+    }
+
+    /**
+     * One failed local-login attempt (auth.md §5A.3), atomically: increments
+     * `failed_login_count` and, when the count reaches [maxFailures], sets
+     * `locked_until` [lockMinutes] into the future. Atomic in a single
+     * UPDATE...RETURNING so concurrent sprays cannot lose increments and slide
+     * under the lockout threshold.
+     *
+     * An EXPIRED lock resets the count to 1 (the attempt happening now): the lock
+     * did its time, so the account gets a fresh [maxFailures] budget instead of
+     * re-locking on the very next mistake forever.
+     */
+    fun recordLocalLoginFailure(
+        id: UUID,
+        maxFailures: Int,
+        lockMinutes: Long,
+    ): LocalLoginFailure =
+        jdbc
+            .query(
+                """
+                UPDATE users
+                   SET failed_login_count = CASE
+                           WHEN locked_until IS NOT NULL AND locked_until <= NOW() THEN 1
+                           ELSE failed_login_count + 1 END,
+                       locked_until = CASE
+                           WHEN (CASE
+                               WHEN locked_until IS NOT NULL AND locked_until <= NOW() THEN 1
+                               ELSE failed_login_count + 1 END) >= :max_failures
+                           THEN NOW() + (:lock_minutes * INTERVAL '1 minute')
+                           ELSE NULL END,
+                       updated_at = NOW()
+                 WHERE id = :id
+                RETURNING failed_login_count, locked_until
+                """.trimIndent(),
+                MapSqlParameterSource()
+                    .addValue("id", id)
+                    .addValue("max_failures", maxFailures)
+                    .addValue("lock_minutes", lockMinutes),
+            ) { rs, _ ->
+                LocalLoginFailure(
+                    failedLoginCount = rs.getInt("failed_login_count"),
+                    lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+                )
+            }.first()
+
+    /** Admin unlock (auth.md §5A.3). Returns true only when something was locked/failed. */
+    fun clearLockout(id: UUID): Boolean =
+        jdbc.update(
+            """
+            UPDATE users
+               SET failed_login_count = 0, locked_until = NULL, updated_at = NOW()
+             WHERE id = :id AND (failed_login_count > 0 OR locked_until IS NOT NULL)
+            """.trimIndent(),
+            MapSqlParameterSource("id", id),
+        ) > 0
+
     fun updateLastLogin(id: UUID) {
         jdbc.update(
             "UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = :id",
@@ -201,5 +365,8 @@ class UserRepository(
             updatedAt = rs.getTimestamp("updated_at").toInstant(),
             lastLoginAt = rs.getTimestamp("last_login_at")?.toInstant(),
             themePreference = rs.getString("theme_preference"),
+            mustChangePassword = rs.getBoolean("must_change_password"),
+            hasLocalPassword = rs.getString("password_hash") != null,
+            lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
         )
 }

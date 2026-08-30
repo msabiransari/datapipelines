@@ -260,10 +260,18 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 | Value | Trigger |
 |---|---|
-| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
-| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable ([Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)) |
+| `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
+| `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)) |
+| `auth.password.changed` | User changed their own password (self-service or forced, [Auth §5A.4](auth.md#5a4-forced-password-change)) |
+| `auth.password.reset` | Admin reset a user's password — new one-time credential ([Auth §5A.1](auth.md#5a1-accounts)) |
+| `auth.password.disabled` | Admin disabled a user's local access — account is OIDC-only ([Auth §5A.1](auth.md#5a1-accounts)) |
+| `auth.user.created` | Admin created a local account ([Auth §5A.1](auth.md#5a1-accounts); details carry the acting admin) |
+| `auth.user.unlocked` | Admin cleared a local account's lockout ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
@@ -278,7 +286,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
 
-> There are no password or lockout events — the system has no local passwords ([Auth §2](auth.md#2-design-principles)).
+> Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
 **Datasource audit events** (same `audit_log` table, defined in [Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)):
 
@@ -306,7 +314,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `pipeline.node.*` | Individual node execution failures | pipeline-contract §13.4 |
 | `pipeline.staging.*` | Tempdb / staging failures | pipeline-contract §13.5 |
 | `type_mapping.*` | Type mapping warnings (not errors — in response `warnings` array) | pipeline-contract §13.6 |
-| `auth.api_key.*`, `auth.scope.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
+| `auth.api_key.*`, `auth.scope.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*`, `auth.password.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
 | `datasource.*` (incl. `datasource.validation.*`) | Datasource CRUD, validation, driver availability | pipeline-contract §13.8 (defined in [Datasources §9](datasources.md#9-validation-rules)) |
 | `template.*` (incl. `template.validation.*`) | Template CRUD, validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation-rules)) |
 | `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
@@ -406,3 +414,4 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-08-11 | v1.2 | gate C review | §16: registered `template.not_found` / `datasource.not_found` as two-segment codes (read/mutate-path misses; pipeline-contract §13 v1.3); template domain row widened to `template.*`. |
 | 2026-08-16 | v1.3 | pipeline composition | §18 `ExecutionTrigger` gains `PIPELINE` — a child execution spawned by a parent's PIPELINE node (V3 migration widens `chk_triggered_via` to match). |
 | 2026-08-17 | v1.4 | pipeline composition | §2 `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a child execution (pipeline-contract §4.9/§8.5; guarded by the new `NodeTypeSpecDriftTest` in pipeline-contract). |
+| 2026-08-30 | v1.5 | local password auth | §15 `AuthAuditEvent` gains the local-account events: `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` re-described as shared OIDC/local. The "no password or lockout events" note is replaced — they exist for the optional local accounts only (auth.md §5A). |

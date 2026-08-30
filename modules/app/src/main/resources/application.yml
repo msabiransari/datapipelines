@@ -102,9 +102,12 @@ datapipelines:
     bootstrap-admin-email: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:}
     oidc:
       providers:
+        # client-id/client-secret default to EMPTY: an unset entry is ignored with a
+        # WARN (OidcConfig, configuration.md §7), so a local-accounts-only deployment
+        # starts with zero OIDC providers. Set the vars to enable the provider.
         - name: google
-          client-id: ${GOOGLE_CLIENT_ID}
-          client-secret: ${GOOGLE_CLIENT_SECRET}
+          client-id: ${GOOGLE_CLIENT_ID:}
+          client-secret: ${GOOGLE_CLIENT_SECRET:}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
         # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the
@@ -127,6 +130,17 @@ datapipelines:
       default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
     rate-limit:
       login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
+    # §3.4 — optional local password accounts (auth.md §5A), disabled by default.
+    # The seed keys configure the FIRST ADMIN's initial credential ONLY (the
+    # bootstrap-admin-email account) and force a first-login change; the hash form
+    # is preferred (produce one with the `hashPassword` Gradle task, §3.4).
+    local:
+      enabled: ${DATAPIPELINES_AUTH_LOCAL_ENABLED:false}
+      bootstrap-password-hash: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH:}
+      bootstrap-password: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD:}
+      lockout:
+        max-failures: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_MAX_FAILURES:5}
+        duration-minutes: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_DURATION_MINUTES:15}
 
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}

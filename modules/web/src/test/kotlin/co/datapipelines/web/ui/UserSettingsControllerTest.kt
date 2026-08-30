@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.LocalPasswordService
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
@@ -26,7 +27,9 @@ import java.util.UUID
 class UserSettingsControllerTest {
     private val userRepository = mockk<UserRepository>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = UserSettingsController(userRepository, themeResolver, UiProperties(theme = "forest"))
+    private val localPasswordService = mockk<LocalPasswordService>()
+    private val controller =
+        UserSettingsController(userRepository, themeResolver, UiProperties(theme = "forest"), localPasswordService)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -115,5 +118,37 @@ class UserSettingsControllerTest {
 
         response.statusCode shouldBe HttpStatus.BAD_REQUEST
         response.body shouldContain "Unknown theme"
+    }
+
+    @Test
+    fun `change password with mismatched confirmation never reaches the service`() {
+        authenticate()
+
+        val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-2")
+
+        response.statusCode shouldBe HttpStatus.BAD_REQUEST
+        response.body shouldContain "do not match"
+    }
+
+    @Test
+    fun `change password maps the service outcomes to fragments`() {
+        authenticate()
+        every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
+            LocalPasswordService.ChangeResult.Success
+        controller
+            .changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+            .statusCode shouldBe HttpStatus.OK
+
+        every { localPasswordService.changeOwn(userId, "wrong-current-1", "new-password-1") } returns
+            LocalPasswordService.ChangeResult.WrongCurrentPassword
+        val wrong = controller.changeOwnPassword("wrong-current-1", "new-password-1", "new-password-1")
+        wrong.statusCode shouldBe HttpStatus.BAD_REQUEST
+        wrong.body shouldContain "current password is incorrect"
+
+        every { localPasswordService.changeOwn(userId, "current-password-1", "short") } returns
+            LocalPasswordService.ChangeResult.PolicyViolation("Password must be at least 12 characters")
+        val weak = controller.changeOwnPassword("current-password-1", "short", "short")
+        weak.statusCode shouldBe HttpStatus.BAD_REQUEST
+        weak.body shouldContain "at least 12 characters"
     }
 }

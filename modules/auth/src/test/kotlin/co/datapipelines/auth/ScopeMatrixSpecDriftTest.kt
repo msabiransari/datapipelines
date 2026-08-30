@@ -40,6 +40,7 @@ class ScopeMatrixSpecDriftTest {
             "List / read own workspaces & members" to ScopeMatrix.RestOperation.WORKSPACES_READ,
             "Create a workspace (per provisioning mode)" to ScopeMatrix.RestOperation.WORKSPACE_CREATE,
             "Update a workspace / manage its members" to ScopeMatrix.RestOperation.MANAGE_WORKSPACE,
+            "Change own password" to ScopeMatrix.RestOperation.CHANGE_OWN_PASSWORD,
         )
 
     @Test

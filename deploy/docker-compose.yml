@@ -12,8 +12,8 @@
 # the Dockerfile at the repo root (deployment.md §6.1).
 #
 # OIDC providers are supplied via the mounted application.yml (see Appendix A);
-# at least one fully-configured provider is required, or startup fails
-# (ConfigValidator §7, auth.md §11.1).
+# at least one authentication method is required — a fully-configured OIDC
+# provider or local accounts (auth.md §5A) — or startup fails (ConfigValidator §7).
 
 # Pinned to the directory-derived default so existing deployments keep their
 # container and volume names (deploy_postgres-data holds the metadata DB —
@@ -45,13 +45,25 @@ services:
       # REQUIRED when OIDC providers are configured (auth.md §5.2).
       DATAPIPELINES_AUTH_BASE_URL: ${DATAPIPELINES_AUTH_BASE_URL}
 
-      # REQUIRED: at least one OIDC provider (application.yml below).
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # OIDC (application.yml below): empty = the stock google entry is ignored
+      # with a WARN — at least one auth method (OIDC provider or local accounts)
+      # must remain, or startup fails (ConfigValidator §7).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       # Microsoft — only with the single-tenant provider block uncommented in
       # application.yml (auth.md §11.1; multi-tenant /common is unsupported in v1):
       # MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID}
       # MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET}
+
+      # Optional local password accounts (auth.md §5A) — empty/false = off, and the
+      # deployment behaves exactly as OIDC-only. The seed configures the FIRST
+      # ADMIN's one-time credential only (the bootstrap-admin-email account below)
+      # and forces a first-login change. Compose defaults MUST mirror
+      # application.yml's defaults (empty string overrides nothing here — these
+      # keys default to empty in the mounted yml too).
+      DATAPIPELINES_AUTH_LOCAL_ENABLED: ${DATAPIPELINES_AUTH_LOCAL_ENABLED:-false}
+      DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH:-}
+      DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD:-}
 
       # Optional (empty = off). Bootstrap admin: this email's user row is created
       # with is_admin at FIRST login (auth.md §4.4 — a fresh deployment otherwise

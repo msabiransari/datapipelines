@@ -11,13 +11,13 @@
 
 This spec defines **how users authenticate** (OIDC via any provider — Google, Microsoft, Okta, Auth0, Keycloak, etc.), **how sessions work** (internal JWT after OIDC login), **how agents authenticate** (API keys), **what authenticated principals can do** (scopes), and the **Spring Security wiring** that ties it all together.
 
-The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect. No local passwords are stored. After OIDC login, the server issues its own JWT for stateless session management.
+The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect **by default**; deployments without an IdP may additionally enable optional local password accounts (§5A), stored as Argon2id hashes. After any login, the server issues its own JWT for stateless session management.
 
 ---
 
 ## 2. Design Principles
 
-1. **No passwords.** Identity is delegated to an external OIDC provider. The server never sees or stores user passwords.
+1. **Identity is delegated by default; local accounts are the narrow exception.** The server never sees or stores OIDC user passwords — identity belongs to the external provider. The one exception (§5A): a deployment with no IdP at all would otherwise be unusable — evaluating the product required registering an OAuth client before seeing a single screen, the biggest adoption barrier the product had. For that deployment shape, optional local accounts exist: admin-created only (no self-registration), stored as Argon2id hashes (never plaintext, never in config beyond the one-time first-admin seed), forced to rotate seeded/reset credentials at first login, and off unless explicitly enabled. An OIDC-only deployment behaves exactly as before.
 2. **Generic OIDC, not provider-specific.** Any OIDC-compliant provider works — Google, Microsoft, Okta, Auth0, Keycloak, Ping, AWS Cognito, etc. The deployment configures which provider(s) to enable; the code is provider-agnostic.
 3. **OIDC for humans, API keys for agents.** Users log in via browser (OIDC redirect flow). Agents (Claude, GLM, Copilot) authenticate via API keys issued from the UI.
 4. **Internal JWT after OIDC.** Once OIDC validates the user, the server issues its own JWT (8h TTL). The JWT is the session — any instance can validate it statelessly. OIDC tokens are NOT used for ongoing session management.
@@ -131,7 +131,7 @@ For internal-only deployments, **always set the allowlist** to prevent random Go
 
 ### 4.4 Bootstrap admin
 
-A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) and no local login — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11):
+A fresh deployment has zero admins (`users.is_admin DEFAULT FALSE`, no seed rows) — so without a bootstrap path, nobody can ever grant `admin`. The mechanism (added 2026-08-07, security review LOW-11; extended 2026-08-29 to seed the first admin's local credential, §5A.2):
 
 - The operator sets `datapipelines.auth.bootstrap-admin-email` ([Configuration §3.4](configuration.md#34-auth)) before first start.
 - When a user row is **created** (first provisioning, §4.2) and its lowercase-normalized email matches the configured value (compared case-insensitively), `is_admin` is set true. The grant fires **only at row creation**: a later login changes nothing, the flag is never *revoked* by this path, and after an admin deliberately revokes admin (`auth.user.admin_revoked`, §10.1) this path never re-grants it — re-instating admin is an explicit §16.3 operation.
@@ -272,6 +272,8 @@ class LoginController(
 
 The login page shows **only the providers the deployment configured** — one button, two buttons, or five buttons. No hardcoded provider names.
 
+When local accounts are enabled (§5A), the page gains a username/password form **before** the provider buttons, separated by a simple divider — one form, then the divider, then the buttons, never tabs (tabs hide half the methods behind a click and add state to a page that should have none). Only the methods actually enabled render: an OIDC-only deployment shows exactly the page above (no form, no divider), a local-only deployment shows the form with no divider and no buttons. Failure states arrive as `?error=` banners (`credentials`, `locked`, `inactive` — same idiom as the OIDC banners).
+
 ### 5.4 OIDC redirect flow (Spring Security handles automatically)
 
 ```
@@ -411,6 +413,58 @@ authored-content operations (pipelines, templates, executions) are scoped to it.
 - **Zero memberships** (possible under `closed` provisioning): the request proceeds with
   no workspace; every workspace-scoped operation then answers
   `403 workspace.membership_required`.
+
+## 5A. Local password accounts (optional)
+
+Local username/password authentication is the **optional second sign-in method** for deployments without an IdP (§2 Principle 1). It is disabled by default (`datapipelines.auth.local.enabled`, [Configuration §3.4](configuration.md#34-auth)); a deployment with only OIDC configured behaves exactly as before this section existed. With no OIDC providers and local accounts enabled, the deployment starts and serves the whole product with zero external setup — the zero-setup path.
+
+### 5A.1 Accounts
+
+A local account is an ordinary `users` row whose `password_hash` holds an **Argon2id** encoded hash (metadata-db §4.1) produced by the same `SecretHasher` API keys use (§7.2) — no second hashing library, no hand-rolled parameters. `password_hash IS NULL` means OIDC-only: that account can **never** authenticate locally. There is **no self-registration** — a local account exists because an admin created it on the user-administration screen, or because it is the config-seeded bootstrap admin (§5A.2). The email domain allowlist (§4.3) governs OIDC exactly as today; admin creation is itself the gate for local accounts, so the allowlist does not re-apply there.
+
+A local account's `provider` is the placeholder `'local'` (like `'bootstrap'`, §4.4 — a value with meaning, not an OIDC registration name): it marks "no OIDC identity is linked". If the person later signs in via OIDC with the same email, §4.2's linking step replaces the placeholder exactly as it replaces `'bootstrap'`; the local password stays valid alongside the OIDC identity unless an admin disables local access.
+
+**Admin operations** on the user-administration screen (§7.6 `USER_ADMINISTRATION`): **create a local user** (a random one-time password is shown to the admin exactly once, `must_change_password = TRUE`, audited `auth.user.created` — there is no email flow; the product has no SMTP, so an admin-driven reset is the whole account-recovery story), **reset a password** (new one-time credential, forces the change, clears the lockout — the unlock path for a sprayed-out account), **disable local access** (the hash is cleared and the account is OIDC-only again), and **unlock** (clears the lockout without touching the credential).
+
+### 5A.2 Seeding the first admin
+
+A fresh local-accounts deployment has the chicken-and-egg §4.4 solves for OIDC: no admin exists to create the first account. Config seeds the **first admin only, never ordinary users** — passwords are not a config medium (config is plaintext in `docker compose config`, `docker inspect`, image layers and pasted issue reports, and offers no rotation, no revocation and no self-service). Every other account's credential lives hashed in the database, created by an admin from the user-administration screen.
+
+- `datapipelines.auth.local.bootstrap-password-hash` — the preferred form: a **pre-computed Argon2id hash**, produced by `./gradlew :modules:auth:hashPassword` (prompts, or reads `DATAPIPELINES_SEED_PASSWORD`; never take the password as a shell argument — it would leak into shell history and the process table). The plaintext never has to sit in a config file.
+- `datapipelines.auth.local.bootstrap-password` — the plaintext alternative, accepted because a zero-setup demo should be one command. It is never logged and never audited.
+
+Both forms land on the `bootstrap-admin-email` account (created through the single §4.4 creation path, so the admin grant and its audit event fire exactly as for OIDC) and **always** seed with `must_change_password = TRUE`: the app refuses to proceed to any other screen until the seeded credential is replaced (§5A.4). Seeding is **create-if-absent and idempotent** — a restart never resets a changed password, and an account that already exists is left untouched. And the seeded credential cannot survive silently: every startup where the bootstrap-admin account still has `must_change_password = TRUE` logs a WARN (`event=auth.local.one_time_credential_pending`). Startup refuses the ambiguous shapes ([Configuration §7](configuration.md#7-config-validation)): both forms set, a seed without `local.enabled`, or a seed without `bootstrap-admin-email` — each naming both keys.
+
+### 5A.3 Lockout
+
+Distinct from the per-IP login rate limit (§9, `rate_limit.exceeded`): that damper is IP/route-scoped and cannot stop a **slow spray against one account** from many addresses. After `datapipelines.auth.local.lockout.max-failures` (default 5) **consecutive** failed local logins, the account locks for `datapipelines.auth.local.lockout.duration-minutes` (default 15):
+
+- While locked, an attempt does **no Argon2 work** and does not touch the failure count — a spray cannot keep the lock warm or spend the server's native hashing memory. Even the correct password is refused until the lock expires.
+- An expired lock starts a **fresh** failure budget (the count resets on the next failure rather than re-locking instantly forever).
+- A successful login clears the counters. The lock engagement is audited as `auth.login.locked` (§10.1), and an admin can clear it early (unlock or password reset on the user-administration screen).
+
+### 5A.4 Forced password change
+
+Every seeded (§5A.2) and admin-reset credential is one-time: `users.must_change_password` is TRUE, and **the app refuses to proceed to any other screen until it is changed**. The mechanism is an MVC interceptor (`ForcedPasswordChangeInterceptor`) registered once for all paths — a filter/interceptor concern precisely so a future controller cannot forget it (a test adds a brand-new route and proves it is still gated). While the flag is set:
+
+- Browsers are redirected `302` to `/settings/password`; htmx requests get `HX-Redirect` (a 302 would swap a full page into a fragment target); API and MCP paths get the `403 auth.password.change_required` envelope (§9) — a redirect is meaningless to a JSON client.
+- The allowlist is exactly: the change-password page and its endpoint, `/logout`, `/health`, `/ready`, and the public/static paths the change page needs to render.
+- **API-key principals are not gated** — an API key is a separate credential the user created deliberately; the forced change is about the human proving control of the interactive account.
+- The flag is read through the same ~60s liveness cache (D13); every password mutation evicts it immediately.
+
+The change itself (self-service, `POST /partials/account/password`) verifies the **current** password first — a hijacked session must not be able to rotate the credential — enforces the §5A.5 floor, clears `must_change_password`, and audits `auth.password.changed`.
+
+### 5A.5 Enumeration resistance and the password policy
+
+Unknown email, an OIDC-only account, and a wrong password are the **same outcome**: the same `Invalid email or password.` banner, the same redirect, the same HTTP status, and — just as important — the **same cost**. The no-row path still runs one Argon2 verification against a dummy hash, so response timing cannot tell "no such account" from "wrong password". Failure audit events carry no credential material.
+
+Passwords are compared only through `SecretHasher.verify` (constant-time-ish at the hash layer). The policy floor for user-chosen passwords (self-service change) is **12 characters minimum** and 128 maximum: length is the factor that resists offline cracking (NIST 800-63B), composition rules push users to predictable patterns, and the maximum bounds Argon2 input cost. Seeded/admin-generated one-time passwords are random and always force a change at first login, so the floor does not apply to them.
+
+### 5A.6 The login flow
+
+`POST /login` (form fields `email`, `password`, plus the `dp_csrf` double-submit token — §8.4) is public (§8.3) and metered by the same per-IP `LoginRateLimitFilter` as the OIDC paths (`/login` prefix). It is deliberately **not** under a scope-governed path: it is the authentication ceremony itself, so no principal exists for the ScopeInterceptor to check yet — exactly like the OIDC callback it mirrors.
+
+On success the flow converges with OIDC: the same `JwtService.issue` mints the same `dp_session` cookie, the same §4.2-step-4 workspace resolution runs (`auto-per-user` provisioning included), the same `auth.login.success` audit event is written (with `provider: "local"` in the details), and `is_active` is re-checked exactly as on the OIDC path (a deactivated account with the correct password gets the `inactive` banner — safe to reveal because the caller just proved the password). The `must_change_password` flag does not block the login; it engages the §5A.4 gate after it.
 
 ## 6. Session Tokens (Internal JWT)
 
@@ -596,6 +650,7 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` |
 | Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | `author` |
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
+| Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
 
 **MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
@@ -694,7 +749,7 @@ If neither API key nor JWT is present (and the path requires auth), the Authoriz
 |---|---|
 | `/health`, `/ready` | Health checks for orchestrators |
 | `/info` | Build info |
-| `/login`, `/login/**` | Login page + error redirects |
+| `/login`, `/login/**` | Login page + error redirects + the local password POST (§5A) |
 | `/oauth2/**` | OIDC authorization + callback |
 | `/vendor/**`, `/css/**`, `/js/**` | Static assets (design system, Cytoscape, Alpine, app CSS/JS) |
 
@@ -725,8 +780,11 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 
 | Code | HTTP | Description |
 |---|---|---|
-| `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist |
-| `auth.login.user_inactive` | 403 | User account deactivated |
+| `auth.login.domain_not_allowed` | 403 | Email domain not in allowlist (OIDC) |
+| `auth.login.user_inactive` | 403 | User account deactivated (OIDC or local) |
+| `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical (§5A.5) |
+| `auth.login.locked` | 403 | Local account locked after consecutive failures (§5A.3) |
+| `auth.password.change_required` | 403 | Session principal must change password before any other operation (§5A.4) |
 | `auth.login.oidc_error` | 500 | OIDC provider returned an error during login |
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |
@@ -748,10 +806,18 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 
 | Event | Trigger |
 |---|---|
-| `auth.login.success` | OIDC login succeeded, JWT issued |
+| `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
-| `auth.login.user_inactive` | User account is deactivated |
+| `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
 | `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
+| `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures (§5A.3) |
+| `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential (§5A.2) |
+| `auth.password.changed` | User changed their own password (self-service or forced, §5A.4) |
+| `auth.password.reset` | Admin reset a user's password — new one-time credential (§5A.1) |
+| `auth.password.disabled` | Admin disabled a user's local access — account is OIDC-only (§5A.1) |
+| `auth.user.created` | Admin created a local account (§5A.1; details carry the acting admin) |
+| `auth.user.unlocked` | Admin cleared a local account's lockout (§5A.3) |
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
@@ -951,6 +1017,8 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | Email domain allowlist | New — restricts who can log in |
 | JWT, API keys, scopes, audit log | **Unchanged** |
 
+*Postscript (v2.10):* optional local accounts returned in §5A — narrower than v1.0's: admin-created only (no self-registration), Argon2id via the API-key `SecretHasher`, per-account lockout, forced rotation of seeded/reset credentials, off by default.
+
 ---
 
 ## 15. Open Questions / Future
@@ -968,6 +1036,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-30 | v2.10 | local password auth | **§5A (new): optional local password accounts** — admin-created only (no self-registration), Argon2id via the API-key `SecretHasher`, `provider = 'local'` placeholder, per-account lockout (§5A.3), config-seeded first admin with a forced first-login change (§5A.2/§5A.4), enumeration-resistant failures with timing equalization (§5A.5), `POST /login` converging on the OIDC session (§5A.6). §1/§2 Principle 1 amended honestly: identity delegated by default, the narrow local exception and WHY. §5.3 login page: form + divider + buttons, only enabled methods. §8.3: `/login` covers the local POST. §10.1 gains `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` are shared with OIDC. The local-auth error codes join §9 and the §13.7 registry (see the catalog commit). §14 postscript. |
 | 2026-08-28 | v2.9 | sample data, slice A | **§4.4 pre-provisioning:** when `datapipelines.bootstrap.datasources-file` is set, startup creates the configured bootstrap admin's row before serving traffic (placeholder `provider = 'bootstrap'` / `provider_subject` = the email, `display_name` from the local-part) so bootstrap-registered datasources have a real `created_by`. Grant-at-creation semantics are unchanged — this is the same single path firing earlier, one audit event across provision → restart → login. **§4.2 linking:** the update no longer rewrites `display_name` on every sign-in; it is set at row creation, and refreshed from the ID token's `name` claim only when the login completes a `provider = 'bootstrap'` placeholder |
 | 2026-08-26 | v2.8 | workspaces slice 2 | **Workspace resolution (design §5/§7):** §4.2 step 4 — login stamps `active_workspace` (last-used, else first membership, else freshly provisioned personal workspace under `auto-per-user`); §5.6 — `DP-Workspace` per-request switch, membership-checked (`403 workspace.membership_required`), API-key requests pin the key's workspace and refuse the header (`400 workspace.header_forbidden`); §7.4 — issuance restricted to the creator's workspaces; `workspace.*` codes catalogued in pipeline-contract §13.12. **§11.1:** stock config ships Google only; Microsoft becomes a commented single-tenant example — multi-tenant `/common` documented as unsupported in v1 (Nimbus refuses its `{tenantid}` discovery metadata at startup). |
 | 2026-08-05 | v1.0 | initial draft | Local username/password auth, JWT sessions, API keys, scopes, audit log |

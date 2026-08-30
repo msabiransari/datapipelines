@@ -94,14 +94,16 @@ htmx and its `response-targets` extension are **vendored** into `static/vendor/`
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /login` |
+| URL | `GET /login` (page), `POST /login` (local password form) |
 | Auth required | No |
-| Purpose | OIDC login — renders one button per configured provider |
-| Design primitives | `.ds-card`, `.ds-button--secondary` |
-| JS | None (static links to `/oauth2/authorization/{provider-name}`) |
+| Purpose | Sign-in — one username/password form, then a divider, then one button per configured OIDC provider; only the enabled methods render |
+| Design primitives | `.ds-card`, `.ds-input`, `.ds-button--primary`, `.ds-button--secondary` |
+| JS | None (plain form POST to `/login`; static links to `/oauth2/authorization/{provider-name}`) |
 | htmx | None |
 
-Content: centered card with app logo + one button per configured OIDC provider. Buttons are **dynamic** — the controller reads the `ClientRegistrationRepository` and passes the provider list to Thymeleaf. A deployment with Google + Okta shows two buttons; a deployment with only Keycloak shows one. Button text is the `display-name` from the provider config ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.3](auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). No hardcoded provider names anywhere in the UI.
+Content: centered card with app logo. When local accounts are enabled ([Auth §5A](auth.md#5a-local-password-accounts-optional)), an email+password form (with the `_csrf` hidden field) comes first; a plain "or" divider separates it from the provider buttons — one form, then the divider, then the buttons, never tabs. Only the methods actually enabled render: an OIDC-only deployment shows just the buttons (no form, no divider, exactly as before); a local-only deployment shows just the form. Provider buttons are **dynamic** — the controller reads the `ClientRegistrationRepository` and passes the provider list to Thymeleaf; button text is the `display-name` from the provider config ([Auth §5.1](auth.md#51-provider-configuration-generic), [§5.3](auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). No hardcoded provider names anywhere in the UI.
+
+Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not_allowed`, `oidc_error` (OIDC); `credentials` (unknown email or wrong password — deliberately identical, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)), `locked` (per-account lockout), `inactive` (deactivated account, either method).
 
 ### 4.2 Dashboard
 
@@ -290,10 +292,11 @@ Content:
 | JS | None |
 | htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-post="/partials/admin/users/{id}/{action}"`, row-level swap) |
 
-Content: table of all users (email, display_name, provider, is_active, is_admin, last_login_at). Admin can toggle `is_active` and `is_admin` per user.
+Content: table of all users (email, display_name, is_active, is_admin, local-access status). Admin can toggle `is_active` and `is_admin` per user, and — for local accounts ([Auth §5A.1](auth.md#5a1-accounts)) — create local users, reset passwords, disable local access, and clear lockouts.
 
 - Partials delegate to [REST §16.3](rest-api.md#163-user-administration-admin-scope) (`activate`, `deactivate`, `grant-admin`, `revoke-admin`), which writes the `auth.user.*` audit events.
-- There is **no create-user action** — users are provisioned by OIDC first login only ([Auth §4.2](auth.md#42-user-provisioning)).
+- **Create local user** (rendered only when local accounts are enabled): email + optional display name; the server generates a random one-time password shown to the admin exactly once (out-of-band notice) with `must_change_password = TRUE` — there is no email flow, so the admin conveys it out-of-band ([Auth §5A.1](auth.md#5a1-accounts)). A taken email answers `409`.
+- **Reset PW** issues a new one-time password under the same rules (and clears any lockout); **Disable local** clears the hash (account becomes OIDC-only); **Unlock** clears the lockout only. The `Local` column shows `local`, `local · locked`, or `—` (OIDC-only).
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s), not instantly and not at JWT expiry.
 - Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
 
@@ -311,6 +314,19 @@ Content: table of all users (email, display_name, provider, is_active, is_admin,
 Content, in order: a **create form** (name + display name; hidden under `closed` mode for non-admins — `workspace.creation_forbidden`), a **joinable list** (`open-join: true` only — each card has a Join button; hidden when `open-join` is off), **your workspaces** (name, role badge, active marker, Switch/Delete actions), and per OWNED workspace a **member table** (name/email/role) with add-by-email and remove actions. Removing a member with the `owner` role is refused server-side (`workspace.in_use`, `blocked_by: owner_membership`) — ownership transfer is not a v1 operation. Delete bounces back with the `in_use` counts while content remains.
 
 The **switcher in the navbar** (§3) drives the active workspace; the screen's Switch buttons POST the same `/workspace/switch`. Expected refusals render as the inline error banner — the generic error page is reserved for the unexpected (§6).
+
+### 4.14 Change password (local accounts)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /settings/password` |
+| Auth required | Yes (any authenticated session with a local password) |
+| Purpose | Self-service password change — and the one screen the §5A.4 forced-change gate lets a `must_change_password` user reach |
+| Design primitives | `.ds-card`, `.ds-input`, `.ds-button--primary` |
+| JS | None |
+| htmx | Yes — `hx-post="/partials/account/password"`, result fragment into `#password-change-result` |
+
+Content: current / new / confirm fields with the policy floor stated inline (at least 12 characters, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)). A `must_change_password` user additionally sees the one-time-password warning banner — every other route redirects here until the change succeeds ([Auth §5A.4](auth.md#5a4-forced-password-change)). An account without a local password (OIDC-only) sees an explanatory note instead of the form. Failure outcomes render as inline fragments: wrong current password, policy violation, confirmation mismatch; success confirms and the gate releases on the next navigation.
 
 ---
 
@@ -446,3 +462,4 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | 2026-08-05 | v1.0 | initial draft | UI screens inventory: 12 screens (login, dashboard, pipeline list/editor, datasource list, template list/editor, execution history/detail, API keys, user settings, admin users), htmx patterns, error pages |
 | 2026-08-07 | v1.1 | consistency campaign | Per [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) §2.12: route convention §2.1 (pages / `/partials/**` / `/api/v1/**`, htmx never calls the JSON API) and all `hx-*` endpoints re-pointed at `/partials/**` incl. §4.10 API keys [1]; template-editor context form replaced with free-form key-value/JSON input — templates no longer declare variables [1b, D3]; §5 htmx example fixed (`hx-include` + `th:attr` `hx-vals` instead of `${q}` interpolation) [2]; §4 scope column declared a view of the authoritative [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative) matrix, datasource test corrected to `author`, key scopes ⊆ creator's scopes [3, D15]; §4.11 theme preference persisted on the `users` row via `PATCH /partials/profile/theme`, not session state [4]; §4.11 provider badge renders the configured provider `display-name` [5]; §4.9 result panel rebuilt on the uniform cursor with the TTL-expired state and `format`-parameter downloads [6, D9]; new §5.1 standard states (empty / loading via `hx-indicator` / errors via the `response-targets` extension into `#toast`) [7]; CSRF via `dp_csrf` cookie + `DP-CSRF-Token` header wired in the layout [D10] |
 | 2026-08-28 | v1.9 | workspaces surfaces slice | New **§4.13 Workspaces** screen (create per mode, open-join, owned-workspace member management, switch) + navbar **workspace switcher** (§3: POST /workspace/switch re-stamps the session claim; hx-headers carries DP-Workspace for partials). §4.5 datasource list re-grounded: workspace-scoped listing, workspace/readonly columns, register modal with the D8-gated `global` (admin-only, visible-disabled) and `readonly` checkboxes, Register hidden for gated-off members. |
+| 2026-08-30 | v1.10 | local password auth | §4.1 Login: local form + divider + provider buttons, only enabled methods render; `credentials`/`locked` banners join the `?error=` idiom. §4.12 admin users: create local user (one-time password shown once), reset, disable local, unlock; `Local` column. New §4.14 Change password — the §5A.4 forced-change screen. |

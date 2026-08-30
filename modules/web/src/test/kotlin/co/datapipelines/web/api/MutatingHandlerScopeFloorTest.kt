@@ -60,7 +60,11 @@ class MutatingHandlerScopeFloorTest {
         discoveredMutatingHandlers().forEach { handler ->
             val operation = handler.operation
             if (operation == null) {
-                offenders += "${handler.where}: mutating handler declares NO @RequiredScope"
+                if (handler.where !in UNAUTHENTICATED_BY_DESIGN) {
+                    offenders +=
+                        "${handler.where}: mutating handler declares NO @RequiredScope " +
+                        "(if it is unauthenticated by design, add it to UNAUTHENTICATED_BY_DESIGN with its permitAll justification)"
+                }
             } else if (operation.minScope == Scope.READ && handler.where !in READ_FLOORED_MUTATION_HANDLERS) {
                 offenders +=
                     "${handler.where}: mutating handler is floored at read via ${operation.name}"
@@ -83,6 +87,23 @@ class MutatingHandlerScopeFloorTest {
                 .map { it.where }
                 .toSet()
         (READ_FLOORED_MUTATION_HANDLERS.keys - readFloored) shouldBe emptySet()
+    }
+
+    /**
+     * The same non-vacuity rule for the unauthenticated allowlist: an entry that has since
+     * gained a `@RequiredScope`, been renamed, or been deleted must fail rather than sit
+     * there certifying nothing. This list is the more dangerous of the two — an entry here
+     * says "no credential is required at all" — so it must stay short, and every addition
+     * has to name the `permitAll()` line in `SecurityConfig` that makes it true.
+     */
+    @Test
+    fun `every unauthenticated-by-design entry is a discovered unannotated mutating handler`() {
+        val unannotated =
+            discoveredMutatingHandlers()
+                .filter { it.operation == null }
+                .map { it.where }
+                .toSet()
+        (UNAUTHENTICATED_BY_DESIGN.keys - unannotated) shouldBe emptySet()
     }
 
     /** The scan sees the module's controllers — an empty scan would prove nothing. */
@@ -121,6 +142,26 @@ class MutatingHandlerScopeFloorTest {
      * which credential each of its handlers is reachable by.
      */
     private companion object {
+        /**
+         * Mutating handlers that carry NO scope because they are reachable BEFORE any
+         * credential exists. Each entry must name the `SecurityConfig` `permitAll()` line
+         * that makes it true — an unannotated mutating handler outside `/api`, `/partials`
+         * and `/mcp` is otherwise exactly the shape that let a read key reach
+         * `POST /workspace/switch`, so "no scope" needs a louder justification than a low
+         * floor, not a quieter one.
+         *
+         * Added at the 026 merge: 026 branched before this guard existed, so its login
+         * endpoint met the guard for the first time at merge — and the guard refused it,
+         * which is the parallel-lane gap this test is here to catch.
+         */
+        val UNAUTHENTICATED_BY_DESIGN: Map<String, String> =
+            mapOf(
+                "LocalLoginController#login" to
+                    "the local sign-in POST — it authenticates the caller, so it cannot require a credential. " +
+                    "Explicitly permitted in SecurityConfig's permitAll() list alongside \"/login\"; brute force is " +
+                    "bounded by LoginRateLimitFilter and the per-account lockout (auth.md §5A), not by a scope",
+            )
+
         val READ_FLOORED_MUTATION_HANDLERS: Map<String, String> =
             mapOf(
                 "AuthController#createKey" to
@@ -137,6 +178,15 @@ class MutatingHandlerScopeFloorTest {
                 "UserSettingsController#updateTheme" to
                     "own-resource: the write targets the caller's own user row (the handler resolves the caller's " +
                     "userId); there is no payload-chosen target",
+                // Added at the 026 merge, not by either lane: 026 branched BEFORE this guard
+                // existed (025 introduced it), so its new mutating handler met the guard for the
+                // first time here — and the guard did its job by refusing it. That is the
+                // parallel-lane failure this test is for.
+                "UserSettingsController#changeOwnPassword" to
+                    "own-resource: the account is the principal's own by construction (no payload-chosen target), and " +
+                    "the CURRENT password is verified in LocalPasswordService — so a hijacked session cannot rotate " +
+                    "the credential. 'Any authenticated' is the documented §7.6 floor, the MANAGE_OWN_API_KEYS " +
+                    "convention for rotating one's own credential",
                 "WorkspacesUiController#switch" to
                     "session-only by construction (requireSessionPrincipal): an API key is refused before the session " +
                     "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",

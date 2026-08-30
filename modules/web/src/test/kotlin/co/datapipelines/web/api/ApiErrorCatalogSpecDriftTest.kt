@@ -71,11 +71,13 @@ class ApiErrorCatalogSpecDriftTest {
         val VALIDATION_ROW_REGEX = Regex("""^\| `(pipeline\.validation\.[a-z_]+)`\s*\|""")
 
         /**
-         * §13.2–§13.12's row count on 2026-08-29 (025 A2 added §13.12's
-         * `workspace.session_required`; workspaces surfaces added §13.12's 4
-         * CRUD rows, §13.8's `workspace_forbidden`, §13.9's template `duplicate_name`).
+         * §13.2–§13.12's row count. Both parallel lanes added rows and each bumped this
+         * literal from the SAME base of 84 — 025b to 85 (§13.12 `workspace.session_required`),
+         * 026 to 87 (§13.7's three local-auth rows) — so neither lane's number is right for
+         * the merged document. Re-derived at merge from the merged spec, which is the only
+         * way a hand-maintained count survives a parallel merge (P8).
          */
-        const val SECTION_13_ROW_COUNT = 85
+        const val SECTION_13_ROW_COUNT = 88
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
         const val SECTION_12_CODE_COUNT = 47

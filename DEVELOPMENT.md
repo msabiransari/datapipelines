@@ -48,7 +48,9 @@ docker compose -f deploy/docker-compose.dev.yml ps
 
 ---
 
-## 3. OIDC Provider Setup
+## 3. OIDC Provider Setup — optional (skip with local login)
+
+**You no longer need this section to run the app.** Local password login ([auth.md §5A](docs/auth.md#5a-local-password-accounts-optional)) is the zero-setup path: the stock `.env.example` (§4) enables it with a one-time dev credential, and you sign in as `dev@example.com` / `dev-admin`, setting a new password on first login. Come back here when you want to try the OIDC path itself.
 
 The app uses **generic OIDC** — any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, etc.). For local development, set up one or two providers.
 
@@ -124,16 +126,23 @@ DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=yourdomain.com
 # Startup fails without it; OIDC redirect URIs are built from it, never from request headers.
 DATAPIPELINES_AUTH_BASE_URL=http://localhost:8080
 
-# Bootstrap admin (optional — makes your OIDC login an admin on first sign-in, auth §4.4)
-DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=you@yourdomain.com
+# Local password login (auth §5A) — the zero-setup path, no OIDC client needed.
+# The seed is the FIRST ADMIN's one-time credential; you set a new password on
+# first sign-in. Delete these two lines to go OIDC-only.
+DATAPIPELINES_AUTH_LOCAL_ENABLED=true
+DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=dev-admin
+
+# Bootstrap admin — the account the local seed lands on; with OIDC, this email
+# becomes admin on first sign-in instead (auth §4.4)
+DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=dev@example.com
 
 # UI theme
 DATAPIPELINES_UI_THEME=saas
 
-# OIDC provider secrets — must match the providers configured in application.yml
+# OIDC provider secrets — OPTIONAL while local login is enabled above (§3).
 # For Google (the only provider the stock application.yml ships):
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
+# GOOGLE_CLIENT_ID=your-google-client-id
+# GOOGLE_CLIENT_SECRET=your-google-client-secret
 
 # For Microsoft: only needed if you uncommented the microsoft provider block (§3.2).
 # MICROSOFT_CLIENT_ID=...
@@ -299,7 +308,7 @@ open http://localhost:8080/login
 
 The health payload shape is specified in [REST API §11.1](docs/rest-api.md#111-health-check).
 
-You should see the login page with one "Sign in with …" button per provider configured in `application-dev.yml` (Google and Microsoft if you set up both) — the buttons are rendered from the provider registry, not hard-coded ([Auth §5.3](docs/auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)).
+You should see the login page with the email/password form (local login from §4) — and one "Sign in with …" button per OIDC provider only if you configured any ([Auth §5.3](docs/auth.md#53-login-page-dynamic--renders-buttons-for-each-configured-provider)). Sign in as `dev@example.com` / `dev-admin`; the app asks you to set a new password on first login ([auth §5A.4](docs/auth.md#5a4-forced-password-change)).
 
 ---
 
@@ -708,17 +717,19 @@ gh pr create --title "Add DuckDB staging" --body "..."
 
 ## Appendix: Quick Start (One-Liner Setup)
 
-For someone who already has OIDC credentials and Docker running:
+For someone with just Docker running — no OIDC client needed (local login, [auth.md §5A](docs/auth.md#5a-local-password-accounts-optional)):
 
 ```bash
 git clone <repo-url> datapipelines && cd datapipelines && \
 docker compose -f deploy/docker-compose.dev.yml up -d && \
 cp .env.example .env.local && \
-nano .env.local && \                           # fill in OIDC + secrets
+nano .env.local && \                           # fill in the two openssl secrets (JWT/encryption)
 cd ../design-system-starter && npm install && npm run build && cd - && \
 ./scripts/sync-design-system.sh && \
 export $(grep -v '^#' .env.local | xargs) && \
 ./gradlew :modules:app:bootRun --args='--spring.profiles.active=dev'
 ```
+
+Then sign in at `http://localhost:8080` as `dev@example.com` / `dev-admin` (one-time — you set a new password on first login). To use an OIDC provider instead, fill its credentials in `.env.local` (§3).
 
 Then open `http://localhost:8080/login`.

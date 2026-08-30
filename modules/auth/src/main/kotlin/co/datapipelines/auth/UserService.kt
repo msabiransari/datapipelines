@@ -127,6 +127,28 @@ class UserService(
 
     fun updateLastLogin(id: UUID) = userRepository.updateLastLogin(id)
 
+    /**
+     * Creates an admin-created local account (auth.md §5A.1) through the ONE
+     * creation path ([createUser]): the §4.4 bootstrap grant still fires exactly
+     * here — an admin who creates the bootstrap address creates an admin, the
+     * same rule as every other path — and the caller audits `auth.user.created`
+     * with the acting admin's id. The `provider = 'local'` placeholder
+     * ([LOCAL_PROVIDER]) marks "no OIDC identity linked"; §4.2's linking step
+     * replaces it if the person later signs in via OIDC. [email] is normalized
+     * by the caller.
+     */
+    fun createLocalAccount(
+        normalizedEmail: String,
+        displayName: String,
+    ): User =
+        createUser(
+            normalizedEmail = normalizedEmail,
+            displayName = displayName,
+            pictureUrl = null,
+            provider = LOCAL_PROVIDER,
+            providerSubject = normalizedEmail,
+        )
+
     /** Cached (D13, ~60s) `users.is_active` — read on every authenticated request. */
     fun isActive(id: UUID): Boolean = authCache.isUserActive(id) { userRepository.findById(it) }
 
@@ -219,6 +241,14 @@ class UserService(
          * login COMPLETES a placeholder identity rather than re-linking a real one.
          */
         const val BOOTSTRAP_PROVIDER = "bootstrap"
+
+        /**
+         * `users.provider` of an admin-created local account (auth.md §5A): no OIDC
+         * identity exists, so — like [BOOTSTRAP_PROVIDER] — this is a placeholder with
+         * meaning, replaced by §4.2's linking step if the person later signs in via
+         * OIDC with the same email.
+         */
+        const val LOCAL_PROVIDER = "local"
 
         /** auth.md §4.2 — one canonical form for every lookup, store and comparison. */
         private fun normalize(email: String): String = email.trim().lowercase()
