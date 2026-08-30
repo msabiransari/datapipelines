@@ -374,9 +374,8 @@ class AuthHttpBoundaryTest {
             )
 
         response.statusCode.value() shouldBe 200
-        response.headers[HttpHeaders.SET_COOKIE].orEmpty()
-            .filter { it.startsWith("dp_csrf") }
-            .shouldBeEmpty()
+        val csrfCookies = response.headers[HttpHeaders.SET_COOKIE].orEmpty().filter { it.startsWith("dp_csrf") }
+        csrfCookies.shouldBeEmpty()
     }
 
     @Test
