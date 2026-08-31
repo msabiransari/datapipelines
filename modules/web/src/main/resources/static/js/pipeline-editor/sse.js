@@ -256,17 +256,27 @@
   SseHandler.prototype.cancel = function () {
     var self = this;
     if (!self.executionId) return;
-    if (self.abortController) {
-      self.abortController.abort();
-    }
-    self.isConnected = false;
-    // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
+    // §6.3/§15.2: the DELETE makes the server emit execution_aborted ON the
+    // still-open stream. The old order aborted the reader FIRST, so the client
+    // never consumed its own terminal event and the aborted end state (banner,
+    // node sweep, and now the toast) could never render from the UI's own Cancel
+    // button (031 F5). Send the DELETE with the reader open; abort only as the
+    // fallback when no terminal event arrives.
     fetch("/api/v1/executions/" + self.executionId, {
       method: "DELETE",
+      // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
       headers: { "DP-CSRF-Token": readCookie("dp_csrf") },
       credentials: "same-origin",
     })
-      .catch(function () {});
+      .catch(function () {})
+      .then(function () {
+        setTimeout(function () {
+          if (!self.terminalSeen && self.abortController) {
+            self.abortController.abort();
+            self.isConnected = false;
+          }
+        }, 5000);
+      });
   };
 
   SseHandler.prototype.handleConnectionLoss = function () {
@@ -313,6 +323,14 @@
         } else if (status === "failed") {
           self.editor.isExecuting = false;
           self.editor.setBanner("Pipeline failed", "error");
+        } else if (status === "aborted") {
+          // The recovery poll previously had no aborted branch (031 F5): a cancel
+          // that raced a dropped stream fell through to "Connection lost".
+          self.editor.isExecuting = false;
+          if (window.DpToast && window.DpToast.show) {
+            window.DpToast.show("warning", "Execution aborted", "The execution was aborted");
+          }
+          self.editor.announceStatus("Execution aborted");
         } else if (status === "running") {
           if (self.pollCount <= self.maxPolls) {
             setTimeout(function () { self.pollExecution(); }, 2000);
