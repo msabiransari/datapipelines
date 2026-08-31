@@ -81,6 +81,7 @@
               <label class="pe-label" x-text="key"></label>
               <template x-if="parameterOverrides[key] !== undefined">
                 <input type="text" class="pe-input" x-model="parameterOverrides[key]"
+                  @input="onParameterInput()"
                   x-bind:placeholder="parameters[key].default ? 'Default: ' + JSON.stringify(parameters[key].default) : (parameters[key].required ? 'Required' : 'Optional')" />
               </template>
               <template x-if="parameterOverrides[key] === undefined">
@@ -105,6 +106,14 @@
 
       <!-- Right sidebar: Node details -->
       <aside class="pe-details-panel" x-bind:class="{ 'pe-details-visible': selectedNode }" aria-label="Node details">
+        <template x-if="!selectedNode">
+          <div class="pe-details-body">
+            <div class="ds-empty">
+              <p class="ds-empty-title">Select a node</p>
+              <p class="ds-empty-description">Click a node in the graph to see its details and rendered SQL.</p>
+            </div>
+          </div>
+        </template>
         <template x-if="selectedNode">
           <div>
             <div class="pe-details-header">
@@ -143,6 +152,14 @@
               <div class="pe-field">
                 <label class="pe-label">Description</label>
                 <div class="pe-value" x-text="selectedNode.description || '—'"></div>
+              </div>
+              <div class="pe-field pe-field-sql">
+                <label class="pe-label">SQL
+                  <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
+                </label>
+                <!-- Filled by htmx.ajax on selection change; the URL carries §6.3 wire
+                     parameters built by the page's own coerceValue (init.js). -->
+                <div id="pe-node-sql"></div>
               </div>
               <template x-if="selectedNode.depends_on && selectedNode.depends_on.length">
                 <div class="pe-field">

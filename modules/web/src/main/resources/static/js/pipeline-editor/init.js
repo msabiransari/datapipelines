@@ -104,6 +104,7 @@
       graph: null,
       sseHandler: null,
       resultPanelInstance: null,
+      sqlReloadTimer: null,
 
       init: function () {
         var self = this;
@@ -131,6 +132,16 @@
 
           setupA11y(self);
           wireSqlCopy(self);
+
+          // Highlight the SQL only after the partial has swapped in — never before:
+          // the tokenizer reads the code element's textContent and replaces its
+          // innerHTML with escaped, span-wrapped tokens (sql-highlight.js).
+          document.body.addEventListener("htmx:afterSwap", function (evt) {
+            var target = evt.detail && evt.detail.target;
+            if (target && target.id === "pe-node-sql" && window.DpSqlHighlight) {
+              window.DpSqlHighlight.apply(target);
+            }
+          });
 
           self.cy.on("tap", "node", function (evt) {
             var nodeData = evt.target.data();
@@ -163,6 +174,48 @@
           if (cyNode.length) cyNode.select();
         }
         a11ySyncNode(id);
+        self.loadNodeSql();
+      },
+
+      /*
+       * The details panel's SQL section (§8). SQL does not live in pipeline nodes —
+       * the server resolves the node's PINNED template and renders it against the
+       * pipeline's own parameter context. The overrides travel as §6.3 wire JSON
+       * built by the page's OWN coerceValue — the same function the execute path
+       * uses (one coercion path for both surfaces; a second one here would
+       * reintroduce the divergence 027b B existed to fix). Blank overrides are
+       * unsupplied: the server's declared defaults and its sampled-parameter
+       * fallback apply, exactly as on execute.
+       */
+      loadNodeSql: function () {
+        var self = this;
+        if (!self.selectedNode || !self.pipeline.id) return;
+        var wire = {};
+        Object.keys(self.parameterOverrides || {}).forEach(function (k) {
+          var raw = self.parameterOverrides[k];
+          if (raw === undefined || raw === null || raw === "") return;
+          var type = (self.parameters[k] && self.parameters[k].type) || "STRING";
+          wire[k] = window.coerceValue(raw, type);
+        });
+        var url =
+          "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
+          "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
+          "?parameters=" + encodeURIComponent(JSON.stringify(wire));
+        htmx.ajax("GET", url, {
+          target: "#pe-node-sql",
+          swap: "innerHTML",
+          indicator: "#pe-node-sql-spinner",
+        });
+      },
+
+      /* Typing in an override box must not fire a render per keystroke — the same
+         ~300ms debounce the list screens use for search. */
+      onParameterInput: function () {
+        var self = this;
+        if (self.sqlReloadTimer) clearTimeout(self.sqlReloadTimer);
+        self.sqlReloadTimer = setTimeout(function () {
+          self.loadNodeSql();
+        }, 300);
       },
 
       setupResultPanelMethods: function () {
