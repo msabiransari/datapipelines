@@ -201,10 +201,16 @@
           "/partials/pipelines/" + encodeURIComponent(self.pipeline.id) +
           "/nodes/" + encodeURIComponent(self.selectedNode.id) + "/sql" +
           "?parameters=" + encodeURIComponent(JSON.stringify(wire));
-        htmx.ajax("GET", url, {
-          target: "#pe-node-sql",
-          swap: "innerHTML",
-          indicator: "#pe-node-sql-spinner",
+        // #pe-node-sql lives inside <template x-if="selectedNode">, which Alpine
+        // renders on the NEXT tick — issuing htmx.ajax synchronously off a
+        // selection change hits htmx:targetError and the section never loads.
+        self.$nextTick(function () {
+          if (!document.getElementById("pe-node-sql")) return;
+          htmx.ajax("GET", url, {
+            target: "#pe-node-sql",
+            swap: "innerHTML",
+            indicator: "#pe-node-sql-spinner",
+          });
         });
       },
 
