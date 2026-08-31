@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<!-- The node details panel's SQL section (pipeline-editor.md §8). Loaded by htmx.ajax
+     from init.js on selection change; one block per state the controller reports.
+     Escaping is Thymeleaf's (th:text / th:attr) — never hand-rolled. -->
+<th:block th:switch="${state}">
+
+  <div th:case="'rendered'" class="pe-sql-block">
+    <div class="pe-sql-meta">
+      <span class="ds-badge ds-badge-default" th:text="${dialect}">POSTGRES</span>
+      <a class="pe-link" th:href="@{/templates/{id}/editor(id=${templateId})}"
+         th:text="${templateId} + ' @ v' + ${templateVersion}">template.sql @ v1</a>
+      <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-sql-copy"
+              th:attr="data-sql=${sql}">Copy</button>
+    </div>
+    <pre class="pe-sql"><code class="pe-sql-code" th:text="${sql}">SELECT 1</code></pre>
+    <div class="ds-empty pe-sql-sampled" th:if="${!#lists.isEmpty(sampledParameters)}">
+      <p class="ds-empty-description"
+         th:text="'Preview uses sample values for: ' + ${#strings.listJoin(sampledParameters, ', ')}">
+        Preview uses sample values for: start_date
+      </p>
+    </div>
+  </div>
+
+  <div th:case="'child-pipeline'" class="ds-empty">
+    <p class="ds-empty-title">Child pipeline</p>
+    <p class="ds-empty-description">
+      This node runs a child pipeline — it has no SQL of its own.
+      <a class="pe-link" th:href="@{/pipelines(q=${childName})}"
+         th:text="${childName} + ' @ v' + ${childVersion}">child @ v1</a>
+    </p>
+  </div>
+
+  <div th:case="'template-missing'" class="ds-empty">
+    <p class="ds-empty-title">Template not found</p>
+    <p class="ds-empty-description"
+       th:text="${templateId} + ' @ v' + ${templateVersion} + ' is not in this workspace’s template registry.'">
+      template.sql @ v1 is not in this workspace’s template registry.
+    </p>
+  </div>
+
+  <div th:case="'parameter-rejected'" class="ds-empty">
+    <p class="ds-empty-title">Parameter rejected</p>
+    <p class="ds-empty-description" th:each="f : ${failures}"
+       th:text="${f.parameter} + ' — ' + ${f.message}">limit — rejected</p>
+    <p class="ds-empty-description">No SQL is shown for values the executor would refuse.</p>
+  </div>
+
+  <div th:case="'render-failed'" class="ds-empty">
+    <p class="ds-empty-title">Render failed</p>
+    <p class="ds-empty-description" th:text="${message}">error</p>
+  </div>
+
+  <div th:case="'node-missing'" class="ds-empty">
+    <p class="ds-empty-title">Node not found</p>
+    <p class="ds-empty-description" th:text="'This pipeline has no node ‘' + ${nodeId} + '’.'">node</p>
+  </div>
+
+</th:block>
+</html>
