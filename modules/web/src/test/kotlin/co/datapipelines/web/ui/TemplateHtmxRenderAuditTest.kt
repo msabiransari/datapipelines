@@ -173,7 +173,13 @@ class TemplateHtmxRenderAuditTest {
                 "templates/list" to { c: WebContext -> c.fillTemplateList() },
                 "datasources/list" to { c: WebContext -> c.fillDatasourceList() },
             ).flatMap { (view, fill) ->
-                val html = templateEngine().process(view, webContext().apply { fill(this) })
+                // Comments are stripped first: the templates document their own contract in
+                // prose ("The ROOT carries id=..."), and an id scraped out of a COMMENT makes
+                // the guard green while the markup produces nothing (found by falsification).
+                val html =
+                    templateEngine()
+                        .process(view, webContext().apply { fill(this) })
+                        .replace(Regex("<!--[\\s\\S]*?-->"), "")
                 val referenced =
                     Regex("""hx-target="#([A-Za-z0-9_-]+)"""").findAll(html).map { it.groupValues[1] }.toSet()
                 referenced.shouldNotBeEmpty()
