@@ -228,7 +228,12 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .post("/partials/datasources")
             .then()
             .statusCode(200)
-            .header("HX-Redirect", Matchers.equalTo("/datasources"))
+            // 030: no HX-Redirect — success is the in-place Shape A response (the modal
+            // success node, the OOB list refresh, and the OOB toast).
+            .header("HX-Redirect", Matchers.nullValue())
+            .body(Matchers.containsString("hx-swap-oob=\"beforeend:#toast\""))
+            .body(Matchers.containsString("Datasource registered"))
+            .body(Matchers.containsString("partial-reg"))
 
         // Cleanup through the REST twin.
         given()
