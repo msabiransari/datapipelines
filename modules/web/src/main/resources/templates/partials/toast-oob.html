@@ -1,0 +1,12 @@
+<!-- The #toast-stack delivery wrapper for partials/toast (ui-screens.md §5.1).
+     htmx 2.0.10 oobSwap: for any swap style other than outerHTML the oob element's
+     CHILDREN are swapped, not the element ("we use the content of the node, not the
+     node itself" — htmx.js). So the hx-swap-oob attribute lives on this wrapper and
+     the .ds-toast is its child. Put the attribute on the toast itself and htmx
+     appends the close button, title and body BARE into the stack: no .ds-toast node
+     is created, toast.js arms nothing, and nothing auto-dismisses. -->
+<div xmlns:th="http://www.thymeleaf.org"
+     th:fragment="oob(variant, title, message)"
+     hx-swap-oob="beforeend:#toast">
+  <th:block th:replace="~{partials/toast :: toast(${variant}, ${title}, ${message})}"></th:block>
+</div>

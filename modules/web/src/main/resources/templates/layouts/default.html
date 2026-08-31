@@ -22,8 +22,10 @@
   <link th:href="@{/css/app.css}" rel="stylesheet">
 </head>
 <body
-    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'"
-    hx-target-error="#toast">
+    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'">
+  <!-- No hx-target-error here: the response-targets extension is NOT loaded, so the
+       attribute was dead config. Refusals that should toast use Shape C (§5.1) —
+       HX-Retarget/HX-Reswap response headers admitted by toast.js's bridgeErrors. -->
   <nav class="app-nav">
     <div class="app-container app-nav-inner">
       <div class="app-nav-left">

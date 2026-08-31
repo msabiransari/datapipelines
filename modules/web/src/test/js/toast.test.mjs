@@ -160,3 +160,126 @@ test("the observer ignores non-toast and non-element additions", async () => {
   );
   delete globalThis.MutationObserver;
 });
+
+test("bridgeErrors swaps an error response that retargets the toast stack", () => {
+  const toast = loadToast();
+  const listeners = {};
+  const root = { addEventListener: (name, fn) => { listeners[name] = fn; } };
+  toast.bridgeErrors(root);
+
+  const detail = {
+    shouldSwap: false,
+    xhr: { status: 409, getResponseHeader: (h) => (h === "HX-Retarget" ? "#toast" : null) },
+  };
+  listeners["htmx:beforeSwap"]({ detail });
+  assert.equal(detail.shouldSwap, true);
+});
+
+test("bridgeErrors leaves an error that does NOT retarget the stack alone", () => {
+  const toast = loadToast();
+  const listeners = {};
+  toast.bridgeErrors({ addEventListener: (n, f) => { listeners[n] = f; } });
+
+  const detail = { shouldSwap: false, xhr: { status: 500, getResponseHeader: () => null } };
+  listeners["htmx:beforeSwap"]({ detail });
+  assert.equal(detail.shouldSwap, false);
+});
+
+test("bridgeErrors never downgrades a successful swap", () => {
+  const toast = loadToast();
+  const listeners = {};
+  toast.bridgeErrors({ addEventListener: (n, f) => { listeners[n] = f; } });
+
+  const detail = { shouldSwap: true, xhr: { status: 200, getResponseHeader: () => "#toast" } };
+  listeners["htmx:beforeSwap"]({ detail });
+  assert.equal(detail.shouldSwap, true);
+});
+
+/** Element double built by the fake document: the surfaces show() touches. */
+function fakeDocument() {
+  return {
+    createElement(tag) {
+      const el = {
+        tagName: tag.toUpperCase(),
+        nodeType: 1,
+        children: [],
+        parentNode: null,
+        textContent: "",
+        _attrs: {},
+        _classes: [],
+        setAttribute(k, v) { el._attrs[k] = String(v); },
+        getAttribute(k) { return k in el._attrs ? el._attrs[k] : null; },
+        appendChild(child) { el.children.push(child); child.parentNode = el; return child; },
+        removeChild(child) {
+          child.parentNode = null;
+          el.children = el.children.filter((c) => c !== child);
+        },
+        addEventListener() {},
+        querySelector() { return null; },
+        classList: {
+          add(c) { if (!el._classes.includes(c)) el._classes.push(c); },
+          contains(c) { return el._classes.includes(c); },
+          get value() { return el._classes.join(" "); },
+        },
+      };
+      Object.defineProperty(el, "className", {
+        get() { return el._classes.join(" "); },
+        set(v) { el._classes = v.split(" ").filter(Boolean); },
+      });
+      return el;
+    },
+    getElementById() { return null; },
+  };
+}
+
+/** Stack double: fakeEl plus the appendChild show() delivers through. */
+function fakeStack() {
+  const stack = fakeEl({ classes: ["ds-toast-stack"] });
+  stack.appendChild = (child) => {
+    stack.children.push(child);
+    child.parentNode = stack;
+  };
+  return stack;
+}
+
+test("show builds the server fragment's shape and appends it to the stack", () => {
+  globalThis.document = fakeDocument();
+  const toast = loadToast();
+  const stack = fakeStack();
+  toast.show("success", "Pipeline completed", "graph_fixture finished in 1.2s", stack);
+
+  const el = stack.children[0];
+  assert.deepEqual(el.classList.value.split(" "), ["ds-toast", "ds-toast-success"]);
+  assert.equal(el.getAttribute("role"), "status");
+  // Child ORDER matters — it is the server fragment's order (partials/toast.html:9-11).
+  assert.deepEqual(el.children.map((c) => c.className),
+    ["ds-toast-close", "ds-toast-title", "ds-toast-body"]);
+  assert.equal(el.children[1].textContent, "Pipeline completed");
+  delete globalThis.document;
+});
+
+test("show escapes by construction — title and body are never parsed as markup", () => {
+  globalThis.document = fakeDocument();
+  const toast = loadToast();
+  const stack = fakeStack();
+  toast.show("danger", "<img src=x onerror=alert(1)>", "<b>no</b>", stack);
+
+  // textContent, never innerHTML: the values carry abort reasons and node ids.
+  assert.equal(stack.children[0].children[1].textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(stack.children[0].children[1].children.length, 0);
+  delete globalThis.document;
+});
+
+test("show is inert when the stack is absent", () => {
+  delete globalThis.document;
+  assert.doesNotThrow(() => loadToast().show("info", "t", "m", null));
+});
+
+test("an unknown variant falls back to info rather than emitting a dead class", () => {
+  globalThis.document = fakeDocument();
+  const toast = loadToast();
+  const stack = fakeStack();
+  toast.show("purple", "t", "m", stack);
+  assert.ok(stack.children[0].classList.value.includes("ds-toast-info"));
+  delete globalThis.document;
+});

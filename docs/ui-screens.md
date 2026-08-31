@@ -68,7 +68,7 @@ The layout also wires three things once, for every page:
 - **Nav chrome (027 UI pass).** The navbar is a sticky, full-width bar whose links and Logout render only for authenticated requests (`UiWorkspaceAdvice.authenticated` — anonymous screens like Login see the brand only). The active section is highlighted from `UiWorkspaceAdvice.currentPath`. Nav and content share the `.app-container` shell (app.css), capped at `--app-content-max` (1600px) rather than the design system's `--container-xl`. App-level chrome and table polish live in `static/css/app.css` — the vendored design system files are synced from design-system-starter and are never edited in this repo.
 - **CSRF for htmx.** `hx-headers` on `<body>` carries the `dp_csrf` cookie value as `DP-CSRF-Token`; because `hx-headers` is inherited, every descendant htmx request is covered ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)).
 - **Workspace switcher + context (workspaces design §9).** The navbar carries a `<select>` of the principal's memberships (`UiWorkspaceAdvice` fills it for every screen); choosing one POSTs `/workspace/switch`, which re-stamps the session JWT's `active_workspace` claim and re-issues `dp_session`, so full-page navigations follow the switch. The layout's `hx-headers` ALSO carries `DP-Workspace: <active>` for every htmx partial call — both mechanisms agree because the switcher drives both. A principal with zero memberships sees no switcher and empty states, never an error page (workspaces design §7).
-- **Toast region.** An empty `<div id="toast" aria-live="polite"></div>` and the htmx `response-targets` extension, which together implement the error rule in §5.1.
+- **Toast region.** An empty `<div id="toast" aria-live="polite"></div>` and `static/js/toast.js`, which together implement §5.1 Notifications — including `bridgeErrors`, the small `htmx:beforeSwap` listener that admits a 4xx/5xx to the swap only when the server retargeted it at `#toast` by header. No htmx extension is loaded; this replaces the `response-targets` prescription this spec once carried.
 
 ```html
 <head>
@@ -76,14 +76,13 @@ The layout also wires three things once, for every page:
     <link rel="stylesheet" id="theme-link"
           th:href="@{'/vendor/design-system/themes/' + ${activeTheme} + '.css'}">
 </head>
-<body th:attr="hx-headers=|{&quot;DP-CSRF-Token&quot;: &quot;${csrfToken}&quot;}|"
-      hx-ext="response-targets">
+<body th:attr="hx-headers=|{&quot;DP-CSRF-Token&quot;: &quot;${csrfToken}&quot;}|">
     <div id="toast" aria-live="polite"></div>
     <!-- … -->
 </body>
 ```
 
-htmx and its `response-targets` extension are **vendored** into `static/vendor/` like the rest of the frontend stack — no CDN references ([Pipeline Editor §4.2](pipeline-editor.md)).
+htmx is **vendored** (webjar) like the rest of the frontend stack — no CDN references, and no htmx extensions ([Pipeline Editor §4.2](pipeline-editor.md)).
 
 ---
 
@@ -409,27 +408,25 @@ Every list, panel and form on these screens implements the same three states. Th
 - Buttons that mutate (`Save`, `Generate key`, `Test connection`) additionally set `hx-disabled-elt="this"` so the action cannot be double-submitted.
 - Indicators are CSS-only (opacity/visibility transitions on `.htmx-request`), so there is no layout shift and no JS.
 
-**Error rendering.** A partial request that fails returns the **standard REST error envelope** ([REST §4.2](rest-api.md#42-error-envelope)) rendered into an HTML fragment — the same `code` / `message` / `user_message` / `correlation_id`, not a bespoke error format. The chosen idiom is the htmx **`response-targets` extension**, enabled once on `<body>` (§3):
+**Error rendering.** A partial request that fails returns the **standard REST error envelope** ([REST §4.2](rest-api.md#42-error-envelope)) rendered into an HTML fragment — the same `code` / `message` / `user_message` / `correlation_id`, not a bespoke error format. No htmx extension is loaded: htmx never swaps 4xx/5xx responses on its own (`responseHandling` maps `[45]..` to `{swap: false}`), so a refusal that should surface as a toast keeps its real 4xx status, carries the `partials/toast-oob` fragment as its body, and sets the `HX-Retarget: #toast` + `HX-Reswap: beforeend` response headers; `toast.js`'s `bridgeErrors` listener flips `shouldSwap` on `htmx:beforeSwap` — only when the server asked for `#toast` by header, so an ordinary error behaves exactly as before (Shape C under **Notifications**).
 
-```html
-<!-- 4xx/5xx go to the toast region; only the success response touches the panel -->
-<button class="ds-button ds-button--primary"
-        hx-post="/partials/datasources/pg-main/test"
-        hx-target="#test-result"
-        hx-target-error="#toast"
-        hx-disabled-elt="this"
-        hx-indicator="#test-spinner">
-    Test connection
-</button>
-```
-
-- `hx-target-error="#toast"` routes any non-2xx response to the shared `#toast` region (`aria-live="polite"`), leaving the success target untouched — a failed refresh never blanks the panel it was going to replace.
-- The server renders the envelope into a `.ds-toast--danger` fragment: `user_message` as the headline, `code` and `correlation_id` in small text (the correlation id is what a user quotes in a support request), and `doc_url` as a link when the envelope carries one.
-- **Field-level validation errors** (`400` with per-field `details`) are the exception: they target the form (`hx-target-error="#form-errors"`) and render inline next to the offending inputs, because a toast that vanishes is the wrong place for "this field is required".
+- The retarget leaves the success target untouched — a failed refresh never blanks the panel it was going to replace.
+- The server renders the envelope into a `.ds-toast-danger` fragment: `user_message` as the headline, `code` and `correlation_id` in small text (the correlation id is what a user quotes in a support request), and `doc_url` as a link when the envelope carries one.
+- **Field-level validation errors** (`400` with per-field `details`) are the exception: they render inline next to the offending inputs, because a toast that vanishes is the wrong place for "this field is required".
+- **Modal-scoped errors** stay in the modal: a screen whose error must not dismiss its context (the §4.5 register modal) keeps its own `htmx:responseError` path and does NOT retarget to the stack.
 - **`401`** is not a toast — the partial responds with `HX-Redirect: /login?expired=true`, which sends the browser to the login page (§6). Rendering a login form inside a swapped fragment would nest a page inside a panel.
 - **`403`** renders a toast and, where the affordance should not have been visible at all, the swap also removes it — a scope-gated action becoming visible is a UI bug, and the toast copy says "you don't have permission", never "something went wrong".
 
-**Notifications.** Success and failure alike are reported as **toasts**: the layout carries a single `#toast` stack (`.ds-toast-stack`, `aria-live="polite"`, top-right below the header), and a partial that has something to report returns the server-rendered `partials/toast` fragment (`.ds-toast` + one of the design-system variants `success` / `danger` / `warning` / `info`, title + body + close button), which the triggering control appends with `hx-target="#toast" hx-swap="beforeend"` — the panel, table, or form that fired the request is NOT re-rendered, so a notification can never break layout. `static/js/toast.js` is loaded once by the layout and owns the whole lifecycle: a `MutationObserver` arms each appended toast with an auto-dismiss timer (6s) and its close button; exit is the design system's own `.exiting` animation. Markup is never built client-side — the JS schedules removal only (the 025 theme-swap rule: fragments are rendered by Thymeleaf). First adopter: the §4.5 connection test.
+**Notifications.** Success and failure alike are reported as **toasts**: the layout carries a single `#toast` stack (`.ds-toast-stack`, `aria-live="polite"`, top-right below the header), and a partial that has something to report returns the server-rendered `partials/toast` fragment (`.ds-toast` + one of the design-system variants `success` / `danger` / `warning` / `info`, title + body + close button) — the panel, table, or form that fired the request is NOT re-rendered, so a notification can never break layout. `static/js/toast.js` is loaded once by the layout and owns the whole lifecycle: a `MutationObserver` arms each appended toast with an auto-dismiss timer (6s) and its close button; exit is the design system's own `.exiting` animation. Markup is built client-side in exactly one place, `DpToast.show`, for events that carry no HTTP response; everything else is server-rendered (the 025 theme-swap rule: fragments are rendered by Thymeleaf).
+
+**The hard rule.** A toast auto-dismisses after 6s, so it NEVER carries anything the user must keep. One-time secrets (`partials/api-key-created.html`, the admin one-time-password notice) stay persistent inline; a toast may POINT at them ("shown below, copy it now") and nothing more. Field-level validation stays inline at the form.
+
+**Delivery shapes.** htmx 2.0.10 swaps the CHILDREN of an out-of-band element for any swap style other than `outerHTML` ("we use the content of the node, not the node itself" — `oobSwap` in `htmx.js`), so a toast bound for the stack is always wrapped: `partials/toast-oob :: oob(variant, title, message)` renders the `hx-swap-oob="beforeend:#toast"` wrapper with the `.ds-toast` as its child. Putting `hx-swap-oob` on the `.ds-toast` itself appends the close button, title and body BARE into the stack — no `.ds-toast` node, no arming, no auto-dismiss, and no error anywhere (`ToastOobFragmentRenderTest` pins the nesting).
+
+- **Shape A — content + toast.** The response is the normal swap content with the `toast-oob` fragment spliced in; the triggering control keeps its `hx-target`/`hx-swap`.
+- **Shape B — toast only.** The control sets `hx-swap="none"`; the response body is the `toast-oob` fragment alone. No response headers.
+- **Shape C — refusal as toast.** The response keeps its real 4xx status, its body is the `toast-oob` fragment, and it sets `HX-Retarget: #toast` + `HX-Reswap: beforeend`; `bridgeErrors` (see **Error rendering**) is what lets htmx swap it.
+- **Shape D — client-originated (the exception, not a convenience).** `DpToast.show(variant, title, message)` in `toast.js` builds the one toast shape and appends it to `#toast`, for events that arrive with no HTTP response to attach an OOB swap to — the pipeline editor's SSE terminal events (`pipeline_completed`, `execution_aborted`, `pipeline_failed`). It is built with `createElement` + `textContent`, never `innerHTML`: titles and bodies carry abort reasons, node ids and error text, none of which is trusted markup. Any outcome that arrives on an HTTP response uses A, B or C — nothing else in the codebase gets a second toast builder. Both markup definitions — `partials/toast.html` and `show` — assert ONE contract: root classes `ds-toast ds-toast-{variant}`, `role="status"`, exactly three children in the order close / title / body, pinned by `ToastMarkupParityTest` (server) and `toast.test.mjs` (client).
 
 ---
 
