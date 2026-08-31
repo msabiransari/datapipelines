@@ -187,6 +187,23 @@
       minZoom: 0.2,
       maxZoom: 3,
     });
+
+    // Live re-theme (§5.3): no page element calls updateTheme() — a theme swap reaches
+    // the page as an htmx OOB replacement of #theme-link (partials/theme-swap.html).
+    // Watch head for the link being swapped in, and re-read tokens on the NEW sheet's
+    // load event: reading earlier races the stylesheet fetch and paints stale values.
+    if (typeof MutationObserver !== "undefined" && typeof document !== "undefined") {
+      self._themeLink = document.getElementById("theme-link");
+      var head = document.head || document.getElementsByTagName("head")[0];
+      if (head) {
+        new MutationObserver(function () {
+          var link = document.getElementById("theme-link");
+          if (!link || link === self._themeLink) return;
+          self._themeLink = link;
+          link.addEventListener("load", function () { self.updateTheme(); }, { once: true });
+        }).observe(head, { childList: true, subtree: true });
+      }
+    }
   };
 
   // Class emission (pipeline-editor.md §5.1): `idle` is explicit so setNodeState()'s
