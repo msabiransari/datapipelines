@@ -136,6 +136,10 @@ class WorkspacesUiControllerTest {
         Regex("""id="toast"[^>]*>(?:[\s\S](?!<main))*ds-toast ds-toast-success""")
             .containsMatchIn(html) shouldBe true
         html shouldNotContain "class=\"ds-surface\"" // the banner element is gone
+        // EXACTLY ONE toast: th:replace outranks th:if on the same element (the host
+        // is discarded before the condition runs), so a keyed block written as
+        // `<div th:if th:replace>` renders EVERY keyed toast at once (030 bug).
+        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
     }
 
     @Test
@@ -150,6 +154,8 @@ class WorkspacesUiControllerTest {
             .containsMatchIn(html) shouldBe true
         html shouldContain "This workspace still owns content (pipelines, templates or datasources), or still needs its owner."
         html shouldNotContain "class=\"ds-surface\""
+        // One flash, one toast — not one per keyed message (see the ok-flash test).
+        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
     }
 
     private fun WebContext.fillPageModel() {
