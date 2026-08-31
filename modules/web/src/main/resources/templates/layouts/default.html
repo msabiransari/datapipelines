@@ -22,8 +22,10 @@
   <link th:href="@{/css/app.css}" rel="stylesheet">
 </head>
 <body
-    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'"
-    hx-target-error="#toast">
+    th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'">
+  <!-- No hx-target-error here: the response-targets extension is NOT loaded, so the
+       attribute was dead config. Refusals that should toast use Shape C (§5.1) —
+       HX-Retarget/HX-Reswap response headers admitted by toast.js's bridgeErrors. -->
   <nav class="app-nav">
     <div class="app-container app-nav-inner">
       <div class="app-nav-left">
@@ -67,7 +69,32 @@
 
   <!-- The notification stack (ui-screens.md §5.1): htmx appends server-rendered
        partials/toast fragments here (hx-swap="beforeend"); toast.js arms each. -->
-  <div id="toast" class="ds-toast-stack" aria-live="polite" style="top: var(--header-height); right: var(--gap-md);"></div>
+  <div id="toast" class="ds-toast-stack" aria-live="polite" style="top: var(--header-height); right: var(--gap-md);">
+    <!-- Full-page redirect flashes, rendered server-side into the stack (§4.13): the
+         workspaces mutations keep their redirect contract — only how the result is
+         DISPLAYED changed (banner → toast). toast.js arms these at DOMContentLoaded
+         like any swapped-in toast. Error copy is the reviewed 022/F8 wording, verbatim. -->
+    <!-- th:if CANNOT share an element with th:replace: fragment inclusion has the
+         higher precedence and DISCARDS the host before the condition is evaluated —
+         so the condition wraps a th:block and the replace lives on the inner div. -->
+    <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
+      <th:block th:if="${code == 'duplicate_name'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace with that name already exists.')}"></div></th:block>
+      <th:block th:if="${code == 'name_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.')}"></div></th:block>
+      <th:block th:if="${code == 'creation_forbidden'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Creating workspaces is not permitted on this server.')}"></div></th:block>
+      <th:block th:if="${code == 'in_use'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'This workspace still owns content (pipelines, templates or datasources), or still needs its owner.')}"></div></th:block>
+      <th:block th:if="${code == 'membership_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is not available to you.')}"></div></th:block>
+      <th:block th:if="${code == 'session_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.')}"></div></th:block>
+      <th:block th:if="${code == 'switch_refused'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Switching workspaces was refused — you are not a member of that workspace.')}"></div></th:block>
+      <th:block th:if="${code == 'user_not_found' or code == 'not_found'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'No user or workspace with that identity exists.')}"></div></th:block>
+    </th:block>
+    <th:block th:if="${param.ok}" th:with="code=${param.ok[0]}">
+      <th:block th:if="${code == 'created'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was created.')}"></div></th:block>
+      <th:block th:if="${code == 'joined'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'You joined the workspace.')}"></div></th:block>
+      <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
+      <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
+      <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>
+    </th:block>
+  </div>
 
   <main class="app-container app-main">
     <th:block th:replace="${content}"/>

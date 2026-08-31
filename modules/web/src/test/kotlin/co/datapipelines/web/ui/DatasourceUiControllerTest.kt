@@ -11,11 +11,15 @@ import co.datapipelines.datasources.TestResult
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
@@ -241,6 +245,61 @@ class DatasourceUiControllerTest {
         partialController().list(model, "nothing-matches-this", null, null)
         @Suppress("UNCHECKED_CAST")
         (model.getAttribute("datasources") as List<*>) shouldBe emptyList<Datasource>()
+    }
+
+    @Test
+    fun `register success returns the refreshed list plus an OOB toast and no redirect`() {
+        authenticate()
+        every { registry.exists("pg-new") } returns false
+        every { registry.save(any(), any()) } returns datasource(name = "pg-new")
+        every { registry.listVisible(null, workspaceId) } returns listOf(datasource(name = "pg-new"))
+
+        val model = ExtendedModelMap()
+        val result =
+            partialController().register(
+                model,
+                "pg-new",
+                "POSTGRES",
+                "jdbc:postgresql://db:5432/app",
+                "u",
+                "p",
+                null,
+                null,
+                false,
+                false,
+            )
+
+        // A VIEW, not an HX-Redirect: the screen never navigates, so the toast survives.
+        result shouldBe "partials/datasource-registered"
+        model["registeredName"] shouldBe "pg-new"
+        @Suppress("UNCHECKED_CAST")
+        (model["datasources"] as List<Datasource>).map { it.name } shouldBe listOf("pg-new")
+    }
+
+    @Test
+    fun `a register refusal keeps its 400 and stays inline in the modal`() {
+        authenticate()
+        every { registry.exists("pg-dupe") } returns true
+
+        val result =
+            partialController().register(
+                ExtendedModelMap(),
+                "pg-dupe",
+                "POSTGRES",
+                "jdbc:postgresql://db:5432/app",
+                "u",
+                "p",
+                null,
+                null,
+                false,
+                false,
+            ) as ResponseEntity<*>
+
+        result.statusCode shouldBe HttpStatus.BAD_REQUEST
+        result.headers["HX-Retarget"] shouldBe null // the modal owns this error (022/F9)
+        val body = result.body as String
+        body shouldContain "already exists"
+        body shouldNotContain "hx-swap-oob"
     }
 
     @Test

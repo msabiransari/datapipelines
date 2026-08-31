@@ -6,11 +6,11 @@ import org.junit.jupiter.api.Test
 
 /**
  * A static pin for the register modal's refusal handling (022 review F9): the page must
- * handle `htmx:responseError` explicitly (the response-targets extension the layout's
- * `hx-target-error` needs is not loaded, and htmx does not swap 4xx into `hx-target`),
- * and the MutationObserver must not close the modal over error content. This asserts the
- * mechanism's presence in the template, not its runtime behavior — the wire half (the
- * partial route returns 400 with the refusal markup) is pinned by the E2E smoke.
+ * handle `htmx:responseError` explicitly (htmx does not swap 4xx, and the refusal carries
+ * no HX-Retarget — the modal owns its error path even now that toast.js's bridgeErrors
+ * exists), and the MutationObserver must not close the modal over error content. This
+ * asserts the mechanism's presence in the template, not its runtime behavior — the wire
+ * half (the partial route returns 400 with the refusal markup) is pinned by the E2E smoke.
  */
 class RegisterModalScriptTest {
     private val template =

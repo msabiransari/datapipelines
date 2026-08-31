@@ -1,3 +1,8 @@
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="cancelled">
+  <!-- The badge is the persistent state (the 027b-E outerHTML button swap); the toast
+       reports the action and is gone in 6s. Cancel REFUSALS (403/404/409) are thrown as
+       ResponseStatusException and handled by UiExceptionHandler's full error pages — a
+       known gap for htmx partial requests, recorded in the 030 handback. -->
   <span class="ds-badge ds-badge-warning">Cancellation requested</span>
+  <div th:replace="~{partials/toast-oob :: oob('info', 'Execution cancelled', 'The run is stopping; the detail page will show its final state.')}"></div>
 </th:block>

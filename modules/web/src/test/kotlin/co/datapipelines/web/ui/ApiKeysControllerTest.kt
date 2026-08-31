@@ -99,7 +99,7 @@ class ApiKeysControllerTest {
                 },
             )
 
-        html shouldContain "<table class=\"ds-table\">"
+        html shouldContain "<table class=\"ds-table\" id=\"keys-table\">"
         html shouldContain "ds-badge ds-badge-default" // the scope chips
         html shouldContain "ds-badge ds-badge-danger" // the revoked marker
         // The migration is only done when the inline header/cell styles are GONE.
@@ -217,14 +217,67 @@ class ApiKeysPartialControllerTest {
     }
 
     @Test
-    fun `revoke returns table rows fragment`() {
+    fun `create returns the once-shown panel, refreshes the table, and points a toast at it`() {
+        authenticate()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val view = partialController.create("ci", "read", null, model)
+
+        view shouldBe "partials/api-key-created"
+        val html =
+            engine().process(
+                view,
+                webContext().apply { model.forEach { (k, v) -> setVariable(k, v) } },
+            )
+
+        html shouldContain "Your new API key (shown once)" // the secret still persists inline
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "copy it now" // the toast POINTS, never carries
+        // …and the issued plaintext never appears anywhere after the OOB marker.
+        html.substringAfter("hx-swap-oob=\"beforeend:#toast\"") shouldNotContain "dpk_abc123.supersecret"
+        // E2: the table is refreshed out-of-band, from the same markup as the page.
+        // The OOB element MUST be the <table>: a <tbody hx-swap-oob> nested inside the
+        // response's div is DESTROYED by the browser's HTML parser (table-only tags
+        // outside table context are dropped tokens — verified against htmx 2.0.10's
+        // template-wrapper makeFragment in a real browser), so the refresh would
+        // silently never happen.
+        Regex("""<table[^>]*id="keys-table"[^>]*hx-swap-oob="true"""")
+            .containsMatchIn(html) shouldBe true
+        html shouldNotContain "<tbody id=\"keys-table-body\" hx-swap-oob"
+        html shouldContain "id=\"keys-table-body\""
+        html shouldContain "ds-badge ds-badge-default"
+    }
+
+    @Test
+    fun `revoke returns the rebuilt rows plus a success toast and drops the dead trigger`() {
         authenticate()
         every { apiKeyService.revoke("dpk_abc123", any()) } returns true
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey().copy(isRevoked = true))
 
         val response = partialController.revoke("dpk_abc123")
 
-        response.statusCode shouldBe HttpStatus.OK
+        response.body!! shouldContain "hx-swap-oob=\"beforeend:#toast\""
         response.body!! shouldContain "revoked"
+        response.headers["HX-Trigger"] shouldBe null // E3: nothing has ever listened for keyRevoked
     }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
 }

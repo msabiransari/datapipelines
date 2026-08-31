@@ -124,6 +124,60 @@ class WorkspacesUiControllerTest {
         html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
     }
 
+    @Test
+    fun `an ok flash renders as a success toast inside the stack, never a banner`() {
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContextWithParams("ok" to "created").apply { fillPageModel() },
+            )
+
+        // Server-rendered INSIDE #toast, so toast.js arms it at DOMContentLoaded.
+        Regex("""id="toast"[^>]*>(?:[\s\S](?!<main))*ds-toast ds-toast-success""")
+            .containsMatchIn(html) shouldBe true
+        html shouldNotContain "class=\"ds-surface\"" // the banner element is gone
+        // EXACTLY ONE toast: th:replace outranks th:if on the same element (the host
+        // is discarded before the condition runs), so a keyed block written as
+        // `<div th:if th:replace>` renders EVERY keyed toast at once (030 bug).
+        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
+    }
+
+    @Test
+    fun `an error flash renders as a danger toast carrying the reviewed copy verbatim`() {
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContextWithParams("error" to "in_use").apply { fillPageModel() },
+            )
+
+        Regex("""id="toast"[^>]*>(?:[\s\S](?!<main))*ds-toast ds-toast-danger""")
+            .containsMatchIn(html) shouldBe true
+        html shouldContain "This workspace still owns content (pipelines, templates or datasources), or still needs its owner."
+        html shouldNotContain "class=\"ds-surface\""
+        // One flash, one toast — not one per keyed message (see the ok-flash test).
+        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
+    }
+
+    private fun WebContext.fillPageModel() {
+        fillLayoutChrome()
+        setVariable("own", emptyList<Any>())
+        setVariable("joinable", emptyList<Any>())
+        setVariable("openJoin", false)
+        setVariable("canCreate", false)
+        setVariable("provisioningMode", "self-serve")
+        setVariable("managed", emptyMap<String, Any>())
+    }
+
+    private fun webContextWithParams(vararg params: Pair<String, String>): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(
+                    MockHttpServletRequest().apply { params.forEach { (k, v) -> setParameter(k, v) } },
+                    MockHttpServletResponse(),
+                ),
+        )
+
     private fun WebContext.fillLayoutChrome() {
         setVariable("_csrf", mapOf("token" to "t"))
         setVariable("workspaceHeaderFragment", "")

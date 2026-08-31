@@ -59,6 +59,9 @@ class ApiKeysPartialController(
         model.addAttribute("keyId", issued.record.id)
         model.addAttribute("keyName", issued.record.name)
         model.addAttribute("keys", keys)
+        // The create response refreshes the whole table out-of-band (E2): this flag is
+        // what puts hx-swap-oob on the keysTable fragment root for THIS render only.
+        model.addAttribute("oob", true)
         return "partials/api-key-created"
     }
 
@@ -70,11 +73,12 @@ class ApiKeysPartialController(
         val principal = requirePrincipal()
         apiKeyService.revoke(keyId, principal.userId)
         val keys = apiKeyRepository.findByUser(principal.userId)
+        // The rebuilt rows stay the primary swap; the toast rides along out-of-band
+        // (Shape A, §5.1). No HX-Trigger: keyRevoked never had a listener anywhere.
         val html = buildKeyTableRows(keys)
         return ResponseEntity
             .status(HttpStatus.OK)
-            .header("HX-Trigger", "keyRevoked")
-            .body(html)
+            .body(html + ToastHtml.oob("success", "API key revoked", "The key can no longer authenticate."))
     }
 
     private fun buildKeyTableRows(keys: List<co.datapipelines.auth.ApiKey>): String {

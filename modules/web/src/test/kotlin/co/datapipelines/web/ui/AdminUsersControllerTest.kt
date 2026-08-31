@@ -235,4 +235,75 @@ class AdminUsersPartialControllerTest {
         partialController.toggle(userId, "disable-local").statusCode shouldBe HttpStatus.OK
         partialController.toggle(userId, "unlock").statusCode shouldBe HttpStatus.OK
     }
+
+    @Test
+    fun `create refusals now reach the user as a toast`() {
+        authenticate()
+
+        val response = partialController.createLocalUser("not-an-email", "")
+
+        response.statusCode shouldBe HttpStatus.BAD_REQUEST // the status is unchanged
+        response.headers.getFirst("HX-Retarget") shouldBe "#toast" // …and now deliverable
+        response.headers.getFirst("HX-Reswap") shouldBe "beforeend"
+        response.body shouldContain "ds-toast-danger"
+        response.body shouldContain "valid email address"
+    }
+
+    @Test
+    fun `a taken email refusal is a deliverable 409 toast`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("taken@example.com", "", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.EmailTaken
+
+        val response = partialController.createLocalUser("taken@example.com", "")
+
+        response.statusCode shouldBe HttpStatus.CONFLICT
+        response.headers.getFirst("HX-Retarget") shouldBe "#toast"
+        response.headers.getFirst("HX-Reswap") shouldBe "beforeend"
+        response.body shouldContain "ds-toast-danger"
+        response.body shouldContain "already exists"
+    }
+
+    @Test
+    fun `create success keeps the one-time password inline and only points at it`() {
+        authenticate()
+        every { localPasswordService.createLocalUser("new@example.com", "New", adminPrincipal.userId) } returns
+            LocalPasswordService.CreateResult.Success(sampleUser(), "ABCD-EFGH-JKLM")
+
+        val response = partialController.createLocalUser("new@example.com", "New")
+
+        response.body shouldContain "id=\"admin-notice\" hx-swap-oob=\"true\"" // unchanged (inline form)
+        response.body shouldContain "ABCD-EFGH-JKLM" // still inline, persistent
+        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        val toastBody = response.body!!.substringAfter("beforeend:#toast")
+        toastBody shouldNotContain "ABCD-EFGH-JKLM" // never in the toast
+    }
+
+    @Test
+    fun `a row action keeps the row swap and gains a toast naming the action and the email`() {
+        authenticate()
+        every { userService.deactivate(userId, adminPrincipal.userId) } returns true
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        val response = partialController.toggle(userId, "deactivate")
+
+        response.statusCode shouldBe HttpStatus.OK
+        response.body shouldContain "id=\"user-row-$userId\""
+        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        response.body shouldContain "User deactivated"
+        response.body shouldContain "user@example.com"
+    }
+
+    @Test
+    fun `reset password keeps the notice and only points a toast at it`() {
+        authenticate()
+        every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
+        every { userService.snapshot(userId) } returns sampleUser()
+
+        val response = partialController.toggle(userId, "reset-password")
+
+        response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        val toastBody = response.body!!.substringAfter("beforeend:#toast")
+        toastBody shouldNotContain "WXYZ-2345-ABCD" // the secret stays in the inline notice only
+    }
 }

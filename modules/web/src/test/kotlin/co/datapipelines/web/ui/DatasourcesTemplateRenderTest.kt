@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.typesystem.Dialect
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -113,6 +114,38 @@ class DatasourcesTemplateRenderTest {
         html shouldContain "id=\"datasource-list-wrapper\""
         html shouldContain "id=\"toast\" class=\"ds-toast-stack\""
         html shouldContain "/js/toast.js"
+    }
+
+    @Test
+    fun `register success renders the modal success node, the OOB list refresh and the OOB toast`() {
+        val html =
+            engine().process(
+                "partials/datasource-registered",
+                context().apply {
+                    fillListModel()
+                    setVariable("registeredName", "pg-new")
+                    setVariable("oob", true)
+                },
+            )
+
+        // The modal's success node: its arrival is what closes the modal (022/F9).
+        html shouldContain "Datasource pg-new registered."
+        // The refreshed list rides along OOB in the outerHTML (inline) form — the
+        // attribute is present ONLY on this path, never baked into the primary fragment.
+        Regex("""<div[^>]*id="datasource-list-wrapper"[^>]*hx-swap-oob="true"""")
+            .containsMatchIn(html) shouldBe true
+        // The toast rides along OOB, WRAPPED (never the attribute on the .ds-toast itself).
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        Regex("""hx-swap-oob="beforeend:#toast"[^>]*>(?:\s|<!--[\s\S]*?-->)*<div class="ds-toast""")
+            .containsMatchIn(html) shouldBe true
+        html shouldContain "Datasource registered"
+    }
+
+    @Test
+    fun `the primary list fragment never carries the OOB attribute`() {
+        val html = engine().process("partials/datasources", context().apply { fillListModel() })
+
+        html shouldNotContain "hx-swap-oob=\""
     }
 
     private fun WebContext.fillListModel() {

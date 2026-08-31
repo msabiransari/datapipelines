@@ -5,8 +5,12 @@
      first render no element matched the pager's hx-target and the swap contract
      silently broke. Test results no longer swap rows at all: the Test button
      appends a server-rendered toast to the #toast stack (§5.1 Notifications),
-     which is why no row needs a per-name id. -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="datasource-list-wrapper">
+     which is why no row needs a per-name id. The `oob` flag is set ONLY by the
+     register success path (partials/datasource-registered): it adds the inline
+     (outerHTML) hx-swap-oob to this root so the refreshed list replaces itself;
+     every other render leaves the attribute off. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="datasource-list-wrapper"
+     th:attr="hx-swap-oob=${oob}">
   <th:block th:if="${#lists.isEmpty(datasources)}">
     <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear filters. -->
     <div class="ds-empty">
