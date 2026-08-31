@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RequestParam
 
 /**
  * The datasources screen's htmx partials (ui-screens.md §4.5/§5): the workspace-scoped
- * list fragment, the connection-test row fragment, and the REGISTER action of the §4.5
+ * list fragment, the connection-test TOAST fragment, and the REGISTER action of the §4.5
  * modal — which applies the SAME [DatasourceWorkspaceRules] the REST §9.1 endpoint applies,
  * then crosses the SAME `registry.save` boundary (validation, encryption, pool eviction).
  * Two write paths, one rule set — that is the point of the extracted component.
@@ -62,20 +62,45 @@ class DatasourcePartialController(
         return "partials/datasources"
     }
 
+    /**
+     * The connection probe, delivered as a TOAST (ui-screens.md §4.5/§5.1 Notifications):
+     * the button appends the rendered fragment to the layout's #toast stack
+     * (`hx-swap="beforeend"`), so the table is never re-rendered mid-interaction —
+     * the old row-swap contract (one row out, two rows in, "Back to list" fetching
+     * the whole list INTO a row) is what exploded the table layout.
+     *
+     * §5.3: an invisible datasource behaves as not-found — a danger toast naming the
+     * probe, the same refusal the REST §9.6 probe expresses as 404.
+     */
     @PostMapping("/partials/datasources/{name}/test")
     @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
     fun test(
         model: Model,
         @PathVariable name: String,
     ): String {
-        // §5.3: an invisible datasource behaves as not-found — the row fragment renders the
-        // "not found" state for it, same as the REST §9.6 probe's 404.
         val workspaceId = principal()?.workspace?.id
         val visible = workspaceId != null && datasources.getVisible(name, workspaceId) != null
         val result = if (visible) datasources.testConnection(name) else null
-        model.addAttribute("testName", name)
-        model.addAttribute("testResult", result)
-        return "partials/datasource-row"
+        when {
+            result == null -> {
+                model.addAttribute("variant", "danger")
+                model.addAttribute("title", "Datasource not found")
+                model.addAttribute("message", "$name is not visible in the active workspace.")
+            }
+
+            result.connected -> {
+                model.addAttribute("variant", "success")
+                model.addAttribute("title", "Connection succeeded")
+                model.addAttribute("message", "$name — Server version: ${result.serverVersion ?: "unknown"}")
+            }
+
+            else -> {
+                model.addAttribute("variant", "danger")
+                model.addAttribute("title", "Connection failed")
+                model.addAttribute("message", "$name — ${result.error ?: "unknown error"}")
+            }
+        }
+        return "partials/toast"
     }
 
     /**

@@ -115,7 +115,7 @@ class DatasourceUiControllerTest {
     }
 
     @Test
-    fun `test connection returns row fragment`() {
+    fun `test connection success returns a success toast`() {
         val result =
             TestResult(
                 connected = true,
@@ -131,13 +131,14 @@ class DatasourceUiControllerTest {
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.test(model, "pg-prod")
 
-        viewName shouldBe "partials/datasource-row"
-        model["testName"] shouldBe "pg-prod"
-        model["testResult"] shouldBe result
+        viewName shouldBe "partials/toast"
+        model["variant"] shouldBe "success"
+        model["title"] shouldBe "Connection succeeded"
+        model["message"] shouldBe "pg-prod — Server version: 15.4"
     }
 
     @Test
-    fun `test connection failure returns row fragment with error`() {
+    fun `test connection failure returns a danger toast with the error`() {
         val result =
             TestResult(
                 connected = false,
@@ -153,11 +154,25 @@ class DatasourceUiControllerTest {
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.test(model, "bad-ds")
 
-        viewName shouldBe "partials/datasource-row"
-        @Suppress("UNCHECKED_CAST")
-        val tr = model["testResult"] as TestResult
-        tr.connected shouldBe false
-        tr.error shouldBe "Connection refused"
+        viewName shouldBe "partials/toast"
+        model["variant"] shouldBe "danger"
+        model["title"] shouldBe "Connection failed"
+        model["message"] shouldBe "bad-ds — Connection refused"
+    }
+
+    @Test
+    fun `test connection on an invisible datasource returns a not-found toast and never probes`() {
+        authenticate()
+        every { registry.getVisible("ghost", workspaceId) } returns null
+
+        val partialController = partialController()
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val viewName = partialController.test(model, "ghost")
+
+        viewName shouldBe "partials/toast"
+        model["variant"] shouldBe "danger"
+        model["title"] shouldBe "Datasource not found"
+        io.mockk.verify(exactly = 0) { registry.testConnection(any<String>()) }
     }
 
     @Test

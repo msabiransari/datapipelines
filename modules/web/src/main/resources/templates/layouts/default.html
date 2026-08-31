@@ -65,12 +65,15 @@
     </div>
   </nav>
 
-  <div id="toast" aria-live="polite" style="position: fixed; top: var(--header-height); right: var(--gap-md); z-index: var(--z-toast);"></div>
+  <!-- The notification stack (ui-screens.md §5.1): htmx appends server-rendered
+       partials/toast fragments here (hx-swap="beforeend"); toast.js arms each. -->
+  <div id="toast" class="ds-toast-stack" aria-live="polite" style="top: var(--header-height); right: var(--gap-md);"></div>
 
   <main class="app-container app-main">
     <th:block th:replace="${content}"/>
   </main>
 
   <script th:src="@{/webjars/htmx.org/2.0.10/dist/htmx.min.js}"></script>
+  <script th:src="@{/js/toast.js}"></script>
 </body>
 </html>
