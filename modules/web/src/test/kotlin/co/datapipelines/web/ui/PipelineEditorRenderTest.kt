@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -40,6 +41,18 @@ class PipelineEditorRenderTest {
     @Test
     fun `the page loads the SQL highlighter`() {
         render() shouldContain "/js/pipeline-editor/sql-highlight.js"
+    }
+
+    @Test
+    fun `the panel is grouped into headed sections and the template is a link`() {
+        val html = render()
+
+        html shouldContain "Identity"
+        html shouldContain "Configuration"
+        html shouldContain "Runtime"
+        // §8.2: the template field links to the route that exists, /templates/{id}/editor.
+        html shouldContain "/editor'"
+        html shouldNotContain "JSON.stringify(selectedNode.output)"
     }
 
     private fun render(): String =

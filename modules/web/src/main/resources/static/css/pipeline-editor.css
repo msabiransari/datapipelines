@@ -141,7 +141,9 @@
 .pe-value {
   font-size: var(--text-sm, 0.875rem);
   color: var(--text-primary, #111827);
-  word-break: break-word;
+  /* Long values (a JDBC URL, a generated table name) wrap, never widen the
+     320px panel; the full text rides on the element's title (032). */
+  overflow-wrap: anywhere;
 }
 
 .pe-link {
@@ -346,6 +348,30 @@
 
 .pe-details-body {
   padding: var(--pe-gap);
+}
+
+.pe-details-section {
+  margin-bottom: var(--gap-md, 16px);
+  padding-bottom: var(--gap-md, 16px);
+  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
+}
+
+.pe-details-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.pe-details-heading {
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #9ca3af);
+  margin: 0 0 var(--gap-sm, 8px);
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
 }
 
 .pe-depends-list {

@@ -262,6 +262,46 @@
         this.banner.type = type;
       },
 
+      /*
+       * §8.1's Output copy: an omitted block on a DQL node is "returns result to
+       * caller (default)" (contract §9.1) — never JSON.stringify's `undefined`,
+       * which is what the panel used to print for the commonest case. DML/DDL and
+       * a zero-caller PIPELINE node are side effects (§4.4/§4.5/§4.9).
+       */
+      outputText: function (node) {
+        if (!node) return "—";
+        if (node.type === "DML" || node.type === "DDL") return "side effect";
+        if (!node.output) {
+          return node.type === "DQL" ? "returns result to caller (default)" : "side effect";
+        }
+        var o = node.output;
+        if (o.target === "caller") return "returns result to caller";
+        if (o.target === "tempdb") return "tempdb → table " + (o.table || "—");
+        if (o.target === "datasource") {
+          return (
+            "datasource " + (o.datasource || "—") + " → " + (o.table || "—") +
+            (o.mode ? " (" + o.mode + ")" : "")
+          );
+        }
+        return JSON.stringify(o);
+      },
+
+      /* Execution status → the badge variant the rest of the app uses for it. */
+      statusBadgeClass: function (state) {
+        switch (state) {
+          case "success":
+            return "ds-badge-success";
+          case "failed":
+            return "ds-badge-danger";
+          case "running":
+            return "ds-badge-primary";
+          case "aborted":
+            return "ds-badge-warning";
+          default:
+            return "ds-badge-default";
+        }
+      },
+
       announceStatus: function (msg) {
         announceStatus(msg);
       },
