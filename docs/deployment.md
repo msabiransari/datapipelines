@@ -618,6 +618,26 @@ It runs as two services because no pinned image carries both a Postgres and a
 MySQL client, and installing one at container start would put an unpinned package
 fetch in the one place that has to be reproducible.
 
+### Resetting an engine volume desyncs the demo login
+
+The loader creates the `dp_demo_ro` login with the passwords from the env files,
+and bootstrap registration is **create-if-absent — it never updates an existing
+datasource row** (§8A). So if you delete an engine's data volume
+(`docker volume rm deploy_mysql-data`) or rotate a `SAMPLE_*` password, the
+freshly created login no longer matches the credential the app stored at the
+original bootstrap, and that datasource fails validation in the UI while the
+engine itself is fine. The repair is to re-run registration for the stale entry
+only:
+
+```bash
+docker exec deploy-postgres-1 sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "delete from datasources where name='"'"'sample-weather'"'"';"'
+docker restart deploy-datapipelines-1   # bootstrap re-registers with the current env password
+```
+
+(2026-08-30: hit live — a recreated MySQL volume left `sample-weather` failing
+UI validation until its row was re-registered this way.)
+
 ### Re-publishing is a new version
 
 Version directories are immutable (design §4). Any change to the data — a wider
