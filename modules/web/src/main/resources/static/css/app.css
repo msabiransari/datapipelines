@@ -26,3 +26,144 @@ body {
   background-color: var(--surface-page);
   color: var(--text-primary);
 }
+
+/* ---------------------------------------------------------------------------
+   App shell (layouts/default.html). The vendored design system is synced from
+   design-system-starter (scripts/sync-design-system.sh) — do NOT edit vendor
+   files; app-level chrome and component polish layer on top here.
+   --------------------------------------------------------------------------- */
+:root {
+  /* Wide-app canvas: --container-xl (1200px) wastes half a desktop monitor. */
+  --app-content-max: 1600px;
+}
+
+.app-container {
+  width: 100%;
+  max-width: var(--app-content-max);
+  margin-inline: auto;
+  padding-inline: var(--gap-lg);
+}
+
+.app-main {
+  padding-block: var(--gap-lg);
+}
+
+/* Sticky top nav — one bordered bar, not a floating ds-surface card. */
+.app-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--surface-default);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.app-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  min-height: var(--header-height);
+}
+
+.app-nav-left {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md);
+}
+
+.app-brand {
+  font-weight: var(--weight-bold);
+  font-size: var(--text-xl);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.app-workspace-form {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-left: var(--gap-md);
+}
+
+.app-workspace-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.app-workspace-select {
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-base);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.app-nav-links {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.app-nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-base);
+}
+
+.app-nav-link:hover {
+  color: var(--text-primary);
+  background: var(--surface-inset);
+}
+
+.app-nav-link.active {
+  color: var(--accent-primary);
+  background: var(--surface-inset);
+  font-weight: var(--weight-medium);
+}
+
+.app-logout-form {
+  display: inline;
+  margin-left: var(--gap-xs);
+}
+
+/* ---------------------------------------------------------------------------
+   Data tables — boxed, header fill, closed rounded corners. Layered over the
+   vendored .ds-table primitives (this file loads last, §3.4; row hover, the
+   last-row border removal and the `.num` alignment already live there).
+   Border model switches to `separate` so the outer border + radius can close;
+   corners are clipped via the corner cells (the thead fill and row-hover fill
+   would otherwise paint over the rounded border).
+   --------------------------------------------------------------------------- */
+.ds-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+}
+
+.ds-table thead th {
+  background: var(--surface-inset);
+  /* Vendored rule hangs the header separator on <thead>, which the separate
+     border model ignores — restate it on the cells. */
+  border-bottom: 1px solid var(--border-default);
+}
+
+.ds-table thead th:first-child {
+  border-top-left-radius: calc(var(--radius-md) - 1px);
+}
+
+.ds-table thead th:last-child {
+  border-top-right-radius: calc(var(--radius-md) - 1px);
+}
+
+.ds-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: calc(var(--radius-md) - 1px);
+}
+
+.ds-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: calc(var(--radius-md) - 1px);
+}

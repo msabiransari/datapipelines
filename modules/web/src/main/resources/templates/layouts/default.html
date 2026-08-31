@@ -24,15 +24,15 @@
 <body
     th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'"
     hx-target-error="#toast">
-  <nav class="ds-surface" style="border-bottom: 1px solid var(--border-default); padding: var(--gap-md)">
-    <div style="max-width: var(--container-xl); margin: 0 auto; display: flex; align-items: center; justify-content: space-between;">
-      <div style="display: flex; gap: var(--gap-md); align-items: center;">
-        <a th:href="@{/}" style="font-weight: var(--weight-bold); font-size: var(--text-xl); color: var(--text-primary); text-decoration: none;">datapipelines</a>
+  <nav class="app-nav">
+    <div class="app-container app-nav-inner">
+      <div class="app-nav-left">
+        <a class="app-brand" th:href="@{/}">datapipelines</a>
         <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
-              style="display: flex; align-items: center; gap: var(--gap-xs); margin-left: var(--gap-md);">
-          <label for="workspace-switcher" style="color: var(--text-tertiary); font-size: var(--text-xs);">workspace</label>
+              class="app-workspace-form">
+          <label for="workspace-switcher" class="app-workspace-label">workspace</label>
           <select id="workspace-switcher" name="name" onchange="this.form.submit()"
-                  style="padding: var(--gap-xs) var(--gap-sm); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
+                  class="app-workspace-select">
             <option th:each="membership : ${workspaceOptions}"
                     th:value="${membership.workspaceName}"
                     th:text="${membership.workspaceName}"
@@ -41,16 +41,24 @@
           <noscript><button type="submit" class="ds-button ds-button-ghost ds-button-sm">Go</button></noscript>
         </form>
       </div>
-      <div style="display: flex; gap: var(--gap-md); align-items: center;">
-        <a th:href="@{/}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Dashboard</a>
-        <a th:href="@{/pipelines}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Pipelines</a>
-        <a th:href="@{/datasources}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Datasources</a>
-        <a th:href="@{/templates}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Templates</a>
-        <a th:href="@{/executions}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Executions</a>
-        <a th:href="@{/workspaces}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Workspaces</a>
-        <a th:href="@{/settings}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Settings</a>
-        <a th:href="@{/admin}" style="color: var(--text-secondary); text-decoration: none; font-size: var(--text-sm);">Admin</a>
-        <form th:action="@{/logout}" method="post" style="display: inline;">
+      <div class="app-nav-links" th:if="${authenticated}">
+        <a th:href="@{/}" class="app-nav-link"
+           th:classappend="${currentPath != null and currentPath == '/'} ? 'active' : null">Dashboard</a>
+        <a th:href="@{/pipelines}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null">Pipelines</a>
+        <a th:href="@{/datasources}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null">Datasources</a>
+        <a th:href="@{/templates}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null">Templates</a>
+        <a th:href="@{/executions}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null">Executions</a>
+        <a th:href="@{/workspaces}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null">Workspaces</a>
+        <a th:href="@{/settings}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/settings')} ? 'active' : null">Settings</a>
+        <a th:href="@{/admin/users}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null">Admin</a>
+        <form th:action="@{/logout}" method="post" class="app-logout-form">
           <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Logout</button>
         </form>
       </div>
@@ -59,7 +67,7 @@
 
   <div id="toast" aria-live="polite" style="position: fixed; top: var(--header-height); right: var(--gap-md); z-index: var(--z-toast);"></div>
 
-  <main style="max-width: var(--container-xl); margin: 0 auto; padding: var(--gap-lg);">
+  <main class="app-container app-main">
     <th:block th:replace="${content}"/>
   </main>
 
