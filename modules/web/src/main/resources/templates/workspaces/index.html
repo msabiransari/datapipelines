@@ -6,19 +6,8 @@
     <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Workspaces</h1>
   </div>
 
-  <div th:if="${param.error}" class="ds-surface" style="border: 1px solid var(--accent-danger); border-radius: var(--radius-base); padding: var(--gap-md); margin-bottom: var(--gap-lg); color: var(--text-primary); font-size: var(--text-sm);">
-    <span th:if="${param.error[0] == 'duplicate_name'}">A workspace with that name already exists.</span>
-    <span th:if="${param.error[0] == 'name_invalid'}">Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.</span>
-    <span th:if="${param.error[0] == 'creation_forbidden'}">Creating workspaces is not permitted on this server.</span>
-    <span th:if="${param.error[0] == 'in_use'}">This workspace still owns content (pipelines, templates or datasources), or still needs its owner.</span>
-    <span th:if="${param.error[0] == 'membership_required'}">That workspace is not available to you.</span>
-    <span th:if="${param.error[0] == 'session_required'}">Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.</span>
-    <span th:if="${param.error[0] == 'switch_refused'}">Switching workspaces was refused — you are not a member of that workspace.</span>
-    <span th:if="${param.error[0] == 'user_not_found'} or ${param.error[0] == 'not_found'}">No user or workspace with that identity exists.</span>
-  </div>
-  <div th:if="${param.ok}" class="ds-surface" style="border: 1px solid var(--accent-success); border-radius: var(--radius-base); padding: var(--gap-md); margin-bottom: var(--gap-lg); color: var(--text-primary); font-size: var(--text-sm);">
-    Done.
-  </div>
+  <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack
+       (§5.1) — the redirect contract is unchanged; there is no banner here any more. -->
 
   <section th:if="${canCreate}" style="margin-bottom: var(--gap-xl);">
     <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Create a workspace</h2>
