@@ -18,27 +18,66 @@
       nodeAbortedText: styles.getPropertyValue("--node-aborted-text").trim() || "#000",
       edgeActiveStroke: styles.getPropertyValue("--edge-active-stroke").trim() || "#2563eb",
       edgeIdleStroke: styles.getPropertyValue("--edge-idle-stroke").trim() || "#6b7280",
+      // Node cards (pipeline-editor.md §5.3): each new key falls back to the token it
+      // supersedes, so a stale theme file cannot blank the graph.
+      nodeSurface: styles.getPropertyValue("--node-surface").trim() ||
+        styles.getPropertyValue("--node-idle-bg").trim() || "#f9fafb",
+      nodeBorder: styles.getPropertyValue("--node-border").trim() || "#d1d5db",
+      nodeLabelText: styles.getPropertyValue("--node-label-text").trim() ||
+        styles.getPropertyValue("--node-idle-text").trim() || "#111827",
+      nodeSelectedRing: styles.getPropertyValue("--node-selected-ring").trim() || "#2563eb",
+      nodeSelectedHalo: styles.getPropertyValue("--node-selected-halo").trim() || "#2563eb",
+      nodeRunningAccent: styles.getPropertyValue("--node-running-accent").trim() ||
+        styles.getPropertyValue("--node-running-bg").trim() || "#2563eb",
+      nodeSuccessAccent: styles.getPropertyValue("--node-success-accent").trim() ||
+        styles.getPropertyValue("--node-success-bg").trim() || "#16a34a",
+      nodeFailedAccent: styles.getPropertyValue("--node-failed-accent").trim() ||
+        styles.getPropertyValue("--node-failed-bg").trim() || "#dc2626",
+      nodeAbortedAccent: styles.getPropertyValue("--node-aborted-accent").trim() ||
+        styles.getPropertyValue("--node-aborted-bg").trim() || "#f59e0b",
     };
   }
 
   function buildStylesheet(tokens) {
     return [
       {
+        // Node card (pipeline-editor.md §5.3): a neutral surface with the label BELOW
+        // the shape — TYPE is carried by shape, STATE by an accent border (§6.2),
+        // SELECTION by the ring (node:selected below). Truncation is a stylesheet
+        // concern now (text-max-width + ellipsis), not a buildElements one.
         selector: "node",
         style: {
-          "background-color": tokens.nodeIdleBg,
-          color: tokens.nodeIdleText,
+          "background-color": tokens.nodeSurface,
+          color: tokens.nodeLabelText,
           label: "data(label)",
-          "text-valign": "center",
+          "text-valign": "bottom",
           "text-halign": "center",
-          "font-size": "11px",
-          "text-wrap": "wrap",
-          "text-max-width": "100px",
-          width: 80,
-          height: 40,
+          "text-margin-y": 8,
+          "font-size": "12px",
+          "text-wrap": "ellipsis",
+          "text-max-width": "160px",
+          width: 120,
+          height: 44,
           shape: "round-rectangle",
-          "border-width": 2,
-          "border-color": tokens.edgeIdleStroke,
+          "border-width": 1,
+          "border-color": tokens.nodeBorder,
+        },
+      },
+      {
+        // §5.3 per-type shapes: DML is a side-effect, DDL a schema change.
+        selector: "node.type-dml",
+        style: { shape: "round-diamond" },
+      },
+      {
+        selector: "node.type-ddl",
+        style: { shape: "round-tag" },
+      },
+      {
+        // §5.3 / pipeline-contract §9: the caller (result) node marker.
+        selector: "node.caller",
+        style: {
+          "border-style": "double",
+          "border-width": 5,
         },
       },
       {
@@ -125,37 +164,50 @@
     });
   };
 
-  PipelineGraph.prototype.buildElements = function () {
+  // Class emission (pipeline-editor.md §5.1): `idle` is explicit so setNodeState()'s
+  // removeClass of all five states stays symmetric; TYPE is a class per node type;
+  // `caller` marks the result node — omitted output means caller (pipeline-contract
+  // §4.7/§9) and only DQL nodes can resolve to it (DML/DDL forbid an output block).
+  function nodeClasses(n) {
+    var classes = ["idle"];
+    var type = (n.type || "").toUpperCase();
+    if (type === "PIPELINE") {
+      classes.push("pipeline-node");
+    } else if (type === "DQL" || type === "DML" || type === "DDL") {
+      classes.push("type-" + type.toLowerCase());
+    }
+    if (type === "DQL" && (!n.output || n.output.target === "caller")) {
+      classes.push("caller");
+    }
+    return classes.join(" ");
+  }
+
+  function buildElements(nodes) {
     var elements = [];
-    var nodeIds = new Set();
     var i, j;
 
-    for (i = 0; i < this.nodes.length; i++) {
-      var n = this.nodes[i];
-      var label = (n.display_name || n.name || n.id);
-      if (label.length > 20) label = label.substring(0, 18) + "...";
-      var isPipelineNode = n.type === "PIPELINE";
+    for (i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
       elements.push({
         group: "nodes",
         data: {
           id: n.id,
-          label: label,
+          label: (n.display_name || n.name || n.id),
         },
-        classes: isPipelineNode ? "idle pipeline-node" : "idle",
+        classes: nodeClasses(n),
       });
-      nodeIds.add(n.id);
     }
 
-    for (i = 0; i < this.nodes.length; i++) {
-      var deps = this.nodes[i].depends_on;
+    for (i = 0; i < nodes.length; i++) {
+      var deps = nodes[i].depends_on;
       if (deps && deps.length) {
         for (j = 0; j < deps.length; j++) {
           elements.push({
             group: "edges",
             data: {
-              id: deps[j] + "->" + this.nodes[i].id,
+              id: deps[j] + "->" + nodes[i].id,
               source: deps[j],
-              target: this.nodes[i].id,
+              target: nodes[i].id,
             },
           });
         }
@@ -163,6 +215,10 @@
     }
 
     return elements;
+  }
+
+  PipelineGraph.prototype.buildElements = function () {
+    return buildElements(this.nodes);
   };
 
   PipelineGraph.prototype.findNode = function (id) {
@@ -239,5 +295,14 @@
     }
   };
 
-  window.PipelineGraph = PipelineGraph;
+  var api = {
+    PipelineGraph: PipelineGraph,
+    buildStylesheet: buildStylesheet,
+    buildElements: buildElements,
+    readDesignTokens: readDesignTokens,
+  };
+  // node --test requires this file directly (the 027b harness); the browser keeps
+  // the global the editor's other modules already reference.
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  if (typeof window !== "undefined") window.PipelineGraph = PipelineGraph;
 })();
