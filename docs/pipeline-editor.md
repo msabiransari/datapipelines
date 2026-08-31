@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.3 (revised — see Change Log)
+**Status:** v1.4 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-08-07
@@ -313,6 +313,8 @@ Authentication: session cookie carrying the internal JWT (browser flow). See [Au
 </body>
 </html>
 ```
+
+The page also loads `/js/pipeline-editor/sql-highlight.js` (§8.3) and issues one additional partial request at runtime: `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (scope `READ_RESOURCES`) fills the details panel's SQL section via `htmx.ajax` on node selection — route, wire format and states in §8.3.
 
 ### 4.3 Layout dimensions
 
@@ -913,7 +915,7 @@ The native `EventSource` API only supports GET requests. Our execute endpoint is
 
 ## 8. Node Details Panel
 
-When a node is clicked, the right panel slides in showing:
+When a node is clicked, the right panel slides in. The fields are grouped into headed sections — **Identity** (type badge, description, child-pipeline link for PIPELINE nodes), **SQL** (§8.3), **Configuration** (source, template, output, depends-on) and **Runtime** (execution status badge) — plus a "Select a node" empty state before the first selection.
 
 ### 8.1 Fields displayed
 
@@ -922,17 +924,35 @@ When a node is clicked, the right panel slides in showing:
 | Node ID | `node.data.id` | Header |
 | Description | `node.data.description` | Below header |
 | Type | `node.data.nodeType` | DQL / DML / DDL badge |
+| SQL | `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` | The node's **rendered** SQL — see §8.3 |
 | Source | `node.data.source` | Datasource name or `tempdb` |
-| Template | `node.data.template` | `{id, version}` — clickable link to template editor |
+| Template | `node.data.template` | `{id, version}` — clickable link to template editor (§8.2) |
 | Output | `node.data.output` | For DQL: target + table/mode; an **omitted** `output` renders as "returns result to caller (default)", not as "none" ([Pipeline Contract §9.1](pipeline-contract.md#91-resolution)). For DML/DDL: "side effect" |
 | Depends on | `node.data.dependsOn` | List of parent node IDs (clickable) |
 | Status | `node.data.status` | Current execution status (idle/running/success/failed/aborted) |
-| Last execution stats | fetched via `/api/v1/executions?pipeline_id={id}&limit=1` | Duration, rows_out, error |
-| Error (if failed) | from `node_failed` SSE event or last execution | Code, message, details, doc_url |
+| Last execution stats | fetched via `/api/v1/executions?pipeline_id={id}&limit=1` | **Not implemented in v1** — needs an executions lookup the panel does not build |
+| Error (if failed) | from `node_failed` SSE event or last execution | **Not implemented in v1** — failures surface through the §9 modal only |
+
+Long values (a JDBC URL, a generated table name) wrap inside the fixed-width panel via `overflow-wrap: anywhere`; the full text rides on the element's `title`.
 
 ### 8.2 Template link
 
-Clicking the template `{id, version}` navigates to `/templates/{id}/versions/{version}/editor` — the template editor page (separate spec, future).
+Clicking the template `{id, version}` navigates to `/templates/{id}/editor` — the template editor page. (The pinned version is not part of the route; the template editor always opens the current version.)
+
+### 8.3 The SQL section (rendered, resolved server-side)
+
+SQL does not live in pipeline nodes — [Pipeline Contract §2](pipeline-contract.md) principle 3: *"SQL/FTL lives in template entities, not inline in the Pipeline."* So "show the SQL for a node" is a resolution problem: the server resolves the node's **pinned** `template: {id, version}` (never the latest), assembles the pipeline's own parameter context, and renders.
+
+```
+GET /partials/pipelines/{id}/nodes/{nodeId}/sql?parameters=<url-encoded JSON>
+```
+
+- **Scope:** `READ_RESOURCES`, matching every other read partial. The existing `POST /partials/templates/{id}/versions/{version}/render` is deliberately NOT reused: it requires `MUTATE_PIPELINES_TEMPLATES` (an author scope, so a read-only viewer would be refused) and takes a free-form context that bypasses the pipeline's own parameter declarations.
+- **Wire format:** the `parameters` query value is a JSON document in [contract §6.3](pipeline-contract.md) wire form, built client-side by the page's own `coerceValue` — the same function the execute path uses (§7.2). One coercion path for both surfaces; `ParameterCoercion` is strict, so raw form strings would be rejected by design. GET, not POST: it is a read, needs no CSRF token, and matches the `/partials/**` GET idiom.
+- **Three context outcomes, not one.** *Bound* — every parameter supplied or defaulted; renders with the bound context. *Sampled* — binding rejected only on unsupplied REQUIRED parameters; renders with `ParameterBinder.sampleContext()` (the §12.6 dry-render context: defaults where present, type-appropriate sample values otherwise) and the panel labels which parameters were sampled. *Rejected* — a supplied override failed §6.3 coercion; the partial names the parameter and renders **no SQL** — SQL built from a value the executor would refuse is worse than no SQL.
+- **The non-render states.** A PIPELINE node has no template by contract (§4.6) — the partial shows the child-pipeline state (name @ version, linked), not an empty SQL block. A pinned `{id, version}` absent from the workspace registry, a `TemplateRenderException`, and an unknown node id each get their own `.ds-empty` state. `Node.template` is never null server-side (`Node.fromJson` binds `template ?: TemplateRef()`), so the "no template" branch keys on the node type / a blank template id — a null check would never fire.
+- **Loading:** `htmx.ajax` on selection change, and again (debounced ~300ms, the list-screen search delay) when a parameter override changes. The response swaps into `#pe-node-sql`; a `.ds-spinner` indicator rides the request.
+- **Highlighting and copy.** After the swap, `sql-highlight.js` re-highlights the `<code>` block — a zero-dependency, single-pass tokenizer (keywords, strings, comments, numbers, `${param}`/`:param` parameters), escaping each token's text as it is emitted (tokenize the RAW SQL, never the escaped string; token colours are `--pe-sql-*` custom properties resolving to design-system accents). The copy button reads the SQL from its `data-sql` attribute (or the `<code>` element's `textContent`) — never from the highlighted `innerHTML`, which carries `<span>` markup. The confirmation is the live region plus a 1.5s label swap on the button, **deliberately not a toast**: copy is high-frequency and self-evident, and a 6s notification per copy trains the user to ignore the stack the §9 terminal events need.
 
 ---
 
@@ -999,6 +1019,16 @@ The `details` object is rendered verbatim, so it must never contain connection s
 
 The graph also shows the failed node in red — the modal is supplementary detail.
 
+### 9.3 Terminal events: modal for failure, toasts for the rest
+
+The three terminal SSE events report differently:
+
+- `pipeline_failed` **keeps the error modal** (§9.1/§9.2) — a failure detail is not a 6s notification.
+- `pipeline_completed` and `execution_aborted` report as **toasts** via `DpToast.show` (Shape D, [UI Screens §5.1](ui-screens.md)): a stream-borne event has no HTTP response to attach an OOB swap to, and this is the one client-side toast builder that exists. The abort toast carries the event's `reason` in its body.
+- All three also call `announceStatus` — the terminal events previously did not announce at all (only node-level events did), so screen-reader parity here is an addition, not a preservation.
+
+The running-progress banner stays at the toolbar for the `running` state.
+
 ---
 
 ## 10. Result Preview
@@ -1031,6 +1061,7 @@ Delivery is **uniform** — there is no inline-vs-claim-check split ([REST API �
 
 - The panel renders `data.rows` from the event directly — no fetch needed for the first page. When `has_more` is `false` (the common case) the first page IS the whole result and no cursor call is ever made.
 - The table renders the first page as delivered. Page size is the server's `datapipelines.result.page-size-rows`, not a client constant — the editor never assumes 100 or 1000 rows.
+- The grid is the shared `.ds-table` component ([UI Screens §5](ui-screens.md)) — the editor's bespoke `.pe-result-table` styles are gone; the container supplies scroll only.
 - BIGDECIMAL / BIGINTEGER values arrive as strings (Type System wire rules) and are rendered as-is — the editor never parses them into JS numbers.
 - Nothing is shown for a **pure-ETL pipeline**: with no caller node there is no `data_ready` event. The completion banner shows execution stats only.
 
@@ -1043,6 +1074,7 @@ GET /api/v1/executions/{execution_id}/result?offset=&limit=&format={json|arrow|c
 ```
 
 - Paging is by `offset`/`limit`; ordering is stable because the result was fully materialized before the cursor existed.
+- The editor's Prev/Next row is client-side cursor paging over the stored result — `resultPanel.prevPage()/nextPage()` with `hasPrev`/`hasNext`, `limit`-authoritative and `total_rows`-denominated (027b). That arithmetic is frozen; the execute-page redesign restyled the row (ghost buttons on tokens) without rewiring it.
 - The cursor requires normal session auth + `read` scope + ownership — `result_url` is **not** a capability URL, so the editor sends its credentials like any other API call.
 - **TTL is fixed.** Reading pages does not extend it. The panel shows the remaining time from `expires_at` and counts down.
 - After expiry the endpoint returns `410` with `result.expired`; the panel replaces the table with **"Result expired — re-run the pipeline"** and a re-execute button. It does not retry.
@@ -1119,6 +1151,7 @@ modules/web/src/main/resources/static/
         ├── details.js                      (DetailsPanel class)
         ├── error.js                        (ErrorModal class)
         ├── result.js                       (ResultPanel class — §10)
+        ├── sql-highlight.js                (zero-dependency SQL tokenizer + highlighter — §8.3)
         └── a11y.js                         (DOM node list ↔ canvas sync, live region — §14)
 ```
 
@@ -1562,6 +1595,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-31 | v1.4 | execute page redesign (032) | **§8 rewritten around the SQL section.** New §8.3: "show the SQL for a node" is a resolution problem, not a display problem — SQL lives in template entities (contract §2.3), so the new `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (scope `READ_RESOURCES`; the author-scoped free-form template render endpoint deliberately NOT reused) resolves the node's PINNED `{id, version}` and renders against the pipeline's own parameter context. Wire format is §6.3 JSON built by the page's own `coerceValue` — one coercion path for execute and preview. Three context outcomes documented: bound / sampled (`sampleContext()`, labelled) / rejected (named parameter, NO SQL — SQL from a value the executor would refuse is worse than none). PIPELINE nodes show the child-pipeline state, not an empty block. §8.1: SQL row added; the last-execution-stats and per-node error rows marked **not implemented in v1** (they previously read as shipped); long-value wrapping specified. §8.2's route fixed to `/templates/{id}/editor` — the spec previously named `/templates/{id}/versions/{version}/editor`, which does not exist. §8 panel regrouped into Identity / SQL / Configuration / Runtime sections; template is now a real link; Output renders "returns result to caller (default)" instead of `undefined`. **§9.3 new:** terminal SSE events split — `pipeline_failed` keeps the modal; `pipeline_completed` / `execution_aborted` report as toasts via `DpToast.show` (Shape D — the one client-side builder, for events with no HTTP response); all three gain the `announceStatus` call they lacked (an addition, not a preservation). **§10:** the result grid moved onto the shared `.ds-table` (the bespoke `.pe-result-table` styles deleted); §10.2 records that the 027b paging arithmetic is frozen — restyled, not rewired. §4.2/§12.1: the new partial and `sql-highlight.js` join the page structure. The SQL copy confirmation is deliberately NOT a toast (live region + 1.5s label swap) — §8.3 says why. |
 | 2026-08-31 | v1.3 | graph design (031) | §5.3 rewritten to the shipped stylesheet: node cards with the label BELOW the shape (was `text-valign: center` inside an 80×40 box, truncated at 20 chars — genuine change, operator contract), per-TYPE shapes (`type-dml` round-diamond, `type-ddl` round-tag, `pipeline-node` hexagon; classes renamed from the never-implemented `nodeTypeDQL` form), the `node.caller` marker (double border, contract §9) now actually emitted and styled, and SELECTION as the `node:selected` PSEUDO-CLASS with ring + underlay halo (was a `.selected` class the code never had; §5.4 corrected to match — selection is `cyNode.select()`, driven by init.js/a11y.js). State becomes an accent border via new `--node-*-accent` tokens (§6.2), superseding the `--node-*-bg/text` fill pairs — the second genuine change; the fill pairs remain only for the `.pe-banner` fills. §6.2: the unimplemented `failed` "brief flash" requirement WITHDRAWN; the running pulse specified honestly as a JS-driven `ele.animate` loop gated on `window.matchMedia("(prefers-reduced-motion: reduce)")` (canvas — CSS media queries cannot reach it). §5.1: layout options recorded as shipped — `edgeSep`, `padding`, and `nodeDimensionsIncludeLabels: true` (mandatory once labels sit below shapes); `marginX`/`marginY` noted as non-dagre options. §14.1/§14.2: node list corrected to roving tabindex (the previous markup gave `<li>`s no `tabindex` — the keyboard path was dead) and the `data-state` execution-state mirror. §3.4 bridge listing and Appendix A token map updated to the shipped token names. |
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline editor UI spec: Thymeleaf + Alpine.js + Cytoscape.js 3.34.0 + cytoscape-dagre. Three-panel layout, 5 node states, SSE-driven graph updates, vendoring strategy, accessibility, keyboard nav. |
 | 2026-08-07 | v1.2 | consistency campaign | **[D7]** §15 rewritten: no SSE reconnection and no `Last-Event-Id` — a dropped stream cancels the execution after the grace period; the editor warns, polls `GET /executions/{id}` at most twice for the final status, and renders `ABORTED`. `execution_aborted` (rest-api §6.4.8) wired into §6.3/§6.4 as a terminal event; explicit Cancel (`DELETE /executions/{id}`) added (§15.2). **[D9]** §10 rewritten for uniform result delivery: one panel shape, inline first page from `data_ready`, cursor paging/downloads within a fixed TTL, `result.expired` handling; inline-vs-claim-check split deleted. **[D1]** "terminal node" → **caller node** throughout; `.terminal` Cytoscape class renamed `.caller` and actually applied in `buildElements()`; zero-caller pipelines documented (no `data_ready`). **[D8]** Theme resolution corrected to `${activeTheme} = users.theme_preference ?: datapipelines.ui.theme` (per-user override, deployment value as default — ui-screens.md v1.1 §4.11); the config key, its default and the valid theme list are referenced from configuration.md §3.10 instead of restated (§3.4, Appendix A.5). **[M]** "Native EventSource" removed from the §3.2 stack (contradicted §7.3). Styling wiring fixed: `nodeType*` and `idle` classes added at build time, `.selected` managed in `selectNode()`/`clearSelection()`. §4.2 adds `result.js`, `a11y.js` and the `x-on:show-error.window` listener that gives §9.1's dispatch a consumer. **[M]** §7.2 `collectParameters()` coerces values to declared wire types (pipeline-contract §6.3) instead of posting FormData strings. **[M]** §14 accessibility rewritten honestly for canvas rendering: per-node `role="button"` is impossible, replaced by a parallel visually-hidden `<ul role="listbox">`, `role="img"` canvas, and an `aria-live` status region. **[M]** Progressive-enhancement overclaim removed (no-JS = metadata + node list, no graph). **[M]** §11 edit mode removed from v1 scope (`?edit=true` deleted) — authoring is LLM/MCP-first, UI edit mode is a ROADMAP item. **[M]** `vendor-manifest.json` unified to `static/vendor/design-system/`. **[M]** Duplicate `### 13.2` renumbered (version upgrades → §13.3). Anchor fixes: auth §6, dag-executor/rest-api cross-links; `jdbc_url` removed from the §9.2 error mockup. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.13. |
