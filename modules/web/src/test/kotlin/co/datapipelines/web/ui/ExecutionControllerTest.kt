@@ -19,16 +19,24 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import org.springframework.web.server.ResponseStatusException
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 import kotlin.enums.EnumEntries
@@ -270,4 +278,42 @@ class ExecutionControllerTest {
             detailPartialController.cancel(executionId, ExtendedModelMap())
         }.statusCode shouldBe HttpStatus.CONFLICT
     }
+
+    @Test
+    fun `cancel renders the cancelled state and an OOB toast`() {
+        val html =
+            engine().process(
+                "partials/execution-cancelled",
+                webContext().apply {
+                    setVariable("cancelled", true)
+                    setVariable("executionId", executionId)
+                },
+            )
+
+        // The badge stays the persistent state; the toast rides along, WRAPPED — the
+        // attribute on the wrapper, the .ds-toast as its first element child.
+        html shouldContain "Cancellation requested"
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "Execution cancelled"
+        Regex("""hx-swap-oob="beforeend:#toast"[^>]*>(?:\s|<!--[\s\S]*?-->)*<div class="ds-toast""")
+            .containsMatchIn(html) shouldBe true
+    }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
 }
