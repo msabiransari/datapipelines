@@ -1,4 +1,12 @@
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment">
+<!-- The datasource list fragment (ui-screens.md §4.5). The ROOT element carries
+     id="datasource-list-wrapper": it is the single, stable swap target for every
+     list-refreshing control (search, dialect filter, Previous/Next) — the old
+     th:block root rendered its children without the wrapper id, so after the
+     first render no element matched the pager's hx-target and the swap contract
+     silently broke. Test results no longer swap rows at all: the Test button
+     appends a server-rendered toast to the #toast stack (§5.1 Notifications),
+     which is why no row needs a per-name id. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="datasource-list-wrapper">
   <th:block th:if="${#lists.isEmpty(datasources)}">
     <div class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
       <p style="color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--gap-sm);">No datasources found</p>
@@ -21,7 +29,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr th:each="ds : ${datasources}" th:id="'ds-row-' + ${ds.name}"
+          <tr th:each="ds : ${datasources}"
               th:style="${dsStat.odd} ? 'border-bottom: 1px solid var(--border-default); background: var(--surface-default);' : 'border-bottom: 1px solid var(--border-default);'">
             <td style="padding: var(--gap-sm) var(--gap-md); font-weight: var(--weight-medium);">
               <span th:text="${ds.name}">pg-prod</span>
@@ -40,13 +48,14 @@
             <td style="padding: var(--gap-sm) var(--gap-md);" th:text="${ds.username}"></td>
             <td style="padding: var(--gap-sm) var(--gap-md); text-align: right; white-space: nowrap;">
               <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+                <!-- Result goes to the #toast stack; the row and table are never
+                     touched, so the table layout cannot break. hx-disabled-elt
+                     blocks the double-submit (§5.1 Loading state). -->
                 <button class="ds-button ds-button-secondary ds-button-sm"
-                        th:attr="hx-post=@{/partials/datasources/{name}/test(name=${ds.name})}, hx-target='#ds-row-' + ${ds.name}, hx-swap=outerHTML"
+                        th:attr="hx-post=@{/partials/datasources/{name}/test(name=${ds.name})}, hx-target='#toast', hx-swap='beforeend'"
+                        hx-disabled-elt="this"
                         th:text="'Test'">Test</button>
               </th:block>
-              <button class="ds-button ds-button-ghost ds-button-sm"
-                      th:attr="hx-get=@{/api/v1/datasources/{name}(name=${ds.name})}"
-                      th:text="'View'">View</button>
             </td>
           </tr>
         </tbody>
@@ -71,4 +80,4 @@
       </button>
     </div>
   </th:block>
-</th:block>
+</div>
