@@ -140,8 +140,10 @@ class AdminUsersPartialController(
     private fun buildUserRow(user: co.datapipelines.auth.User): String {
         val activeStatus = if (user.isActive) "Active" else "Inactive"
         val role = if (user.isAdmin) "Admin" else "User"
-        val activeColor = if (user.isActive) COLOR_SUCCESS else COLOR_DANGER
-        val roleBg = if (user.isAdmin) COLOR_PRIMARY_BG else COLOR_TERTIARY
+        // Status and role render as design-system badges (029): a restriction/state gets the
+        // semantic variant — success/danger for active, primary/default for the role.
+        val activeBadge = if (user.isActive) "ds-badge-success" else "ds-badge-danger"
+        val roleBadge = if (user.isAdmin) "ds-badge-primary" else "ds-badge-default"
         val userIdShort = user.id.toString().take(USER_ID_PREFIX_LEN)
         val locked = user.lockedUntil?.isAfter(Instant.now()) == true
         val localStatus =
@@ -152,20 +154,13 @@ class AdminUsersPartialController(
             }
 
         return """<tr id="user-row-${user.id}">
-          <td style="padding:var(--gap-xs);font-family:var(--font-mono);font-size:var(--text-xs)"
-              title="${user.id}">$userIdShort...</td>
-          <td style="padding:var(--gap-xs)">${esc(user.displayName)}</td>
-          <td style="padding:var(--gap-xs);font-family:var(--font-mono);font-size:var(--text-sm)">${esc(user.email)}</td>
-          <td style="padding:var(--gap-xs)">
-            <span style="color:$activeColor;font-size:var(--text-xs);background:var(--surface-tertiary);
-              padding:2px var(--gap-xs);border-radius:var(--radius-base)">$activeStatus</span>
-          </td>
-          <td style="padding:var(--gap-xs)">
-            <span style="font-size:var(--text-xs);background:$roleBg;
-              padding:2px var(--gap-xs);border-radius:var(--radius-base);color:var(--text-secondary)">$role</span>
-          </td>
-          <td style="padding:var(--gap-xs);font-size:var(--text-xs);color:var(--text-secondary)">$localStatus</td>
-          <td style="padding:var(--gap-xs);white-space:nowrap">${toggleButton(user)} ${roleButton(user)}${localButtons(user, locked)}</td>
+          <td title="${user.id}">$userIdShort...</td>
+          <td>${esc(user.displayName)}</td>
+          <td>${esc(user.email)}</td>
+          <td><span class="ds-badge $activeBadge">$activeStatus</span></td>
+          <td><span class="ds-badge $roleBadge">$role</span></td>
+          <td>$localStatus</td>
+          <td style="white-space:nowrap">${toggleButton(user)} ${roleButton(user)}${localButtons(user, locked)}</td>
         </tr>"""
     }
 
@@ -291,8 +286,6 @@ class AdminUsersPartialController(
         const val COLOR_SUCCESS = "var(--accent-success)"
         const val COLOR_DANGER = "var(--accent-danger)"
         const val COLOR_WARNING = "var(--accent-warning)"
-        const val COLOR_PRIMARY_BG = "var(--accent-primary-bg)"
-        const val COLOR_TERTIARY = "var(--surface-tertiary)"
         const val EMPTY_ROW_HTML =
             """<tr><td colspan="7" style="padding:var(--gap-md);""" +
                 """text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">""" +

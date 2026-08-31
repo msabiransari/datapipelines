@@ -1,10 +1,14 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.StoredResultView
+import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.ColumnSchema
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -109,17 +113,175 @@ class TemplateHtmxRenderAuditTest {
             engine
                 .process(
                     "executions/detail",
-                    WebContext(
-                        JakartaServletWebApplication
-                            .buildApplication(MockServletContext())
-                            .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-                    ).apply { fillDetailModel(executionId) },
+                    webContext().apply { fillDetailModel(executionId) },
                 )
 
         html shouldContain "hx-delete=\"/partials/executions/$executionId/cancel\""
         html shouldContain "hx-get=\"/partials/executions/$executionId/result\""
         html shouldNotContain "th:hx-"
         Regex("""hx-[a-z-]+="[^"]*\$\{""").containsMatchIn(html) shouldBe false
+    }
+
+    /**
+     * An unquoted literal inside a th:attr assignation sequence (`hx-target=#id`)
+     * makes Thymeleaf reject the WHOLE sequence at render time — "Could not parse
+     * as assignation sequence" — but only once the block containing it renders,
+     * which is why the empty-state pages looked fine while both list screens 500'd
+     * on their first row (2026-08-31 hotfix). Source-level, because the render that
+     * would catch it needs a non-empty model on every screen.
+     */
+    @Test
+    fun `no th-attr sequence carries an unquoted literal value`() {
+        val violations =
+            templateSources().flatMap { (name, source) ->
+                TH_ATTR_VALUE
+                    .findAll(source)
+                    .flatMap { m -> splitAssignations(m.groupValues[1]) }
+                    .filter { it.isNotBlank() && !isProcessableValue(it.substringAfter('=', "")) }
+                    .map { "$name: `$it` — the literal must be quoted: `${it.substringBefore('=')}='…'`" }
+            }
+        violations shouldBe emptyList()
+    }
+
+    /** Non-vacuity: the guard must be ABLE to see the shape it exists to catch. */
+    @Test
+    fun `the unquoted-assignation guard can go red`() {
+        val bad = """th:attr="hx-get=@{/partials/pipelines}, hx-target=#pipeline-list-wrapper""""
+        val good = """th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper'""""
+        offenders(bad).shouldNotBeEmpty()
+        offenders(good) shouldBe emptyList()
+    }
+
+    private fun offenders(source: String): List<String> =
+        TH_ATTR_VALUE
+            .findAll(source)
+            .flatMap { m -> splitAssignations(m.groupValues[1]) }
+            .filter { it.isNotBlank() && !isProcessableValue(it.substringAfter('=', "")) }
+            .toList()
+
+    /**
+     * D1: `th:replace` REMOVES the host element, so an id written on the host div
+     * never reaches the DOM. Both list pages targeted an id that no rendered page
+     * produced, and their pagers matched nothing from first paint. Source-level
+     * checks cannot see this — only the rendered output can.
+     */
+    @Test
+    fun `every hx-target id a rendered list page references exists in that page`() {
+        val missing =
+            listOf(
+                "pipelines/list" to { c: WebContext -> c.fillPipelineList() },
+                "templates/list" to { c: WebContext -> c.fillTemplateList() },
+                "datasources/list" to { c: WebContext -> c.fillDatasourceList() },
+            ).flatMap { (view, fill) ->
+                // Comments are stripped first: the templates document their own contract in
+                // prose ("The ROOT carries id=..."), and an id scraped out of a COMMENT makes
+                // the guard green while the markup produces nothing (found by falsification).
+                val html =
+                    templateEngine()
+                        .process(view, webContext().apply { fill(this) })
+                        .replace(Regex("<!--[\\s\\S]*?-->"), "")
+                val referenced =
+                    Regex("""hx-target="#([A-Za-z0-9_-]+)"""").findAll(html).map { it.groupValues[1] }.toSet()
+                referenced.shouldNotBeEmpty()
+                val produced =
+                    Regex("""id="([A-Za-z0-9_-]+)"""").findAll(html).map { it.groupValues[1] }.toSet()
+                (referenced - produced - LAYOUT_PROVIDED_IDS).map { "$view: #$it" }
+            }
+        missing shouldBe emptyList()
+    }
+
+    /** Layout chrome (the UiWorkspaceAdvice set) every page render needs. */
+    private fun WebContext.fillLayoutChrome() {
+        setVariable("_csrf", mapOf("token" to "t"))
+        setVariable("workspaceHeaderFragment", "")
+        setVariable("workspaceOptions", emptyList<Any>())
+        setVariable("activeWorkspace", "acme")
+        setVariable("activeTheme", "saas")
+        setVariable("authenticated", true)
+        setVariable("currentPath", "/")
+    }
+
+    /** PipelineUiController's model — ONE row, or the pager never renders and the guard is vacuous. */
+    private fun WebContext.fillPipelineList() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("READ"))
+        setVariable("dialects", emptyList<String>())
+        setVariable(
+            "pipelines",
+            listOf(
+                PipelineRecord(
+                    id = UUID.randomUUID(),
+                    name = "my-pipeline",
+                    displayName = "My Pipeline",
+                    description = "A test pipeline",
+                    ownerId = UUID.randomUUID(),
+                    currentVersion = 1,
+                    isDeleted = false,
+                    createdAt = Instant.parse("2026-08-01T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-08-10T00:00:00Z"),
+                ),
+            ),
+        )
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
+    }
+
+    /** TemplateUiController's model — ONE row, or the pager never renders and the guard is vacuous. */
+    private fun WebContext.fillTemplateList() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("READ"))
+        setVariable("dialects", emptyList<String>())
+        setVariable("selectedDialect", "")
+        setVariable(
+            "templates",
+            listOf(
+                Template(
+                    id = "orders.sql",
+                    version = 1,
+                    dialect = Dialect.POSTGRES,
+                    displayName = "Orders",
+                    description = "A test template",
+                    body = "SELECT 1",
+                    createdAt = Instant.parse("2026-08-10T00:00:00Z"),
+                    createdBy = UUID.randomUUID(),
+                ),
+            ),
+        )
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
+    }
+
+    /** DatasourceUiController's model — ONE row, or the pager never renders and the guard is vacuous. */
+    private fun WebContext.fillDatasourceList() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("READ"))
+        setVariable("dialects", emptyList<String>())
+        setVariable("selectedDialect", "")
+        setVariable("isAdmin", false)
+        setVariable("memberDatasourcesEnabled", false)
+        setVariable("canRegister", false)
+        setVariable("bindingHint", "")
+        setVariable(
+            "datasources",
+            listOf(
+                Datasource(
+                    name = "pg-prod",
+                    displayName = "Production Postgres",
+                    description = null,
+                    dialect = Dialect.POSTGRES,
+                    jdbcUrl = "jdbc:postgresql://db:5432/app",
+                    username = "readonly",
+                ),
+            ),
+        )
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
     }
 
     private fun WebContext.fillDetailModel(executionId: UUID) {
@@ -166,6 +328,13 @@ class TemplateHtmxRenderAuditTest {
         )
     }
 
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
+
     private fun templateEngine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {
             setTemplateResolver(
@@ -190,5 +359,60 @@ class TemplateHtmxRenderAuditTest {
 
         /** th:hx-anything — no dialect in this build defines such a processor. */
         val UNKNOWN_TH_HX_ATTRIBUTE = Regex("""\bth:hx-[a-z-]+=""")
+
+        /** The raw value of every th:attr, captured for assignation-level checking. */
+        val TH_ATTR_VALUE = Regex("""th:attr="([^"]*)"""")
+
+        /** Ids the layout provides when a fragment renders standalone (the toast stack). */
+        val LAYOUT_PROVIDED_IDS = setOf("toast")
+
+        /** Split on commas that are not inside @{...}, ${...} or '...'. */
+        fun splitAssignations(value: String): List<String> {
+            val parts = mutableListOf<String>()
+            val current = StringBuilder()
+            var depth = 0
+            var quoted = false
+            for (c in value) {
+                when {
+                    c == '\'' -> {
+                        quoted = !quoted
+                        current.append(c)
+                    }
+
+                    quoted -> {
+                        current.append(c)
+                    }
+
+                    c == '{' -> {
+                        depth++
+                        current.append(c)
+                    }
+
+                    c == '}' -> {
+                        depth--
+                        current.append(c)
+                    }
+
+                    c == ',' && depth == 0 -> {
+                        parts.add(current.toString().trim())
+                        current.clear()
+                    }
+
+                    else -> {
+                        current.append(c)
+                    }
+                }
+            }
+            parts.add(current.toString().trim())
+            return parts
+        }
+
+        /** A value Thymeleaf can evaluate: an expression, a quoted literal, or a boolean. */
+        fun isProcessableValue(raw: String): Boolean {
+            val v = raw.trim()
+            return v.startsWith("'") ||
+                v.startsWith("@{") || v.startsWith("$" + "{") || v.startsWith("#{") ||
+                v.startsWith("|") || v == "true" || v == "false"
+        }
     }
 }

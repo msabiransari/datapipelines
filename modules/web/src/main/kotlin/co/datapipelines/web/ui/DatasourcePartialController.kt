@@ -162,6 +162,13 @@ class DatasourcePartialController(
                 "</div>",
         )
 
+    /**
+     * The screen's search covers EVERY column the table renders (§4.5): name +
+     * readonly, dialect, workspace, URL, username — plus description, which is
+     * searchable though only the modal shows it. A search that silently ignores a
+     * visible column reads as "no results" to the user (029). The workspace column
+     * renders the bound workspace's name or the literal `global`, so both match.
+     */
     private fun filter(
         list: List<Datasource>,
         query: String?,
@@ -171,6 +178,13 @@ class DatasourcePartialController(
         return list.filter { d ->
             d.name.lowercase().contains(lower) ||
                 d.displayName.lowercase().contains(lower) ||
+                d.dialect.wire
+                    .lowercase()
+                    .contains(lower) ||
+                d.jdbcUrl.lowercase().contains(lower) ||
+                d.username.lowercase().contains(lower) ||
+                (d.workspaceName ?: "global").lowercase().contains(lower) ||
+                (d.isReadonly && "readonly".contains(lower)) ||
                 (d.description?.lowercase()?.contains(lower) == true)
         }
     }

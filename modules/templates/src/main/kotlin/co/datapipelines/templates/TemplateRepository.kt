@@ -106,7 +106,9 @@ class TemplateRepository(
      *
      * Returns each live template at its **current** version, `name`-ordered so paging is stable.
      * Both filters are optional and independent: [dialect] is an exact match on the version's
-     * dialect, [q] a case-insensitive substring of `name`, `display_name` or `description`.
+     * dialect, [q] a case-insensitive substring of `name`, `display_name`, `description` or the
+     * version's `dialect` wire value (the list screen renders a dialect badge, and the 029 search
+     * rule is that a screen's search covers every column it renders).
      *
      * `q` is bound as a parameter and its own LIKE metacharacters are escaped ([escapeLike]), so
      * a search for `100%_off` searches for that literal string instead of turning into a wildcard
@@ -134,6 +136,7 @@ class TemplateRepository(
                      OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                      OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                      OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                     OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
                    )
              ORDER BY t.name
              LIMIT :limit OFFSET :offset

@@ -47,7 +47,7 @@
         <button class="ds-button ds-button-secondary"
                 hx-get="/partials/executions"
                 hx-include="#execution-filters"
-                hx-vals='{"offset": "[[${offset - pageSize}]]"}'
+                th:attr="hx-vals=|{&quot;offset&quot;: ${offset - pageSize}}|"
                 hx-target="#execution-table"
                 hx-swap="innerHTML">Previous</button>
       </th:block>
@@ -58,7 +58,7 @@
         <button class="ds-button ds-button-secondary"
                 hx-get="/partials/executions"
                 hx-include="#execution-filters"
-                hx-vals='{"offset": "[[${nextOffset}]]"}'
+                th:attr="hx-vals=|{&quot;offset&quot;: ${nextOffset}}|"
                 hx-target="#execution-table"
                 hx-swap="innerHTML">Next</button>
       </th:block>

@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.1
+**Status:** v1.12
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-08-07
@@ -131,9 +131,9 @@ Content:
 | Purpose | Search, filter, browse all pipelines |
 | Design primitives | `.ds-table`, `.ds-input`, `.ds-badge`, `.ds-button` |
 | JS | None |
-| htmx | Yes — search filter and pagination (`hx-get="/partials/pipelines" hx-target="#pipeline-table"`) — full pattern in §5 |
+| htmx | Yes — search filter and pagination (`hx-get="/partials/pipelines"` into the fragment-root `#pipeline-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh) via the `#pipeline-filter-q` search input (`input changed delay:300ms`, `#pipeline-filter-spinner` indicator) and the shared §5 pager — full pattern in §5 |
 
-Content: search bar, datasource filter dropdown, table of pipelines (name, description, version, owner, last updated). "Create Pipeline" button (requires `author` scope) → opens create modal.
+Content: search bar, table of pipelines (name, display name, description, version, last updated). "Create Pipeline" button (requires `author` scope) → opens create modal. There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
 
 ### 4.4 Pipeline Editor
 
@@ -148,11 +148,11 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Not repeated here
 | Purpose | Browse, test, register datasource connections in the active workspace |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-modal` |
 | JS | `static/js/toast.js` (layout-global: arms every `.ds-toast` appended to `#toast` — auto-dismiss + close) |
-| htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test"`, `hx-target="#toast"`, `hx-swap="beforeend"` — the result is a §5.1 Notifications toast, never a row swap), search + dialect filter + pager (`hx-get="/partials/datasources"` into `#datasource-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh), register modal (`hx-post` on `/partials/datasources`, `HX-Redirect` on success) |
+| htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test"`, `hx-target="#toast"`, `hx-swap="beforeend"` — the result is a §5.1 Notifications toast, never a row swap), search + dialect filter + pager (`hx-get="/partials/datasources"` into `#datasource-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh; the pager is the shared §5 fragment), register modal (`hx-post` on `/partials/datasources`, `HX-Redirect` on success) |
 
 Content: table of the ACTIVE workspace's datasources (name + `readonly` badge, dialect badge, workspace column — `global` or the bound name, URL, username). Per-row "Test" button (`author` scope) → connection result as a §5.1 Notifications toast; the table itself is never re-rendered mid-interaction. "Register Datasource" button → modal form with: name, display name, dialect dropdown, JDBC URL, username, password, description, and two checkboxes — `readonly` (always settable, [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)) and `global` (**admin-only; visible-disabled for everyone else**, workspaces D8: unchecked binds to the active workspace). The register action applies the SAME D8 rules as REST §9.1 (`DatasourceWorkspaceRules` — one component, two surfaces) and crosses the same registry save boundary.
 
-The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-bound + global, repository-level); a datasource bound to another workspace is absent, and its by-name test behaves as not-found. Rename is not offered — a datasource name is immutable (delete + re-create, blocked while referenced).
+The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-bound + global, repository-level); a datasource bound to another workspace is absent, and its by-name test behaves as not-found. Rename is not offered — a datasource name is immutable (delete + re-create, blocked while referenced). The search covers every column the table renders (the §5.1 Search rule): name and the `readonly` badge, the dialect wire value, the workspace column (the bound name or the literal `global`), the JDBC URL, and the username — plus `description`, searchable though only the modal shows it.
 
 **§4.13's workspaces screen** owns workspace lifecycle; this screen's Register button is hidden entirely when the caller is a non-admin and `member-datasources-enabled` is off (the demo shape — open datasource creation is an SSRF primitive from the server's network position).
 
@@ -165,9 +165,9 @@ The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-b
 | Purpose | Browse SQL templates, filter by dialect, search |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
 | JS | None |
-| htmx | Yes — search, dialect filter, pagination (`hx-get="/partials/templates"`) |
+| htmx | Yes — search, dialect filter and pagination re-fetch `/partials/templates` into the fragment-root `#template-list-wrapper` (`outerHTML`); the `#template-filter-q` input and the `#template-filter-dialect` select address each other **by id** via `hx-include` (never by name — other `name="dialect"` inputs exist), with the shared §5 pager fragment |
 
-Content: table of templates (id, display_name, dialect badge, version, is_library badge, truncated `description`). Clickable → template editor.
+Content: table of templates (id, display name, dialect badge, description, version, created). Clickable → template editor. The search covers every rendered column (the §5.1 Search rule): id, display name, description, and the dialect badge's wire value — the dialect match is repository-level (`ILIKE` on the version's dialect), so a `sqlite` query finds templates whose names never mention it.
 
 ### 4.7 Template Editor
 
@@ -202,9 +202,9 @@ Content:
 | Purpose | Browse past executions, filter by pipeline/status/date |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
 | JS | None |
-| htmx | Yes — filters (pipeline, status, date range), pagination (`hx-get="/partials/executions"`) |
+| htmx | Yes — filters (pipeline, status, date range), pagination (`hx-get="/partials/executions"` into `#execution-table`, `innerHTML`, with `hx-include="#execution-filters"` re-sending the filter form by id; the pager offsets are server-rendered into `hx-vals` via `th:attr` literal substitution) |
 
-Content: table of executions (pipeline name, version, status badge, triggered_by, triggered_via badge, started_at, duration). Clickable → execution detail.
+Content: table of executions (pipeline name, version, status badge, triggered_by, triggered_via badge, started_at, duration). Clickable → execution detail. This screen deliberately keeps its own `#execution-table` / `innerHTML` / `hx-include="#execution-filters"` contract rather than adopting the §5 outerHTML one — it satisfies every §5.1 guarantee (stable target, controls outside the fragment, spinner, toasts), and the pager's `hx-vals` offsets are server-rendered via `th:attr="hx-vals=|{...}|"` (a plain-attribute `[[...]]` inlining reaches the browser unprocessed — Thymeleaf processes inlining in text nodes, not attribute values).
 
 ### 4.9 Execution Detail
 
@@ -252,7 +252,7 @@ For anything that must outlive the TTL, the answer is not a longer TTL: write it
 | Purpose | Issue, view, revoke API keys for agents |
 | Design primitives | `.ds-table`, `.ds-button`, `.ds-modal`, `.ds-badge`, `.ds-code-block` |
 | JS | Light — copy-to-clipboard for newly created key |
-| htmx | Yes — generate key modal (`hx-post="/partials/api-keys" hx-target="#key-list"`), revoke (`hx-delete="/partials/api-keys/{id}"`) |
+| htmx | Yes — generate key modal (`hx-post="/partials/api-keys"`, the created-key fragment into `#keyCreated`), revoke (`hx-delete="/partials/api-keys/{id}"`, rebuilt rows into `#keys-table-body`) |
 
 Server-side these partials delegate to the same application service as [REST §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only) (`GET`/`POST /api/v1/auth/api-keys`, `DELETE /api/v1/auth/api-keys/{key_id}`) — identical validation and identical ownership scoping, HTML instead of JSON.
 
@@ -291,9 +291,9 @@ Content:
 | Purpose | View all users, activate/deactivate, grant/revoke admin |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button` |
 | JS | None |
-| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-post="/partials/admin/users/{id}/{action}"`, row-level swap) |
+| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap) |
 
-Content: table of all users (email, display_name, is_active, is_admin, local-access status). Admin can toggle `is_active` and `is_admin` per user, and — for local accounts ([Auth §5A.1](auth.md#5a1-accounts)) — create local users, reset passwords, disable local access, and clear lockouts.
+Content: table of all users (email, display_name, `is_active` and `is_admin` as `.ds-badge` variants — success/danger for status, primary/default for role — local-access status). Admin can toggle `is_active` and `is_admin` per user, and — for local accounts ([Auth §5A.1](auth.md#5a1-accounts)) — create local users, reset passwords, disable local access, and clear lockouts.
 
 - Partials delegate to [REST §16.3](rest-api.md#163-user-administration-admin-scope) (`activate`, `deactivate`, `grant-admin`, `revoke-admin`), which writes the `auth.user.*` audit events.
 - **Create local user** (rendered only when local accounts are enabled): email + optional display name; the server generates a random one-time password shown to the admin exactly once (out-of-band notice) with `must_change_password = TRUE` — there is no email flow, so the admin conveys it out-of-band ([Auth §5A.1](auth.md#5a1-accounts)). A taken email answers `409`.
@@ -392,13 +392,17 @@ Server returns a partial HTML fragment (the `#pipeline-results` div), htmx swaps
 Two rules this example encodes, applicable to every list screen:
 
 1. **Parameters come from named form fields**, gathered with `hx-include`. Values the user never edits (the next `offset`) are server-rendered into `hx-vals` with `th:attr`.
-2. **The swap target is a wrapper that contains everything that changes** — table *and* pager — so one `outerHTML` swap keeps them consistent. Swapping only the `<table>` leaves a stale pager behind.
+2. **The swap target is a wrapper that contains everything that changes** — table *and* pager — so one `outerHTML` swap keeps them consistent. Swapping only the `<table>` leaves a stale pager behind. On the screens that swap `outerHTML`, the wrapper is the list **fragment's own root element** (`#pipeline-list-wrapper`, `#template-list-wrapper`, `#datasource-list-wrapper`): the id must live on the fragment root, never on the page's host div — `th:replace` removes the host, so an id written there never reaches the DOM and every swap targets nothing.
+
+**The shared pager.** Every list screen renders the one fragment `partials/pager :: pager(targetId, prevUrl, nextUrl, offset, hasMore, shown, total)`. The fragment never builds URLs: Thymeleaf link expressions take literal parameter names, so a per-screen filter set cannot be splatted into `@{...}` — each caller builds `prevUrl`/`nextUrl` with its own `th:with` (keeping that screen's filters in the query string) and passes the finished strings. `total` is nullable: a screen that computes no count renders `Showing N` rather than `Showing N of M`. Previous is disabled at `offset == 0`, Next when `hasMore` is false. The executions screen is the deliberate exception — its `#execution-table` / `innerHTML` contract is documented in §4.8.
 
 ### 5.1 Standard States
 
 Every list, panel and form on these screens implements the same three states. They are layout-shell concerns, specified once here rather than per screen.
 
-**Empty state.** When a collection legitimately has zero rows, the partial returns an `.ds-empty-state` card — an icon, one sentence naming what is missing, and the primary action if the user has scope for it ("No pipelines yet — Create pipeline"). Distinguish the two empties: *nothing exists* gets the create action; *nothing matched the filter* gets "No pipelines match "…" — Clear filters". An empty table with only a header row is not an acceptable empty state.
+**Empty state.** When a collection legitimately has zero rows, the partial returns a `.ds-empty` block — `.ds-empty-title` naming what is missing, `.ds-empty-description` with the follow-up, and `.ds-empty-actions` for the action if the user has scope for it ("No pipelines yet — Create pipeline"). These are the only empty-state classes; `.ds-empty-state` is **not a class** — no stylesheet defines it (four templates once used it and every pixel came from the inline styles beside it). Distinguish the two empties: *nothing exists* gets the create action; *nothing matched the filter* gets "No pipelines match "…" — Clear filters". An empty table with only a header row is not an acceptable empty state.
+
+**Search.** A screen's server-side search covers every column that screen renders; where a column is derived, the search matches the rendered text (a dialect enum's wire value, an unbound workspace's `global` literal, a `readonly` restriction badge). A search that silently ignores a visible column reads as "no results" to the user.
 
 **Loading state.** htmx's own indicator mechanism: `hx-indicator` points at an element carrying `.htmx-indicator`, which htmx toggles to `.htmx-request` for the duration of the request.
 - List/panel refreshes use an inline `.ds-spinner` next to the control that triggered them (see §5 above).
@@ -467,3 +471,4 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | 2026-08-28 | v1.9 | workspaces surfaces slice | New **§4.13 Workspaces** screen (create per mode, open-join, owned-workspace member management, switch) + navbar **workspace switcher** (§3: POST /workspace/switch re-stamps the session claim; hx-headers carries DP-Workspace for partials). §4.5 datasource list re-grounded: workspace-scoped listing, workspace/readonly columns, register modal with the D8-gated `global` (admin-only, visible-disabled) and `readonly` checkboxes, Register hidden for gated-off members. |
 | 2026-08-30 | v1.11 | datasources SPA table + toasts | §4.5: search/dialect/pager re-fetch only the list fragment into the stable `#datasource-list-wrapper` swap root (the id moved onto the fragment root — it previously died with the page's placeholder div); the connection test result is a §5.1 toast, ending the row-swap/"Back to list" contract that broke the table layout; the dead View button (REST JSON via hx-get) removed. New §5.1 **Notifications** state: `#toast` stack, server-rendered `partials/toast`, layout-global `toast.js` lifecycle. |
 | 2026-08-30 | v1.10 | local password auth | §4.1 Login: local form + divider + provider buttons, only enabled methods render; `credentials`/`locked` banners join the `?error=` idiom. §4.12 admin users: create local user (one-time password shown once), reset, disable local, unlock; `Local` column. New §4.14 Change password — the §5A.4 forced-change screen. |
+| 2026-08-31 | v1.12 | table component rollout + live list controls | §4.3/§4.6: the pipelines and templates swap roots moved onto the fragment roots (`#pipeline-list-wrapper` / `#template-list-wrapper`) — the ids previously died with the page's `th:replace`d host div, so both pagers had never worked — and the search inputs gained their `hx-*` wiring (they were inert). §4.3's unimplementable datasource filter was deleted (deferred: `PipelineRecord` carries no datasource; serving it needs a join through the pipeline definition). New §5 **shared pager** fragment (`partials/pager`, caller-built URLs, nullable `total`). New §5.1 **Search** rule: a screen's search covers every rendered column — datasources search now matches URL, username, dialect wire value and workspace; template search matches the dialect column (repository-level ILIKE). `.ds-table`/`.ds-badge`/`.ds-empty` adopted on the three list partials, API keys, admin users (rows are Kotlin-built), workspaces and the template editor's imports table; the undefined `.ds-empty-state` class is gone. §4.8 keeps its `#execution-table`/`innerHTML` contract; its pager's `hx-vals` offsets are now server-rendered via `th:attr` (they previously reached the browser as an unprocessed `[[...]]` literal). Two new mechanical guards: no unquoted literal inside a `th:attr` assignation, and every `hx-target` id a rendered list page references must exist in that page. |
