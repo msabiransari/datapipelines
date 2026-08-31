@@ -58,6 +58,18 @@
       </div>
     </div>
 
+    <div class="ds-card" style="padding:var(--gap-lg)">
+      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Password</h2>
+      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Change your local password, or see which sign-in method your account uses.</p>
+      <a th:href="@{/settings/password}" class="ds-button ds-button-secondary">Change password</a>
+    </div>
+
+    <div class="ds-card" style="padding:var(--gap-lg)">
+      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">API Keys</h2>
+      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Keys authenticate agents against the MCP endpoint and REST API. Each key is pinned to one workspace and carries its own scopes (read, execute, author).</p>
+      <a th:href="@{/settings/api-keys}" class="ds-button ds-button-secondary">Manage API keys</a>
+    </div>
+
     <form th:action="@{/logout}" method="post" style="margin-top:var(--gap-sm)">
       <button type="submit" class="ds-button ds-button-secondary" style="width:100%">Logout</button>
     </form>
