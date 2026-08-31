@@ -43,8 +43,13 @@
       </div>
       <div style="display: flex; gap: var(--gap-sm);">
         <th:block th:if="${canCancel}">
+          <!-- th:attr + @{...}: hx-delete as a PLAIN attribute ships the literal
+               ${...} text, htmx resolves it against the page URL and the DELETE
+               404s — the cancel endpoint is never reached and the execution
+               keeps running (027b E). @{...} also prepends the context path,
+               which a hand-built string would miss. -->
           <button id="cancel-button" class="ds-button ds-button-danger"
-                  hx-delete="${'/partials/executions/' + record.executionId + '/cancel'}"
+                  th:attr="hx-delete=@{/partials/executions/{id}/cancel(id=${record.executionId})}"
                   hx-swap="outerHTML">Cancel</button>
         </th:block>
       </div>
@@ -150,9 +155,9 @@
       </div>
 
       <div id="result-content"
-           th:hx-get="${'/partials/executions/' + record.executionId + '/result'}"
-           hx-trigger="load"
-           hx-swap="innerHTML">
+            th:attr="hx-get=@{/partials/executions/{id}/result(id=${record.executionId})}"
+            hx-trigger="load"
+            hx-swap="innerHTML">
         <div style="text-align: center; padding: var(--gap-lg); color: var(--text-muted);">
           <div class="ds-spinner" style="margin-bottom: var(--gap-md);"></div>
           <div style="font-size: var(--text-sm);">Loading result...</div>

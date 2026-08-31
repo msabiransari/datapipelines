@@ -31,11 +31,21 @@
 
   function coerceValue(val, type) {
     var upper = (type || "").toUpperCase();
-    if (upper === "INTEGER" || upper === "BIGINTEGER") {
+    if (upper === "INTEGER") {
       var n = parseInt(val, 10);
       return isNaN(n) ? val : n;
     }
-    if (upper === "DECIMAL" || upper === "BIGDECIMAL") {
+    // §6.3: BIGINTEGER/BIGDECIMAL are STRING-on-wire — their value space exceeds
+    // the IEEE 754 safe range, so "Accepting it would silently lose precision for
+    // values beyond IEEE 754 safe range" (pipeline-contract §6.3) — and the
+    // server rejects a JSON number outright with 400
+    // pipeline.execution.invalid_parameter_type (ParameterCoercion). Pass the
+    // raw string through; the server's parse remains the authority. INTEGER and
+    // DECIMAL stay JSON numbers — the split is exactly where the contract puts it.
+    if (upper === "BIGINTEGER" || upper === "BIGDECIMAL") {
+      return String(val);
+    }
+    if (upper === "DECIMAL") {
       var f = parseFloat(val);
       return isNaN(f) ? val : f;
     }

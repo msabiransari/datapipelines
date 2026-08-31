@@ -81,6 +81,15 @@
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var buffer = "";
+    // Frame state lives HERE, beside `buffer` — a frame's `event:` line and its
+    // complete `data:` line routinely arrive in different chunks. `data_ready`
+    // carries the inline first page (page-size-rows rows) as one `data:` line;
+    // tens of rows already exceed Tomcat's default 8KB response buffer, so the
+    // frame spans many reads. With per-chunk state the event type was lost at
+    // the first boundary, the completed frame never dispatched, and the run
+    // bannered success while the result panel never opened (027b A).
+    var eventType = null;
+    var eventData = "";
 
     function pump() {
       reader
@@ -101,9 +110,6 @@
           var lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          var eventType = null;
-          var eventData = "";
-
           for (var i = 0; i < lines.length; i++) {
             var line = lines[i];
             // SSE field values may carry ONE optional leading space after the colon
@@ -114,16 +120,15 @@
               eventType = line.substring(6).trim();
             } else if (line.indexOf("data:") === 0) {
               eventData = line.substring(5).trim();
-            } else if (line === "" && eventType) {
+            } else if (line === "" && eventType !== null) {
+              // A frame is dispatched ONLY at its blank-line terminator — the
+              // server (Spring SseEmitter) always terminates frames with \n\n.
+              // `eventType !== null`, not truthiness: a frame with EMPTY data is
+              // legitimate and must still dispatch.
               self.dispatch(eventType, eventData);
               eventType = null;
               eventData = "";
             }
-          }
-
-          // Handle last event if there is one at end of buffer
-          if (eventType && eventData) {
-            self.dispatch(eventType, eventData);
           }
 
           pump();
