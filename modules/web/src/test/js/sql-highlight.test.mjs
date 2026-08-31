@@ -60,7 +60,10 @@ test("an unterminated string terminates the token stream instead of hanging", ()
 });
 
 test("every input is reconstructible from its tokens — nothing is dropped", () => {
-  const sql = "SELECT a, /* c */ b\nFROM t -- tail\nWHERE x = 'y' AND n = 12";
+  // The backtick is deliberately NOT in any recognized class: an input without an
+  // unrecognized character cannot catch a tokenizer whose catch-all branch silently
+  // eats one (found by falsification — dropping the catch-all left this test green).
+  const sql = "SELECT `a`, /* c */ b\nFROM t -- tail\nWHERE x = 'y' AND n = 12";
   const tokens = loadHighlight().tokenize(sql);
   assert.equal(tokens.map((t) => t.text).join(""), sql);
 });
