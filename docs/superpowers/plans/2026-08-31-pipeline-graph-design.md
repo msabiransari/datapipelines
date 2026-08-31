@@ -10,7 +10,7 @@
 
 **Tech Stack:** Cytoscape.js stylesheet JSON, cytoscape-dagre, design tokens. Tests: `node --test` via the `editorJsTest` Gradle task (`modules/web/build.gradle.kts:82-117`; `fileTree("src/test/js") { include("*.test.mjs") }`, so a new test file is picked up with no build change). Browser screenshots as visual evidence.
 
-**Spec:** `docs/pipeline-editor.md` §5.1 (initialization), §5.2 (dagre choice), §5.3 (graph stylesheet), §6.2 (state → visual mapping); `docs/ui-screens.md` §4.4 if it names graph visuals.
+**Spec:** `docs/pipeline-editor.md` §5.1 (initialization), §5.2 (dagre choice), §5.3 (graph stylesheet), §6.2 (state → visual mapping); `docs/pipeline-editor.md` Appendix B change log (this doc is at v1.2). **This plan does not touch `docs/ui-screens.md`** — see Task 4 Step 4.
 
 **The user-facing contract (operator's words, verbatim):** *"a shape for select"* — a selected node is unmistakable; *"label contained below, not inside"* — the node's name renders beneath the shape, full text, not truncated inside a box.
 
@@ -424,7 +424,7 @@ git commit -am "feat(web): dagre spacing that accounts for below-shape labels, e
 
 - [ ] **Step 3: §5.1 / §5.2.** Record the layout options actually passed, including `nodeDimensionsIncludeLabels: true` and why. Note that `marginX`/`marginY` are not dagre options, so no future reader re-adds them.
 
-- [ ] **Step 4: `docs/ui-screens.md`** §4.4 — it currently defers to the pipeline-editor spec entirely; add a graph-visuals line only if that stays true.
+- [ ] **Step 4: Do NOT edit `docs/ui-screens.md`.** §4.4 defers to the pipeline-editor spec entirely and that stays true. This fence is what lets this plan run beside the table-component plan (029), which rewrites large parts of `ui-screens.md` and owns its changelog version — two lanes editing that file would collide on the version row. If a §4.4 graph line is ever warranted, it goes in the execute-page plan's sweep (032), which already owns the editor row.
 
 - [ ] **Step 5: Run `./scripts/docs-audit.sh`** (exit 0) and **commit** `docs(pipeline-editor): graph stylesheet, state mapping, layout options (031)`.
 

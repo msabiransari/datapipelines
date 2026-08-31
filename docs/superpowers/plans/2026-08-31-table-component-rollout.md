@@ -62,7 +62,15 @@ Five tables are already migrated. The previous revision of this plan claimed "th
 
 ### Landing zone
 
-The operator's hotfix is **uncommitted in the working tree** (`git status`): quoted `th:attr` literals in `partials/pipelines.html` and `partials/templates.html`, an unrelated `settings/index.html` change, and the new untracked `modules/web/src/test/kotlin/co/datapipelines/web/ui/ListPartialsRenderTest.kt`. Branch this work only **after** that lands on main. If it has not landed when you start, stop and ask the operator — do not re-fix it, and do not carry their `settings/index.html` change into this branch.
+**Clear — the hotfix landed on main in `a01c712`** (*fix(web): /pipelines and /templates 500 once a row exists — quote th:attr hx literals*), together with `ListPartialsRenderTest.kt` and an unrelated `settings/index.html` change. Branch from a main that contains it.
+
+Verify before branching, because this plan's Task 1 builds directly on that fix:
+
+```bash
+git merge-base --is-ancestor a01c712 origin/main && echo "hotfix present"
+```
+
+If that fails, you are on a main that predates it — stop and ask the operator rather than re-fixing the quoting yourself.
 
 ---
 

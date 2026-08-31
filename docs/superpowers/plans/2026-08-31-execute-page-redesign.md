@@ -19,7 +19,7 @@ Therefore: a node-scoped server partial `GET /partials/pipelines/{id}/nodes/{nod
 - `docs/pipeline-editor.md` §4.2 — only the server-rendered structure and the new partial's place in it.
 - `docs/ui-screens.md` §4.4 + §5.1.
 
-**Sequencing:** lands AFTER the table-component (`2026-08-31-table-component-rollout.md`) and toast (`2026-08-31-toast-application.md`) plans — this plan consumes `.ds-table` and the toast delivery shapes. **Run strictly after the graph plan (031)**, never in parallel: both touch `pipeline-editor.css` and `pipelines/editor.html`.
+**Sequencing:** lands AFTER the table-component (`2026-08-31-table-component-rollout.md`) and toast (`2026-08-31-toast-application.md`) plans — this plan consumes `.ds-table` from the first and, from the second, **`window.DpToast.show` (Shape D), which Task 5 hard-depends on**. If `DpToast.show` is not on `window` when you reach Task 5, 030 has not landed: stop and re-check the sequencing rather than writing a second toast builder. **Run strictly after the graph plan (031)**, never in parallel: both touch `pipeline-editor.css` and `pipelines/editor.html`.
 
 ---
 
@@ -59,7 +59,7 @@ So the partial has three context outcomes, not one: **bound** (everything suppli
 
 `ui-screens.md` §5.1 Notifications: *"Markup is never built client-side — the JS schedules removal only."* `toast.js` arms server-rendered `.ds-toast` nodes; it has no builder. A "Copied" confirmation is a purely client-side event with no server round-trip, so a toast for it would require the client to build toast markup — which the rule forbids, and a round-trip purely to render a confirmation is absurd.
 
-**Resolution: the copy confirmation is not a toast.** Use the live region (`editor.announceStatus("SQL copied to clipboard")`, which already exists and is the a11y-correct channel) plus a transient label swap on the button itself ("Copy" → "Copied" for ~1.5s). Task 2 does that. If the operator wants a real toast there, that is a §5.1 amendment to make deliberately, not a side effect of this plan.
+**Resolved (operator, 2026-08-31):** §5.1 gains ONE client-side entry point, `DpToast.show`, built by the toast plan's Task 1 — see **Shape D** there. It is for the SSE terminal events (Task 5), which have no HTTP response to attach an OOB swap to. **The copy confirmation still does not use it.** Use the live region (`editor.announceStatus("SQL copied to clipboard")`, which already exists and is the a11y-correct channel) plus a transient label swap on the button itself ("Copy" → "Copied" for ~1.5s). Task 2 does that.
 
 ### Spec vs. code — §8 is already ahead of the implementation
 
@@ -272,7 +272,7 @@ The last test is the one that catches a tokenizer silently eating whitespace or 
 
 - [ ] **Step 5: Wire it in.** Add the script tag to `editor.html` beside the other editor modules, and call `highlight()` on the `<code>` element after the partial swaps in (`htmx:afterSwap` on the SQL container, or directly in the Alpine loader's `.then`).
 
-- [ ] **Step 6: Copy button — not a toast.** See the §5.1 conflict above. `navigator.clipboard.writeText(sql)` with a `document.execCommand("copy")` fallback for non-secure contexts, then `editor.announceStatus("SQL copied to clipboard")` and a 1.5s label swap on the button. Read the SQL from a `data-sql` attribute or the `<code>` element's `textContent` — **never from the highlighted innerHTML**, which carries `<span>` markup.
+- [ ] **Step 6: Copy button — deliberately not a toast.** `DpToast.show` exists after 030, so a toast here is now *possible*; it is still the wrong call. Copy is a high-frequency, self-evident action, and a 6s notification for every copy is noise that trains the user to ignore the stack the terminal events need. The live region is the a11y-correct channel and the label swap is the visible one. `navigator.clipboard.writeText(sql)` with a `document.execCommand("copy")` fallback for non-secure contexts, then `editor.announceStatus("SQL copied to clipboard")` and a 1.5s label swap on the button. Read the SQL from a `data-sql` attribute or the `<code>` element's `textContent` — **never from the highlighted innerHTML**, which carries `<span>` markup.
 
 - [ ] **Step 7: Run and verify GREEN**, then **commit.**
 
@@ -360,16 +360,22 @@ Debounce the parameter-change trigger (~300ms) so typing in an override box does
 - [ ] **Step 2: Align the pager's look, not its logic.** The Prev/Next/page-info row keeps `resultPanel.prevPage()` / `nextPage()` and the `hasPrev` / `hasNext` bindings **exactly as they are** — this is client-side cursor paging over a stored result, not the server-rendered shared pager fragment, and 027b C's `limit`-authoritative, `total_rows`-denominated arithmetic is frozen. Restyle to match the shared pager (ghost buttons, centred count text, token spacing). The downloads row becomes ghost buttons on tokens.
 
 - [ ] **Step 3: Terminal events become toasts.** In `sse.js`:
-  - `pipeline_completed` (`:200-204`): replace `setBanner("Pipeline completed successfully", "success")` with a success toast, and **add** `editor.announceStatus("Pipeline completed successfully")` — the terminal events do not announce today (see the parity finding).
-  - `execution_aborted` (`:219-231`): the same, with the event's `reason` in the body, per §6.3's "Execution aborted ({reason})".
-  - `pipeline_failed` (`:206-210`): **keeps the error modal** (§9) — a failure detail is not a 6s notification. Add the `announceStatus` call it also lacks.
-  - The running-progress banner stays at the toolbar for the `running` state only.
+  - `pipeline_completed` (`:200-204`): replace `setBanner("Pipeline completed successfully", "success")` with a success toast, and **add** `editor.announceStatus(...)` — the terminal events do not announce today (see the parity finding).
+  - `execution_aborted` (`:219-231`): the same, with the event's `reason` in the body.
+  - `pipeline_failed` (`:206-210`): **keeps the error modal** (§9); add the `announceStatus` call it also lacks.
 
-  Delivery shape: these are client-side events with no server response to hang an OOB fragment on, so the toast markup cannot come from `partials/toast-oob`. **This is the same §5.1 "never build markup client-side" conflict as the copy button, and it is bigger.** Two honest options, decide with the operator before implementing:
-  - **(a)** Keep the toolbar banner for terminal events (no change beyond the `announceStatus` additions) and let toasts stay a server-response mechanism. Cheapest, and consistent with §5.1 as written.
-  - **(b)** Amend §5.1 to allow a single named client-side entry point — `DpToast.show(variant, title, message)` in `toast.js`, which builds the one markup shape the server fragment produces and is covered by `toast.test.mjs`. Then the SSE handlers and the copy button both use it.
+  **Delivery: Shape D** (`DpToast.show`, ratified 2026-08-31 and built by the toast plan's Task 1 Steps 9-12). These are stream-borne events with no HTTP response to hang an OOB fragment on, so shapes A/B/C cannot reach them; without Shape D this screen would be the only one in the app that never notifies. **This task therefore hard-depends on 030 having landed** — if `window.DpToast.show` is absent, stop and re-check the sequencing, do not hand-roll a second builder.
 
-  **Recommendation: (b)**, because the SSE surface has no server response to attach an OOB swap to and the alternative is that the operator's most-used screen is the only one that never toasts — but it is a spec amendment, so it goes in the toast plan's §5.1 section and gets named in the handback, not slipped in here.
+```js
+      case "pipeline_completed":
+        self.terminalSeen = true;
+        editor.isExecuting = false;
+        window.DpToast.show("success", "Pipeline completed", editor.pipeline.name + " finished");
+        editor.announceStatus("Pipeline completed successfully");
+        break;
+```
+
+  `execution_aborted` takes the same form with `variant: "warning"` and the event's `reason` in the body (§6.3's "Execution aborted ({reason})"). `pipeline_failed` keeps `showError` — a failure detail is not a 6s notification — and gains only the missing `announceStatus`. The running-progress banner stays at the toolbar for the `running` state.
 
 - [ ] **Step 4: Run every editor JS test and the render tests.**
 
@@ -412,7 +418,7 @@ Expected: BUILD SUCCESSFUL with `editorJsTest` shown as RUN. Read the log's last
 
 - [ ] **Step 3: Falsification, one per guard**: the escaping test (return raw HTML from `highlight` and watch it go red), the pinned-version test, the strict-coercion test, and the reconstructibility test. Record each run.
 
-- [ ] **Step 4: Handback** at `datapipelines-orchestration/handbacks/032-execute-page.md`: evidence, falsification runs, the Task 5 Step 3 decision as taken, and the §8.1 rows left unimplemented.
+- [ ] **Step 4: Handback** at `datapipelines-orchestration/handbacks/032-execute-page.md`: evidence, falsification runs, confirmation that Task 5 used Shape D and nothing hand-rolled a second toast builder, and the §8.1 rows left unimplemented.
 
 - [ ] **Step 5: Merge** from the MAIN checkout after operator review. Check `git symbolic-ref HEAD` — the ref, not the SHA — and `git status` for foreign modified files before committing there. After pushing, verify `git merge-base --is-ancestor <your-sha> origin/main`, then a full build on main.
 

@@ -64,7 +64,13 @@ Every claim was checked on 2026-08-31 against the working tree and, for htmx beh
 
 ### Landing zone
 
-`git status` shows `modules/web/src/main/resources/templates/settings/index.html` **modified and uncommitted** — the operator added Password and API Keys cards (+12 lines at `:58`). Task 4 edits that file. Branch only after it lands, and do not carry that change into this branch. Also uncommitted: the `partials/{pipelines,templates}.html` quoting hotfix and `ListPartialsRenderTest.kt` (the table plan's landing zone).
+**Clear.** The Password and API Keys cards in `settings/index.html`, which Task 4 edits, landed on main in `a01c712` along with the list-partial quoting hotfix. Branch from a main that contains it.
+
+The real sequencing constraint is not this file — it is **029**. The table-component plan rewrites five files this plan also edits (`settings/api-keys.html`, `admin/users.html` + `AdminUsersPartialController`, `workspaces/index.html`, `DatasourcePartialController`, `datasources/list.html`), so **029 must be merged before this plan branches**. Structure first, then behaviour: starting here would only mean 029 rewriting the same lines. Verify:
+
+```bash
+git log --oneline origin/main | grep -q '(029)' && echo "029 present"
+```
 
 ---
 
@@ -92,6 +98,7 @@ Every claim was checked on 2026-08-31 against the working tree and, for htmx beh
 - **Shape A (content + toast):** the response is the normal swap content, with the `toast-oob` fragment spliced in. The triggering control keeps its `hx-target`/`hx-swap`.
 - **Shape B (toast only):** the control sets `hx-swap="none"` and the response body is the `toast-oob` fragment alone. No response headers.
 - **Shape C (refusal):** the response keeps its real 4xx status, its body is the `toast-oob` fragment, and it sets `HX-Retarget: #toast` + `HX-Reswap: beforeend`. The `toast.js` bridge from Step 3 is what makes htmx swap it.
+- **Shape D (client-originated):** `DpToast.show(variant, title, message)` in `toast.js` builds the one toast shape and appends it to `#toast`. **Ratified by the operator 2026-08-31** as a deliberate §5.1 amendment. It exists for events with no server response to attach an OOB swap to — the pipeline editor's SSE terminal events (`pipeline_completed`, `execution_aborted`, `pipeline_failed`), read off a stream rather than a swap. Without it the operator's most-used screen is the only one that never notifies. **Shape D is the exception, not a convenience**: any outcome that arrives on an HTTP response uses A, B or C, and the parity guard in Step 12 keeps the two markup definitions identical.
 
 - [ ] **Step 1: Write the failing fragment render test.**
 
@@ -235,17 +242,125 @@ Add `bridgeErrors: bridgeErrors` to the exported `api`, and call it from the bro
 
 Run: `./gradlew :modules:web:editorJsTest`
 
-- [ ] **Step 9: Record the decision and the rule in `docs/ui-screens.md` §5.1.** Under **Notifications**, add the three delivery shapes A/B/C with the wrapper requirement and the reason (children-not-element), and the hard rule verbatim from this plan's header. Under **Error rendering**, replace the `response-targets` prescription with what the build actually does: no extension is loaded; refusals that should surface as toasts set `HX-Retarget: #toast` + `HX-Reswap: beforeend` and are admitted by `toast.js`'s `bridgeErrors`; field-level validation and modal-scoped errors are unchanged. Keep the `hx-target-error` example only if you also vendor the extension — see **Open decision** below.
+- [ ] **Step 9: Write the failing tests for the client-side entry point** (Shape D). In `toast.test.mjs`:
 
-- [ ] **Step 10: Run `./scripts/docs-audit.sh`** (exit 0) and **commit.**
+```js
+test("show builds the server fragment's shape and appends it to the stack", () => {
+  const toast = loadToast();
+  const stack = fakeStack();                       // the file's existing DOM double
+  toast.show("success", "Pipeline completed", "graph_fixture finished in 1.2s", stack);
+
+  const el = stack.children[0];
+  assert.deepEqual(el.classList.value.split(" "), ["ds-toast", "ds-toast-success"]);
+  assert.equal(el.getAttribute("role"), "status");
+  // Child ORDER matters — it is the server fragment's order (partials/toast.html:9-11).
+  assert.deepEqual(el.children.map((c) => c.className),
+    ["ds-toast-close", "ds-toast-title", "ds-toast-body"]);
+  assert.equal(el.children[1].textContent, "Pipeline completed");
+});
+
+test("show escapes by construction — title and body are never parsed as markup", () => {
+  const toast = loadToast();
+  const stack = fakeStack();
+  toast.show("danger", "<img src=x onerror=alert(1)>", "<b>no</b>", stack);
+
+  // textContent, never innerHTML: the values carry abort reasons and node ids.
+  assert.equal(stack.children[0].children[1].textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(stack.children[0].children[1].children.length, 0);
+});
+
+test("show is inert when the stack is absent", () => {
+  assert.doesNotThrow(() => loadToast().show("info", "t", "m", null));
+});
+
+test("an unknown variant falls back to info rather than emitting a dead class", () => {
+  const toast = loadToast();
+  const stack = fakeStack();
+  toast.show("purple", "t", "m", stack);
+  assert.ok(stack.children[0].classList.value.includes("ds-toast-info"));
+});
+```
+
+- [ ] **Step 10: Run and verify RED**, then implement `show` in `toast.js`:
+
+```js
+  var VARIANTS = ["success", "danger", "warning", "info"];
+
+  /*
+   * The ONE client-side toast builder (ui-screens.md §5.1, Shape D). It exists for
+   * events that arrive without an HTTP response to hang an OOB swap on — the editor's
+   * SSE terminal events. Everything that DOES have a response renders partials/toast
+   * server-side; this is not a shortcut past that.
+   *
+   * Built with createElement + textContent, never innerHTML: title and body carry
+   * abort reasons, node ids and error text, none of which is trusted markup.
+   * The structure mirrors partials/toast.html exactly; ToastMarkupParityTest pins it.
+   */
+  function show(variant, title, message, stack) {
+    var target = stack || (typeof document !== "undefined" && document.getElementById("toast"));
+    if (!target) return null;
+    var v = VARIANTS.indexOf(variant) === -1 ? "info" : variant;
+    var el = document.createElement("div");
+    el.className = "ds-toast ds-toast-" + v;
+    el.setAttribute("role", "status");
+    var close = document.createElement("button");
+    close.setAttribute("type", "button");
+    close.className = "ds-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "×";
+    var t = document.createElement("div");
+    t.className = "ds-toast-title";
+    t.textContent = title;
+    var b = document.createElement("div");
+    b.className = "ds-toast-body";
+    b.textContent = message;
+    el.appendChild(close);
+    el.appendChild(t);
+    el.appendChild(b);
+    target.appendChild(el);
+    // The stack's observer arms it; arm directly too, so a stack that was never
+    // attach()ed (a test double, a page without the bootstrap) still auto-dismisses.
+    arm(el);
+    return el;
+  }
+```
+
+Export `show` on `api` alongside `attach` / `arm` / `dismiss` / `bridgeErrors`; `window.DpToast` therefore carries it.
+
+- [ ] **Step 11: Run and verify GREEN.** `./gradlew :modules:web:editorJsTest`
+
+- [ ] **Step 12: Add the markup-parity guard.** Two definitions of the same markup now exist — `partials/toast.html` and `toast.js`'s `show` — and nothing stops them drifting. Add `modules/web/src/test/kotlin/co/datapipelines/web/ui/ToastMarkupParityTest.kt`, which renders the SERVER fragment and asserts the same structural contract the JS test asserts. Both sides assert ONE contract, written down once in §5.1: root classes `ds-toast ds-toast-{variant}`, `role="status"`, and exactly three children in the order close / title / body.
+
+```kotlin
+    @Test
+    fun `the server fragment emits the contracted toast structure`() {
+        val html = render(variant = "success", title = "T", message = "M")
+
+        html shouldContain "class=\"ds-toast ds-toast-success\""
+        html shouldContain "role=\"status\""
+        val order =
+            Regex("class=\"ds-toast-(close|title|body)\"")
+                .findAll(html)
+                .map { it.groupValues[1] }
+                .toList()
+        order shouldBe listOf("close", "title", "body")
+    }
+```
+
+If either side changes without the other, one of the two tests goes red — that is the whole point. Name both tests in the §5.1 contract paragraph so the next author finds them.
+
+- [ ] **Step 13: Record the decision and the rule in `docs/ui-screens.md` §5.1.** Under **Notifications**, add the three delivery shapes A/B/C with the wrapper requirement and the reason (children-not-element), and the hard rule verbatim from this plan's header. Under **Error rendering**, replace the `response-targets` prescription with what the build actually does: no extension is loaded; refusals that should surface as toasts set `HX-Retarget: #toast` + `HX-Reswap: beforeend` and are admitted by `toast.js`'s `bridgeErrors`; field-level validation and modal-scoped errors are unchanged. Keep the `hx-target-error` example only if you also vendor the extension — see **Open decision** below. Add the **Shape D** paragraph in the same edit: the one client-side entry point, why it exists (stream-borne events have no response to attach an OOB swap to), that it is the exception rather than a general permission, and the four-part markup contract both `toast.test.mjs` and `ToastMarkupParityTest` assert — root classes `ds-toast ds-toast-{variant}`, `role="status"`, three children, order close / title / body. The existing §5.1 sentence "Markup is never built client-side" becomes "Markup is built client-side in exactly one place, `DpToast.show`, for events that carry no HTTP response; everything else is server-rendered" — amend it, do not leave it standing while the code contradicts it.
+
+- [ ] **Step 14: Run `./scripts/docs-audit.sh`** (exit 0) and **commit.**
 
 ```bash
 git add modules/web/src/main/resources/templates/partials/toast-oob.html \
         modules/web/src/main/resources/static/js/toast.js \
         modules/web/src/test/js/toast.test.mjs \
         modules/web/src/test/kotlin/co/datapipelines/web/ui/ToastOobFragmentRenderTest.kt \
+        modules/web/src/test/kotlin/co/datapipelines/web/ui/ToastMarkupParityTest.kt \
         docs/ui-screens.md
-git commit -m "feat(web): toast delivery shapes and the 4xx swap bridge (030)"
+git commit -m "feat(web): toast delivery shapes, the 4xx swap bridge, one client-side entry point (030)"
 ```
 
 ---
