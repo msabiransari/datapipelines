@@ -50,6 +50,35 @@ class DatasourcesTemplateRenderTest {
     }
 
     @Test
+    fun `list fragment renders the design-system table and badges`() {
+        val html = engine().process("partials/datasources", context().apply { fillListModel() })
+
+        html shouldContain "<table class=\"ds-table\">"
+        // The dialect chip and the readonly restriction are badges now (029).
+        html shouldContain "ds-badge ds-badge-default"
+        html shouldContain "ds-badge ds-badge-warning"
+        // The migration is only done when the inline table styles are GONE.
+        html shouldNotContain "border-collapse: collapse"
+        html shouldNotContain "padding: var(--gap-sm) var(--gap-md); text-align: left"
+    }
+
+    @Test
+    fun `list empty state uses the ds-empty primitive`() {
+        val html =
+            engine().process(
+                "partials/datasources",
+                context().apply {
+                    fillListModel()
+                    setVariable("datasources", emptyList<Datasource>())
+                },
+            )
+
+        html shouldContain "class=\"ds-empty\""
+        html shouldContain "class=\"ds-empty-title\""
+        html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
+    }
+
+    @Test
     fun `toast fragment renders the design-system toast with the model's variant`() {
         val html =
             engine().process(
@@ -87,7 +116,7 @@ class DatasourcesTemplateRenderTest {
     }
 
     private fun WebContext.fillListModel() {
-        setVariable("datasources", listOf(datasource("pg-prod"), datasource("sample-trips")))
+        setVariable("datasources", listOf(datasource("pg-prod", isReadonly = true), datasource("sample-trips")))
         setVariable("q", "trip")
         setVariable("selectedDialect", "POSTGRES")
         setVariable("offset", 0)
@@ -120,15 +149,18 @@ class DatasourcesTemplateRenderTest {
         setVariable("total", 1)
     }
 
-    private fun datasource(name: String) =
-        Datasource(
-            name = name,
-            displayName = name,
-            description = null,
-            dialect = Dialect.POSTGRES,
-            jdbcUrl = "jdbc:postgresql://db:5432/app",
-            username = "readonly",
-        )
+    private fun datasource(
+        name: String,
+        isReadonly: Boolean = false,
+    ) = Datasource(
+        name = name,
+        displayName = name,
+        description = null,
+        dialect = Dialect.POSTGRES,
+        jdbcUrl = "jdbc:postgresql://db:5432/app",
+        username = "readonly",
+        isReadonly = isReadonly,
+    )
 
     private fun context(): WebContext =
         WebContext(

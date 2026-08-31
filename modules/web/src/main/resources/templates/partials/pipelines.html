@@ -4,39 +4,43 @@
      in the DOM at all (ui-screens.md §4.3, the 028 §4.5 contract). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="pipeline-list-wrapper">
   <th:block th:if="${#lists.isEmpty(pipelines)}">
-    <div class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
-      <p style="color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--gap-sm);">No pipelines found</p>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm);" th:if="${#strings.isEmpty(q)}">Create your first pipeline to get started.</p>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm);" th:unless="${#strings.isEmpty(q)}">Try adjusting your search.</p>
+    <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear filters. -->
+    <div class="ds-empty">
+      <p class="ds-empty-title" th:if="${#strings.isEmpty(q)}">No pipelines yet</p>
+      <p class="ds-empty-title" th:unless="${#strings.isEmpty(q)}">No pipelines match your search</p>
+      <p class="ds-empty-description" th:if="${#strings.isEmpty(q)}">Create your first pipeline to get started.</p>
+      <div class="ds-empty-actions" th:unless="${#strings.isEmpty(q)}">
+        <button class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
+      </div>
     </div>
   </th:block>
 
   <th:block th:unless="${#lists.isEmpty(pipelines)}">
-    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden;">
-      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
-        <thead>
-          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Name</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Display Name</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Description</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Version</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr th:each="p : ${pipelines}"
-              style="border-bottom: 1px solid var(--border-default); cursor: pointer;"
-              th:style="'border-bottom: 1px solid var(--border-default); cursor: pointer;' + (${pStat.odd} ? ' background: var(--surface-default);' : '')"
-              th:attr="onclick='location.href=\'/pipelines/' + ${p.id} + '/editor\''">
-            <td style="padding: var(--gap-sm) var(--gap-md); font-weight: var(--weight-medium); color: var(--accent-primary);" th:text="${p.name}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md);" th:text="${p.displayName}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" th:text="${p.description}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-family: monospace;" th:text="${'v' + p.currentVersion}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right; color: var(--text-secondary);" th:text="${#temporals.format(p.updatedAt, 'yyyy-MM-dd HH:mm')}"></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- .ds-table brings its own border, radius, header fill and row hover (app.css) —
+         no wrapper div, no zebra striping, no per-cell padding. -->
+    <table class="ds-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Display Name</th>
+          <th>Description</th>
+          <th class="num">Version</th>
+          <th class="num">Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="p : ${pipelines}"
+            style="cursor: pointer;"
+            th:attr="onclick='location.href=\'/pipelines/' + ${p.id} + '/editor\''">
+          <td th:text="${p.name}"></td>
+          <td th:text="${p.displayName}"></td>
+          <td th:text="${p.description}"></td>
+          <td class="num" th:text="${'v' + p.currentVersion}"></td>
+          <td class="num" th:text="${#temporals.format(p.updatedAt, 'yyyy-MM-dd HH:mm')}"></td>
+        </tr>
+      </tbody>
+    </table>
 
     <th:block th:with="prevUrl=@{/partials/pipelines(q=${q}, offset=${offset - 25})},
                        nextUrl=@{/partials/pipelines(q=${q}, offset=${offset + 25})}">

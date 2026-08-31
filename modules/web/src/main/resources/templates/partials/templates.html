@@ -4,43 +4,48 @@
      existed in the DOM at all (ui-screens.md §4.6, the 028 §4.5 contract). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="template-list-wrapper">
   <th:block th:if="${#lists.isEmpty(templates)}">
-    <div class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
-      <p style="color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--gap-sm);">No templates found</p>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm);" th:if="${#strings.isEmpty(q)}">Create your first template to get started.</p>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm);" th:unless="${#strings.isEmpty(q)}">Try adjusting your search.</p>
+    <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear filters. -->
+    <div class="ds-empty">
+      <p class="ds-empty-title" th:if="${#strings.isEmpty(q)}">No templates yet</p>
+      <p class="ds-empty-title" th:unless="${#strings.isEmpty(q)}">No templates match your search</p>
+      <p class="ds-empty-description" th:if="${#strings.isEmpty(q)}">Create your first template to get started.</p>
+      <div class="ds-empty-actions" th:unless="${#strings.isEmpty(q)}">
+        <button class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
+      </div>
     </div>
   </th:block>
 
   <th:block th:unless="${#lists.isEmpty(templates)}">
-    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden;">
-      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
-        <thead>
-          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">ID</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Display Name</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Dialect</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Description</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Version</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr th:each="t : ${templates}"
-              style="border-bottom: 1px solid var(--border-default); cursor: pointer;"
-              th:style="'border-bottom: 1px solid var(--border-default); cursor: pointer;' + (${tStat.odd} ? ' background: var(--surface-default);' : '')"
-              th:attr="onclick='location.href=\'/templates/' + ${t.id} + '/editor\''">
-            <td style="padding: var(--gap-sm) var(--gap-md); font-weight: var(--weight-medium); color: var(--accent-primary); font-family: monospace;" th:text="${t.id}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md);" th:text="${t.displayName}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md);">
-              <span style="display: inline-block; padding: 2px var(--gap-sm); border-radius: var(--radius-base); background: var(--surface-raised); font-size: var(--text-xs); font-family: monospace;" th:text="${t.dialect.wire}"></span>
-            </td>
-            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" th:text="${t.description}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-family: monospace;" th:text="${'v' + t.version}"></td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right; color: var(--text-secondary);" th:text="${#temporals.format(t.createdAt, 'yyyy-MM-dd HH:mm')}"></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- .ds-table brings its own border, radius, header fill and row hover (app.css) —
+         no wrapper div, no zebra striping, no per-cell padding. The last column renders
+         createdAt — Template has no updatedAt, so the header says "Created". -->
+    <table class="ds-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Display Name</th>
+          <th>Dialect</th>
+          <th>Description</th>
+          <th class="num">Version</th>
+          <th class="num">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="t : ${templates}"
+            style="cursor: pointer;"
+            th:attr="onclick='location.href=\'/templates/' + ${t.id} + '/editor\''">
+          <td th:text="${t.id}"></td>
+          <td th:text="${t.displayName}"></td>
+          <td>
+            <span class="ds-badge ds-badge-default" th:text="${t.dialect.wire}"></span>
+          </td>
+          <td th:text="${t.description}"></td>
+          <td class="num" th:text="${'v' + t.version}"></td>
+          <td class="num" th:text="${#temporals.format(t.createdAt, 'yyyy-MM-dd HH:mm')}"></td>
+        </tr>
+      </tbody>
+    </table>
 
     <th:block th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},
                        nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}">
