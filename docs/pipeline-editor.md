@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.2 (revised — see Change Log)
+**Status:** v1.3 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-08-07
@@ -97,7 +97,7 @@ Theme switching at runtime: swap the `href` of `#theme-link`. All tokens cascade
 **Design system rules we follow strictly:**
 - Never use hardcoded hex values in CSS, Thymeleaf templates, or Cytoscape styles. Always reference tokens.
 - Never edit `tokens.css` or theme files (they are vendored, not forked).
-- App-specific semantic tokens (e.g., `--node-running-bg`) are defined in `app.css` and derive from design system tokens.
+- App-specific semantic tokens (e.g., `--node-running-accent`) are defined in `app.css` and derive from design system tokens.
 - Use `.ds-*` primitives wherever they fit (buttons, inputs, cards, badges, tables, modals). Override or extend only when the primitive doesn't fit.
 
 **Bridging design system tokens → Cytoscape styles:**
@@ -107,30 +107,25 @@ Cytoscape uses its own style format (not CSS). We bridge by reading computed CSS
 ```javascript
 function readDesignTokens() {
     const cs = getComputedStyle(document.documentElement);
+    // Every key falls back to a hard hex so a stale theme file cannot blank the graph
+    // (fallbacks elided here). The keys are exactly those §5.3 references.
     return {
-        surfaceDefault:    cs.getPropertyValue('--surface-default').trim(),
-        surfaceRaised:     cs.getPropertyValue('--surface-raised').trim(),
-        textPrimary:       cs.getPropertyValue('--text-primary').trim(),
-        textMuted:         cs.getPropertyValue('--text-muted').trim(),
-        textInverted:      cs.getPropertyValue('--text-inverted').trim(),
-        accentPrimary:     cs.getPropertyValue('--accent-primary').trim(),
-        accentPrimaryText: cs.getPropertyValue('--accent-primary-text').trim(),
-        accentDanger:      cs.getPropertyValue('--accent-danger').trim(),
-        accentDangerText:  cs.getPropertyValue('--accent-danger-text').trim(),
-        borderDefault:     cs.getPropertyValue('--border-default').trim(),
-        borderFocus:       cs.getPropertyValue('--border-focus').trim(),
-        // Node-state tokens (defined in app.css, derive from design system)
-        nodeIdleBg:        cs.getPropertyValue('--node-idle-bg').trim(),
-        nodeRunningBg:     cs.getPropertyValue('--node-running-bg').trim(),
-        nodeRunningText:   cs.getPropertyValue('--node-running-text').trim(),
-        nodeSuccessBg:     cs.getPropertyValue('--node-success-bg').trim(),
-        nodeSuccessText:   cs.getPropertyValue('--node-success-text').trim(),
-        nodeFailedBg:      cs.getPropertyValue('--node-failed-bg').trim(),
-        nodeFailedText:    cs.getPropertyValue('--node-failed-text').trim(),
-        nodeAbortedBg:     cs.getPropertyValue('--node-aborted-bg').trim(),
-        nodeAbortedText:   cs.getPropertyValue('--node-aborted-text').trim(),
-        edgeDefault:       cs.getPropertyValue('--edge-default').trim(),
-        edgeActive:        cs.getPropertyValue('--edge-active').trim(),
+        // Node card (§5.3)
+        nodeSurface:       cs.getPropertyValue('--node-surface').trim(),
+        nodeBorder:        cs.getPropertyValue('--node-border').trim(),
+        nodeLabelText:     cs.getPropertyValue('--node-label-text').trim(),
+        // Selection (§5.3)
+        nodeSelectedRing:  cs.getPropertyValue('--node-selected-ring').trim(),
+        nodeSelectedHalo:  cs.getPropertyValue('--node-selected-halo').trim(),
+        // State accents (§6.2) — success/failed/aborted fall back to the banner's
+        // --node-*-bg tokens so a theme overriding those re-themes both surfaces
+        nodeRunningAccent: cs.getPropertyValue('--node-running-accent').trim(),
+        nodeSuccessAccent: cs.getPropertyValue('--node-success-accent').trim(),
+        nodeFailedAccent:  cs.getPropertyValue('--node-failed-accent').trim(),
+        nodeAbortedAccent: cs.getPropertyValue('--node-aborted-accent').trim(),
+        // Edges
+        edgeIdleStroke:    cs.getPropertyValue('--edge-idle-stroke').trim(),
+        edgeActiveStroke:  cs.getPropertyValue('--edge-active-stroke').trim(),
     };
 }
 ```
@@ -371,7 +366,7 @@ class PipelineGraph {
 
     render() {
         const elements = this.buildElements(this.pipeline);
-        const layout = this.buildLayout();
+        const layout = this.layoutOptions();
 
         this.cy = cytoscape({
             container: document.getElementById('cy'),
@@ -409,8 +404,9 @@ class PipelineGraph {
             // else adds them later. `idle` is applied at build time so setNodeStatus()'s
             // removeClass('idle running success failed aborted') stays symmetric (§6.4).
             classes: [
-                `nodeType${n.type}`,            // nodeTypeDQL | nodeTypeDML | nodeTypeDDL
-                'idle',
+                'idle',                          // explicit — §6.2 symmetry
+                `type-${n.type.toLowerCase()}`,  // type-dql | type-dml | type-ddl
+                                                 // (PIPELINE nodes get `pipeline-node` instead)
                 ...(isCaller(n) ? ['caller'] : []),
             ].join(' '),
         }));
@@ -431,14 +427,21 @@ class PipelineGraph {
         return [...nodes, ...edges];
     }
 
-    buildLayout() {
+    // The layout options actually passed (v1.3). nodeDimensionsIncludeLabels is
+    // MANDATORY with the label below the shape (§5.3): at its cytoscape-dagre
+    // default of false, dagre lays out on the node box alone and one rank's labels
+    // collide with the next. marginX/marginY are NOT cytoscape-dagre options (they
+    // belong to grid/cose and are silently ignored) — padding is the edge clearance,
+    // and `fit` defaults to true, so there is no manual cy.fit() call.
+    layoutOptions() {
         return {
             name: 'dagre',
             rankDir: 'LR',                      // left-to-right
             nodeSep: 50,                        // vertical spacing between nodes at same rank
             rankSep: 100,                       // horizontal spacing between ranks
-            directed: true,
+            edgeSep: 12,
             padding: 30,
+            nodeDimensionsIncludeLabels: true,  // labels are part of a node's box
         };
     }
 }
@@ -460,110 +463,77 @@ v1 ships with dagre LR. The layout choice is configurable per pipeline in a futu
 
 ### 5.3 Graph stylesheet
 
-The Cytoscape stylesheet reads design system tokens at init time via `readDesignTokens()` (§3.4) and uses them throughout. No hardcoded hex values. When the theme changes, the graph re-reads tokens and re-applies the stylesheet.
+The Cytoscape stylesheet reads design system tokens at init time via `readDesignTokens()` (§3.4) and uses them throughout. No hardcoded hex values in the JS — every value resolves through a `--node-*` / `--edge-*` custom property that `app.css` maps onto design-system variables with a hex fallback. When the theme changes, `updateTheme()` re-reads the tokens and re-applies the stylesheet without a page reload.
+
+Three visual channels, deliberately non-overlapping (ratified 2026-08-31): **shape carries TYPE, colour carries STATE, the ring carries SELECTION.** No channel competes with another for the same pixels, and shape survives greyscale, colour-blindness and theme swaps on its own.
+
+Two deliberate changes from earlier revisions of this section, both from the operator contract (*"label contained below, not inside"*, *"a shape for select"*):
+
+1. **The label renders BELOW the shape**, full text (stylesheet-side ellipsis at `text-max-width: 160px`) — not truncated at 20 characters inside an 80×40 box. Earlier revisions specified `text-valign: center` with the label inside the shape; the dagre layout must compensate, see `nodeDimensionsIncludeLabels` in §5.1.
+2. **Execution state is an accent border, not a background fill.** The card keeps its neutral `--node-surface` in every state; the earlier `--node-*-bg` / `--node-*-text` background/text pairs are superseded by the `--node-*-accent` tokens (§6.2).
 
 ```javascript
-function buildGraphStyle(t) {        // t = readDesignTokens() output
+function buildStylesheet(t) {        // t = readDesignTokens() output
     return [
-        // Default node
+        // Node card — neutral surface, label BELOW the shape
         {
             selector: 'node',
             style: {
+                'background-color': t.nodeSurface,       // --node-surface
+                'color': t.nodeLabelText,                // --node-label-text
                 'label': 'data(label)',
-                'text-valign': 'center',
+                'text-valign': 'bottom',
                 'text-halign': 'center',
-                'color': t.textInverted,
-                'text-outline-color': t.nodeIdleBg,
-                'text-outline-width': 2,
-                'background-color': t.nodeIdleBg,
-                'border-width': 2,
-                'border-color': t.borderDefault,
+                'text-margin-y': 8,
+                'font-size': '12px',
+                'text-wrap': 'ellipsis',
+                'text-max-width': '160px',
+                'width': 120,
+                'height': 44,
                 'shape': 'round-rectangle',
-                'width': 140,
-                'height': 50,
-                'font-size': 12,
-                'font-weight': 'bold',
-                'font-family': 'Inter, ui-sans-serif, system-ui, sans-serif',
+                'border-width': 1,
+                'border-color': t.nodeBorder,            // --node-border
             }
         },
-        // Node type indicators via class
-        {
-            selector: 'node.nodeTypeDQL',
-            style: { 'background-color': t.accentPrimary }
-        },
-        {
-            selector: 'node.nodeTypeDML',
-            style: { 'shape': 'round-diamond' }          // distinct shape for side-effects
-        },
-        {
-            selector: 'node.nodeTypeDDL',
-            style: { 'shape': 'round-tag' }              // distinct shape for schema changes
-        },
-        // Execution states (§6) — all colors from design system tokens
-        {
-            selector: 'node.running',
-            style: {
-                'background-color': t.nodeRunningBg,
-                'border-color': t.nodeRunningBg,
-                'border-width': 3,
-                'color': t.nodeRunningText,
-                'text-outline-color': t.nodeRunningBg,
-            }
-        },
-        {
-            selector: 'node.success',
-            style: {
-                'background-color': t.nodeSuccessBg,
-                'border-color': t.nodeSuccessBg,
-                'color': t.nodeSuccessText,
-                'text-outline-color': t.nodeSuccessBg,
-            }
-        },
-        {
-            selector: 'node.failed',
-            style: {
-                'background-color': t.nodeFailedBg,
-                'border-color': t.nodeFailedBg,
-                'border-width': 3,
-                'color': t.nodeFailedText,
-                'text-outline-color': t.nodeFailedBg,
-            }
-        },
-        {
-            selector: 'node.aborted',
-            style: {
-                'background-color': t.nodeAbortedBg,
-                'opacity': 0.5,
-                'color': t.nodeAbortedText,
-                'text-outline-color': t.nodeAbortedBg,
-            }
-        },
-        // Selected node
-        {
-            selector: 'node.selected',
-            style: {
-                'border-width': 4,
-                'border-color': t.accentPrimary,        // design system focus ring color
-            }
-        },
+        // TYPE channel — per-type shapes (DQL keeps the round-rectangle above)
+        { selector: 'node.type-dml', style: { 'shape': 'round-diamond' } },   // side-effects
+        { selector: 'node.type-ddl', style: { 'shape': 'round-tag' } },       // schema changes
+        // STATE channel — accent borders, never a background fill (§6.2)
+        { selector: 'node.running', style: { 'border-color': t.nodeRunningAccent, 'border-width': 2 } },
+        { selector: 'node.success', style: { 'border-color': t.nodeSuccessAccent, 'border-width': 2 } },
+        { selector: 'node.failed',  style: { 'border-color': t.nodeFailedAccent,  'border-width': 2 } },
+        { selector: 'node.aborted', style: { 'border-color': t.nodeAbortedAccent, 'border-width': 2, 'opacity': 0.5 } },
         // Caller node (resolves to output.target: caller) — distinct visual marker.
         // Applied in buildElements() (§5.1). At most one node carries it; a pure-ETL
-        // pipeline has none.
+        // pipeline has none. Ordered AFTER the state accents so the double border
+        // survives a state change — the accent colour shows on the double border
+        // itself. See [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node).
+        { selector: 'node.caller', style: { 'border-style': 'double', 'border-width': 5 } },
+        // Composition (§7): a PIPELINE node runs another pipeline as a child execution.
+        { selector: 'node.pipeline-node', style: { 'shape': 'hexagon' } },
+        // SELECTION channel — Cytoscape's :selected PSEUDO-CLASS, not a .selected
+        // class: init.js/a11y.js already drive cyNode.select() (§5.4). Ring +
+        // underlay halo (underlay paints BEHIND the node; an overlay would dim the
+        // label). Ordered last so selection wins the border while it holds.
         {
-            selector: 'node.caller',
+            selector: 'node:selected',
             style: {
-                'border-style': 'double',
-                'border-width': 5,
+                'border-width': 3,
+                'border-color': t.nodeSelectedRing,      // --node-selected-ring
+                'underlay-color': t.nodeSelectedHalo,    // --node-selected-halo
+                'underlay-opacity': 0.18,
+                'underlay-padding': 6,
             }
         },
         // Edges
         {
             selector: 'edge',
             style: {
-                'width': 2,
-                'line-color': t.edgeDefault,
-                'target-arrow-color': t.edgeDefault,
+                'width': 1.5,
+                'line-color': t.edgeIdleStroke,          // --edge-idle-stroke
+                'target-arrow-color': t.edgeIdleStroke,
                 'target-arrow-shape': 'triangle',
+                'arrow-scale': 1.2,
                 'curve-style': 'bezier',
             }
         },
@@ -571,16 +541,16 @@ function buildGraphStyle(t) {        // t = readDesignTokens() output
         {
             selector: 'edge.active',
             style: {
-                'line-color': t.edgeActive,
-                'target-arrow-color': t.edgeActive,
-                'width': 3,
+                'width': 2.5,
+                'line-color': t.edgeActiveStroke,        // --edge-active-stroke
+                'target-arrow-color': t.edgeActiveStroke,
             }
         },
     ];
 }
 ```
 
-**Key difference from v1.0:** all colors are now variable (read from the design system at init time), not hardcoded constants. A theme switch (light → dark → professional) changes every color in the graph without page reload.
+`readDesignTokens()` returns exactly the keys referenced above — `nodeSurface`, `nodeBorder`, `nodeLabelText`, `nodeSelectedRing`, `nodeSelectedHalo`, `nodeRunningAccent`, `nodeSuccessAccent`, `nodeFailedAccent`, `nodeAbortedAccent`, `edgeIdleStroke`, `edgeActiveStroke` — each read from the same-named custom property in `app.css` with a hard hex fallback, so a stale theme file cannot blank the graph. The success/failed/aborted accents fall back to the banner's `--node-*-bg` tokens first, so a theme overriding those keeps banner and graph on the same hue.
 
 ### 5.4 Event handlers
 
@@ -602,19 +572,19 @@ wireEventHandlers() {
     });
 }
 
-// The `.selected` class in §5.3 is applied HERE and nowhere else — Cytoscape's own
-// :selected pseudo-state is not used, so the class must be managed explicitly.
-// Selection is exclusive: at most one node carries `.selected`.
+// Selection uses Cytoscape's own :selected pseudo-state — the §5.3 stylesheet keys on
+// the pseudo-class, so selection is cyNode.select()/unselect() and nothing else. There
+// is NO .selected class to manage. Selection is exclusive: at most one node is selected.
 selectNode(nodeId) {
     this.clearSelection();
     const node = this.cy.getElementById(nodeId);
-    node.addClass('selected');
+    node.select();
     this.selectedNodeId = nodeId;
     window.a11y.syncSelection(nodeId);       // mirrors aria-selected on the §14 DOM list
 }
 
 clearSelection() {
-    this.cy.nodes().removeClass('selected');
+    this.cy.elements().unselect();
     this.selectedNodeId = null;
     window.a11y.syncSelection(null);
 }
@@ -657,13 +627,19 @@ interrupted its statement.
 
 All colors derive from app-specific semantic tokens defined in `app.css`, which in turn derive from the `@acme/design-tokens` design system. See Appendix A for the full token mapping.
 
-| State | CSS class | Token (background) | Token (text) | Animation | Meaning |
-|---|---|---|---|---|---|
-| `idle` | `.idle` | `--node-idle-bg` | `--node-idle-text` | none | Initial state, not yet executed. Applied in `buildElements()` (§5.1) so all five statuses are symmetric classes — there is no implicit "no class" state. |
-| `running` | `.running` | `--node-running-bg` | `--node-running-text` | pulse | Node is currently executing |
-| `success` | `.success` | `--node-success-bg` | `--node-success-text` | none | Node completed successfully |
-| `failed` | `.failed` | `--node-failed-bg` | `--node-failed-text` | brief flash | Node failed; pipeline aborted |
-| `aborted` | `.aborted` | `--node-aborted-bg` | `--node-aborted-text`, 0.5 opacity | none | Node never ran (dependency failed), or was interrupted by cancellation |
+**State is an accent border on the neutral card, not a background fill** (changed in v1.3 — see §5.3 for the rationale: colour carries STATE and never competes with shape for TYPE or the ring for SELECTION). The card's `--node-surface` background and `--node-label-text` label are constant across all five states.
+
+| State | CSS class | Accent token | Animation | Meaning |
+|---|---|---|---|---|
+| `idle` | `.idle` | — (neutral card: `--node-border`) | none | Initial state, not yet executed. Applied in `buildElements()` (§5.1) so all five statuses are symmetric classes — there is no implicit "no class" state. |
+| `running` | `.running` | `--node-running-accent` | pulse (border-width 2↔5, JS-driven; still under `prefers-reduced-motion: reduce`) | Node is currently executing |
+| `success` | `.success` | `--node-success-accent` | none | Node completed successfully |
+| `failed` | `.failed` | `--node-failed-accent` | none | Node failed; pipeline aborted |
+| `aborted` | `.aborted` | `--node-aborted-accent`, 0.5 opacity | none | Node never ran (dependency failed), or was interrupted by cancellation |
+
+The running pulse is gated in JS on `window.matchMedia("(prefers-reduced-motion: reduce)")` — the graph is a `<canvas>`, so the design system's CSS `prefers-reduced-motion` blocks cannot reach it. A Cytoscape stylesheet has no keyframes, so the pulse is a JS-driven `ele.animate` loop that stops when the node leaves `running`. Under reduced motion the node keeps its accent border and simply does not animate — the still state is unambiguous.
+
+Earlier revisions specified a "brief flash" on `failed`; **v1.3 withdraws that requirement** (it was never implemented). The failure is already signalled by the accent border, the details panel error (§8) and the banner — a canvas flash would in any case be invisible to the keyboard/screen-reader users the §14 node list serves.
 
 Colors automatically adapt to the active design system theme. No hardcoded hex values.
 
@@ -1271,15 +1247,15 @@ The accessible surface is therefore a **parallel DOM structure mirroring the gra
 |---|---|---|
 | `Tab` / `Shift+Tab` | page | Execute → version dropdown → parameter inputs → **node list** → graph controls → result panel |
 | `Enter` | Execute button | Execute pipeline |
-| `↑` / `↓` | node list | Move the active option (`aria-activedescendant` on the `<ul>`), selecting as it moves |
+| `↑` / `↓` | node list | Move focus between options (roving `tabindex` — exactly one `<li>` is tabbable) |
 | `Home` / `End` | node list | First / last node |
-| `Enter` / `Space` | node list | Open the details panel for the active node |
+| `Enter` / `Space` | node list | Select the focused node, opening its details panel |
 | `Escape` | anywhere | Close details panel → result panel → error modal (topmost first) |
 | `+` / `−` | node list or graph controls | Zoom in / out |
 | `F` | node list or graph controls | Fit graph to viewport |
 | `R` | node list or graph controls | Reset node states to idle (only after a terminal event) |
 
-Selection is bidirectional and single-sourced: arrowing the list calls `PipelineGraph.selectNode()` (§5.4), which sets `.selected` on the canvas node, centres the viewport on it, and sets `aria-selected="true"` on the matching `<li>`. Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
+Selection is bidirectional and single-sourced: `Enter`/`Space` (or a click) on a list item calls `selectNodeById()` (§5.4), which calls `cyNode.select()` on the canvas node — the `node:selected` pseudo-class the §5.3 stylesheet styles — and sets `aria-selected="true"`, `tabindex="0"` and focus on the matching `<li>` (roving tabindex). Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
 
 The graph canvas is **not** in the tab order (`tabindex="-1"`) — focusing an image the user cannot interact with is a trap, and every graph action is reachable from the list or the controls.
 
@@ -1287,7 +1263,7 @@ The graph canvas is **not** in the tab order (`tabindex="-1"`) — focusing an i
 
 `a11y.js` owns two jobs, both driven by the same SSE handler that styles the canvas (§6.4) — there is no second source of truth for status:
 
-- `syncStatus(nodeId, status)` rewrites the matching `<li>`'s text (`fetch_orders — DQL — running`). Because the option text changes rather than an ARIA attribute alone, screen readers announce it when the option is active.
+- `a11yNodeState(nodeId, state)` sets the matching `<li>`'s `data-state` attribute (`idle`/`running`/`success`/`failed`/`aborted`), styled with the same accent tokens as the graph's state border — a keyboard user sees execution state without the canvas. It is called from `PipelineGraph.setNodeState()`/`resetAll()`, the same functions that style the canvas, so there is no second source of truth for status.
 - `announce(eventType, data)` writes one sentence into `#graph-status` (`role="status"`, `aria-live="polite"`): `"fetch_orders running"`, `"fetch_orders failed: could not reach pg-prod"`, `"Pipeline completed, 4480 rows"`, `"Execution aborted (cancelled)"`. Terminal and failure events use `aria-live="assertive"` via a second region; per-node progress stays polite so a 20-node pipeline does not flood the buffer.
 - Rapid node transitions are coalesced (max one announcement per 500 ms, latest wins) — parallel branches otherwise emit faster than speech synthesis can consume.
 - The Execute button carries `aria-busy="true"` for the duration of the stream.
@@ -1296,18 +1272,17 @@ Other regions: details panel `role="region" aria-label="Node details"`; result p
 
 ### 14.3 Color contrast
 
-All node state colors derive from design system tokens, which are audited for WCAG AA compliance by the design system's own contrast audit (`npm run audit:contrast` in the design system project). The specific token mappings in Appendix A ensure:
+All node colors derive from design system tokens, which are audited for WCAG AA compliance by the design system's own contrast audit (`npm run audit:contrast` in the design system project). The token mappings in Appendix A ensure:
 
-- **Idle** (`--text-muted` background, `--text-inverted` text): meets AA for large text (node labels are 12px bold with outline).
-- **Running** (`--accent-primary` background, `--accent-primary-text` text): design system guarantees this pairing is AA-compliant (it's the same pairing used for primary buttons).
-- **Success** (`--text-success` background, `--text-inverted` text): verified per-theme in the design system.
-- **Failed** (`--accent-danger` background, `--accent-danger-text` text): design system guarantees this pairing is AA-compliant (same as danger buttons).
+- **The card is constant across states** (`--node-surface` background, `--node-label-text` label): one pairing to audit, and it is the same surface/text pairing the design system uses for raised cards.
+- **State accents are borders, not fills** (`--node-*-accent` on a 2px border): they carry state *in addition to* the shape/type and ring/selection channels, so even a hypothetical low-contrast accent never hides information — the §14 node list repeats every state in words and in its own accent stripe.
+- **Selection** (`--node-selected-ring`): the design system's primary/focus accent, AA-compliant as an indicator against both light and dark surfaces.
 
 If a custom theme introduces a contrast issue, the design system's contrast audit catches it at build time. We run `npm run audit:contrast` in the design system project as part of our CI when syncing themes.
 
 For colorblind users, status is also indicated by:
-- **Shape**: DML nodes are diamonds, DDL are tags, DQL are rectangles.
-- **Icon**: success shows ✓, failed shows ✗, running shows ⟳ (added as node label suffix).
+- **Shape**: DML nodes are diamonds, DDL are tags, DQL are rectangles (PIPELINE nodes are hexagons).
+- **Opacity**: aborted nodes render at 0.5 opacity — a non-color channel.
 - **Text**: the details panel and the §14 node list always show the status in words — no state is conveyed by color alone.
 
 ---
@@ -1475,34 +1450,36 @@ The pipeline editor defines **app-specific semantic tokens** in `app.css` that d
 ```css
 :root {
     /* ============================================================
-       Node state colors — derive from design system accent tokens
+       Graph node cards (§5.3) — neutral card; TYPE is shape, STATE
+       is an accent border, SELECTION is the ring
        ============================================================ */
+    --node-surface:        var(--surface-raised);
+    --node-border:         var(--border-default);
+    --node-label-text:     var(--text-primary);
+    --node-selected-ring:  var(--accent-primary);
+    --node-selected-halo:  var(--accent-primary);
+    --node-running-accent: var(--accent-primary);
+    --node-success-accent: var(--accent-success);
+    --node-failed-accent:  var(--accent-danger);
+    --node-aborted-accent: var(--accent-warning);
 
-    /* Idle: muted background, inverted text (readable on dark node) */
-    --node-idle-bg:      var(--text-muted);
-    --node-idle-text:    var(--text-inverted);
-
-    /* Running: primary action color (indigo in saas theme) */
-    --node-running-bg:   var(--accent-primary);
-    --node-running-text: var(--accent-primary-text);
-
-    /* Success: success text color (dark green in saas theme, works as node bg with white text) */
-    --node-success-bg:   var(--text-success);
-    --node-success-text: var(--text-inverted);
-
-    /* Failed: danger accent (red in all themes) */
+    /* ============================================================
+       Banner state fills (pipeline-editor.css .pe-banner) — the
+       graph's success/failed/aborted accents fall back to these,
+       so a theme override re-themes banner and graph together
+       ============================================================ */
+    --node-success-bg:   var(--accent-success);
+    --node-success-text: var(--accent-primary-text);
     --node-failed-bg:    var(--accent-danger);
     --node-failed-text:  var(--accent-danger-text);
-
-    /* Aborted: muted, reduced opacity applied via Cytoscape */
-    --node-aborted-bg:   var(--text-muted);
-    --node-aborted-text: var(--text-inverted);
+    --node-aborted-bg:   var(--accent-warning);
+    --node-aborted-text: var(--accent-primary-text);
 
     /* ============================================================
        Edge colors
        ============================================================ */
-    --edge-default:      var(--border-default);
-    --edge-active:       var(--accent-primary);
+    --edge-idle-stroke:  var(--text-secondary);
+    --edge-active-stroke: var(--accent-primary);
 
     /* ============================================================
        Editor layout — uses design system layout tokens
@@ -1517,8 +1494,8 @@ The pipeline editor defines **app-specific semantic tokens** in `app.css` that d
 
 We don't reference `--accent-primary` directly in Cytoscape styles because:
 
-1. **Indirection enables restyling.** If we later decide "running nodes should be teal, not indigo," we change `--node-running-bg` in one place, not every Cytoscape selector.
-2. **Semantic clarity.** `--node-running-bg` is self-documenting. `--accent-primary` requires the reader to know what accent-primary means in the context of a graph node.
+1. **Indirection enables restyling.** If we later decide "running nodes should be teal, not indigo," we change `--node-running-accent` in one place, not every Cytoscape selector.
+2. **Semantic clarity.** `--node-running-accent` is self-documenting. `--accent-primary` requires the reader to know what accent-primary means in the context of a graph node.
 3. **Theme portability.** Some design system themes may have unusual accent colors (e.g., `minimal` theme uses black + white). The app-specific tokens let us remap for edge cases without touching Cytoscape code.
 
 ### A.3 Design system tokens used directly (no app wrapper)
@@ -1585,6 +1562,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-31 | v1.3 | graph design (031) | §5.3 rewritten to the shipped stylesheet: node cards with the label BELOW the shape (was `text-valign: center` inside an 80×40 box, truncated at 20 chars — genuine change, operator contract), per-TYPE shapes (`type-dml` round-diamond, `type-ddl` round-tag, `pipeline-node` hexagon; classes renamed from the never-implemented `nodeTypeDQL` form), the `node.caller` marker (double border, contract §9) now actually emitted and styled, and SELECTION as the `node:selected` PSEUDO-CLASS with ring + underlay halo (was a `.selected` class the code never had; §5.4 corrected to match — selection is `cyNode.select()`, driven by init.js/a11y.js). State becomes an accent border via new `--node-*-accent` tokens (§6.2), superseding the `--node-*-bg/text` fill pairs — the second genuine change; the fill pairs remain only for the `.pe-banner` fills. §6.2: the unimplemented `failed` "brief flash" requirement WITHDRAWN; the running pulse specified honestly as a JS-driven `ele.animate` loop gated on `window.matchMedia("(prefers-reduced-motion: reduce)")` (canvas — CSS media queries cannot reach it). §5.1: layout options recorded as shipped — `edgeSep`, `padding`, and `nodeDimensionsIncludeLabels: true` (mandatory once labels sit below shapes); `marginX`/`marginY` noted as non-dagre options. §14.1/§14.2: node list corrected to roving tabindex (the previous markup gave `<li>`s no `tabindex` — the keyboard path was dead) and the `data-state` execution-state mirror. §3.4 bridge listing and Appendix A token map updated to the shipped token names. |
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline editor UI spec: Thymeleaf + Alpine.js + Cytoscape.js 3.34.0 + cytoscape-dagre. Three-panel layout, 5 node states, SSE-driven graph updates, vendoring strategy, accessibility, keyboard nav. |
 | 2026-08-07 | v1.2 | consistency campaign | **[D7]** §15 rewritten: no SSE reconnection and no `Last-Event-Id` — a dropped stream cancels the execution after the grace period; the editor warns, polls `GET /executions/{id}` at most twice for the final status, and renders `ABORTED`. `execution_aborted` (rest-api §6.4.8) wired into §6.3/§6.4 as a terminal event; explicit Cancel (`DELETE /executions/{id}`) added (§15.2). **[D9]** §10 rewritten for uniform result delivery: one panel shape, inline first page from `data_ready`, cursor paging/downloads within a fixed TTL, `result.expired` handling; inline-vs-claim-check split deleted. **[D1]** "terminal node" → **caller node** throughout; `.terminal` Cytoscape class renamed `.caller` and actually applied in `buildElements()`; zero-caller pipelines documented (no `data_ready`). **[D8]** Theme resolution corrected to `${activeTheme} = users.theme_preference ?: datapipelines.ui.theme` (per-user override, deployment value as default — ui-screens.md v1.1 §4.11); the config key, its default and the valid theme list are referenced from configuration.md §3.10 instead of restated (§3.4, Appendix A.5). **[M]** "Native EventSource" removed from the §3.2 stack (contradicted §7.3). Styling wiring fixed: `nodeType*` and `idle` classes added at build time, `.selected` managed in `selectNode()`/`clearSelection()`. §4.2 adds `result.js`, `a11y.js` and the `x-on:show-error.window` listener that gives §9.1's dispatch a consumer. **[M]** §7.2 `collectParameters()` coerces values to declared wire types (pipeline-contract §6.3) instead of posting FormData strings. **[M]** §14 accessibility rewritten honestly for canvas rendering: per-node `role="button"` is impossible, replaced by a parallel visually-hidden `<ul role="listbox">`, `role="img"` canvas, and an `aria-live` status region. **[M]** Progressive-enhancement overclaim removed (no-JS = metadata + node list, no graph). **[M]** §11 edit mode removed from v1 scope (`?edit=true` deleted) — authoring is LLM/MCP-first, UI edit mode is a ROADMAP item. **[M]** `vendor-manifest.json` unified to `static/vendor/design-system/`. **[M]** Duplicate `### 13.2` renumbered (version upgrades → §13.3). Anchor fixes: auth §6, dag-executor/rest-api cross-links; `jdbc_url` removed from the §9.2 error mockup. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.13. |
 | 2026-08-05 | v1.1 | design system integration | Integrated `@acme/design-tokens` design system as the styling foundation. All hardcoded colors replaced with design system tokens (`--surface-*`, `--text-*`, `--accent-*`). HTML uses `.ds-*` primitives (`.ds-button`, `.ds-card`, `.ds-modal`, etc.). Cytoscape stylesheet reads tokens via `readDesignTokens()` bridge. App-specific node-state tokens (`--node-*-bg/text`) derive from design system accent tokens. Theme switching (9 themes including dark mode) works at runtime without page reload. Replaced Appendix A entirely. Updated vendoring to include design system CSS. |
