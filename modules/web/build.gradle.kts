@@ -64,3 +64,65 @@ dependencies {
     // Konsist architecture guard for the web layer (module-structure.md §7.8).
     testImplementation(libs.konsist)
 }
+
+// 027b A/B/C+D — automated coverage for the pipeline-editor JS (the SSE frame
+// parser, the execute-path wire coercion, the result-panel paging). No JS test
+// harness existed in the repo and 027's six execute-path fixes shipped with
+// zero automated coverage; these run on Node's BUILT-IN test runner
+// (`node --test`), so they add NO package, NO lockfile, NO runner dependency —
+// the deliberate dependency decision, named in the 027b handback. Node >= 18
+// (the runner's floor); the editor JS is browser IIFE code published on
+// `window`, which the tests shim and require directly.
+//
+// Node-less machines SKIP with a lifecycle banner rather than fail the build:
+// the Gradle toolchain pins JDK, not node, and every other module builds
+// node-free. Where node exists (dev boxes, this guard's audience), a red
+// parser/paging test fails `check` like any other test.
+val editorJsTests =
+    fileTree("src/test/js") {
+        include("*.test.mjs")
+    }
+
+tasks.register("editorJsTest") {
+    group = "verification"
+    description = "Runs the pipeline-editor JS unit tests (sse parser, coercion, paging) on node --test."
+    doLast {
+        val node =
+            System.getenv("PATH")
+                ?.split(File.pathSeparator)
+                ?.asSequence()
+                ?.map { File(it, "node") }
+                ?.firstOrNull { it.canExecute() }
+        if (node == null) {
+            logger.lifecycle("editorJsTest SKIPPED — node not on PATH (install Node >= 18 to run the editor JS guard)")
+            return@doLast
+        }
+        val testFiles = editorJsTests.files.sortedBy { it.name }
+        if (testFiles.isEmpty()) throw GradleException("editorJsTest found no *.test.mjs under src/test/js — the guard ran vacuously")
+        logger.lifecycle("editorJsTest: {} on {}", node.absolutePath, nodeVersion(node))
+        val argv =
+            buildList {
+                add(node.absolutePath)
+                add("--test")
+                addAll(testFiles.map { it.absolutePath })
+            }
+        val proc =
+            ProcessBuilder(argv)
+                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start()
+        if (proc.waitFor() != 0) throw GradleException("editorJsTest FAILED (node --test exited ${proc.exitValue()})")
+    }
+}
+
+fun nodeVersion(node: File): String =
+    ProcessBuilder(node.absolutePath, "--version")
+        .start()
+        .inputStream
+        .bufferedReader()
+        .readText()
+        .trim()
+
+tasks.named("check") {
+    dependsOn("editorJsTest")
+}
