@@ -54,15 +54,26 @@ class AdminUsersPartialController(
     ): ResponseEntity<String> {
         requireSessionAdmin("create-local-user")
         if (email.isBlank() || !email.contains('@')) {
-            return ResponseEntity.badRequest().body(errorSpan("A valid email address is required"))
+            return refusedToast(HttpStatus.BAD_REQUEST, "User not created", "A valid email address is required")
         }
         return when (val result = localPasswordService.createLocalUser(email, displayName, currentPrincipal().userId)) {
             is LocalPasswordService.CreateResult.EmailTaken -> {
-                ResponseEntity.status(HttpStatus.CONFLICT).body(errorSpan("An account with that email already exists"))
+                refusedToast(HttpStatus.CONFLICT, "User not created", "An account with that email already exists")
             }
 
             is LocalPasswordService.CreateResult.Success -> {
-                ResponseEntity.ok(buildUserRow(result.user) + oneTimeNotice(result.oneTimePassword, result.user.email))
+                // Shape A: the row prepends, the one-time password stays in its PERSISTENT
+                // inline notice (§5.1's hard rule), and the toast only POINTS at it.
+                ResponseEntity.ok(
+                    buildUserRow(result.user) +
+                        oneTimeNotice(result.oneTimePassword, result.user.email) +
+                        ToastHtml.oob(
+                            "success",
+                            "Local user created",
+                            ToastHtml.esc(result.user.email) +
+                                " — the one-time password is shown once on this screen; pass it to the user out-of-band.",
+                        ),
+                )
             }
         }
     }
@@ -113,12 +124,30 @@ class AdminUsersPartialController(
             }
 
             else -> {
-                return ResponseEntity.badRequest().body(errorSpan("Unknown action: $action"))
+                return refusedToast(HttpStatus.BAD_REQUEST, "Action refused", "Unknown action: $action")
             }
         }
         val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build()
-        return ResponseEntity.ok(buildUserRow(updated))
+        // Shape A: the row keeps its #user-row outerHTML swap; the toast names the
+        // action and the user it happened to.
+        val (title, outcome) = actionOutcome(action)
+        return ResponseEntity.ok(
+            buildUserRow(updated) +
+                ToastHtml.oob("success", title, "${ToastHtml.esc(updated.email)} $outcome"),
+        )
     }
+
+    /** The toast copy for a completed row action — what happened, in the user's words. */
+    private fun actionOutcome(action: String): Pair<String, String> =
+        when (action) {
+            "activate" -> "User activated" to "can sign in again."
+            "deactivate" -> "User deactivated" to "can no longer sign in."
+            "promote" -> "Admin granted" to "is now an administrator."
+            "demote" -> "Admin revoked" to "is no longer an administrator."
+            "disable-local" -> "Local access disabled" to "now signs in via the identity provider only."
+            "unlock" -> "Account unlocked" to "the lockout is cleared."
+            else -> error("unreachable — unknown actions returned above")
+        }
 
     /** Admin reset: the refreshed row plus the one-time password shown exactly once. */
     private fun resetPassword(
@@ -127,7 +156,15 @@ class AdminUsersPartialController(
     ): ResponseEntity<String> {
         val oneTime = localPasswordService.resetPassword(userId, actor) ?: return ResponseEntity.notFound().build()
         val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build()
-        return ResponseEntity.ok(buildUserRow(updated) + oneTimeNotice(oneTime, updated.email))
+        return ResponseEntity.ok(
+            buildUserRow(updated) +
+                oneTimeNotice(oneTime, updated.email) +
+                ToastHtml.oob(
+                    "info",
+                    "Password reset",
+                    "The one-time password is shown once on this screen — pass it to the user out-of-band.",
+                ),
+        )
     }
 
     private fun buildUserTable(users: List<co.datapipelines.auth.User>): String {
@@ -217,8 +254,22 @@ class AdminUsersPartialController(
             "One-time password for ${esc(email)}: <strong style=\"font-family:var(--font-mono)\">${esc(oneTimePassword)}</strong>" +
             " — shown ONCE; pass it to the user out-of-band. They must set a new password at first login (auth.md §5A.4).</div>"
 
-    private fun errorSpan(message: String): String =
-        """<span style="color:var(--accent-danger);font-size:var(--text-sm)">${esc(message)}</span>"""
+    /**
+     * Shape C (§5.1): the refusal keeps its real 4xx and its body is the toast — the
+     * headers retarget it at the stack, and toast.js's bridgeErrors is what lets htmx
+     * swap it at all (htmx never swaps 4xx on its own). Before the bridge, every one
+     * of these refusals was INVISIBLE: htmx dropped the body and no listener existed.
+     */
+    private fun refusedToast(
+        status: HttpStatus,
+        title: String,
+        message: String,
+    ): ResponseEntity<String> =
+        ResponseEntity
+            .status(status)
+            .header("HX-Retarget", "#toast")
+            .header("HX-Reswap", "beforeend")
+            .body(ToastHtml.oob("danger", title, ToastHtml.esc(message)))
 
     private fun esc(text: String?): String =
         (text ?: "")
