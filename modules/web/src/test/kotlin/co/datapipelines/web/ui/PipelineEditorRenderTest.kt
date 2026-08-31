@@ -81,7 +81,8 @@ class PipelineEditorRenderTest {
                 setVariable("currentPath", "/pipelines")
                 setVariable(
                     "pipelineJson",
-                    """{"id":"00000000-0000-0000-0000-000000000001","name":"p","display_name":"P","version":1,"parameters":{},"nodes":[]}""",
+                    """{"id":"00000000-0000-0000-0000-000000000001","name":"p",""" +
+                        """"display_name":"P","version":1,"parameters":{},"nodes":[]}""",
                 )
             },
         )
