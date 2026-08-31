@@ -41,13 +41,13 @@
     <div style="display: flex; align-items: center; justify-content: center; gap: var(--gap-md); margin-top: var(--gap-md); font-size: var(--text-sm);">
       <button class="ds-button ds-button-ghost ds-button-sm"
               th:disabled="${offset == 0}"
-              th:attr="hx-get=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})}, hx-target=#template-list-wrapper, hx-swap=outerHTML">
+              th:attr="hx-get=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">
         Previous
       </button>
       <span style="color: var(--text-secondary);" th:text="'Showing ' + ${templates.size()} + ' templates'"></span>
       <button class="ds-button ds-button-ghost ds-button-sm"
               th:disabled="${!hasMore}"
-              th:attr="hx-get=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}, hx-target=#template-list-wrapper, hx-swap=outerHTML">
+              th:attr="hx-get=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">
         Next
       </button>
     </div>

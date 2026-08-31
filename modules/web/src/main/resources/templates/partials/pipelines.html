@@ -37,13 +37,13 @@
     <div style="display: flex; align-items: center; justify-content: center; gap: var(--gap-md); margin-top: var(--gap-md); font-size: var(--text-sm);">
       <button class="ds-button ds-button-ghost ds-button-sm"
               th:disabled="${offset == 0}"
-              th:attr="hx-get=@{/partials/pipelines(q=${q}, offset=${offset - 25})}, hx-target=#pipeline-list-wrapper, hx-swap=outerHTML">
+              th:attr="hx-get=@{/partials/pipelines(q=${q}, offset=${offset - 25})}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'">
         Previous
       </button>
       <span style="color: var(--text-secondary);" th:text="'Showing ' + ${pipelines.size()} + ' of ' + ${total}"></span>
       <button class="ds-button ds-button-ghost ds-button-sm"
               th:disabled="${!hasMore}"
-              th:attr="hx-get=@{/partials/pipelines(q=${q}, offset=${offset + 25})}, hx-target=#pipeline-list-wrapper, hx-swap=outerHTML">
+              th:attr="hx-get=@{/partials/pipelines(q=${q}, offset=${offset + 25})}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'">
         Next
       </button>
     </div>
