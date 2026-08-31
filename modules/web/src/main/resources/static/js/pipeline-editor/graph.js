@@ -278,6 +278,12 @@
     });
     node.addClass(state);
     if (state === "running") this.startPulse(node);
+    // Keep the editor's nodeStates mirror complete. sse.js only writes entries for
+    // nodes that START, and its execution_aborted sweep falls back to a classes-string
+    // compare for the rest — a string the type classes ("idle type-dml") no longer
+    // equal. Writing every transition here keeps pending nodes marked "idle", which
+    // is what that sweep checks for.
+    if (this.editor && this.editor.nodeStates) this.editor.nodeStates[nodeId] = state;
     // Mirror execution state to the a11y node list (a11y.js owns the DOM; the call
     // is guarded so the pure module stays loadable under node --test).
     if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(nodeId, state);
@@ -319,6 +325,7 @@
     self.cy.nodes().forEach(function (node) {
       NODE_STATES.forEach(function (s) { node.removeClass(s); });
       node.addClass("idle");
+      if (self.editor && self.editor.nodeStates) self.editor.nodeStates[node.id()] = "idle";
       if (typeof window !== "undefined" && window.a11yNodeState) window.a11yNodeState(node.id(), "idle");
     });
     self.cy.edges().forEach(function (edge) {
