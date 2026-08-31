@@ -270,6 +270,8 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.password.changed` | User changed their own password (self-service or forced, [Auth §5A.4](auth.md#5a4-forced-password-change)) |
 | `auth.password.reset` | Admin reset a user's password — new one-time credential ([Auth §5A.1](auth.md#5a1-accounts)) |
 | `auth.password.disabled` | Admin disabled a user's local access — account is OIDC-only ([Auth §5A.1](auth.md#5a1-accounts)) |
+| `auth.password.change_failed` | Self-service password change failed (wrong current password) — counted on the same §5A.3 lockout counter as `POST /login` ([Auth §5A.4](auth.md#5a4-forced-password-change)) |
+| `auth.password.change_locked` | Self-service change refused because the account's §5A.3 lockout was already engaged — consulted before any Argon2 work ([Auth §5A.4](auth.md#5a4-forced-password-change)) |
 | `auth.user.created` | Admin created a local account ([Auth §5A.1](auth.md#5a1-accounts); details carry the acting admin) |
 | `auth.user.unlocked` | Admin cleared a local account's lockout ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.logout` | User logged out (cookie cleared) |
@@ -414,4 +416,5 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-08-11 | v1.2 | gate C review | §16: registered `template.not_found` / `datasource.not_found` as two-segment codes (read/mutate-path misses; pipeline-contract §13 v1.3); template domain row widened to `template.*`. |
 | 2026-08-16 | v1.3 | pipeline composition | §18 `ExecutionTrigger` gains `PIPELINE` — a child execution spawned by a parent's PIPELINE node (V3 migration widens `chk_triggered_via` to match). |
 | 2026-08-17 | v1.4 | pipeline composition | §2 `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a child execution (pipeline-contract §4.9/§8.5; guarded by the new `NodeTypeSpecDriftTest` in pipeline-contract). |
+| 2026-08-31 | v1.6 | 026 post-merge follow-up | §15 registers `auth.password.change_failed` / `auth.password.change_locked` — the self-service change path's failure and lockout events added by the session-only credential fix (22be7b2) after the v1.5 sync. Unregistered, docs-audit check C flagged them at auth.md:487; they are audit events, not pipeline-contract error codes. |
 | 2026-08-30 | v1.5 | local password auth | §15 `AuthAuditEvent` gains the local-account events: `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` re-described as shared OIDC/local. The "no password or lockout events" note is replaced — they exist for the optional local accounts only (auth.md §5A). |
