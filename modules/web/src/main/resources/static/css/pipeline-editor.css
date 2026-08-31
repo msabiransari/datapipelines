@@ -196,17 +196,34 @@
 
 /* ---- Accessible node list ---- */
 .pe-node-list {
-  display: none;
+  /* Visually hidden but focusable and in the accessibility tree (031): display:none
+     removed the list from the tab order AND from screen readers — the keyboard path
+     was dead at the <ul>, before any <li> tabindex could matter. Clip, don't hide. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 
 .pe-node-list:focus,
 .pe-node-list:focus-within {
+  /* Undo the visually-hidden clip above. */
   display: block;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow-y: auto;
+  clip: auto;
+  white-space: normal;
   position: absolute;
   bottom: var(--pe-gap);
   left: var(--pe-gap);
   max-height: 200px;
-  overflow-y: auto;
   background: var(--surface-overlay, #fff);
   border: 1px solid var(--border-default, #e5e7eb);
   border-radius: var(--pe-radius);
