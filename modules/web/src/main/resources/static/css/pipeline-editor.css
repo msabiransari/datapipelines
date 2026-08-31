@@ -9,6 +9,13 @@
   --pe-gap: var(--gap-md, 16px);
   --pe-radius: var(--radius-md, 8px);
   --pe-transition: 200ms ease;
+  /* SQL highlight accents (032) — token references only; hex lives in the fallback slot. */
+  --pe-sql-keyword: var(--accent-primary, #2563eb);
+  --pe-sql-string: var(--accent-success, #16a34a);
+  --pe-sql-comment: var(--text-muted, #9ca3af);
+  --pe-sql-number: var(--accent-warning, #92400e);
+  --pe-sql-parameter: var(--accent-info, #1e40af);
+  --pe-sql-punct: var(--text-secondary, #6b7280);
 }
 
 .pe-root {
@@ -356,6 +363,78 @@
 .pe-depends-item::before {
   content: "→ ";
   color: var(--text-muted, #9ca3af);
+}
+
+/* ---- Node SQL section (032) ---- */
+.pe-sql-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm, 8px);
+}
+
+.pe-sql-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm, 8px);
+  flex-wrap: wrap;
+}
+
+.pe-sql-meta .pe-link {
+  font-size: var(--text-xs, 0.75rem);
+  word-break: break-all;
+}
+
+.pe-sql-meta .pe-sql-copy {
+  margin-left: auto;
+}
+
+.pe-sql {
+  margin: 0;
+  padding: var(--gap-sm, 8px);
+  background: var(--surface-inset, #f3f4f6);
+  border: 1px solid var(--border-default, #e5e7eb);
+  border-radius: var(--pe-radius);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.5;
+  color: var(--text-primary, #111827);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.pe-sql-code {
+  font-family: inherit;
+}
+
+.pe-sql-tok-keyword {
+  color: var(--pe-sql-keyword);
+  font-weight: var(--weight-semibold, 600);
+}
+
+.pe-sql-tok-string {
+  color: var(--pe-sql-string);
+}
+
+.pe-sql-tok-comment {
+  color: var(--pe-sql-comment);
+  font-style: italic;
+}
+
+.pe-sql-tok-number {
+  color: var(--pe-sql-number);
+}
+
+.pe-sql-tok-parameter {
+  color: var(--pe-sql-parameter);
+  font-weight: var(--weight-medium, 500);
+}
+
+.pe-sql-tok-punct {
+  color: var(--pe-sql-punct);
+}
+
+.pe-sql-sampled {
+  padding: var(--gap-xs, 4px) 0 0;
 }
 
 /* ---- Result panel ---- */

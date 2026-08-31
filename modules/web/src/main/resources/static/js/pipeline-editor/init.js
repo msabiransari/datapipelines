@@ -1,6 +1,65 @@
 (function () {
   "use strict";
 
+  /*
+   * 032: the SQL copy confirmation is deliberately NOT a toast, even though
+   * DpToast.show now exists. Copy is high-frequency and self-evident; a 6s
+   * notification per copy trains the user to ignore the stack the SSE terminal
+   * events need. The live region is the a11y-correct channel and the 1.5s label
+   * swap is the visible one (ui-screens.md §5.1 keeps exactly one client-side
+   * toast builder; this is not a second one).
+   *
+   * The SQL is read from the button's data-sql attribute, falling back to the
+   * code element's textContent — NEVER from the highlighted innerHTML, which
+   * carries <span> markup.
+   */
+  function wireSqlCopy(editor) {
+    document.addEventListener("click", function (evt) {
+      var target = evt.target;
+      var btn = target && target.closest ? target.closest(".pe-sql-copy") : null;
+      if (!btn) return;
+      var sql = btn.getAttribute("data-sql");
+      if (sql === null) {
+        var block = btn.closest(".pe-sql-block");
+        var code = block && block.querySelector("code.pe-sql-code");
+        sql = code ? code.textContent : "";
+      }
+      var done = function () {
+        editor.announceStatus("SQL copied to clipboard");
+        var label = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(function () {
+          btn.textContent = label;
+        }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sql).then(done, function () {
+          legacyCopy(sql, done);
+        });
+      } else {
+        legacyCopy(sql, done);
+      }
+    });
+  }
+
+  /* Non-secure-context fallback: the async clipboard API requires one. */
+  function legacyCopy(text, done) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      done();
+    } catch (e) {
+      /* no copy channel available — leave the button unchanged */
+    }
+    document.body.removeChild(ta);
+  }
+
   function pipelineEditor() {
     return {
       pipeline: {},
@@ -71,6 +130,7 @@
           self.cy = self.graph.cy;
 
           setupA11y(self);
+          wireSqlCopy(self);
 
           self.cy.on("tap", "node", function (evt) {
             var nodeData = evt.target.data();
