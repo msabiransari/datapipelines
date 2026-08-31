@@ -85,7 +85,10 @@ class UiLayoutChromeAdviceTest {
         }
 
     /** Renders `layouts/default` (via test-stub) with the given chrome variables. */
-    private fun renderLayout(authenticated: Boolean, currentPath: String): String {
+    private fun renderLayout(
+        authenticated: Boolean,
+        currentPath: String,
+    ): String {
         val application = JakartaServletWebApplication.buildApplication(MockServletContext())
         val exchange = application.buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
         val context = WebContext(exchange)
