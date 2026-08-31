@@ -28,26 +28,25 @@
     <span class="htmx-indicator" style="color:var(--text-secondary);font-size:var(--text-sm)">Searching...</span>
   </div>
 
-  <div class="ds-card" style="padding:var(--gap-md)">
-    <table style="width:100%;font-size:var(--text-sm)">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">ID</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Name</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Email</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Status</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Role</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Local</th>
-          <th style="text-align:right;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="user-table-body">
-        <tr><td colspan="7" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
-          <span class="htmx-indicator">Loading users...</span>
-        </td></tr>
-      </tbody>
-    </table>
-  </div>
+  <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
+  <table class="ds-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Status</th>
+        <th>Role</th>
+        <th>Local</th>
+        <th class="num">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="user-table-body">
+      <tr><td colspan="7" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
+        <span class="htmx-indicator">Loading users...</span>
+      </td></tr>
+    </tbody>
+  </table>
 
   <script>
     document.addEventListener('DOMContentLoaded', function() {

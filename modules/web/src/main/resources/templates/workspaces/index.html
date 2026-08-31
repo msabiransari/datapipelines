@@ -49,75 +49,72 @@
 
   <section style="margin-bottom: var(--gap-xl);">
     <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Your workspaces</h2>
-    <div th:if="${#lists.isEmpty(own)}" class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
-      <p style="color: var(--text-secondary); font-size: var(--text-base);">You are not a member of any workspace yet.</p>
+    <div th:if="${#lists.isEmpty(own)}" class="ds-empty">
+      <p class="ds-empty-title">No workspaces yet</p>
+      <p class="ds-empty-description">You are not a member of any workspace yet.</p>
     </div>
-    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden;"
-         th:unless="${#lists.isEmpty(own)}">
-      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
-        <thead>
-          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Workspace</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Your role</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr th:each="membership : ${own}"
-              style="border-bottom: 1px solid var(--border-default);">
-            <td style="padding: var(--gap-sm) var(--gap-md); font-weight: var(--weight-medium);">
-              <span th:text="${membership.workspaceName}">team</span>
-              <span th:if="${membership.workspaceName == activeWorkspace}"
-                    style="display: inline-block; margin-left: var(--gap-xs); padding: 2px var(--gap-sm); border-radius: var(--radius-base); background: var(--surface-raised); font-size: var(--text-xs); color: var(--text-secondary);">active</span>
-            </td>
-            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary);" th:text="${membership.role.wire}">owner</td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
-              <form th:action="@{/workspace/switch}" method="post" style="display: inline;">
-                <input type="hidden" name="name" th:value="${membership.workspaceName}">
-                <button type="submit" class="ds-button ds-button-secondary ds-button-sm"
-                        th:disabled="${membership.workspaceName == activeWorkspace}">Switch</button>
-              </form>
-              <form th:action="@{/workspaces/{name}/delete(name=${membership.workspaceName})}" method="post" style="display: inline;"
-                    th:if="${managed.containsKey(membership.workspaceName)}">
-                <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
-              </form>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->
+    <table class="ds-table" th:unless="${#lists.isEmpty(own)}">
+      <thead>
+        <tr>
+          <th>Workspace</th>
+          <th>Your role</th>
+          <th class="num">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="membership : ${own}">
+          <td>
+            <span th:text="${membership.workspaceName}">team</span>
+            <span th:if="${membership.workspaceName == activeWorkspace}"
+                  class="ds-badge ds-badge-primary">active</span>
+          </td>
+          <td th:text="${membership.role.wire}">owner</td>
+          <td class="num">
+            <form th:action="@{/workspace/switch}" method="post" style="display: inline;">
+              <input type="hidden" name="name" th:value="${membership.workspaceName}">
+              <button type="submit" class="ds-button ds-button-secondary ds-button-sm"
+                      th:disabled="${membership.workspaceName == activeWorkspace}">Switch</button>
+            </form>
+            <form th:action="@{/workspaces/{name}/delete(name=${membership.workspaceName})}" method="post" style="display: inline;"
+                  th:if="${managed.containsKey(membership.workspaceName)}">
+              <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
+            </form>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 
   <section th:each="entry : ${managed}" style="margin-bottom: var(--gap-xl);">
     <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">
       Members — <span th:text="${entry.key}">team</span>
     </h2>
-    <div style="border: 1px solid var(--border-default); border-radius: var(--radius-base); overflow: hidden; margin-bottom: var(--gap-md);">
-      <table style="width: 100%; border-collapse: collapse; font-size: var(--text-sm);">
-        <thead>
-          <tr style="background: var(--surface-raised); border-bottom: 1px solid var(--border-default);">
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Member</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: left; font-weight: var(--weight-semibold); color: var(--text-secondary);">Role</th>
-            <th style="padding: var(--gap-sm) var(--gap-md); text-align: right; font-weight: var(--weight-semibold); color: var(--text-secondary);">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr th:each="member : ${entry.value}" style="border-bottom: 1px solid var(--border-default);">
-            <td style="padding: var(--gap-sm) var(--gap-md);">
-              <span th:text="${member.displayName}">Alice</span>
-              <span style="color: var(--text-secondary); font-size: var(--text-xs);" th:text="' ' + ${member.email}">alice@example.com</span>
-            </td>
-            <td style="padding: var(--gap-sm) var(--gap-md); color: var(--text-secondary);" th:text="${member.role.wire}">member</td>
-            <td style="padding: var(--gap-sm) var(--gap-md); text-align: right;">
-              <form th:if="${member.role.wire != 'owner'}"
-                    th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
-                <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
-              </form>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->
+    <table class="ds-table" style="margin-bottom: var(--gap-md);">
+      <thead>
+        <tr>
+          <th>Member</th>
+          <th>Role</th>
+          <th class="num">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="member : ${entry.value}">
+          <td>
+            <span th:text="${member.displayName}">Alice</span>
+            <span style="color: var(--text-secondary); font-size: var(--text-xs);" th:text="' ' + ${member.email}">alice@example.com</span>
+          </td>
+          <td th:text="${member.role.wire}">member</td>
+          <td class="num">
+            <form th:if="${member.role.wire != 'owner'}"
+                  th:action="@{/workspaces/{name}/members/{userId}/remove(name=${entry.key}, userId=${member.userId})}" method="post">
+              <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
+            </form>
+          </td>
+        </tr>
+      </tbody>
+    </table>
     <form th:action="@{/workspaces/{name}/members(name=${entry.key})}" method="post" style="display: flex; gap: var(--gap-md); align-items: center;">
       <input type="email" name="email" class="ds-input" placeholder="member@example.com" required
              style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); width: 280px;">

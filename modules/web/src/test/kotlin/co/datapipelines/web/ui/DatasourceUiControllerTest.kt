@@ -187,17 +187,18 @@ class DatasourceUiControllerTest {
     fun `partial search matches every rendered column`() {
         authenticate()
         val partialController = partialController()
-        val rows = listOf(
-            datasource(name = "alpha", jdbcUrl = "jdbc:postgresql://reports.internal:5432/db", username = "svc_reports"),
-            datasource(
-                name = "beta",
-                dialect = Dialect.SQLITE,
-                jdbcUrl = "jdbc:sqlite:/tmp/other.db",
-                username = "svc_other",
-                displayName = "Scratch database",
-                description = "Local scratch file",
-            ),
-        )
+        val rows =
+            listOf(
+                datasource(name = "alpha", jdbcUrl = "jdbc:postgresql://reports.internal:5432/db", username = "svc_reports"),
+                datasource(
+                    name = "beta",
+                    dialect = Dialect.SQLITE,
+                    jdbcUrl = "jdbc:sqlite:/tmp/other.db",
+                    username = "svc_other",
+                    displayName = "Scratch database",
+                    description = "Local scratch file",
+                ),
+            )
         every { registry.listVisible(null, workspaceId) } returns rows
 
         // jdbcUrl substring, username, and the dialect's wire value each select alpha only.
@@ -214,10 +215,11 @@ class DatasourceUiControllerTest {
     fun `partial search matches the rendered workspace column, including the global literal`() {
         authenticate()
         val partialController = partialController()
-        every { registry.listVisible(null, workspaceId) } returns listOf(
-            datasource(name = "bound", workspaceName = "analytics"),
-            datasource(name = "shared"),
-        )
+        every { registry.listVisible(null, workspaceId) } returns
+            listOf(
+                datasource(name = "bound", workspaceName = "analytics"),
+                datasource(name = "shared"),
+            )
 
         val boundModel: ExtendedModelMap = ExtendedModelMap()
         partialController.list(boundModel, "analytics", null, null)

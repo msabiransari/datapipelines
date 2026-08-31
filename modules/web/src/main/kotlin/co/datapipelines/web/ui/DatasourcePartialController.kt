@@ -178,7 +178,9 @@ class DatasourcePartialController(
         return list.filter { d ->
             d.name.lowercase().contains(lower) ||
                 d.displayName.lowercase().contains(lower) ||
-                d.dialect.wire.lowercase().contains(lower) ||
+                d.dialect.wire
+                    .lowercase()
+                    .contains(lower) ||
                 d.jdbcUrl.lowercase().contains(lower) ||
                 d.username.lowercase().contains(lower) ||
                 (d.workspaceName ?: "global").lowercase().contains(lower) ||

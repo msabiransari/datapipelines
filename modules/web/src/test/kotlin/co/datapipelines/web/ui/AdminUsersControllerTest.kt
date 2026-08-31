@@ -10,15 +10,23 @@ import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
@@ -55,6 +63,42 @@ class AdminUsersControllerTest {
         viewName shouldBe "admin/users"
         model["activeTheme"] shouldBe "saas"
     }
+
+    @Test
+    fun `admin users page renders the design-system table`() {
+        val html =
+            engine().process(
+                "admin/users",
+                WebContext(
+                    JakartaServletWebApplication
+                        .buildApplication(MockServletContext())
+                        .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+                ).apply {
+                    setVariable("_csrf", mapOf("token" to "t"))
+                    setVariable("workspaceHeaderFragment", "")
+                    setVariable("workspaceOptions", emptyList<Any>())
+                    setVariable("activeWorkspace", "acme")
+                    setVariable("activeTheme", "saas")
+                    setVariable("authenticated", true)
+                    setVariable("currentPath", "/admin/users")
+                    setVariable("localEnabled", true)
+                },
+            )
+
+        html shouldContain "<table class=\"ds-table\">"
+        html shouldNotContain "border-bottom:1px solid var(--border-default)"
+    }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
 }
 
 class AdminUsersPartialControllerTest {
@@ -109,6 +153,20 @@ class AdminUsersPartialControllerTest {
         response.statusCode shouldBe HttpStatus.OK
         response.body shouldContain "Test User"
         response.body shouldContain "user@example.com"
+    }
+
+    @Test
+    fun `search rows render status and role as design-system badges, not styled spans`() {
+        authenticate()
+        every { userService.search("test", 0, 20) } returns listOf(sampleUser())
+
+        val response = partialController.search("test", 0, 20)
+
+        // sampleUser is active and a non-admin (029: chips are ds-badge variants now).
+        response.body shouldContain "ds-badge ds-badge-success"
+        response.body shouldContain "ds-badge ds-badge-default"
+        response.body shouldNotContain "padding:var(--gap-xs)"
+        response.body shouldNotContain "background:var(--surface-tertiary)"
     }
 
     @Test

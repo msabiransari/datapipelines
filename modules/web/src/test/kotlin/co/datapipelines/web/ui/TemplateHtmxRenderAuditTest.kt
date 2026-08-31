@@ -134,7 +134,8 @@ class TemplateHtmxRenderAuditTest {
     fun `no th-attr sequence carries an unquoted literal value`() {
         val violations =
             templateSources().flatMap { (name, source) ->
-                TH_ATTR_VALUE.findAll(source)
+                TH_ATTR_VALUE
+                    .findAll(source)
                     .flatMap { m -> splitAssignations(m.groupValues[1]) }
                     .filter { it.isNotBlank() && !isProcessableValue(it.substringAfter('=', "")) }
                     .map { "$name: `$it` — the literal must be quoted: `${it.substringBefore('=')}='…'`" }
@@ -152,7 +153,8 @@ class TemplateHtmxRenderAuditTest {
     }
 
     private fun offenders(source: String): List<String> =
-        TH_ATTR_VALUE.findAll(source)
+        TH_ATTR_VALUE
+            .findAll(source)
             .flatMap { m -> splitAssignations(m.groupValues[1]) }
             .filter { it.isNotBlank() && !isProcessableValue(it.substringAfter('=', "")) }
             .toList()
@@ -366,12 +368,33 @@ class TemplateHtmxRenderAuditTest {
             var quoted = false
             for (c in value) {
                 when {
-                    c == '\'' -> { quoted = !quoted; current.append(c) }
-                    quoted -> current.append(c)
-                    c == '{' -> { depth++; current.append(c) }
-                    c == '}' -> { depth--; current.append(c) }
-                    c == ',' && depth == 0 -> { parts.add(current.toString().trim()); current.clear() }
-                    else -> current.append(c)
+                    c == '\'' -> {
+                        quoted = !quoted
+                        current.append(c)
+                    }
+
+                    quoted -> {
+                        current.append(c)
+                    }
+
+                    c == '{' -> {
+                        depth++
+                        current.append(c)
+                    }
+
+                    c == '}' -> {
+                        depth--
+                        current.append(c)
+                    }
+
+                    c == ',' && depth == 0 -> {
+                        parts.add(current.toString().trim())
+                        current.clear()
+                    }
+
+                    else -> {
+                        current.append(c)
+                    }
                 }
             }
             parts.add(current.toString().trim())

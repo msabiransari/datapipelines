@@ -11,19 +11,28 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
 import co.datapipelines.auth.WorkspaceInUseException
 import co.datapipelines.auth.WorkspaceMemberRow
+import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspacesProperties
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
@@ -69,6 +78,79 @@ class WorkspacesUiControllerTest {
 
     private fun memberRow(email: String = "bob@acme.test") =
         WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", WorkspaceRole.MEMBER, Instant.EPOCH)
+
+    @Test
+    fun `workspaces page renders the design-system tables and the active badge`() {
+        val membership =
+            WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.OWNER, Instant.EPOCH)
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("own", listOf(membership))
+                    setVariable("joinable", emptyList<Any>())
+                    setVariable("openJoin", false)
+                    setVariable("canCreate", false)
+                    setVariable("provisioningMode", "self-serve")
+                    setVariable("managed", mapOf("acme" to listOf(memberRow())))
+                },
+            )
+
+        // Both tables (own workspaces, per-managed members) are on the design system (029).
+        html shouldContain "<table class=\"ds-table\">"
+        html shouldContain "ds-badge ds-badge-primary" // the active-workspace chip
+        html shouldNotContain "border-collapse: collapse"
+    }
+
+    @Test
+    fun `workspaces empty state uses the ds-empty primitive`() {
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("own", emptyList<Any>())
+                    setVariable("joinable", emptyList<Any>())
+                    setVariable("openJoin", false)
+                    setVariable("canCreate", false)
+                    setVariable("provisioningMode", "self-serve")
+                    setVariable("managed", emptyMap<String, Any>())
+                },
+            )
+
+        html shouldContain "class=\"ds-empty\""
+        html shouldContain "class=\"ds-empty-title\""
+        html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
+    }
+
+    private fun WebContext.fillLayoutChrome() {
+        setVariable("_csrf", mapOf("token" to "t"))
+        setVariable("workspaceHeaderFragment", "")
+        setVariable("workspaceOptions", emptyList<Any>())
+        setVariable("activeWorkspace", "acme")
+        setVariable("activeTheme", "saas")
+        setVariable("authenticated", true)
+        setVariable("currentPath", "/workspaces")
+    }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
 
     @Test
     fun `create redirects with ok=created - and a duplicate name is the banner, not an error page`() {

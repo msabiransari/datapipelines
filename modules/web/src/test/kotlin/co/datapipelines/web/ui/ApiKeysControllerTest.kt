@@ -11,15 +11,23 @@ import co.datapipelines.auth.WorkspaceContext
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.mock.web.MockServletContext
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.thymeleaf.context.WebContext
+import org.thymeleaf.spring6.SpringTemplateEngine
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
+import org.thymeleaf.web.servlet.JakartaServletWebApplication
 import java.time.Instant
 import java.util.UUID
 
@@ -78,6 +86,73 @@ class ApiKeysControllerTest {
         (model["keys"] as List<*>).size shouldBe 1
         model["activeTheme"] shouldBe "saas"
     }
+
+    @Test
+    fun `api keys page renders the design-system table and badges`() {
+        val html =
+            engine().process(
+                "settings/api-keys",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("keys", listOf(sampleKey(), sampleKey(id = "dpk_old999").copy(isRevoked = true)))
+                    setVariable("scopes", listOf("read", "execute"))
+                },
+            )
+
+        html shouldContain "<table class=\"ds-table\">"
+        html shouldContain "ds-badge ds-badge-default" // the scope chips
+        html shouldContain "ds-badge ds-badge-danger" // the revoked marker
+        // The migration is only done when the inline header/cell styles are GONE.
+        html shouldNotContain "border-bottom:1px solid var(--border-default)"
+    }
+
+    @Test
+    fun `api keys empty state uses the ds-empty primitive and keeps the swap target`() {
+        val html =
+            engine().process(
+                "settings/api-keys",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("keys", emptyList<ApiKey>())
+                    setVariable("scopes", listOf("read"))
+                },
+            )
+
+        html shouldContain "class=\"ds-empty\""
+        html shouldContain "class=\"ds-empty-title\""
+        // The revoke path and the post-create refresh target #keys-table-body — it must
+        // exist even with zero keys, so the table renders around the empty state.
+        html shouldContain "id=\"keys-table-body\""
+        html shouldNotContain "ds-empty-state" // a class with no CSS anywhere (D4)
+    }
+
+    private fun WebContext.fillLayoutChrome() {
+        setVariable("_csrf", mapOf("token" to "t"))
+        setVariable("workspaceHeaderFragment", "")
+        setVariable("workspaceOptions", emptyList<Any>())
+        setVariable("activeWorkspace", "acme")
+        setVariable("activeTheme", "saas")
+        setVariable("authenticated", true)
+        setVariable("currentPath", "/settings/api-keys")
+    }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
 }
 
 class ApiKeysPartialControllerTest {

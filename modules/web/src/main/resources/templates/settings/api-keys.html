@@ -9,44 +9,51 @@
 
   <div id="keyCreated" style="display:none;background:var(--accent-success-bg);border:1px solid var(--accent-success);padding:var(--gap-md);border-radius:var(--radius-base);margin-bottom:var(--gap-md)"></div>
 
-  <div class="ds-card" style="padding:var(--gap-md)">
-    <table style="width:100%;font-size:var(--text-sm)">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Name</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Created</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Last Used</th>
-          <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Scopes</th>
-          <th style="text-align:right;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="keys-table-body">
-        <th:block th:if="${keys == null || keys.isEmpty()}">
-          <tr><td colspan="5" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">No API keys found</td></tr>
-        </th:block>
-        <tr th:each="key : ${keys}">
-          <td style="padding:var(--gap-xs);font-family:var(--font-mono)">
-            <span th:text="${key.name}">key-name</span>
-            <span th:if="${key.isRevoked}" style="color:var(--accent-danger);font-size:var(--text-xs)"> (revoked)</span>
-          </td>
-          <td style="padding:var(--gap-xs);color:var(--text-secondary)" th:text="${#temporals.format(key.createdAt, 'yyyy-MM-dd HH:mm')}">2026-08-01 12:00</td>
-          <td style="padding:var(--gap-xs);color:var(--text-secondary)" th:text="${key.lastUsedAt != null ? #temporals.format(key.lastUsedAt, 'yyyy-MM-dd HH:mm') : 'never'}">never</td>
-          <td style="padding:var(--gap-xs)">
-            <span style="font-size:var(--text-xs);background:var(--surface-tertiary);padding:2px var(--gap-xs);border-radius:var(--radius-base)" th:each="scope : ${key.scopes}" th:text="${scope.wire}">read</span>
-          </td>
-          <td style="padding:var(--gap-xs);text-align:right">
-            <th:block th:if="!${key.isRevoked}">
-              <button class="ds-button ds-button-ghost ds-button-sm"
-                      th:attr="hx-delete=@{/partials/api-keys/{id}(id=${key.id})}"
-                      hx-target="#keys-table-body"
-                      hx-confirm="Revoke this key?"
-                      style="color:var(--accent-danger)">Revoke</button>
-            </th:block>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+  <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it.
+       The table renders even when empty: the revoke path swaps Kotlin-built rows into
+       #keys-table-body and the post-create refresh targets it, so the tbody must exist;
+       the empty state lives inside the one row rather than replacing the table. -->
+  <table class="ds-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Created</th>
+        <th>Last Used</th>
+        <th>Scopes</th>
+        <th class="num">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="keys-table-body">
+      <tr th:if="${keys == null || keys.isEmpty()}">
+        <td colspan="5">
+          <div class="ds-empty">
+            <p class="ds-empty-title">No API keys yet</p>
+            <p class="ds-empty-description">Generate a key to call the REST API.</p>
+          </div>
+        </td>
+      </tr>
+      <tr th:each="key : ${keys}">
+        <td>
+          <span th:text="${key.name}">key-name</span>
+          <span th:if="${key.isRevoked}" class="ds-badge ds-badge-danger">revoked</span>
+        </td>
+        <td th:text="${#temporals.format(key.createdAt, 'yyyy-MM-dd HH:mm')}">2026-08-01 12:00</td>
+        <td th:text="${key.lastUsedAt != null ? #temporals.format(key.lastUsedAt, 'yyyy-MM-dd HH:mm') : 'never'}">never</td>
+        <td>
+          <span class="ds-badge ds-badge-default" th:each="scope : ${key.scopes}" th:text="${scope.wire}">read</span>
+        </td>
+        <td class="num">
+          <th:block th:if="!${key.isRevoked}">
+            <button class="ds-button ds-button-ghost ds-button-sm"
+                    th:attr="hx-delete=@{/partials/api-keys/{id}(id=${key.id})}"
+                    hx-target="#keys-table-body"
+                    hx-confirm="Revoke this key?"
+                    style="color:var(--accent-danger)">Revoke</button>
+          </th:block>
+        </td>
+      </tr>
+    </tbody>
+  </table>
 
   <div id="create-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
     <div class="ds-card" style="max-width:480px;width:100%;padding:var(--gap-lg);position:relative">

@@ -63,22 +63,21 @@
   <th:block th:if="${template?.imports != null && !template.imports.isEmpty()}">
     <div style="margin-bottom:var(--gap-lg)">
       <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-sm) 0">Imports</h2>
-      <div class="ds-card" style="padding:var(--gap-md)">
-        <table style="width:100%;font-size:var(--text-sm)">
-          <thead>
-            <tr>
-              <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Template ID</th>
-              <th style="text-align:left;padding:var(--gap-xs);color:var(--text-secondary);font-weight:var(--weight-medium);border-bottom:1px solid var(--border-default)">Version</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr th:each="imp : ${template.imports}">
-              <td style="padding:var(--gap-xs);font-family:var(--font-mono)" th:text="${imp.id}">import_id</td>
-              <td style="padding:var(--gap-xs);font-family:var(--font-mono)" th:text="${imp.version}">1</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
+      <table class="ds-table">
+        <thead>
+          <tr>
+            <th>Template ID</th>
+            <th class="num">Version</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="imp : ${template.imports}">
+            <td th:text="${imp.id}">import_id</td>
+            <td class="num" th:text="${imp.version}">1</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </th:block>
 
