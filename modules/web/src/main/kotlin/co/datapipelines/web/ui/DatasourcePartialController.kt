@@ -87,11 +87,13 @@ class DatasourcePartialController(
                 model.addAttribute("title", "Datasource not found")
                 model.addAttribute("message", "$name is not visible in the active workspace.")
             }
+
             result.connected -> {
                 model.addAttribute("variant", "success")
                 model.addAttribute("title", "Connection succeeded")
                 model.addAttribute("message", "$name — Server version: ${result.serverVersion ?: "unknown"}")
             }
+
             else -> {
                 model.addAttribute("variant", "danger")
                 model.addAttribute("title", "Connection failed")
