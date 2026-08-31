@@ -508,34 +508,11 @@
 }
 
 .pe-result-table-container {
+  /* Scroll only — .ds-table supplies the border, radius and background (032);
+     any border/radius left here would draw a second frame. */
   overflow-x: auto;
   max-height: calc(40vh - 100px);
-}
-
-.pe-result-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-sm, 0.875rem);
-}
-
-.pe-result-table thead {
-  position: sticky;
-  top: 0;
-  background: var(--surface-raised, #f3f4f6);
-}
-
-.pe-result-table th {
-  padding: 6px var(--gap-sm, 8px);
-  text-align: left;
-  font-weight: var(--weight-semibold, 600);
-  border-bottom: 2px solid var(--border-default, #e5e7eb);
-  color: var(--text-secondary, #6b7280);
-}
-
-.pe-result-table td {
-  padding: 4px var(--gap-sm, 8px);
-  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
-  color: var(--text-primary, #111827);
+  padding: var(--gap-sm, 8px);
 }
 
 .pe-result-actions {

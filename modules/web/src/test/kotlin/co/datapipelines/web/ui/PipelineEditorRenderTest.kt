@@ -44,6 +44,19 @@ class PipelineEditorRenderTest {
     }
 
     @Test
+    fun `the result grid renders on the shared table with the frozen pager bindings`() {
+        val html = render()
+
+        html shouldContain "<table class=\"ds-table\">"
+        html shouldNotContain "pe-result-table\""
+        // 027b C is restyled, not rewired: the pager keeps its exact bindings.
+        html shouldContain "resultPanel.prevPage()"
+        html shouldContain "resultPanel.nextPage()"
+        html shouldContain "resultPanel.hasPrev"
+        html shouldContain "resultPanel.hasNext"
+    }
+
+    @Test
     fun `the panel is grouped into headed sections and the template is a link`() {
         val html = render()
 

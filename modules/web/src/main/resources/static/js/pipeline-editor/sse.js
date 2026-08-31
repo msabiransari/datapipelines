@@ -22,6 +22,11 @@
     this.executionId = null;
   }
 
+  function pipelineLabel(editor) {
+    var p = editor.pipeline || {};
+    return p.display_name || p.name || "Pipeline";
+  }
+
   SseHandler.prototype.connect = function (executionId, pipelineId) {
     var self = this;
     self.executionId = executionId;
@@ -200,13 +205,22 @@
       case "pipeline_completed":
         self.terminalSeen = true;
         editor.isExecuting = false;
-        editor.setBanner("Pipeline completed successfully", "success");
+        // Shape D (ui-screens.md §5.1): a stream-borne event has no HTTP response
+        // to hang an OOB swap on, so the ONE client-side builder reports it. The
+        // terminal events also ANNOUNCE now — they previously did not (only
+        // node-level events did); this is an addition, not a preservation.
+        if (window.DpToast && window.DpToast.show) {
+          window.DpToast.show("success", "Pipeline completed", pipelineLabel(editor) + " finished");
+        }
+        editor.announceStatus("Pipeline completed successfully");
         break;
 
       case "pipeline_failed":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        // A failure detail is not a 6s notification — the modal keeps it (§9).
         editor.showError(payload.message || "Pipeline execution failed");
+        editor.announceStatus("Pipeline execution failed");
         break;
 
       case "data_ready":
@@ -227,7 +241,11 @@
             }
           });
         }
-        editor.setBanner("Execution aborted", "aborted");
+        var abortReason = payload && payload.reason ? String(payload.reason) : null;
+        if (window.DpToast && window.DpToast.show) {
+          window.DpToast.show("warning", "Execution aborted", abortReason || "The execution was aborted");
+        }
+        editor.announceStatus(abortReason ? "Execution aborted (" + abortReason + ")" : "Execution aborted");
         break;
 
       default:

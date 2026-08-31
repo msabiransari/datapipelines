@@ -214,7 +214,7 @@
       </div>
       <div x-show="!resultPanel.expired && resultPanel.data">
         <div class="pe-result-table-container">
-          <table class="pe-result-table">
+          <table class="ds-table">
             <thead>
               <tr>
                 <template x-for="col in resultPanel.columns" :key="col">
@@ -234,9 +234,13 @@
           </table>
         </div>
         <div class="pe-result-actions">
-          <button class="ds-button ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
+          <!-- Client-side cursor paging over a stored result (027b C, frozen):
+               prevPage/nextPage and hasPrev/hasNext keep their exact bindings;
+               limit-authoritative, total_rows-denominated arithmetic lives in
+               result.js. This row is restyled, not rewired. -->
+          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
           <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
-          <button class="ds-button ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
           <div class="pe-result-downloads">
             <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
             <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
