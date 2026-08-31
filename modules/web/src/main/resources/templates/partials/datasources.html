@@ -62,22 +62,9 @@
       </table>
     </div>
 
-    <div style="display: flex; align-items: center; justify-content: center; gap: var(--gap-md); margin-top: var(--gap-md); font-size: var(--text-sm);">
-      <button class="ds-button ds-button-ghost ds-button-sm"
-              th:disabled="${offset == 0}"
-              th:with="prevUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})}"
-              th:attr="hx-get=${prevUrl}"
-              hx-target="#datasource-list-wrapper" hx-swap="outerHTML">
-        Previous
-      </button>
-      <span style="color: var(--text-secondary);" th:text="'Showing ' + ${datasources.size()} + ' of ' + ${total}"></span>
-      <button class="ds-button ds-button-ghost ds-button-sm"
-              th:disabled="${!hasMore}"
-              th:with="nextUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}"
-              th:attr="hx-get=${nextUrl}"
-              hx-target="#datasource-list-wrapper" hx-swap="outerHTML">
-        Next
-      </button>
-    </div>
+    <th:block th:with="prevUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},
+                       nextUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}">
+      <div th:replace="~{partials/pager :: pager('#datasource-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${datasources.size()}, ${total})}"></div>
+    </th:block>
   </th:block>
 </div>

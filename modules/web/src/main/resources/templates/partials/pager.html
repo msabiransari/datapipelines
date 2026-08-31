@@ -1,0 +1,22 @@
+<!-- The one pager for every list screen (§5). It never builds URLs: Thymeleaf link
+     expressions take literal parameter names, so a per-screen filter set cannot be
+     splatted into @{...}. Each caller builds prevUrl/nextUrl with its own th:with and
+     passes the finished strings, together with the swap root it owns. `total` is
+     nullable — TemplatePartialController supplies none, so the count renders as
+     "Showing N" without the "of M". -->
+<div xmlns:th="http://www.thymeleaf.org"
+     th:fragment="pager(targetId, prevUrl, nextUrl, offset, hasMore, shown, total)"
+     style="display: flex; align-items: center; justify-content: center; gap: var(--gap-md); margin-top: var(--gap-md); font-size: var(--text-sm);">
+  <button class="ds-button ds-button-ghost ds-button-sm"
+          th:disabled="${offset == 0}"
+          th:attr="hx-get=${prevUrl}, hx-target=${targetId}, hx-swap='outerHTML'">
+    Previous
+  </button>
+  <span style="color: var(--text-secondary);"
+        th:text="${total == null} ? 'Showing ' + ${shown} : 'Showing ' + ${shown} + ' of ' + ${total}">Showing 0</span>
+  <button class="ds-button ds-button-ghost ds-button-sm"
+          th:disabled="${!hasMore}"
+          th:attr="hx-get=${nextUrl}, hx-target=${targetId}, hx-swap='outerHTML'">
+    Next
+  </button>
+</div>
