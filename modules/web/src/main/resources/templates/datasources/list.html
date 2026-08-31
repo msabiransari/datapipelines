@@ -110,10 +110,13 @@
     document.addEventListener('DOMContentLoaded', function() {
       var result = document.getElementById('register-result');
 
-      // Refusals arrive as 4xx — htmx does NOT swap those into hx-target (the layout's
-      // hx-target-error is the response-targets extension, which is not loaded). Handle
-      // the failure explicitly: the refusal markup lands in #register-result, tagged so
-      // the observer below does NOT close the modal over it (022 review F9).
+      // Refusals arrive as 4xx and htmx does not swap those. The layout now carries
+      // toast.js's bridgeErrors, which admits a 4xx retargeted at #toast by header —
+      // but the register refusal deliberately carries NO HX-Retarget: this screen
+      // still owns its error path because the modal must not close over an error,
+      // and a 6s toast is the wrong place for form-level feedback (022 review F9).
+      // Handle the failure explicitly: the refusal markup lands in #register-result,
+      // tagged so the observer below does NOT close the modal over it.
       document.body.addEventListener('htmx:responseError', function(event) {
         if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
         result.setAttribute('data-error', 'true');

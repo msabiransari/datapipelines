@@ -37,6 +37,17 @@ class DatasourcePartialController(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) offset: Int?,
     ): String {
+        listModel(model, q, dialect, offset)
+        return "partials/datasources"
+    }
+
+    /** The list fragment's model — the register success path refreshes the same list OOB. */
+    private fun listModel(
+        model: Model,
+        q: String?,
+        dialect: String?,
+        offset: Int?,
+    ) {
         val page = maxOf(0, offset ?: 0)
         val size = PAGE_SIZE
         val dialectFilter =
@@ -59,7 +70,6 @@ class DatasourcePartialController(
         model.addAttribute("hasMore", all.size > page + size)
         model.addAttribute("total", all.size)
         model.addAttribute("scopes", scopes())
-        return "partials/datasources"
     }
 
     /**
@@ -113,6 +123,7 @@ class DatasourcePartialController(
     @PostMapping("/partials/datasources")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
     fun register(
+        model: Model,
         @RequestParam name: String,
         @RequestParam dialect: String,
         @RequestParam jdbcUrl: String,
@@ -145,9 +156,13 @@ class DatasourcePartialController(
                 return refused("A datasource named '${datasource.name}' already exists.")
             }
             datasources.save(datasource, principal.userId)
-            // htmx honors HX-Redirect with a full-page navigation — the screen re-renders
-            // with the new row (the api-keys screen's post-create choreography).
-            ResponseEntity.ok().header("HX-Redirect", "/datasources").body("")
+            // No HX-Redirect: a full-page navigation would discard the toast. The success
+            // node lands in #register-result (its arrival closes the modal, 022/F9); the
+            // refreshed list and the toast ride along out-of-band (Shape A, §5.1).
+            listModel(model, null, null, null)
+            model.addAttribute("registeredName", datasource.name)
+            model.addAttribute("oob", true)
+            "partials/datasource-registered"
         } catch (e: co.datapipelines.typesystem.DatapipelinesException) {
             refused(e.message ?: "The connection details were rejected.")
         }
