@@ -26,14 +26,17 @@
       </div>
       <div style="display: flex; gap: var(--gap-sm);">
         <th:block th:if="${prevOffset != null}">
+          <!-- th:attr + @{...}: th:hx-get is no processor (no htmx dialect is
+               registered) — it shipped literally and these pager buttons were
+               dead. Same class as the 027b E cancel-button fix. -->
           <button class="ds-button ds-button-secondary ds-button-sm"
-                  th:hx-get="${'/partials/executions/' + executionId + '/result?offset=' + prevOffset}"
+                  th:attr="hx-get=@{/partials/executions/{id}/result(id=${executionId}, offset=${prevOffset})}"
                   hx-target="#result-content"
                   hx-swap="innerHTML">Previous</button>
         </th:block>
         <th:block th:if="${hasMore}">
           <button class="ds-button ds-button-secondary ds-button-sm"
-                  th:hx-get="${'/partials/executions/' + executionId + '/result?offset=' + nextOffset}"
+                  th:attr="hx-get=@{/partials/executions/{id}/result(id=${executionId}, offset=${nextOffset})}"
                   hx-target="#result-content"
                   hx-swap="innerHTML">Next</button>
         </th:block>
