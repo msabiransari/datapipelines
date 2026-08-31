@@ -59,6 +59,9 @@ class ApiKeysPartialController(
         model.addAttribute("keyId", issued.record.id)
         model.addAttribute("keyName", issued.record.name)
         model.addAttribute("keys", keys)
+        // The create response refreshes the whole table out-of-band (E2): this flag is
+        // what puts hx-swap-oob on the keysTable fragment root for THIS render only.
+        model.addAttribute("oob", true)
         return "partials/api-key-created"
     }
 

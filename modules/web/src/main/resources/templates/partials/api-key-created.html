@@ -12,11 +12,13 @@
   </div>
   <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0">Key <span th:text="${keyId}" style="font-family:var(--font-mono)">dpk_xxx</span> (<span th:text="${keyName}">name</span>) created successfully.</p>
   <!-- E2: the create response is the ONLY chance to refresh the table without a reload;
-       `keys` was already in the model and rendered nowhere. Same row markup as the page
-       (settings/api-keys :: keyRows) — extracted, never duplicated. outerHTML (inline)
-       OOB form: this tbody replaces #keys-table-body itself. -->
-  <tbody id="keys-table-body" hx-swap-oob="true">
-    <tr th:replace="~{settings/api-keys :: keyRows(${keys})}"></tr>
-  </tbody>
+       `keys` was already in the model and rendered nowhere. Same table markup as the
+       page (settings/api-keys :: keysTable) — extracted, never duplicated. The OOB
+       element is the WHOLE TABLE (the controller set oob=true, which puts
+       hx-swap-oob="true" on it for THIS render only): a tbody-level OOB element nested
+       in this div is destroyed by the browser's fragment parser (030 — table-only tags
+       outside table context are dropped tokens), so the refresh would silently never
+       happen. outerHTML (inline) OOB form: the new table replaces #keys-table. -->
+  <th:block th:replace="~{settings/api-keys :: keysTable(${keys})}"></th:block>
   <div th:replace="~{partials/toast-oob :: oob('info', 'API key created', 'The key is shown once on this screen — copy it now.')}"></div>
 </div>

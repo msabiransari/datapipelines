@@ -11,9 +11,14 @@
 
   <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it.
        The table renders even when empty: the revoke path swaps Kotlin-built rows into
-       #keys-table-body and the post-create refresh targets it, so the tbody must exist;
-       the empty state lives inside the one row rather than replacing the table. -->
-  <table class="ds-table">
+       #keys-table-body and the post-create refresh targets the WHOLE table, so both ids
+       must exist; the empty state lives inside the one row rather than replacing the
+       table. One definition, two renderers: this page renders it directly, and the
+       post-create OOB refresh (partials/api-key-created) includes it as the keysTable
+       fragment — at TABLE level, because a tbody OOB element nested in the response's
+       div dies in the browser's fragment parser (030). The `oob` flag is set ONLY by
+       the create path: it adds the inline (outerHTML) hx-swap-oob for that render. -->
+  <table class="ds-table" id="keys-table" th:fragment="keysTable(keys)" th:attr="hx-swap-oob=${oob}">
     <thead>
       <tr>
         <th>Name</th>

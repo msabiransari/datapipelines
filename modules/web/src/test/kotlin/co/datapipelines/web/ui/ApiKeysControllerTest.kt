@@ -99,7 +99,7 @@ class ApiKeysControllerTest {
                 },
             )
 
-        html shouldContain "<table class=\"ds-table\">"
+        html shouldContain "<table class=\"ds-table\" id=\"keys-table\">"
         html shouldContain "ds-badge ds-badge-default" // the scope chips
         html shouldContain "ds-badge ds-badge-danger" // the revoked marker
         // The migration is only done when the inline header/cell styles are GONE.
@@ -237,9 +237,16 @@ class ApiKeysPartialControllerTest {
         html shouldContain "copy it now" // the toast POINTS, never carries
         // …and the issued plaintext never appears anywhere after the OOB marker.
         html.substringAfter("hx-swap-oob=\"beforeend:#toast\"") shouldNotContain "dpk_abc123.supersecret"
-        // E2: the table is refreshed out-of-band, from the same row markup as the page.
+        // E2: the table is refreshed out-of-band, from the same markup as the page.
+        // The OOB element MUST be the <table>: a <tbody hx-swap-oob> nested inside the
+        // response's div is DESTROYED by the browser's HTML parser (table-only tags
+        // outside table context are dropped tokens — verified against htmx 2.0.10's
+        // template-wrapper makeFragment in a real browser), so the refresh would
+        // silently never happen.
+        Regex("""<table[^>]*id="keys-table"[^>]*hx-swap-oob="true"""")
+            .containsMatchIn(html) shouldBe true
+        html shouldNotContain "<tbody id=\"keys-table-body\" hx-swap-oob"
         html shouldContain "id=\"keys-table-body\""
-        html shouldContain "hx-swap-oob=\"true\""
         html shouldContain "ds-badge ds-badge-default"
     }
 
