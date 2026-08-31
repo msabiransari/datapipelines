@@ -10,15 +10,26 @@
     </th:block>
   </div>
 
+  <!-- Search and dialect address each other by ID (hx-include): a name-based include
+       would also sweep up any other name="dialect" input on the page (§4.6). -->
   <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
-    <input type="search" name="q" th:value="${q}"
+    <input type="search" id="template-filter-q" name="q" th:value="${q}"
            placeholder="Search templates..."
-           style="flex: 1; padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); max-width: 360px;">
-    <select name="dialect" style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
+           th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+           hx-trigger="input changed delay:300ms, search"
+           hx-include="#template-filter-dialect"
+           hx-indicator="#template-filter-spinner"
+           class="ds-input" style="flex: 1; max-width: 360px;">
+    <select id="template-filter-dialect" name="dialect" class="ds-input"
+            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+            hx-trigger="change"
+            hx-include="#template-filter-q"
+            hx-indicator="#template-filter-spinner">
       <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
       <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
               th:selected="${d == selectedDialect}"></option>
     </select>
+    <span id="template-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 
   <!-- The fragment root carries id="template-list-wrapper", so the swap target

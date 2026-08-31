@@ -10,14 +10,17 @@
     </th:block>
   </div>
 
+  <!-- SPA filter controls (§4.3, the 028 §4.5 contract): they re-fetch ONLY the list
+       fragment into the stable #pipeline-list-wrapper root, so the controls are never
+       re-rendered and the search keeps focus and value. -->
   <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
-    <input type="search" name="q" th:value="${q}"
+    <input type="search" id="pipeline-filter-q" name="q" th:value="${q}"
            placeholder="Search pipelines..."
-           style="flex: 1; padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); max-width: 360px;">
-    <select name="datasource" style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
-      <option value="">All Datasources</option>
-      <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"></option>
-    </select>
+           th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'"
+           hx-trigger="input changed delay:300ms, search"
+           hx-indicator="#pipeline-filter-spinner"
+           class="ds-input" style="flex: 1; max-width: 360px;">
+    <span id="pipeline-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 
   <!-- The fragment root carries id="pipeline-list-wrapper", so the swap target

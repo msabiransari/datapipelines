@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -105,6 +106,98 @@ class ListPartialsRenderTest {
         html shouldContain "hx-target=\"#template-list-wrapper\""
         html shouldContain "hx-swap=\"outerHTML\""
         html shouldContain "hx-get=\"/partials/templates"
+    }
+
+    @Test
+    fun `pipelines page wires a live search control into the stable swap root`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillPipelineList() })
+
+        html shouldContain "id=\"pipeline-filter-q\""
+        html shouldContain "hx-get=\"/partials/pipelines\""
+        html shouldContain "hx-target=\"#pipeline-list-wrapper\""
+        html shouldContain "hx-swap=\"outerHTML\""
+        html shouldContain "hx-trigger=\"input changed delay:300ms, search\""
+        html shouldContain "id=\"pipeline-filter-spinner\""
+        html shouldContain "hx-indicator=\"#pipeline-filter-spinner\""
+        // D3: the inert, unimplementable datasource select is gone.
+        html shouldNotContain "All Datasources"
+    }
+
+    @Test
+    fun `templates page wires search and dialect controls that include each other by id`() {
+        val html = engine.process("templates/list", webContext().apply { fillTemplateList() })
+
+        html shouldContain "id=\"template-filter-q\""
+        html shouldContain "id=\"template-filter-dialect\""
+        // By ID, never by name — other name="dialect" inputs exist on these screens.
+        html shouldContain "hx-include=\"#template-filter-dialect\""
+        html shouldContain "hx-include=\"#template-filter-q\""
+        html shouldContain "hx-target=\"#template-list-wrapper\""
+        html shouldContain "id=\"template-filter-spinner\""
+    }
+
+    /** Layout chrome plus PipelineUiController's model, one row so the pager renders. */
+    private fun WebContext.fillPipelineList() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("READ"))
+        setVariable("dialects", emptyList<String>())
+        setVariable(
+            "pipelines",
+            listOf(
+                PipelineRecord(
+                    id = UUID.randomUUID(),
+                    name = "my-pipeline",
+                    displayName = "My Pipeline",
+                    description = "A test pipeline",
+                    ownerId = UUID.randomUUID(),
+                    currentVersion = 1,
+                    isDeleted = false,
+                    createdAt = Instant.parse("2026-08-01T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-08-10T00:00:00Z"),
+                ),
+            ),
+        )
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
+    }
+
+    /** Layout chrome plus TemplateUiController's model, one row so the pager renders. */
+    private fun WebContext.fillTemplateList() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("READ"))
+        setVariable("dialects", listOf("POSTGRES", "SQLITE"))
+        setVariable("selectedDialect", "")
+        setVariable(
+            "templates",
+            listOf(
+                Template(
+                    id = "orders.sql",
+                    version = 1,
+                    dialect = Dialect.POSTGRES,
+                    displayName = "Orders",
+                    description = "A test template",
+                    body = "SELECT 1",
+                    createdAt = Instant.parse("2026-08-10T00:00:00Z"),
+                    createdBy = UUID.randomUUID(),
+                ),
+            ),
+        )
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
+    }
+
+    private fun WebContext.fillLayoutChrome() {
+        setVariable("_csrf", mapOf("token" to "t"))
+        setVariable("workspaceHeaderFragment", "")
+        setVariable("workspaceOptions", emptyList<Any>())
+        setVariable("activeWorkspace", "acme")
+        setVariable("activeTheme", "saas")
+        setVariable("authenticated", true)
+        setVariable("currentPath", "/")
     }
 
     private fun webContext(): WebContext =
