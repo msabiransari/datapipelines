@@ -1,4 +1,8 @@
-<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment">
+<!-- The ROOT carries id="template-list-wrapper": the single stable swap target for
+     search, the dialect filter and the pager. The old <th:block> root contributed no
+     element, and the page's host div was consumed by th:replace, so the target never
+     existed in the DOM at all (ui-screens.md §4.6, the 028 §4.5 contract). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="template-list-wrapper">
   <th:block th:if="${#lists.isEmpty(templates)}">
     <div class="ds-empty-state" style="text-align: center; padding: var(--gap-2xl) var(--gap-lg);">
       <p style="color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--gap-sm);">No templates found</p>
@@ -52,4 +56,4 @@
       </button>
     </div>
   </th:block>
-</th:block>
+</div>

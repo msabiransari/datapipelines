@@ -20,8 +20,8 @@
     </select>
   </div>
 
-  <div id="pipeline-list-wrapper"
-       th:replace="~{partials/pipelines :: fragment}">
-  </div>
+  <!-- The fragment root carries id="pipeline-list-wrapper", so the swap target
+       survives every refresh — this div is only a placeholder (§4.3). -->
+  <div th:replace="~{partials/pipelines :: fragment}"></div>
 </th:block>
 </html>

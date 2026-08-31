@@ -21,8 +21,8 @@
     </select>
   </div>
 
-  <div id="template-list-wrapper"
-       th:replace="~{partials/templates :: fragment}">
-  </div>
+  <!-- The fragment root carries id="template-list-wrapper", so the swap target
+       survives every refresh — this div is only a placeholder (§4.6). -->
+  <div th:replace="~{partials/templates :: fragment}"></div>
 </th:block>
 </html>
