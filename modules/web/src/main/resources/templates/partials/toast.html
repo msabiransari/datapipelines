@@ -1,0 +1,13 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="toast(variant, title, message)">
+  <!-- The toast (ui-screens.md §5.1 Notifications). Server-rendered ONLY: controllers
+       return this template with variant/title/message in the model, or another template
+       splices the fragment in. Variants are the design system's: success, danger,
+       warning, info (primitives.css .ds-toast-*). Appended to the #toast stack
+       (hx-swap="beforeend"); static/js/toast.js schedules the auto-dismiss and wires
+       the close button — this markup carries no JS of its own. -->
+  <div class="ds-toast" th:classappend="'ds-toast-' + ${variant}" role="status">
+    <button type="button" class="ds-toast-close" aria-label="Dismiss">&times;</button>
+    <div class="ds-toast-title" th:text="${title}">Title</div>
+    <div class="ds-toast-body" th:text="${message}">Message</div>
+  </div>
+</th:block>
