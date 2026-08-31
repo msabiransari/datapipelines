@@ -133,8 +133,9 @@
           "line-color": tokens.edgeIdleStroke,
           "target-arrow-color": tokens.edgeIdleStroke,
           "target-arrow-shape": "triangle",
+          "arrow-scale": 1.2,
           "curve-style": "bezier",
-          width: 2,
+          width: 1.5,
         },
       },
       {
@@ -142,7 +143,7 @@
         style: {
           "line-color": tokens.edgeActiveStroke,
           "target-arrow-color": tokens.edgeActiveStroke,
-          width: 3,
+          width: 2.5,
         },
       },
     ];
@@ -156,6 +157,23 @@
     this.tokens = readDesignTokens();
   }
 
+  // dagre layout options (pipeline-editor.md §5.1/§5.2). nodeDimensionsIncludeLabels
+  // is MANDATORY with the label below the shape: at its default false, dagre lays out
+  // on the node box alone and one rank's labels collide with the next. marginX/marginY
+  // do not exist here (they are grid/cose options) — padding is the edge clearance, and
+  // fit defaults to true, so no manual cy.fit().
+  function layoutOptions() {
+    return {
+      name: "dagre",
+      rankDir: "LR",
+      nodeSep: 50,
+      rankSep: 100,
+      edgeSep: 12,
+      padding: 30,
+      nodeDimensionsIncludeLabels: true,
+    };
+  }
+
   PipelineGraph.prototype.render = function () {
     var self = this;
     var elements = this.buildElements();
@@ -164,7 +182,7 @@
       container: document.getElementById(this.containerId),
       elements: elements,
       style: buildStylesheet(this.tokens),
-      layout: { name: "dagre", rankDir: "LR" },
+      layout: layoutOptions(),
       wheelSensitivity: 0.3,
       minZoom: 0.2,
       maxZoom: 3,
@@ -331,6 +349,7 @@
     buildStylesheet: buildStylesheet,
     buildElements: buildElements,
     readDesignTokens: readDesignTokens,
+    layoutOptions: layoutOptions,
     pulseEnabled: pulseEnabled,
   };
   // node --test requires this file directly (the 027b harness); the browser keeps

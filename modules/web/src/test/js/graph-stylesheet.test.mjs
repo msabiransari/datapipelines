@@ -118,3 +118,17 @@ test("the pulse is gated on the reduced-motion preference", () => {
   assert.equal(graph.pulseEnabled({ matches: true }), false);   // reduce → still
   assert.equal(graph.pulseEnabled({ matches: false }), true);
 });
+
+test("the layout gives the graph room, and counts labels as part of a node", () => {
+  const opts = loadGraph().layoutOptions();
+  assert.equal(opts.name, "dagre");
+  assert.equal(opts.rankDir, "LR");
+  assert.ok(opts.nodeSep >= 40);
+  assert.ok(opts.rankSep >= 90);
+  assert.ok(opts.edgeSep >= 12);
+  assert.ok(opts.padding >= 24);
+  // Without this, dagre lays out on the node box alone and the below-shape labels
+  // of one rank collide with the next rank (cytoscape-dagre default is false).
+  assert.equal(opts.nodeDimensionsIncludeLabels, true);
+  assert.equal(opts.marginX, undefined, "dagre has no marginX — do not pin an ignored key");
+});
