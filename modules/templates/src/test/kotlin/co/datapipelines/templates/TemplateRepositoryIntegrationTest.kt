@@ -252,6 +252,18 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `list matches the rendered dialect column`() {
+        // The templates table renders a dialect badge per row (partials/templates.html), so the
+        // search rule (029: a screen's search covers every rendered column) requires the dialect
+        // wire value to be searchable. These two templates share no name/display-name/description
+        // substring with "sqlite" — a hit can only come from the dialect column.
+        repository.create(workspaceId, draft(id = "inventory.sql", dialect = Dialect.SQLITE), actor)
+        repository.create(workspaceId, draft(id = "fetch_orders.sql", dialect = Dialect.POSTGRES), actor)
+
+        repository.list(workspaceId, q = "sqlite").map { it.id } shouldContainExactly listOf("inventory.sql")
+    }
+
+    @Test
     fun `list pages with limit and offset`() {
         listOf("a.sql", "b.sql", "c.sql").forEach { repository.create(workspaceId, draft(id = it), actor) }
 

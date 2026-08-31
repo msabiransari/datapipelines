@@ -29,15 +29,23 @@ class DatasourceUiControllerTest {
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
 
-    private fun datasource(name: String = "pg-prod") =
-        Datasource(
-            name = name,
-            displayName = "Production Postgres",
-            description = "Main production database",
-            dialect = Dialect.POSTGRES,
-            jdbcUrl = "jdbc:postgresql://db:5432/app",
-            username = "readonly",
-        )
+    private fun datasource(
+        name: String = "pg-prod",
+        dialect: Dialect = Dialect.POSTGRES,
+        jdbcUrl: String = "jdbc:postgresql://db:5432/app",
+        username: String = "readonly",
+        displayName: String = "Production Postgres",
+        description: String? = "Main production database",
+        workspaceName: String? = null,
+    ) = Datasource(
+        name = name,
+        displayName = displayName,
+        description = description,
+        dialect = dialect,
+        jdbcUrl = jdbcUrl,
+        username = username,
+        workspaceName = workspaceName,
+    )
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -173,6 +181,64 @@ class DatasourceUiControllerTest {
         model["variant"] shouldBe "danger"
         model["title"] shouldBe "Datasource not found"
         io.mockk.verify(exactly = 0) { registry.testConnection(any<String>()) }
+    }
+
+    @Test
+    fun `partial search matches every rendered column`() {
+        authenticate()
+        val partialController = partialController()
+        val rows = listOf(
+            datasource(name = "alpha", jdbcUrl = "jdbc:postgresql://reports.internal:5432/db", username = "svc_reports"),
+            datasource(
+                name = "beta",
+                dialect = Dialect.SQLITE,
+                jdbcUrl = "jdbc:sqlite:/tmp/other.db",
+                username = "svc_other",
+                displayName = "Scratch database",
+                description = "Local scratch file",
+            ),
+        )
+        every { registry.listVisible(null, workspaceId) } returns rows
+
+        // jdbcUrl substring, username, and the dialect's wire value each select alpha only.
+        listOf("reports.internal", "svc_reports", "postgres").forEach { q ->
+            val model: ExtendedModelMap = ExtendedModelMap()
+            partialController.list(model, q, null, null)
+            @Suppress("UNCHECKED_CAST")
+            val shown = model.getAttribute("datasources") as List<Datasource>
+            shown.map { it.name } shouldBe listOf("alpha")
+        }
+    }
+
+    @Test
+    fun `partial search matches the rendered workspace column, including the global literal`() {
+        authenticate()
+        val partialController = partialController()
+        every { registry.listVisible(null, workspaceId) } returns listOf(
+            datasource(name = "bound", workspaceName = "analytics"),
+            datasource(name = "shared"),
+        )
+
+        val boundModel: ExtendedModelMap = ExtendedModelMap()
+        partialController.list(boundModel, "analytics", null, null)
+        @Suppress("UNCHECKED_CAST")
+        (boundModel.getAttribute("datasources") as List<Datasource>).map { it.name } shouldBe listOf("bound")
+
+        // An unbound row renders the literal "global" in the workspace column.
+        val globalModel: ExtendedModelMap = ExtendedModelMap()
+        partialController.list(globalModel, "global", null, null)
+        @Suppress("UNCHECKED_CAST")
+        (globalModel.getAttribute("datasources") as List<Datasource>).map { it.name } shouldBe listOf("shared")
+    }
+
+    @Test
+    fun `partial search still excludes non-matches`() {
+        authenticate()
+        every { registry.listVisible(null, workspaceId) } returns listOf(datasource(name = "alpha"))
+        val model: ExtendedModelMap = ExtendedModelMap()
+        partialController().list(model, "nothing-matches-this", null, null)
+        @Suppress("UNCHECKED_CAST")
+        (model.getAttribute("datasources") as List<*>) shouldBe emptyList<Datasource>()
     }
 
     @Test
