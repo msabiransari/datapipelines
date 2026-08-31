@@ -217,14 +217,60 @@ class ApiKeysPartialControllerTest {
     }
 
     @Test
-    fun `revoke returns table rows fragment`() {
+    fun `create returns the once-shown panel, refreshes the table, and points a toast at it`() {
+        authenticate()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val view = partialController.create("ci", "read", null, model)
+
+        view shouldBe "partials/api-key-created"
+        val html =
+            engine().process(
+                view,
+                webContext().apply { model.forEach { (k, v) -> setVariable(k, v) } },
+            )
+
+        html shouldContain "Your new API key (shown once)" // the secret still persists inline
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "copy it now" // the toast POINTS, never carries
+        // …and the issued plaintext never appears anywhere after the OOB marker.
+        html.substringAfter("hx-swap-oob=\"beforeend:#toast\"") shouldNotContain "dpk_abc123.supersecret"
+        // E2: the table is refreshed out-of-band, from the same row markup as the page.
+        html shouldContain "id=\"keys-table-body\""
+        html shouldContain "hx-swap-oob=\"true\""
+        html shouldContain "ds-badge ds-badge-default"
+    }
+
+    @Test
+    fun `revoke returns the rebuilt rows plus a success toast and drops the dead trigger`() {
         authenticate()
         every { apiKeyService.revoke("dpk_abc123", any()) } returns true
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey().copy(isRevoked = true))
 
         val response = partialController.revoke("dpk_abc123")
 
-        response.statusCode shouldBe HttpStatus.OK
+        response.body!! shouldContain "hx-swap-oob=\"beforeend:#toast\""
         response.body!! shouldContain "revoked"
+        response.headers["HX-Trigger"] shouldBe null // E3: nothing has ever listened for keyRevoked
     }
+
+    private fun engine(): SpringTemplateEngine =
+        SpringTemplateEngine().apply {
+            setTemplateResolver(
+                ClassLoaderTemplateResolver().apply {
+                    prefix = "templates/"
+                    suffix = ".html"
+                    characterEncoding = "UTF-8"
+                },
+            )
+        }
+
+    private fun webContext(): WebContext =
+        WebContext(
+            JakartaServletWebApplication
+                .buildApplication(MockServletContext())
+                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+        )
 }

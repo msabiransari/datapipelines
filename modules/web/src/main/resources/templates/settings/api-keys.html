@@ -32,7 +32,9 @@
           </div>
         </td>
       </tr>
-      <tr th:each="key : ${keys}">
+      <!-- One row definition, two renderers: this page iterates it directly, and the
+           post-create OOB refresh (partials/api-key-created) includes it as a fragment. -->
+      <tr th:fragment="keyRows(keys)" th:each="key : ${keys}">
         <td>
           <span th:text="${key.name}">key-name</span>
           <span th:if="${key.isRevoked}" class="ds-badge ds-badge-danger">revoked</span>
@@ -94,12 +96,12 @@
         if (created.children.length > 0 && created.style.display === 'none') {
           created.style.display = 'block';
           hideCreateModal();
-          htmx.ajax('GET', '/settings/api-keys', {target: '#keys-table-body', swap: 'outerHTML'}).then(function() {
-            setTimeout(function() {
-              var keyInput = created.querySelector('input');
-              if (keyInput) keyInput.select();
-            }, 50);
-          });
+          // The create response itself refreshes #keys-table-body out-of-band and
+          // points a toast at this panel (030) — no refetch; just select the secret.
+          setTimeout(function() {
+            var keyInput = created.querySelector('input');
+            if (keyInput) keyInput.select();
+          }, 50);
         }
       });
       observer.observe(document.getElementById('keyCreated'), {childList: true, subtree: true});
