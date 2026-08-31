@@ -30,7 +30,6 @@
       (payload.schema || []).map(function (s) {
         return s && s.name;
       });
-    var pageSize = payload.rows ? payload.rows.length : 0;
     var keyed = (payload.rows || []).map(function (r, i) {
       if (r && typeof r === "object" && !Array.isArray(r)) {
         r.__idx = i;
@@ -42,7 +41,16 @@
       });
       return o;
     });
-    return { columns: columns, rows: keyed, pageSize: pageSize, limit: payload.limit };
+    // `limit` is the page size the SERVER says it applied (§7.3). rows.length is
+    // only ever a lower bound — the last page is short by definition, and
+    // treating it as the page size corrupted every subsequent offset (027b C).
+    return { columns: columns, rows: keyed, limit: payload.limit };
+  }
+
+  /** The page denominator from the field both payloads carry (§6.4.7, §7.3). */
+  function totalPagesFrom(totalRows, pageSize) {
+    if (totalRows === undefined || totalRows === null) return 1;
+    return Math.max(1, Math.ceil(totalRows / (pageSize || 1)));
   }
 
   ResultPanel.prototype.showData = function (payload) {
@@ -53,13 +61,19 @@
     var page = normalizePage(payload);
     self.columns = page.columns;
     self.rows = page.rows;
-    self.pageSize = page.pageSize || page.limit || self.pageSize;
+    // data_ready carries no `limit` (§6.4.7). The inline page IS exactly one page:
+    // a full page when has_more, the whole result when not — either way its row
+    // count is a correct provisional size. Cursor pages below prefer the
+    // server-reported `limit` and never shrink to a short last page's row count.
+    self.pageSize = page.limit || page.rows.length;
     // The template gates the table on `resultPanel.data` — a value nothing ever
     // set, so the panel rendered its chrome (header, TTL, pagination) over an
     // eternally hidden table (027). Materialize it from the loaded page.
     self.data = { columns: self.columns, rows: self.rows };
-    if (payload.total_pages !== undefined) self.totalPages = payload.total_pages;
-    else self.totalPages = payload.has_more === false ? self.page : 2; // "1 or more": Next probes the next offset
+    // total_rows is in both payloads — a real denominator, recomputed on every
+    // page load (027b D). The API sends neither total_pages nor page (§6.4.7,
+    // §7.3); the old has_more guess froze at 2 and rendered "Page 3 / 2".
+    self.totalPages = totalPagesFrom(payload.total_rows, self.pageSize);
     self.page = payload.page || 1;
     self.hasPrev = self.page > 1;
     self.hasNext = payload.has_more !== undefined ? payload.has_more : self.page < self.totalPages;
@@ -103,7 +117,7 @@
     // The cursor paginates by offset/limit (rest-api.md §7.3), not by a page
     // number — the panel's old "?page=" param was ignored and every Prev/Next
     // click silently re-fetched the first page (027).
-    var size = self.pageSize || self.rows.length || 100;
+    var size = self.pageSize || 100;
     var offset = (page - 1) * size;
     fetch(self.cursorEndpoint + "?offset=" + offset + "&limit=" + size)
       .then(function (res) {
@@ -115,8 +129,13 @@
         var normalized = normalizePage(pl);
         self.columns = normalized.columns;
         self.rows = normalized.rows;
-        self.pageSize = normalized.pageSize || normalized.limit || self.pageSize;
+        // The cursor reports the limit IT applied — the only page-size authority.
+        // Never rows.length: the short last page must not rescale every other
+        // page's offsets (027b C). total_rows keeps the denominator current on
+        // every page (027b D).
+        if (normalized.limit) self.pageSize = normalized.limit;
         self.page = page;
+        self.totalPages = totalPagesFrom(pl.total_rows, self.pageSize);
         self.hasPrev = self.page > 1;
         self.hasNext = pl.has_more !== undefined ? pl.has_more : false;
         self.syncToEditor();
