@@ -86,3 +86,35 @@ test("edges are still built from depends_on", () => {
   assert.equal(edges.length, 1);
   assert.deepEqual([edges[0].data.source, edges[0].data.target], ["a", "b"]);
 });
+
+test("a selected node is unmistakable — ring plus halo", () => {
+  const style = styleFor(loadGraph().buildStylesheet(TOKENS), "node:selected");
+  assert.ok(style["border-width"] >= 3);
+  assert.equal(style["border-color"], TOKENS.nodeSelectedRing);
+  // underlay, not overlay: an overlay paints over the node and dims its label.
+  assert.ok(style["underlay-opacity"] > 0);
+  assert.ok(style["underlay-padding"] > 0);
+});
+
+test("states are accents, not full fills", () => {
+  const sheet = loadGraph().buildStylesheet(TOKENS);
+  const accent = {
+    running: TOKENS.nodeRunningAccent, success: TOKENS.nodeSuccessAccent,
+    failed: TOKENS.nodeFailedAccent, aborted: TOKENS.nodeAbortedAccent,
+  };
+  Object.keys(accent).forEach((s) => {
+    const style = styleFor(sheet, "node." + s);
+    assert.equal(style["background-color"], undefined,
+      `state ${s} must not repaint the card background`);
+    // Assert the VALUE, not merely presence: a border-color left on the old
+    // --node-*-bg token would satisfy a truthiness check and change nothing.
+    assert.equal(style["border-color"], accent[s]);
+  });
+  assert.equal(styleFor(sheet, "node.aborted").opacity, 0.5);   // §6.2 already required this
+});
+
+test("the pulse is gated on the reduced-motion preference", () => {
+  const graph = loadGraph();
+  assert.equal(graph.pulseEnabled({ matches: true }), false);   // reduce → still
+  assert.equal(graph.pulseEnabled({ matches: false }), true);
+});

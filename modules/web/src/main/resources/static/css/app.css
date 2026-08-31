@@ -3,16 +3,14 @@
   --app-sidebar-width: 280px;
   --app-sidebar-collapsed: 0px;
   --app-detail-width: 320px;
-  --node-running-bg: var(--accent-primary, #2563eb);
-  --node-running-text: var(--accent-primary-text, #ffffff);
+  /* Banner state fills (pipeline-editor.css .pe-banner) — the graph itself now uses
+     the --node-*-accent tokens below; a theme overriding these re-themes both. */
   --node-success-bg: var(--accent-success, #16a34a);
   --node-success-text: var(--accent-primary-text, #ffffff);
   --node-failed-bg: var(--accent-danger, #dc2626);
   --node-failed-text: var(--accent-danger-text, #ffffff);
   --node-aborted-bg: var(--accent-warning, #f59e0b);
   --node-aborted-text: var(--accent-primary-text, #000000);
-  --node-idle-bg: var(--surface-raised, #e5e7eb);
-  --node-idle-text: var(--text-primary, #111827);
   --edge-active-stroke: var(--accent-primary, #2563eb);
   --edge-idle-stroke: var(--text-secondary, #6b7280);
   /* Graph node cards (pipeline-editor.md §5.3). The card is a neutral surface; TYPE is
