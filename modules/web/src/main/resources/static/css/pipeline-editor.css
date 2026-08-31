@@ -196,17 +196,34 @@
 
 /* ---- Accessible node list ---- */
 .pe-node-list {
-  display: none;
+  /* Visually hidden but focusable and in the accessibility tree (031): display:none
+     removed the list from the tab order AND from screen readers — the keyboard path
+     was dead at the <ul>, before any <li> tabindex could matter. Clip, don't hide. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 
 .pe-node-list:focus,
 .pe-node-list:focus-within {
+  /* Undo the visually-hidden clip above. */
   display: block;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow-y: auto;
+  clip: auto;
+  white-space: normal;
   position: absolute;
   bottom: var(--pe-gap);
   left: var(--pe-gap);
   max-height: 200px;
-  overflow-y: auto;
   background: var(--surface-overlay, #fff);
   border: 1px solid var(--border-default, #e5e7eb);
   border-radius: var(--pe-radius);
@@ -222,11 +239,42 @@
   font-size: var(--text-sm, 0.875rem);
   color: var(--text-primary, #111827);
   border-radius: 4px;
+  /* Execution-state indicator channel (031): a left accent in the same token as the
+     graph's state border — never a background fill, so it can't be confused with
+     selection and never fights hover for the same pixels. */
+  border-left: 3px solid transparent;
 }
 
-.pe-node-list-item:hover,
+.pe-node-list-item:hover {
+  background: var(--surface-inset, #f3f4f6);
+}
+
+/* Selection is distinct from hover (031): the ring token the canvas ring uses. */
 .pe-node-list-item[aria-selected="true"] {
   background: var(--surface-selected, #e5e7eb);
+  box-shadow: inset 0 0 0 2px var(--node-selected-ring, #2563eb);
+}
+
+.pe-node-list-item:focus-visible {
+  outline: 2px solid var(--node-selected-ring, #2563eb);
+  outline-offset: -2px;
+}
+
+.pe-node-list-item[data-state="running"] {
+  border-left-color: var(--node-running-accent, #2563eb);
+}
+
+.pe-node-list-item[data-state="success"] {
+  border-left-color: var(--node-success-accent, #16a34a);
+}
+
+.pe-node-list-item[data-state="failed"] {
+  border-left-color: var(--node-failed-accent, #dc2626);
+}
+
+.pe-node-list-item[data-state="aborted"] {
+  border-left-color: var(--node-aborted-accent, #f59e0b);
+  opacity: 0.6;
 }
 
 .sr-only {

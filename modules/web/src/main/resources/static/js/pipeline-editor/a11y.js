@@ -20,6 +20,11 @@
       li.className = "pe-node-list-item";
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", "false");
+      // Roving tabindex: exactly one item is tabbable, arrows move it (and focus).
+      // Without ANY tabindex an <li> cannot take focus and the keydown handlers
+      // below never fired — the keyboard path was dead (031 finding).
+      li.setAttribute("tabindex", i === 0 ? "0" : "-1");
+      li.setAttribute("data-state", "idle");
       li.setAttribute("data-node-id", node.id);
       li.textContent = (node.display_name || node.name || node.id);
       li.addEventListener("click", function () {
@@ -47,12 +52,20 @@
 
   function focusNextSibling(el) {
     var next = el.nextElementSibling;
-    if (next) next.focus();
+    if (next) {
+      el.setAttribute("tabindex", "-1");
+      next.setAttribute("tabindex", "0");
+      next.focus();
+    }
   }
 
   function focusPrevSibling(el) {
     var prev = el.previousElementSibling;
-    if (prev) prev.focus();
+    if (prev) {
+      el.setAttribute("tabindex", "-1");
+      prev.setAttribute("tabindex", "0");
+      prev.focus();
+    }
   }
 
   function a11ySyncNode(nodeId) {
@@ -61,11 +74,12 @@
 
     var items = list.querySelectorAll('[role="option"]');
     for (var i = 0; i < items.length; i++) {
-      if (items[i].getAttribute("data-node-id") === nodeId) {
-        items[i].setAttribute("aria-selected", "true");
-      } else {
-        items[i].setAttribute("aria-selected", "false");
-      }
+      var selected = items[i].getAttribute("data-node-id") === nodeId;
+      items[i].setAttribute("aria-selected", selected ? "true" : "false");
+      // Roving tabindex follows the selection, and focus follows the tabindex so a
+      // keyboard user sees the ring where the canvas ring is.
+      items[i].setAttribute("tabindex", selected ? "0" : "-1");
+      if (selected) items[i].focus();
     }
 
     if (editor && editor.cy) {
@@ -73,6 +87,16 @@
       var cyNode = editor.cy.getElementById(nodeId);
       if (cyNode.length) cyNode.select();
     }
+  }
+
+  // Execution-state mirror: graph.js setNodeState/resetAll call this so a keyboard
+  // user sees running/success/failed/aborted without the canvas (styled via the
+  // same accent tokens as the graph border — pipeline-editor.css).
+  function a11yNodeState(nodeId, state) {
+    var list = document.getElementById("pe-node-list");
+    if (!list) return;
+    var item = list.querySelector('[role="option"][data-node-id="' + nodeId + '"]');
+    if (item) item.setAttribute("data-state", state);
   }
 
   function announceStatus(message) {
@@ -87,5 +111,6 @@
   window.setupA11y = setupA11y;
   window.buildNodeList = buildNodeList;
   window.a11ySyncNode = a11ySyncNode;
+  window.a11yNodeState = a11yNodeState;
   window.announceStatus = announceStatus;
 })();
