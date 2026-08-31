@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.ParameterBindingResult
 import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
@@ -44,8 +45,15 @@ class PipelineNodeSqlPartialController(
     private val pipelines: PipelineRepository,
     private val templateEngines: WorkspaceTemplateEngines,
     private val templates: TemplateRepository,
-    private val mapper: ObjectMapper = PipelineJson.objectMapper(),
 ) {
+    // NOT constructor parameters: Spring injects the app's servlet ObjectMapper into an
+    // ObjectMapper-typed parameter even when it has a default, and that mapper lacks
+    // NodeOutputModule — reading a stored body with it 500s on `output` (caught by the
+    // demo smoke test). The body goes through the same deserializer every production
+    // reader uses; the tree mapper (for the `parameters` query value) is the contract's.
+    private val deserializer = PipelineDeserializer()
+    private val mapper: ObjectMapper = PipelineJson.objectMapper()
+
     @GetMapping("/partials/pipelines/{id}/nodes/{nodeId}/sql")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun nodeSql(
@@ -61,7 +69,7 @@ class PipelineNodeSqlPartialController(
         val bodyJson =
             pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
                 ?: throw NoSuchElementException("Pipeline $id version ${record.currentVersion} body not found")
-        val pipeline = mapper.readValue(bodyJson, Pipeline::class.java)
+        val pipeline = deserializer.readOrThrow(bodyJson)
         val node = pipeline.node(nodeId)
 
         when {
