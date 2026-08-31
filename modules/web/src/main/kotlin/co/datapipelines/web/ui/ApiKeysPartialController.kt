@@ -75,7 +75,7 @@ class ApiKeysPartialController(
         val html = buildKeyTableRows(keys)
         return ResponseEntity
             .status(HttpStatus.OK)
-            .body(html + REVOKED_TOAST_HTML)
+            .body(html + ToastHtml.oob("success", "API key revoked", "The key can no longer authenticate."))
     }
 
     private fun buildKeyTableRows(keys: List<co.datapipelines.auth.ApiKey>): String {
@@ -134,16 +134,5 @@ class ApiKeysPartialController(
             """<tr><td colspan="5" style="padding:var(--gap-md);""" +
                 """text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">""" +
                 "No API keys found</td></tr>"
-
-        /**
-         * The revoke toast in its delivery wrapper (partials/toast-oob's shape): htmx
-         * swaps the CHILDREN of a non-outerHTML OOB element, so the attribute lives on
-         * the wrapper, never on the .ds-toast itself. Static copy — nothing interpolated.
-         */
-        const val REVOKED_TOAST_HTML =
-            """<div hx-swap-oob="beforeend:#toast"><div class="ds-toast ds-toast-success" role="status">""" +
-                """<button type="button" class="ds-toast-close" aria-label="Dismiss">&times;</button>""" +
-                """<div class="ds-toast-title">API key revoked</div>""" +
-                """<div class="ds-toast-body">The key can no longer authenticate.</div></div></div>"""
     }
 }

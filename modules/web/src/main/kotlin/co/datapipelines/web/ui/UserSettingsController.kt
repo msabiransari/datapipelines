@@ -79,10 +79,19 @@ class UserSettingsController(
         val principal = requirePrincipal()
         val available = listAvailableThemes()
         if (theme.isNotBlank() && theme !in available) {
-            return ResponseEntity.badRequest().body(
-                """<span style="color:var(--accent-danger);font-size:var(--text-sm)">""" +
-                    "Unknown theme: $theme</span>",
-            )
+            // Shape C (§5.1): the refusal keeps its real 400 and is retargeted at the
+            // stack — toast.js's bridgeErrors admits it (htmx never swaps 4xx alone).
+            return ResponseEntity
+                .badRequest()
+                .header("HX-Retarget", "#toast")
+                .header("HX-Reswap", "beforeend")
+                .body(
+                    ToastHtml.oob(
+                        "danger",
+                        "Unknown theme",
+                        "${ToastHtml.esc(theme)} is not a vendored theme — the preference was not changed.",
+                    ),
+                )
         }
         userRepository.setThemePreference(principal.userId, theme.ifBlank { null })
         model.addAttribute("theme", theme.ifBlank { uiProperties.theme })
@@ -92,8 +101,9 @@ class UserSettingsController(
     /**
      * Self-service password change (auth.md §5A.4), scope-governed as
      * `CHANGE_OWN_PASSWORD` (§7.6 — any authenticated principal, own account by
-     * construction). Answers htmx fragments, never redirects: the change screen
-     * swaps them into `#password-change-result`.
+     * construction). Answers htmx fragments, never redirects: success is a toast,
+     * failures stay inline in `#password-change-result` (§5.1 — validation is not
+     * a toast; the screen owns its 4xx delivery).
      *
      * SESSION-ONLY. The scope floor is "any authenticated", and API keys are CSRF-exempt
      * and authenticate on every path, so without this gate a leaked READ-scoped `dpk_` key
@@ -119,9 +129,15 @@ class UserSettingsController(
         }
         return when (val result = localPasswordService.changeOwn(principal.userId, currentPassword, newPassword)) {
             is LocalPasswordService.ChangeResult.Success -> {
+                // Toast-only (§5.1 Shape B): htmx extracts the OOB toast and clears
+                // #password-change-result with the empty remainder. The FAILURES below
+                // stay inline spans — field-level/credential validation is never a toast.
                 ResponseEntity.ok(
-                    """<span style="color:var(--accent-success);font-size:var(--text-sm)">""" +
-                        "Password changed — you can continue to the app.</span>",
+                    ToastHtml.oob(
+                        "success",
+                        "Password changed",
+                        "You can continue to the app.",
+                    ),
                 )
             }
 

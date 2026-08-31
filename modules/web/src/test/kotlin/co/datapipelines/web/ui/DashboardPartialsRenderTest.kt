@@ -66,6 +66,8 @@ class DashboardPartialsRenderTest {
      * 025 C1: the theme-swap fragment's OOB link must come out RENDERED — a resolved href
      * (context-pathed by @{...}), no surviving th: attributes. The old hand-built string
      * shipped th:href verbatim and htmx swapped it over the layout's stylesheet link.
+     * 030: the confirmation is the WRAPPED OOB toast (Shape B) — the select has no
+     * content target any more, so nothing but the link and the toast may be here.
      */
     @Test
     fun `theme-swap renders a resolved oob stylesheet link with no raw th attributes`() {
@@ -82,7 +84,12 @@ class DashboardPartialsRenderTest {
         // The RESOLVED href — @{...} ran; a hand-built or unprocessed value would still
         // carry the {theme} placeholder or a th: attribute.
         html shouldContain """href="/vendor/design-system/themes/ocean.css""".trim()
-        html shouldContain "Theme updated to"
+        // The confirmation is the toast-oob fragment, WRAPPED — never the attribute on
+        // the .ds-toast itself, and never the old #theme-status span.
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldContain "ds-toast-success"
+        html shouldContain "Theme updated"
+        html shouldNotContain "theme-status"
         html shouldNotContain "th:"
     }
 
