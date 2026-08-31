@@ -86,7 +86,12 @@ scripts/sample-data/work/
 /*.png
 
 # --- Local AI-assistant state (per-developer, never shared) ---
-.claude/
+# `.claude/*` (not `.claude/`): git cannot re-include anything under an excluded
+# DIRECTORY, so the dir stays visible and only its contents are ignored…
+.claude/*
+# …except project-level agent skills, which ARE shared: .claude/skills/ is a
+# symlink to the canonical .agents/skills/ (which Kimi and opencode read natively).
+!.claude/skills/
 .kimi-code/
 # Orchestration prompts/handbacks live in a private sibling repo, never here
 orchestration/
