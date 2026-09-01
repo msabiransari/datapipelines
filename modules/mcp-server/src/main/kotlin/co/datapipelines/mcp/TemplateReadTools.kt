@@ -114,7 +114,11 @@ class TemplatesGetTool(
             null -> templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
             else ->
                 templates.findVersion(workspaceId, id, version)
-                    ?: if (templates.existsId(workspaceId, id)) throw McpNotFound.templateVersion(id, version) else throw McpNotFound.template(id)
+                    ?: if (templates.existsId(workspaceId, id)) {
+                        throw McpNotFound.templateVersion(id, version)
+                    } else {
+                        throw McpNotFound.template(id)
+                    }
         }
     }
 }

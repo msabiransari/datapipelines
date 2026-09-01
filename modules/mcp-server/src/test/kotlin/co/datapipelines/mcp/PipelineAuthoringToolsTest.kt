@@ -51,7 +51,9 @@ class PipelineAuthoringToolsTest {
 
     private val drafts = mockk<PipelineDraftService>()
 
-    private fun createTool() = PipelinesCreateTool(pipelines, co.datapipelines.pipeline.AuthoringGuard(true), PipelineDeserializer(), validator, PipelineSerializer())
+    private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
+
+    private fun createTool() = PipelinesCreateTool(pipelines, guard, PipelineDeserializer(), validator, PipelineSerializer())
 
     private fun updateTool() = PipelinesUpdateTool(pipelines, drafts, PipelineDeserializer(), validator, PipelineSerializer())
 
@@ -126,7 +128,11 @@ class PipelineAuthoringToolsTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER)
-        } returns PipelineDraftService.DraftWrite(McpFixtures.pipelineRecord(version = 1), draftDetail(version = 2), """{"schema_version":1}""")
+        } returns PipelineDraftService.DraftWrite(
+            McpFixtures.pipelineRecord(version = 1),
+            draftDetail(version = 2),
+            """{"schema_version":1}""",
+        )
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -181,12 +187,19 @@ class PipelineAuthoringToolsTest {
     fun `create refuses with the catalogued code when authoring is disabled`() {
         // versioning §5.5: the MCP surface shares the guard — a promotion receiver's
         // agent gets the same catalogued refusal, not a silent success.
-        val tool = PipelinesCreateTool(pipelines, co.datapipelines.pipeline.AuthoringGuard(false), PipelineDeserializer(), validator, PipelineSerializer())
+        val tool =
+            PipelinesCreateTool(
+                pipelines,
+                co.datapipelines.pipeline.AuthoringGuard(false),
+                PipelineDeserializer(),
+                validator,
+                PipelineSerializer(),
+            )
 
         val error =
             shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { tool.call(args, ctx) }
         error.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
-        error.details["config_key"] shouldBe "datapipelines.authoring.enabled"
+        error.details["config_key"] shouldBe "datapipelines.deployment.authoring-enabled"
     }
 
     @Test

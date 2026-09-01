@@ -76,8 +76,10 @@ class TemplateToolsTest {
     fun `create refuses with the catalogued code when authoring is disabled`() {
         val error =
             shouldThrow<DatapipelinesException> {
-                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(false), validator)
-                    .call(McpArguments(mapOf("dialect" to "POSTGRES", "display_name" to "X", "description" to "d", "body" to "SELECT 1")), authorCtx)
+                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(false), validator).call(
+                    McpArguments(mapOf("dialect" to "POSTGRES", "display_name" to "X", "description" to "d", "body" to "SELECT 1")),
+                    authorCtx,
+                )
             }
         error.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
         error.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
@@ -291,7 +293,8 @@ class TemplateToolsTest {
             { draft.captured.isLibrary shouldBe true },
             {
                 shouldThrow<McpError> {
-                    TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
+                    TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
+                        .call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },
         )

@@ -843,7 +843,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 | `template.version.conflict` | 409 | Content-hash precondition failed on a template draft write/release/discard — another writer changed it after the caller loaded it ([Versioning §4](versioning.md#4-content-hash-body_hash)) |
 | `template.version.not_draft` | 409 | Template release or discard requested but no DRAFT version exists ([Versioning §3](versioning.md#3-version-lifecycle)) |
-| `template.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.authoring.enabled=false` — the template mirror of `pipeline.authoring.disabled` ([Versioning §5.5](versioning.md#55-authoring-is-a-dev-server-capability-039)); reads, execution and import are unaffected |
+| `template.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — the template mirror of `pipeline.authoring.disabled` ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)); reads, execution and import are unaffected |
 
 ### 13.10 Result retrieval
 
@@ -898,7 +898,7 @@ entry, Versioning is the semantics).
 | `pipeline.release.template_not_released` | 409 | Pipeline release blocked: the draft pins template version(s) still in DRAFT — release those templates first (Versioning §5.3 precondition 2) |
 | `pipeline.promotion.not_released` | 409 | Promotion selected a pipeline whose candidate version is not RELEASED — drafts are never promoted (Versioning §10.3 guard 1) |
 | `pipeline.promotion.not_newer` | 409 | Promotion push of a version not greater than the target environment's current version for that pipeline — same-version pushes are a bug, not a no-op (Versioning §10.3 guard 2) |
-| `pipeline.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.authoring.enabled=false` — a promotion receiver never authors (Versioning D7/§5.5). Reads, execution and import are unaffected. The template mirror is `template.authoring.disabled` (§13.9) |
+| `pipeline.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — a promotion receiver never authors (Versioning D7/§5.5). Reads, execution and import are unaffected. The template mirror is `template.authoring.disabled` (§13.9) |
 
 ---
 

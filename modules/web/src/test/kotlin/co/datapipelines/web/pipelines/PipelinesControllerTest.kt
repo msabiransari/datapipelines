@@ -302,7 +302,7 @@ class PipelinesControllerTest {
             receiver.create("""{"schema_version":1,"name":"x","display_name":"X","description":"","parameters":{},"nodes":[]}""")
         }
         create.code shouldBe "pipeline.authoring.disabled"
-        create.details["config_key"] shouldBe "datapipelines.authoring.enabled"
+        create.details["config_key"] shouldBe "datapipelines.deployment.authoring-enabled"
 
         val delete = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { receiver.delete(pipelineId) }
         delete.code shouldBe "pipeline.authoring.disabled"

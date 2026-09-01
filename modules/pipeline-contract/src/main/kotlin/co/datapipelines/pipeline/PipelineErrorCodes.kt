@@ -443,7 +443,7 @@ object PipelineErrorCodes {
 
         /**
          * §13.13 / versioning §5.5 — an authoring write (create, update/draft, release,
-         * discard, delete) on a server with `datapipelines.authoring.enabled=false`. Drafts
+         * discard, delete) on a deployment with `datapipelines.deployment.authoring-enabled=false`. Drafts
          * are a capability of authoring environments; a promotion receiver never authors
          * (D7), so its write path refuses, naming the reason. Reads, execution and import
          * are unaffected.

@@ -85,10 +85,11 @@ class DomainConfiguration {
         co.datapipelines.pipeline.AuthoringGuard.from(environment)
 
     /**
-     * The §7 boot consistency checks around that capability (configuration.md §7): a
-     * promotion server-key configured on an authoring-enabled server WARNs (D7's violation
-     * stated in config — but a one-box deployment may legitimately be both), and existing
-     * drafts on an authoring-DISABLED server refuse startup, naming them.
+     * The §7 boot checks around that capability (configuration.md §3.19): the deployment
+     * posture line (the `name` label's ONLY consumer — no code branches on it, pinned by
+     * [DeploymentNameBranchingGuardTest]), the receiver-also-authors WARN — currently
+     * ONE-SIDED, its promotion half a seam the promotion round wires — and the refusal
+     * when an authoring-disabled deployment still holds drafts, naming them.
      */
     @Bean
     fun authoringStartupCheck(

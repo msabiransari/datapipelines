@@ -28,7 +28,7 @@ class AuthoringGuardTest {
         val thrown = shouldThrow<DatapipelinesException> { AuthoringGuard(false).requirePipelineAuthoring() }
 
         thrown.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
-        thrown.message shouldContain "datapipelines.authoring.enabled=false"
+        thrown.message shouldContain "datapipelines.deployment.authoring-enabled=false"
         thrown.details["config_key"] shouldBe AuthoringGuard.CONFIG_KEY
     }
 
@@ -54,18 +54,12 @@ class AuthoringGuardTest {
         }.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
     }
 
-    private fun environment(
-        flag: String?,
-        serverKey: String? = null,
-    ): StandardEnvironment =
+    private fun environment(flag: String?): StandardEnvironment =
         StandardEnvironment().apply {
             propertySources.addFirst(
                 MapPropertySource(
                     "test",
-                    buildMap {
-                        flag?.let { put(AuthoringGuard.CONFIG_KEY, it) }
-                        serverKey?.let { put(AuthoringGuard.PROMOTION_SERVER_KEY, it) }
-                    },
+                    if (flag == null) emptyMap() else mapOf(AuthoringGuard.CONFIG_KEY to flag),
                 ),
             )
         }
