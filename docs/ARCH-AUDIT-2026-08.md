@@ -110,11 +110,22 @@ round's brief; see the 036 handback.
 **Proposed fix:** catch `DuplicateKeyException` and re-read — precedent exists at `LocalPasswordService.kt:153`.
 **Verification:** code-read.
 
+**[resolved — 036, branch `fix/multi-instance`]** Both sites now catch `DuplicateKeyException`
+and take the pre-existing row's path, in the repo's established shape: `BootstrapDatasourceRegistrar`
+counts the loser as `skipped` (`reason=concurrent_registration`); `UserService.provisionBootstrapActor`
+re-reads and returns the winner's row. Tests: `BootstrapDatasourceRegistrarRaceTest`,
+`UserServiceRaceTest` (deterministic — mock returns absent-then-throws, the race's interleaving).
+
 ### M6 — First-login races (transient 500s) — MEDIUM
 **Evidence:** `UserService.findOrCreateByEmail` (`UserService.kt:32`) — find-then-insert, no duplicate catch on this path. `WorkspaceService.ensurePersonalWorkspace` (via `WorkspaceService.kt:129`) is deliberately loud on failure (`PersonalWorkspaceSeeder.kt:21`).
 **Failure mode:** a user's two concurrent first OIDC logins on different replicas → one 500; retry succeeds.
 **Proposed fix:** same catch-and-reread as M5.
 **Verification:** code-read.
+
+**[resolved — 036, branch `fix/multi-instance`]** `UserService.findOrCreateByEmail` catches
+`DuplicateKeyException` from the insert, re-reads the winner, and runs the same §4.2 identity
+link the existing-row path uses (extracted as `linkIdentity` so the two paths cannot drift).
+Test: `UserServiceRaceTest`.
 
 ### M7 — Per-JVM caps multiply by N — LOW
 - **SSE per-user stream cap** — `ExecutionStreamRegistry.kt:50,76,100`: `max-streams-per-user` is effectively ×N.

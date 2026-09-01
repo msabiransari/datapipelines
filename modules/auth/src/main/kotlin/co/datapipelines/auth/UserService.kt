@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import org.springframework.dao.DuplicateKeyException
 import java.util.UUID
 
 /**
@@ -39,29 +40,55 @@ class UserService(
         val normalized = normalize(email)
         val existing = userRepository.findByEmail(normalized)
         if (existing != null) {
-            userRepository.updateIdentity(
-                id = existing.id,
-                // display_name refreshes from the ID token on EVERY login (owner-ratified
-                // 2026-08-28, 021 Deviation 3): no profile-edit feature exists, so a stored
-                // name has no user-chosen referent to protect — freezing would leave an IdP
-                // rename unrepresentable. The §6.1 bootstrap placeholder is replaced by this
-                // same refresh at the first real sign-in.
+            return linkIdentity(existing.id, displayName, pictureUrl, provider, providerSubject)
+        }
+
+        return try {
+            createUser(
+                normalizedEmail = normalized,
                 displayName = displayName,
-                profilePictureUrl = pictureUrl,
+                pictureUrl = pictureUrl,
                 provider = provider,
                 providerSubject = providerSubject,
             )
-            authCache.invalidateUser(existing.id)
-            return checkNotNull(userRepository.findById(existing.id)) { "User ${existing.id} vanished mid-provisioning" }
+        } catch (_: DuplicateKeyException) {
+            // A user's two concurrent FIRST logins on different replicas both pass the
+            // find above; one wins the insert. Losing must not 500 the login (ARCH-AUDIT M6):
+            // re-read and link, exactly as if the row had already been there. Same
+            // catch-and-reread shape as LocalPasswordService.createLocalUser.
+            val winner =
+                checkNotNull(userRepository.findByEmail(normalized)) {
+                    "User $normalized lost the insert race but is absent on re-read"
+                }
+            return linkIdentity(winner.id, displayName, pictureUrl, provider, providerSubject)
         }
+    }
 
-        return createUser(
-            normalizedEmail = normalized,
+    /**
+     * The §4.2 identity (re)link for an account that already exists: refresh the stored
+     * identity from the ID token, evict the liveness cache, return the fresh row.
+     */
+    private fun linkIdentity(
+        id: UUID,
+        displayName: String,
+        pictureUrl: String?,
+        provider: String,
+        providerSubject: String,
+    ): User {
+        userRepository.updateIdentity(
+            id = id,
+            // display_name refreshes from the ID token on EVERY login (owner-ratified
+            // 2026-08-28, 021 Deviation 3): no profile-edit feature exists, so a stored
+            // name has no user-chosen referent to protect — freezing would leave an IdP
+            // rename unrepresentable. The §6.1 bootstrap placeholder is replaced by this
+            // same refresh at the first real sign-in.
             displayName = displayName,
-            pictureUrl = pictureUrl,
+            profilePictureUrl = pictureUrl,
             provider = provider,
             providerSubject = providerSubject,
         )
+        authCache.invalidateUser(id)
+        return checkNotNull(userRepository.findById(id)) { "User $id vanished mid-provisioning" }
     }
 
     /**
@@ -78,6 +105,9 @@ class UserService(
      * The placeholders (`provider = 'bootstrap'`, `provider_subject` = the email) satisfy the
      * NOT NULL columns and the `(provider, provider_subject)` uniqueness; the first real OIDC
      * login replaces them through §4.2's linking step.
+     *
+     * Multi-instance first boot: two replicas can race the find-then-insert; the loser catches
+     * `DuplicateKeyException` and re-reads the winner's row (ARCH-AUDIT M5).
      */
     fun provisionBootstrapActor(): User {
         val configured = authProperties.bootstrapAdminEmail?.let(::normalize)
@@ -85,13 +115,24 @@ class UserService(
             "datapipelines.auth.bootstrap-admin-email is required to pre-provision the bootstrap actor"
         }
         userRepository.findByEmail(configured)?.let { return it }
-        return createUser(
-            normalizedEmail = configured,
-            displayName = configured.substringBefore('@'),
-            pictureUrl = null,
-            provider = BOOTSTRAP_PROVIDER,
-            providerSubject = configured,
-        )
+        return try {
+            createUser(
+                normalizedEmail = configured,
+                displayName = configured.substringBefore('@'),
+                pictureUrl = null,
+                provider = BOOTSTRAP_PROVIDER,
+                providerSubject = configured,
+            )
+        } catch (_: DuplicateKeyException) {
+            // Two instances seeding against one fresh database race here (ARCH-AUDIT M5):
+            // both pass the find above, one wins the insert, and the loser would otherwise
+            // crash its own context startup inside afterSingletonsInstantiated(). The winner's
+            // row is exactly what "create-if-absent" wants kept — re-read and return it, the
+            // same catch-and-reread shape as LocalPasswordService.createLocalUser.
+            checkNotNull(userRepository.findByEmail(configured)) {
+                "Bootstrap actor $configured lost the insert race but is absent on re-read"
+            }
+        }
     }
 
     /**
