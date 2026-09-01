@@ -83,7 +83,10 @@ class PipelinesListTool(
  * `pipelines_get` (mcp-server.md §6.2.2). Scope: `read`.
  *
  * Returns the **pipeline JSON body** exactly as stored (pipeline-contract §3) — not a wrapper
- * carrying server-assigned fields, which §6.2.2 does not describe. `version` defaults to the
+ * carrying server-assigned fields — merged with the fields the hash protocol needs
+ * (versioning §4.2/§12): the version's `body_hash` and `status` (echo this hash back as
+ * `expected_hash` when you update), `current_version` (the latest RELEASED version — what
+ * execute-default runs), and the `draft` pointer when one exists. `version` defaults to the
  * pipeline's current version.
  */
 class PipelinesGetTool(
@@ -94,7 +97,9 @@ class PipelinesGetTool(
             name = "pipelines_get",
             description =
                 "Get the full definition of a pipeline (latest version, or a specific version). Use this to read the " +
-                    "pipeline body before executing or modifying it.",
+                    "pipeline body before executing or modifying it. The result carries body_hash and status — echo " +
+                    "body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased " +
+                    "edits exist.",
             schema =
                 """
                 {
@@ -124,6 +129,22 @@ class PipelinesGetTool(
         version: Int,
     ): JsonNode {
         val json = pipelines.findVersionBody(workspaceId, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
-        return McpTools.readTree(json)
+        val detail =
+            pipelines.findVersionDetail(workspaceId, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val tree = McpTools.readTree(json) as? com.fasterxml.jackson.databind.node.ObjectNode ?: error("body of $id is not an object")
+        tree.put("version", detail.version)
+        tree.put("status", detail.status.name)
+        tree.put("body_hash", detail.bodyHash)
+        val draftPointer = tree.putObject("draft")
+        val draft = pipelines.findDraftDetail(workspaceId, id)
+        if (draft != null) {
+            draftPointer
+                .put("version", draft.version)
+                .put("body_hash", draft.bodyHash)
+                .put("updated_at", draft.updatedAt?.toString() ?: "")
+        } else {
+            tree.remove("draft")
+        }
+        return tree
     }
 }

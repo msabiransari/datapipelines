@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.1 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.6 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-08-26
+**Last updated:** 2026-09-01
 
 ---
 
@@ -32,7 +32,7 @@ This spec defines the **complete physical schema** for the app's own metadata Po
 - **Naming**: `snake_case` for all identifiers. Table names are plural (`users`, `pipelines`). Column names are singular (`email`, `created_at`).
 - **Foreign keys** use `ON DELETE CASCADE` for child tables that don't make sense without their parent (e.g., `pipeline_versions` without `pipelines`). Use `ON DELETE RESTRICT` (default) for reference columns (e.g., `owner_id` in `pipelines` — don't delete a user who owns pipelines).
 - **`updated_at` maintenance:** every table that has an `updated_at` column gets it set **by the application, in the `SET` clause of every `UPDATE` statement** (`updated_at = NOW()`). There are **no triggers** in this schema — no `BEFORE UPDATE` trigger, no `moddatetime` extension. Rationale: a trigger hides a write from the statement that caused it, and this schema is small enough that the discipline is a code-review item, not an operational risk. The `DEFAULT NOW()` on the column covers INSERT only. An UPDATE that forgets `updated_at` is a bug in the repository method.
-- **Immutable tables carry no `updated_at`** (`pipeline_versions`, `template_versions`, `execution_events`, `audit_log`) — see the per-table notes.
+- **Immutable tables carry no `updated_at`** (`execution_events`, `audit_log`) — see the per-table notes. Since V6 the version tables carry one **narrowly**: `pipeline_versions` / `template_versions` record the last DRAFT write in `updated_at`/`updated_by` (the 409 conflict details of [versioning §4.2](versioning.md)); a release or discard does not restamp it, and RELEASED/DISCARDED rows are never UPDATEd otherwise (versioning §3.1's amended immutability discipline).
 
 ---
 
@@ -206,24 +206,38 @@ CREATE INDEX idx_pipelines_owner ON pipelines(owner_id) WHERE is_deleted = FALSE
 
 ### 4.5 `pipeline_versions`
 
-Immutable per-version pipeline bodies. See [Pipeline Contract §17.3](pipeline-contract.md#173-persistence).
+Per-version pipeline bodies with their lifecycle state (V6, [versioning §3/§4](versioning.md)). See [Pipeline Contract §17.3](pipeline-contract.md#173-persistence).
 
 ```sql
 CREATE TABLE pipeline_versions (
     pipeline_id     UUID        NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
     version         INTEGER     NOT NULL,
     body_json       JSONB       NOT NULL,            -- full pipeline JSON (per Pipeline Contract §3)
+    status          TEXT        NOT NULL DEFAULT 'RELEASED'
+                        CONSTRAINT chk_pipeline_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of body_json's canonical projection, DB-computed
+    released_at     TIMESTAMPTZ NULL,                -- DB-generated (NOW()) at release — never application-supplied
+    released_by     UUID        REFERENCES users(id),
+    updated_by      UUID        REFERENCES users(id),-- last DRAFT writer — powers the 409 conflict details
+    updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only; not restamped at release/discard
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (pipeline_id, version)
 );
+
+CREATE UNIQUE INDEX uq_pipeline_versions_one_draft
+    ON pipeline_versions (pipeline_id) WHERE status = 'DRAFT';
 ```
 
 **Notes:**
 - `body_json` is the complete pipeline JSON as defined by [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema) — `schema_version`, `name`, `display_name`, `description`, `parameters`, `settings`, `nodes`. It already carries the `_json` suffix, so it is **not** renamed by the D4 sweep.
+- **The version lifecycle (V6, versioning §3.1).** RELEASED and DISCARDED rows are never UPDATEd; DRAFT rows may be — that is the one bounded exception to append-only, and only the DB predicate `status = 'DRAFT'` permits mutation. A write to a RELEASED version first copies it to a DRAFT (copy-on-write); a write to a DRAFT overwrites it in place. `pipelines.current_version` names the latest RELEASED version and does not move while a draft exists (§4.4), so every reader of the pointer keeps its semantics. Creation still lands v1 RELEASED — creation is not modification.
+- **`uq_pipeline_versions_one_draft` is the concurrency rule made physical.** At most one DRAFT per pipeline; two simultaneous first-writers both insert and the loser violates this index, surfacing as `pipeline.version.conflict` carrying the winner's hash (versioning §3.3).
+- **`body_hash` is computed by the database** — `encode(sha256(convert_to(body_json::text, 'UTF8')), 'hex')` — in V6's backfill and in every repository write, one expression everywhere: a JSONB column does not preserve the writer's key order, so the application's serialized string would be a drifting canonical anchor. The hash is the precondition token of every mutation (versioning §4.2) and the cross-server content identity (§11.2).
+- **`released_at` is database-generated** (`NOW()` in the release statement). [Versioning §8](versioning.md#8-executing-drafts) derives the draft-run label by comparing it against the application-supplied `pipeline_executions.started_at`; requiring both clocks to be right would double the failure window, so at most one side spans a clock.
+- `updated_at` belongs to the DRAFT write path; a release or discard does not restamp it (versioning §11) — the row's modification clock is the last draft write, and §2's every-UPDATE rule is a `pipelines`-table rule.
 - There is **no terminal-node column and no derived result-node column**. Under D1 the result node is the node whose `output` resolves to `caller` (at most one per pipeline, zero legal); it is a property of the stored JSON, read at execution time. Nothing about it is denormalized here — a denormalized copy would be a second source of truth for a value validation already guarantees.
-- Versions are immutable. Never UPDATE; only INSERT a new version — hence no `updated_at`.
-- `PRIMARY KEY (pipeline_id, version)` is also the target of the composite foreign key on `pipeline_executions` ([§4.6](#46-pipeline_executions)); it must not be reordered or dropped.
+- `PRIMARY KEY (pipeline_id, version)` is also the target of the composite foreign key on `pipeline_executions` ([§4.6](#46-pipeline_executions)); it must not be reordered or dropped. The same FK is why an **executed** draft cannot be hard-deleted — discard flips it to DISCARDED and the number stays consumed (versioning §3.4).
 
 ### 4.6 `pipeline_executions`
 
@@ -339,7 +353,7 @@ CREATE INDEX idx_templates_active ON templates(name) WHERE is_deleted = FALSE;
 
 ### 4.9 `template_versions`
 
-Immutable per-version template bodies.
+Per-version template bodies with their lifecycle state (V6, [versioning §6](versioning.md)).
 
 ```sql
 CREATE TABLE template_versions (
@@ -350,6 +364,13 @@ CREATE TABLE template_versions (
     is_library      BOOLEAN     NOT NULL DEFAULT FALSE,
     imports_json    JSONB       NOT NULL DEFAULT '[]',   -- array of {id, version, alias}
     body            TEXT        NOT NULL,            -- template source; syntax per `engine`
+    status          TEXT        NOT NULL DEFAULT 'RELEASED'
+                        CONSTRAINT chk_template_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of the canonical {engine,dialect,is_library,imports,body} object
+    released_at     TIMESTAMPTZ NULL,                -- DB-generated at release
+    released_by     UUID        REFERENCES users(id),
+    updated_by      UUID        REFERENCES users(id),
+    updated_at      TIMESTAMPTZ NULL,                -- DRAFT writes only
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (template_id, version),
@@ -357,16 +378,19 @@ CREATE TABLE template_versions (
 );
 
 CREATE INDEX idx_template_versions_dialect ON template_versions(dialect);
+
+CREATE UNIQUE INDEX uq_template_versions_one_draft
+    ON template_versions (template_id) WHERE status = 'DRAFT';
 ```
 
 **Notes:**
 - `template_id` re-keyed from the TEXT human id to the surrogate `templates.id` in V4 (§4.8) — same FK name (`template_versions_template_id_fkey`), same `ON DELETE CASCADE`, new type. Lookups by human id join `templates` on the surrogate and filter `name` within the workspace; the join back is how a stored version "resolves to its named template".
+- **The version lifecycle mirrors `pipeline_versions` (V6, versioning §6)**: same statuses, same one-draft partial index, same four write paths, same DB-computed `body_hash` discipline. Two template-specific differences. First, the canonical body is the **version-owned field object** — `jsonb_build_object('engine', …, 'dialect', …, 'is_library', …, 'imports', imports_json, 'body', body)` — because `display_name`/`description` live on the index row `templates` only and are not part of the versioned artifact (they keep updating at save time; versioning v1.3 records the asymmetry). Second, discard is always a hard delete — nothing references a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so versioning §3.4's executed-draft DISCARDED branch cannot fire here.
 - **No `params_schema` column** (D3) — deleted, not deprecated. Any migration from a pre-v1.1 draft drops it.
 - `engine` carries the [`TemplateEngine`](enums.md#6-templateengine--template-language) value. It is `NOT NULL DEFAULT 'freemarker'` and deliberately has **no CHECK constraint**: v1 accepts only `freemarker` (enforced by save-time validation, D2), and future engines must not require a migration to become storable. The default exists for the v1 write path, which never omits it.
 - `is_library` is version-scoped (§4.8). [Templates §6](templates.md#6-library-templates) resolves `template.validation.import_not_library` against the *exact* `{id, version}` an `imports` entry names, so this is the column that validation reads. A library body holds only macro/function definitions — `body` is still `NOT NULL`.
 - `imports_json` is a JSONB **array** of `{id, version, alias}` objects, `[]` when the template imports nothing. The body never contains `<#import>` (D12) — the engine synthesizes the prologue from this array. Nothing here enforces the referenced versions exist: that is save-time validation's job (D2), and a DB-level FK is impossible against a JSONB array.
 - `body` is `TEXT`, not JSONB — it is template source, so no `_json` suffix applies.
-- Versions are immutable ([Templates §5](templates.md#5-template-versioning)): never UPDATE, only INSERT — hence no `updated_at`.
 
 ### 4.10 `datasources`
 
@@ -484,6 +508,7 @@ CREATE TABLE workspace_members (
 | `pipelines` | `uq_pipelines_workspace_name` | via UNIQUE | Name lookup within a workspace; prevents duplicate names per workspace (incl. soft-deleted) |
 | `pipelines` | `idx_pipelines_owner` | explicit (partial) | List non-deleted pipelines by owner |
 | `pipeline_versions` | `pipeline_versions_pkey` | via PK | `(pipeline_id, version)` fetch; also the target of `fk_executions_pipeline_version` |
+| `pipeline_versions` | `uq_pipeline_versions_one_draft` | explicit (partial, unique) | The one-DRAFT-per-pipeline rule of versioning §3.3 — the physical concurrency guard behind copy-on-write |
 | `pipeline_executions` | `pipeline_executions_pkey` | via PK | Lookup by `execution_id` |
 | `pipeline_executions` | `idx_executions_pipeline` | explicit | List executions for a pipeline, newest first |
 | `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions — the stale sweep's access path ([§8.3](#83-stale-execution-sweep)) |
@@ -496,6 +521,7 @@ CREATE TABLE workspace_members (
 | `templates` | `uq_templates_workspace_name` | via UNIQUE | Name lookup within a workspace; prevents duplicate names per workspace (incl. soft-deleted) |
 | `templates` | `idx_templates_active` | explicit (partial) | List non-deleted templates (indexed on `name` since V4) |
 | `template_versions` | `template_versions_pkey` | via PK | `(template_id, version)` fetch — the render path's lookup (surrogate `template_id` since V4) |
+| `template_versions` | `uq_template_versions_one_draft` | explicit (partial, unique) | The one-DRAFT-per-template rule of versioning §3.3/§6 |
 | `template_versions` | `idx_template_versions_dialect` | explicit | Filter template versions by dialect |
 | `datasources` | `datasources_pkey` | via PK | Lookup by name — the registry's hot path |
 | `datasources` | `idx_datasources_active` | explicit (partial) | List non-deleted datasources |
@@ -508,6 +534,40 @@ CREATE TABLE workspace_members (
 - `idx_events_execution` — dropped as an exact duplicate of the `uq_events_execution_event` constraint index on the schema's highest-volume table.
 - Indexes on FK columns that are only ever joined *from* the parent (`pipeline_versions.created_by`, `template_versions.created_by`, `templates.created_by`, `datasources.created_by`). v1 has no "list everything user X created" screen. Add them when a query needs one — an unused index on a write-heavy table is a cost with no return.
 - Indexes on the V4 `workspace_id` FK columns (`pipelines`, `templates`, `api_keys`, `datasources`) and on `workspace_members.user_id`. Slice-1 read paths pin one constant workspace, so these indexes would filter nothing; slice 2's real workspace resolution adds them with the queries that need them.
+
+---
+
+## 5A. Promotion Classification
+
+One row per table in §4 — the registry `FlywayMigrationIntegrationTest` parses and compares
+against the live schema **in both directions** (every live table is classified; every
+classified table exists). A new table fails that test until it is BOTH expected in the
+schema assertions AND classified here, so the classification cannot rot behind the schema
+and the schema cannot grow past the classification. When the guard fires, update THIS
+table and the test's expected-table list in the same commit.
+
+- **promotable** — authored content that promotion transfers between environments at an
+  exact version number (identity rule D5: numbers are global identities; imports never
+  renumber).
+- **environment-local** — state that belongs to exactly one deployment and is never
+  transferred; promotion references these only by name.
+- **derived** — data this deployment's own activity produced (executions, events, audit);
+  per-environment by construction, never authored, never promoted.
+
+| table | verdict | resource | version series | export key | why |
+|---|---|---|---|---|---|
+| `pipelines` | promotable | Pipeline | `current_version` (latest RELEASED; versioning §3.4) | `id` (UUID, portable) | The index row over the current released body; metadata rides the release (versioning §3.5) |
+| `pipeline_versions` | promotable | Pipeline | per-pipeline `version` — global identity, preserved on import (D5) | `(pipeline_id, version)` | The artifacts themselves; promotion pushes the latest RELEASED body (versioning D6/§9.2) |
+| `templates` | promotable | Template | `current_version` | `name` | The human id is the cross-env identity pipeline pins reference by number |
+| `template_versions` | promotable | Template | per-template `version` — same preservation rule | `(name, version)` | Content of the artifact rows promotion transfers (versioning §6/§9.2) |
+| `datasources` | environment-local | Datasource | — | `name` | Connection secrets never leave the environment; the NAME is the cross-env contract (portability §11.1) |
+| `users` | environment-local | User | — | `email` | Identities are per-deployment; imported rows' `created_by` names the importing actor (versioning §10.6's service principal, when promotion ships) |
+| `api_keys` | environment-local | ApiKey | — | — | Credentials are per-deployment by definition |
+| `workspaces` | environment-local | Workspace | — | `name` | Isolation topology is per-deployment |
+| `workspace_members` | environment-local | Membership | — | — | Follows `users` and `workspaces`, both local |
+| `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
+| `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
+| `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
 
 ---
 
@@ -648,7 +708,8 @@ modules/app/src/main/resources/db/migration/
 ├── V3__execution_lineage.sql
 ├── V4__workspaces_rekey.sql        ← workspaces + workspace_members; workspace_id on pipelines/templates/api_keys/datasources; templates surrogate re-key
 ├── V5__local_password_auth.sql     ← users gains password_hash / password_changed_at / must_change_password / failed_login_count / locked_until (auth.md §5A)
-└── V6__...                         ← future migrations
+├── V6__version_lifecycle.sql       ← pipeline_versions/template_versions gain status/body_hash/released_*/updated_* + the one-draft partial indexes (versioning.md §11)
+└── V7__...                         ← future migrations
 ```
 
 ### 7.2 V1 migration
@@ -762,3 +823,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-08-26 | v1.4 | V4 migration | Workspaces, slice 1 (design doc 2026-08-16-workspaces-design §3/§4, D2/D9; re-base resolutions R1/R2 recorded here, amending that spec's PROPOSED DDL). New tables §4.11 `workspaces` and §4.12 `workspace_members`; the `default` workspace is seeded with the well-known constant UUID `defa0000-0000-0000-0000-000000000001` (R2 — deterministic across deployments and greppable; a boot-time DB lookup or a config key was considered and rejected) and `created_by` NULL (R1 — NULL = system-provisioned; the spec's `NOT NULL` gave the seed no user to reference on a fresh install). §4.4 `pipelines` gains `workspace_id NOT NULL` backfilled to `default`; name uniqueness moves from global (`pipelines_name_key`) to per-workspace via the explicitly named `uq_pipelines_workspace_name` — same mechanism (plain UNIQUE constraint, soft-deleted rows included). §4.8 `templates` re-keys onto a surrogate `id UUID` PK; the TEXT id becomes `name`, unique per workspace (`uq_templates_workspace_name`); `idx_templates_active` follows the rename onto `name`. §4.9 `template_versions.template_id` re-keys onto the surrogate (same FK name and `ON DELETE CASCADE`); pipeline-JSON and `imports_json` `{id, version}` refs keep meaning the human id (`name`) — stored payloads not rewritten. §4.10 `datasources` gains `workspace_id UUID NULL` (NULL = global; existing rows backfill NULL, D9) and `is_readonly NOT NULL DEFAULT FALSE` — columns only, no datasources-module change in this slice. §4.2 `api_keys` gains `workspace_id NOT NULL` backfilled to `default` (D3 pinning). §3 ERD, §5 index table, §6.1 example, and §7.1 file list updated (the §7.1 list also stops showing the stale `V2__seed_admin_user.sql` placeholder — V2/V3 are the introspection and lineage migrations). |
 | 2026-08-28 | §4.10 prose refresh | The "columns land here, module unchanged / enforcement arrives with the readonly slice" note is history: the surfaces slice put `workspace_id` and `is_readonly` on the entity, in the repository's INSERT/UPDATE/read-join SQL, and made visibility (`bound-to-active OR global`) a repository-level predicate. No DDL change in this note. |
 | 2026-08-29 | v1.5 | V5 migration | §4.1 `users` gains the local password auth columns (migration V5, auth.md §5A): `password_hash TEXT NULL` (NULL = OIDC-only account; Argon2id via the same `SecretHasher` as API keys), `password_changed_at TIMESTAMPTZ NULL`, `must_change_password BOOLEAN NOT NULL DEFAULT FALSE` (the forced-change gate), and the per-account lockout pair `failed_login_count INTEGER NOT NULL DEFAULT 0` / `locked_until TIMESTAMPTZ NULL`. Additive only — existing rows backfill NULL/defaults and behave exactly as before; no new indexes (the login lookup keys off the existing UNIQUE `email`); the "No password column" note is replaced by the password/lockout notes. |
+| 2026-09-01 | v1.6 | V6 migration (035) | §4.5 `pipeline_versions` and §4.9 `template_versions` gain the version-lifecycle columns (migration V6, versioning.md §11): `status` (DRAFT/RELEASED/DISCARDED, CHECK-constrained, existing rows backfill RELEASED), `body_hash` (SHA-256 hex, DB-computed over the canonical body projection — the same expression in the backfill and every write, so writer and reader can never disagree; NOT NULL after backfill), `released_at` (DB-generated at release — versioning §8's cross-clock precondition), `released_by`, and the draft-write pair `updated_by`/`updated_at` (the 409 conflict details; not restamped at release/discard). Each table gains `uq_*_versions_one_draft`, the partial unique index that makes copy-on-write race-safe (versioning §3.3). §2's immutable-tables rule amended accordingly; §5 index table updated; §7.1 file list gains V6. New **§5A Promotion Classification** — one row per table (promotable / environment-local / derived) parsed by `FlywayMigrationIntegrationTest` in both directions, so a new table fails that test until it is both expected and classified (the D17 registry). |

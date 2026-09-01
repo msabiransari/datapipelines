@@ -44,6 +44,10 @@ class PipelinePartialController(
             hasMore = all.size > page + size
         }
         model.addAttribute("pipelines", items)
+        // versioning §7: the "drafts pending release" badge — unreleased (often agent)
+        // work must be visible on the list screen. Released metadata stays what the row
+        // shows until lock (§3.5); the badge is the marker that a draft exists.
+        model.addAttribute("drafts", pipelines.findDrafts(workspaceId, items.map { it.id }))
         model.addAttribute("q", q ?: "")
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", hasMore)

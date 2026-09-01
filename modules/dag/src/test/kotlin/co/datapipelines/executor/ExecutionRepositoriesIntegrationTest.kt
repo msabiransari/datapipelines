@@ -381,8 +381,10 @@ class ExecutionRepositoriesIntegrationTest {
             )
             jdbc.update(
                 """
-                INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by)
-                VALUES (:id, 1, CAST('{}' AS jsonb), :owner)
+                -- Seed row carries V6's lifecycle columns (035): body_hash NOT NULL since the
+                -- version-lifecycle migration; the executor suite does not exercise hashing.
+                INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at)
+                VALUES (:id, 1, CAST('{}' AS jsonb), 'seed-hash', 'RELEASED', :owner, :owner, NOW())
                 """.trimIndent(),
                 mapOf("id" to id, "owner" to owner),
             )

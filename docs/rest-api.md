@@ -215,7 +215,11 @@ Server assigns: `id`, `version` (starts at `1`), `owner` (from auth), `created_a
 GET /pipelines/{id}
 ```
 
-Response: `200 OK` with full pipeline JSON (including server-assigned fields).
+Response: `200 OK` with full pipeline JSON (including server-assigned fields). The default
+body remains the **released** version; since the version lifecycle (versioning §7) the
+response also carries the released version's `status` (`RELEASED`) and `body_hash` (the
+precondition token for a first write), `current_version` (the latest RELEASED version), and
+a `draft` pointer — `{version, body_hash, updated_by, updated_at}` — when a draft exists.
 
 ### 5.3 Get pipeline (specific version)
 
@@ -229,18 +233,61 @@ GET /pipelines/{id}/versions/{version}
 GET /pipelines/{id}/versions
 ```
 
-Returns metadata only (no body JSON) for each version.
+Returns metadata only (no body JSON) for each version: `version`, `status`
+(`DRAFT`/`RELEASED`/`DISCARDED`), `body_hash`, `created_at`, `created_by`, `released_at`.
 
-### 5.5 Update pipeline (creates new version)
+### 5.5 Update pipeline (writes the draft)
 
 ```
 PUT /pipelines/{id}
+If-Match: <body_hash of the version this edit is based on>
 Content-Type: application/json
 
 {full pipeline body, excluding server-assigned fields}
 ```
 
-Response: `200 OK` with the new version (`version: N+1`, `updated_at` bumped).
+Since the version lifecycle (versioning §3.2/§5) a PUT **always writes the DRAFT branch**:
+the first write after a release copies the released version to a draft (`version: N+1`,
+`status: "DRAFT"`); later writes overwrite that same draft in place. A PUT never appends a
+released version. The `If-Match` header carries the hash precondition (§4.2 of versioning):
+the DRAFT's hash for an in-place write, the current RELEASED row's hash for a first write —
+absent/blank is `400 pipeline.execution.invalid_parameter_type` with
+`details.reason = "precondition_missing"`; stale is `409 pipeline.version.conflict` with the
+current hash/author in `details`. A draft renaming onto a taken name fails HERE with
+`pipeline.validation.duplicate_name` (versioning §3.5), not at release.
+
+Response: `200 OK` with the draft version (`version`, `status: "DRAFT"`, `body_hash`,
+`current_version` — the released pointer, unmoved).
+
+### 5.10 Release pipeline
+
+```
+POST /pipelines/{id}/release
+If-Match: <the draft's body_hash>
+```
+
+Locks the draft: the version flips to RELEASED, `pipelines.current_version` moves to it,
+and the index row's name/display_name/description adopt the released body's values
+(metadata rides the release — versioning §3.5). Preconditions evaluated server-side:
+§12 re-validation on the draft body; every pinned template version RELEASED
+(`409 pipeline.release.template_not_released` naming it); the hash guard
+(`409 pipeline.version.conflict`); no draft at all (`409 pipeline.version.not_draft`).
+UI-driven in practice — agents never release (versioning D4); no MCP tool exists.
+
+Response: `200 OK` with the released version's full shape (`status: "RELEASED"`).
+
+### 5.11 Discard pipeline draft
+
+```
+POST /pipelines/{id}/draft/discard
+If-Match: <the draft's body_hash>
+```
+
+Discards the draft: a never-executed draft is hard-deleted and its version number returns
+to the pool; an executed draft flips to `DISCARDED` (the executions FK blocks the delete)
+and the number stays consumed. Both outcomes are transparent to the caller.
+
+Response: `204 No Content`. Errors as §5.10 (`not_draft` / `version.conflict`).
 
 ### 5.6 Delete pipeline
 
@@ -276,6 +323,16 @@ Response: `201 Created` or `200 OK` (if updating existing pipeline).
 
 Fails with `pipeline.import.missing_datasource` or `pipeline.import.missing_template` if dependencies unmet.
 
+**Preserved-version import** (versioning §9.2, D5 — version numbers are global identities
+and imports never renumber): a payload carrying `version` (export and promotion send it)
+is honored at that EXACT version. `body_hash` must ride along and is recomputed from the
+payload body — a mismatch (or a missing declaration) is
+`409 pipeline.import.hash_mismatch`. Target-side rules: absent ⇒ insert as RELEASED at that
+version (`released_at` from the payload's, if present); present+RELEASED+same hash ⇒
+idempotent `200`; present+RELEASED+different hash / present as DRAFT / present as DISCARDED
+⇒ `409 pipeline.import.version_conflict` with both hashes and the target status in
+`details`. A version-less payload keeps the allocate-next behavior above.
+
 ### 5.9 Export pipeline
 
 ```
@@ -304,6 +361,10 @@ Returns a bundle:
 ```
 
 `include_templates=true` is the default. Set `false` to export the pipeline only.
+
+The exported pipeline object carries its lifecycle fields (`version`, `status`,
+`body_hash`, `released_at`) so a preserved-version import on the target can verify and
+re-stamp them; bundled template versions carry their `version`, `status` and `body_hash`.
 
 ---
 
@@ -684,16 +745,20 @@ Response: `201 Created` with full template (including version `1`, `created_at`)
 GET /templates/{id}
 ```
 
+Response carries the version's `status` and `body_hash` and, when a draft exists, a
+`draft` pointer — the template mirror of §5.2 (versioning §6/§7).
+
 ### 8.3 Get template (specific version)
 
 ```
 GET /templates/{id}/versions/{version}
 ```
 
-### 8.4 Update template (creates new version)
+### 8.4 Update template (writes the draft)
 
 ```
 PUT /templates/{id}
+If-Match: <body_hash of the version this edit is based on>
 
 {
   "dialect": "POSTGRES",            // may differ from prior versions — a new version records its own dialect (existing pipelines pin a version, so they are unaffected)
@@ -704,7 +769,36 @@ PUT /templates/{id}
 }
 ```
 
-Response: `200 OK` with new version number.
+The template mirror of §5.5 (versioning §3.2/§6): the first write after a release copies
+to a draft, later writes overwrite it in place; `If-Match` carries the hash precondition;
+stale is `409 template.version.conflict`. The draft versions the CONTENT fields —
+`display_name`/`description` move on the index row at save time (versioning §6's
+documented asymmetry: they are not part of the versioned artifact).
+
+Response: `200 OK` with the draft version's projection (`version`, `status: "DRAFT"`,
+`body_hash`).
+
+### 8.9 Release template
+
+```
+POST /templates/{id}/release
+If-Match: <the draft's body_hash>
+```
+
+Locks the template draft (§5.10's mirror; templates lock BEFORE pipelines — versioning
+§6's pin rule is enforced at pipeline release). Errors: `template.version.not_draft`,
+`template.version.conflict`, or the template validator's §13.9 codes re-run on the draft
+content. Response: `200 OK` with the released version.
+
+### 8.10 Discard template draft
+
+```
+POST /templates/{id}/draft/discard
+If-Match: <the draft's body_hash>
+```
+
+Always a hard delete (nothing references a template version by FK — versioning §6), so the
+version number always returns to the pool. Response: `204 No Content`.
 
 ### 8.5 List templates
 

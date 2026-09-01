@@ -66,6 +66,7 @@ class TemplateUiControllerTest {
                 template("orders_v2.sql"),
             )
         every { repository.count(any(), null, null) } returns 42
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null, null)
@@ -85,6 +86,7 @@ class TemplateUiControllerTest {
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), Dialect.POSTGRES, "orders", 0, 26) } returns listOf(template())
         every { repository.count(any(), Dialect.POSTGRES, "orders") } returns 1
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "orders", "POSTGRES", null)
@@ -100,7 +102,8 @@ class TemplateUiControllerTest {
     fun `partial returns fragment view`() {
         authenticate()
         every { repository.list(any(), null, null, 0, 26) } returns listOf(template())
-        every { repository.count(any(), null, null) } returns 1
+        every { repository.count(any(), null, null) } returns 100
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -117,6 +120,7 @@ class TemplateUiControllerTest {
         val many = (1..26).map { template("t$it.sql") }
         every { repository.list(any(), null, null, 0, 26) } returns many
         every { repository.count(any(), null, null) } returns 100
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -137,6 +141,7 @@ class TemplateUiControllerTest {
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), null, null, 0, 26) } returns emptyList()
         every { repository.count(any(), null, null) } returns 0
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)
@@ -152,6 +157,7 @@ class TemplateUiControllerTest {
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), null, null, 0, 26) } returns emptyList()
         every { repository.count(any(), null, null) } returns 0
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)

@@ -8,25 +8,37 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.dao.DuplicateKeyException
+import java.time.Instant
 import java.util.UUID
 
 /**
- * The pipeline **import** act (rest-api.md §5.8), lifted out of [PipelineTransferController] so a
- * second caller can perform it.
+ * The pipeline **import** act (rest-api.md §5.8, versioning §9), lifted out of
+ * [PipelineTransferController] so a second caller can perform it.
  *
- * The logic is unchanged and this is the only copy: the controller now supplies the workspace and
- * actor it reads off the request principal, and the D9 example seeder
- * (`ExampleContentSeeder`) supplies the freshly provisioned personal workspace and its owner.
- * Extracting it — rather than letting the seeder re-implement an import — is what keeps the §12
- * validation, the id-collision handling and the §13.2 error re-labelling identical on both paths.
- * The extraction is why `modules/web` is in this slice's write-set at all.
+ * ## Two modes, decided by the payload
  *
- * Everything HTTP stays in the controller: this returns [Imported.created] and lets the caller
+ * - **Version-less** (the historical shape): allocate the next local version. An `id` that
+ *   exists appends to that pipeline; otherwise the pipeline is created under that id.
+ * - **Preserved-version** (versioning §9.2, D5): when the payload carries `version` —
+ *   promotion always sends it, and so does export — the version number is **honored**:
+ *   imports never renumber, because cross-environment renumbering silently breaks template
+ *   pins (§9.1's verified latent defect). `body_hash` must ride along and is recomputed
+ *   from the payload body (`pipeline.import.hash_mismatch` on a mismatch — the transfer-
+ *   corruption and canonicalization-drift catcher). `released_at` is honored so §8's
+ *   draft-run derivation stays truthful on the target.
+ *
+ * The D9 example seeder (`ExampleContentSeeder`) supplies the freshly provisioned personal
+ * workspace and its owner through this same path; extracting it — rather than letting the
+ * seeder re-implement an import — is what keeps the §12 validation, the id-collision
+ * handling and the §13.2 error re-labelling identical on both paths.
+ *
+ * Everything HTTP stays in the controller: this returns [Imported] and lets the caller
  * decide between `201` and `200`.
  */
 class PipelineImportService(
@@ -35,7 +47,7 @@ class PipelineImportService(
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
-    /** What the import stored, plus whether it was a create (`201`) or a new version (`200`). */
+    /** What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). */
     data class Imported(
         val record: PipelineRecord,
         val canonical: String,
@@ -47,7 +59,7 @@ class PipelineImportService(
      *
      * @throws ApiException / `PipelineValidationException` exactly as the endpoint always has.
      */
-    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
+    @Suppress("ThrowsCount", "LongMethod") // a boundary maps each distinct failure to its own catalogued 4xx
     fun import(
         body: String,
         workspaceId: UUID,
@@ -63,16 +75,61 @@ class PipelineImportService(
                         mapOf("id" to raw.asText().take(MAX_ECHOED_ID_CHARS)),
                     )
             }
+        val preserved = preservedVersion(tree)
         SERVER_FIELDS.forEach(tree::remove)
 
         val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
         importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
         val canonical = serializer.write(pipeline)
 
+        return if (preserved != null) {
+            importPreserved(workspaceId, requestedId, pipeline, canonical, preserved, actorId)
+        } else {
+            importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
+        }
+    }
+
+    /** The §9.2 payload: `version` plus the `body_hash` / `released_at` that ride with it. */
+    private data class Preserved(
+        val version: Int,
+        val bodyHash: String?,
+        val releasedAt: Instant?,
+    )
+
+    /** The textual value of [field] when present as a JSON string, else null. */
+    private fun textual(
+        tree: ObjectNode,
+        field: String,
+    ): String? = tree.get(field)?.takeIf { it.isTextual }?.asText()
+
+    private fun preservedVersion(tree: ObjectNode): Preserved? {
+        val versionNode = tree.get("version") ?: return null
+        if (!versionNode.isInt || versionNode.asInt() < 1) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "'version', when present on an import payload, must be a positive integer.",
+                mapOf("version" to versionNode.asText().take(MAX_ECHOED_ID_CHARS)),
+            )
+        }
+        return Preserved(
+            version = versionNode.asInt(),
+            bodyHash = textual(tree, "body_hash"),
+            releasedAt = textual(tree, "released_at")?.let(Instant::parse),
+        )
+    }
+
+    /** Version-less import — today's allocate-next-local behavior (§9.2: "when absent"). */
+    private fun importNextLocal(
+        workspaceId: UUID,
+        requestedId: UUID?,
+        pipeline: co.datapipelines.pipeline.Pipeline,
+        canonical: String,
+        actorId: UUID,
+    ): Imported {
         val existing = requestedId?.let { pipelines.findById(workspaceId, it) }
         val record =
             if (existing != null) {
-                pipelines.update(workspaceId, existing.id, pipeline, canonical, actorId)
+                pipelines.appendReleasedVersion(workspaceId, existing.id, pipeline, canonical, actorId)
                     ?: throw ApiErrors.pipelineNotFound(existing.id.toString())
             } else {
                 try {
@@ -93,6 +150,155 @@ class PipelineImportService(
             }
         return Imported(record = record, canonical = canonical, created = existing == null)
     }
+
+    /**
+     * Preserved-version import — §9.2's table, row by row. Version numbers are global
+     * identities (D5): gaps below `current_version` are expected and harmless, a local
+     * DRAFT is never clobbered, consumed (DISCARDED) numbers are never reused, and a
+     * same-hash re-import of an old export is an idempotent no-op.
+     */
+    @Suppress("ThrowsCount", "LongMethod") // each §9.2 row is its own refusal; the length is the conflict table made literal
+    private fun importPreserved(
+        workspaceId: UUID,
+        requestedId: UUID?,
+        pipeline: co.datapipelines.pipeline.Pipeline,
+        canonical: String,
+        preserved: Preserved,
+        actorId: UUID,
+    ): Imported {
+        // Hash recompute guard — catches transfer corruption and canonicalization drift in
+        // one place, before any classification.
+        val declared =
+            preserved.bodyHash
+                ?: throw ApiException(
+                    PipelineErrorCodes.Import.HASH_MISMATCH,
+                    "An import payload carrying 'version' must also carry its 'body_hash'.",
+                    mapOf("reason" to "body_hash_missing", "pipeline_version" to preserved.version),
+                )
+        val recomputed = pipelines.computeBodyHash(canonical)
+        if (recomputed != declared) {
+            throw ApiException(
+                PipelineErrorCodes.Import.HASH_MISMATCH,
+                "The import payload's declared body_hash does not match its body.",
+                mapOf(
+                    "declared_body_hash" to declared.take(MAX_ECHOED_ID_CHARS),
+                    "recomputed_body_hash" to recomputed.take(MAX_ECHOED_ID_CHARS),
+                    "pipeline_version" to preserved.version,
+                ),
+            )
+        }
+
+        val existing = requestedId?.let { pipelines.findById(workspaceId, it) }
+        if (existing == null) {
+            // Absent: insert as RELEASED at the exact version, released_at from source.
+            try {
+                val record =
+                    pipelines.importPipelineVersion(
+                        workspaceId,
+                        NewPipeline.from(pipeline, ownerId = actorId, id = requestedId ?: UUID.randomUUID()),
+                        preserved.version,
+                        canonical,
+                        declared,
+                        preserved.releasedAt,
+                        actorId,
+                    )
+                return Imported(record, canonical, created = true)
+            } catch (e: DuplicateKeyException) {
+                throw ApiException(
+                    PipelineErrorCodes.Import.VERSION_CONFLICT,
+                    "Pipeline id '$requestedId' collides with a deleted pipeline's retained id.",
+                    mapOf("pipeline_id" to requestedId.toString()),
+                    e,
+                )
+            }
+        }
+
+        val target = pipelines.findVersionDetail(workspaceId, existing.id, preserved.version)
+        return when {
+            target == null -> {
+                val inserted =
+                    insertAbsentVersion(workspaceId, existing.id, preserved, pipeline, canonical, declared, actorId)
+                if (inserted == null) {
+                    // The number was taken between the read and the insert — classify per §9.2.
+                    throw versionConflict(
+                        pipelines.findVersionDetail(workspaceId, existing.id, preserved.version),
+                        preserved,
+                        null,
+                    )
+                }
+                Imported(existing, canonical, created = false)
+            }
+
+            target.status == PipelineVersionStatus.RELEASED && target.bodyHash == declared -> {
+                // Idempotent no-op: re-importing an old export is safe (§9.2).
+                Imported(existing, canonical, created = false)
+            }
+
+            else -> {
+                throw versionConflict(target, preserved, null)
+            }
+        }
+    }
+
+    /**
+     * The absent-row insert; null when the number was taken between the read and the write
+     * (sequential), the DuplicateKeyException when it was taken mid-statement (concurrent).
+     */
+    private fun insertAbsentVersion(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        preserved: Preserved,
+        pipeline: co.datapipelines.pipeline.Pipeline,
+        canonical: String,
+        declared: String,
+        actorId: UUID,
+    ): co.datapipelines.pipeline.PipelineVersionDetail? =
+        try {
+            pipelines.insertReleasedVersion(
+                workspaceId,
+                pipelineId,
+                preserved.version,
+                pipeline.name,
+                pipeline.displayName,
+                pipeline.description,
+                canonical,
+                declared,
+                preserved.releasedAt,
+                actorId,
+            )
+        } catch (e: DuplicateKeyException) {
+            // The row appeared between the read and the insert — classify by what is there now.
+            throw versionConflict(pipelines.findVersionDetail(workspaceId, pipelineId, preserved.version), preserved, e)
+        }
+
+    private fun versionConflict(
+        target: co.datapipelines.pipeline.PipelineVersionDetail?,
+        preserved: Preserved,
+        cause: Throwable?,
+    ): ApiException =
+        ApiException(
+            PipelineErrorCodes.Import.VERSION_CONFLICT,
+            when (target?.status) {
+                PipelineVersionStatus.DRAFT -> {
+                    "Version ${preserved.version} exists as a local draft; a local draft is never clobbered."
+                }
+
+                PipelineVersionStatus.DISCARDED -> {
+                    "Version ${preserved.version} was discarded here; consumed version numbers are never reused."
+                }
+
+                else -> {
+                    "Version ${preserved.version} exists with different content; never overwrite."
+                }
+            },
+            buildMap {
+                put("pipeline_version", preserved.version)
+                put("declared_body_hash", preserved.bodyHash?.take(MAX_ECHOED_ID_CHARS) ?: "")
+                put("target_body_hash", target?.bodyHash?.take(MAX_ECHOED_ID_CHARS) ?: "")
+                put("target_status", target?.status?.name ?: "ABSENT")
+            },
+            cause,
+        )
 
     /**
      * Re-labels environment-dependency failures with the §13.2 import codes; every other failure
@@ -140,8 +346,23 @@ class PipelineImportService(
     private companion object {
         val MAPPER = PipelineJson.objectMapper()
 
-        /** Server-assigned fields an import payload may carry from an export; never authoritative. */
-        val SERVER_FIELDS = listOf("version", "owner", "created_at", "updated_at")
+        /**
+         * Server-assigned fields an import payload may carry from an export; never
+         * authoritative. The lifecycle fields (`status`, `body_hash`, `released_at`) ride
+         * this list too — they were read (and honored) BEFORE the strip, per §9.2.
+         */
+        val SERVER_FIELDS =
+            listOf(
+                "version",
+                "owner",
+                "created_at",
+                "updated_at",
+                "status",
+                "body_hash",
+                "released_at",
+                "current_version",
+                "draft",
+            )
 
         /** Reflected client input is bounded before it reaches an error message. */
         const val MAX_ECHOED_ID_CHARS = 64

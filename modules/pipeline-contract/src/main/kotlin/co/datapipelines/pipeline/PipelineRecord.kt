@@ -31,15 +31,19 @@ data class PipelineRecord(
 /**
  * The metadata of one `pipeline_versions` row (metadata-db §4.5), without the body.
  *
- * Versions are immutable — never updated, only inserted — which is why the table carries no
- * `updated_at` and this type carries no modification time. `GET /pipelines/{id}/versions`
- * (§14) is the listing this shape serves.
+ * Since V6 a version carries its lifecycle status and content hash (versioning §3.1/§4);
+ * `GET /pipelines/{id}/versions` (§14) is the listing this shape serves. RELEASED and
+ * DISCARDED rows are never UPDATEd; a DRAFT row may be — the one bounded exception to
+ * append-only, per versioning §3.1's immutability discipline.
  */
 data class PipelineVersionRecord(
     val pipelineId: UUID,
     val version: Int,
+    val status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    val bodyHash: String = "",
     val createdAt: Instant,
     val createdBy: UUID,
+    val releasedAt: Instant? = null,
 )
 
 /**

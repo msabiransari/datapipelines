@@ -1,5 +1,7 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -7,6 +9,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -94,7 +97,7 @@ class TemplateRepositoryIntegrationTest {
     fun `update appends a new immutable version and bumps current_version`() {
         repository.create(workspaceId, draft(body = "SELECT 1"), actor)
 
-        val v2 = repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor)
+        val v2 = repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor)
 
         v2.shouldNotBeNull()
         v2.version shouldBe 2
@@ -107,7 +110,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `update on an unknown id returns null and writes nothing`() {
-        repository.update(workspaceId, "nope.sql", draft(), actor).shouldBeNull()
+        repository.appendReleasedVersion(workspaceId, "nope.sql", draft(), actor).shouldBeNull()
         existsRows("template_versions") shouldBe 0
     }
 
@@ -152,7 +155,7 @@ class TemplateRepositoryIntegrationTest {
         repository.create(workspaceId, draft(body = "SELECT 1"), actor)
         repository.softDelete(workspaceId, "fetch_orders.sql")
 
-        repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
+        repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), actor).shouldBeNull()
 
         existsRows("template_versions") shouldBe 1
         repository.lookupVersion(workspaceId, "fetch_orders.sql", 2).shouldBeNull()
@@ -168,7 +171,7 @@ class TemplateRepositoryIntegrationTest {
         val updater = insertUser(email = "editor@example.com", subject = "sub-2")
         repository.create(workspaceId, draft(body = "SELECT 1"), actor)
 
-        val v2 = repository.update(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), updater)
+        val v2 = repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), updater)
 
         v2.shouldNotBeNull()
         v2.createdBy shouldBe updater
@@ -188,7 +191,7 @@ class TemplateRepositoryIntegrationTest {
     fun `list returns live templates at their current version, id-ordered`() {
         repository.create(workspaceId, draft(id = "b.sql"), actor)
         repository.create(workspaceId, draft(id = "a.sql"), actor)
-        repository.update(workspaceId, "a.sql", draft(id = "a.sql", body = "SELECT 2"), actor)
+        repository.appendReleasedVersion(workspaceId, "a.sql", draft(id = "a.sql", body = "SELECT 2"), actor)
         repository.create(workspaceId, draft(id = "gone.sql"), actor)
         repository.softDelete(workspaceId, "gone.sql")
 
@@ -325,7 +328,7 @@ class TemplateRepositoryIntegrationTest {
         // the stored per-version value is what is read back.
         repository.create(workspaceId, draft(id = "shift.sql", dialect = Dialect.POSTGRES), actor)
 
-        val v2 = repository.update(workspaceId, "shift.sql", draft(id = "shift.sql", dialect = Dialect.MYSQL), actor)
+        val v2 = repository.appendReleasedVersion(workspaceId, "shift.sql", draft(id = "shift.sql", dialect = Dialect.MYSQL), actor)
 
         v2.shouldNotBeNull()
         v2.dialect shouldBe Dialect.MYSQL
@@ -351,6 +354,297 @@ class TemplateRepositoryIntegrationTest {
             )
 
         alias shouldBe "l"
+    }
+
+    // =============================================================================================
+    // The draft/release lifecycle (versioning §3–§6, V6) — the template mirror of §13's floor.
+    // =============================================================================================
+
+    @Test
+    fun `createDraft copies the released version to a draft and leaves the released row untouched`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        val detail =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        detail.version shouldBe 2
+        detail.status shouldBe PipelineVersionStatus.DRAFT
+        detail.bodyHash shouldNotBe released.bodyHash
+        detail.updatedBy shouldBe actor
+        // §3.4: the pointer does not move while a draft exists.
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.version shouldBe 1
+        // The metadata (display_name/description) moved at save time — the template asymmetry.
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.displayName shouldBe "Fetch Orders"
+        checkNotNull(repository.findVersion(workspaceId, "fetch_orders.sql", 2)).body shouldBe "SELECT 2"
+    }
+
+    @Test
+    fun `writeDraft overwrites the draft in place - no new row`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val first =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        val second = checkNotNull(repository.writeDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor))
+
+        second.version shouldBe 2
+        checkNotNull(repository.findVersion(workspaceId, "fetch_orders.sql", 2)).body shouldBe "SELECT 3"
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 2
+    }
+
+    @Test
+    fun `stale hashes write nothing on every template mutation`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
+        repository.writeDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 9"), "stale", actor).shouldBeNull()
+        repository.releaseDraft(workspaceId, "fetch_orders.sql", "stale", actor).shouldBeNull()
+        repository.discardDraft(workspaceId, "fetch_orders.sql", "stale") shouldBe false
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 2
+        checkNotNull(repository.findDraftDetail(workspaceId, "fetch_orders.sql")).version shouldBe 2
+    }
+
+    @Test
+    fun `releaseDraft flips the draft and bumps current_version`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draftDetail =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        val out = checkNotNull(repository.releaseDraft(workspaceId, "fetch_orders.sql", draftDetail.bodyHash, actor))
+
+        out.version shouldBe 2
+        out.status shouldBe PipelineVersionStatus.RELEASED
+        out.releasedAt shouldNotBe null
+        out.releasedBy shouldBe actor
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.version shouldBe 2
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+    }
+
+    @Test
+    fun `discardDraft hard-deletes the draft and returns the number to the pool`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draftDetail =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 2"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        repository.discardDraft(workspaceId, "fetch_orders.sql", draftDetail.bodyHash) shouldBe true
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                "fetch_orders.sql",
+                draft(body = "SELECT 3"),
+                released.bodyHash,
+                actor,
+            ),
+        ).version shouldBe 2
+    }
+
+    @Test
+    fun `a second DRAFT row violates the one-draft partial unique index`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+
+        val templateId =
+            checkNotNull(
+                jdbc.queryForObject(
+                    "SELECT id FROM templates WHERE name = 'fetch_orders.sql'",
+                    emptyMap<String, Any>(),
+                    UUID::class.java,
+                ),
+            )
+        val thrown =
+            io.kotest.assertions.throwables.shouldThrow<org.springframework.dao.DuplicateKeyException> {
+                jdbc.update(
+                    """
+                    INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, body_hash, status, created_by)
+                    VALUES (:id, 99, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'x', 'h', 'DRAFT', :actor)
+                    """.trimIndent(),
+                    mapOf("id" to templateId, "actor" to actor),
+                )
+            }
+        thrown.mostSpecificCause.message?.contains("uq_template_versions_one_draft") shouldBe true
+    }
+
+    @Test
+    fun `the template draft service branches, and a stale base is a version conflict`() {
+        val service = TemplateDraftService(repository)
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        val first = service.write(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        val second = service.write(workspaceId, "fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor)
+        second.version shouldBe 2
+
+        val stale =
+            io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                service.write(workspaceId, "fetch_orders.sql", draft(body = "SELECT 4"), released.bodyHash, actor)
+            }
+        stale.code shouldBe PipelineErrorCodes.Template.VERSION_CONFLICT
+        stale.details["current_body_hash"] shouldBe second.bodyHash
+
+        val notFound =
+            io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                service.write(workspaceId, "nope.sql", draft(id = "nope.sql"), released.bodyHash, actor)
+            }
+        notFound.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
+    }
+
+    @Test
+    fun `computeBodyHash agrees with the stored hash - the template one-expression rule`() {
+        // The expected imports JSON comes through writeImports, never hand-written: Jackson
+        // serializes every getter, including TemplateImport's computed `key`, so the wire
+        // form of an import is richer than its declared fields.
+        val imports = listOf(TemplateImport("lib.sql", 1, "l"))
+        repository.create(workspaceId, draft(imports = imports), actor)
+        val stored = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        stored.bodyHash shouldBe
+            repository.computeBodyHash("freemarker", "POSTGRES", false, TemplateJson.writeImports(imports), "SELECT 1")
+    }
+
+    @Test
+    fun `V6 backfilled template rows are RELEASED with a hash the runtime agrees with`() {
+        // The template half of the A2 proof: a row the way pre-V6 code wrote it, stamped by
+        // the migration's own expression, passes its first draft-write precondition.
+        jdbc.update(
+            """
+            INSERT INTO templates (name, display_name, description, current_version, workspace_id, created_by)
+            VALUES ('legacy.sql', 'Legacy', '', 1, :ws, :actor)
+            """.trimIndent(),
+            mapOf("ws" to workspaceId, "actor" to actor),
+        )
+        jdbc.jdbcTemplate.execute(
+            """
+            INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, status, body_hash, created_by)
+            SELECT id, 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', 'RELEASED', 'pending', '$actor'
+              FROM templates WHERE name = 'legacy.sql'
+            """.trimIndent(),
+        )
+        jdbc.jdbcTemplate.execute(
+            // The migration's own stamping expression, rerun by hand: the row was inserted
+            // pre-V6-style in a post-V6 schema, and this is the backfill being proven.
+            """
+            UPDATE template_versions
+               SET status = 'RELEASED', released_at = created_at, released_by = created_by,
+                   body_hash = encode(
+                       sha256(
+                           convert_to(jsonb_build_object('engine', engine, 'dialect', dialect, 'is_library', is_library,
+                                              'imports', imports_json, 'body', body)::text, 'UTF8')
+                       ), 'hex')
+             WHERE template_id IN (SELECT id FROM templates WHERE name = 'legacy.sql')
+            """.trimIndent(),
+        )
+
+        val stored = checkNotNull(repository.findVersion(workspaceId, "legacy.sql", 1))
+        stored.status shouldBe PipelineVersionStatus.RELEASED
+        stored.bodyHash shouldBe repository.computeBodyHash("freemarker", "POSTGRES", false, "[]", "SELECT 1")
+
+        // The first precondition check against this pre-migration row succeeds.
+        checkNotNull(repository.createDraft(workspaceId, "legacy.sql", draft(id = "legacy.sql", body = "SELECT 2"), stored.bodyHash, actor))
+    }
+
+    @Test
+    fun `preserved-version imports create at the exact number and fill gaps without moving the pointer`() {
+        // §9.2's template mirror: a NEW template lands at the source's exact version; a
+        // gap below current is harmless; a taken number writes nothing.
+        val promoted = draft(id = "promoted.sql", body = "SELECT 9")
+        val created =
+            repository.importTemplateVersion(
+                workspaceId,
+                promoted,
+                4,
+                "hash-v4",
+                java.time.Instant.parse("2026-08-31T14:03:11Z"),
+                actor,
+            )
+        created.version shouldBe 4
+        repository.findLatest(workspaceId, "promoted.sql")?.version shouldBe 4
+        checkNotNull(repository.findVersionDetail(workspaceId, "promoted.sql", 4)).bodyHash shouldBe "hash-v4"
+
+        // A gap at v2 on the existing v-4 template: pointer stays, no metadata ride.
+        repository.insertReleasedVersion(
+            workspaceId,
+            "promoted.sql",
+            draft(id = "promoted.sql", body = "SELECT 2"),
+            2,
+            "hash-v2",
+            null,
+            actor,
+        )
+        repository.findLatest(workspaceId, "promoted.sql")?.version shouldBe 4
+
+        // The taken v4 again: suppressed (null), nothing written.
+        val reinserted =
+            repository.insertReleasedVersion(
+                workspaceId,
+                "promoted.sql",
+                draft(id = "promoted.sql", body = "SELECT 9"),
+                4,
+                "hash-v4",
+                null,
+                actor,
+            )
+        reinserted.shouldBeNull()
+    }
+
+    @Test
+    fun `findVersionStatus answers for the pin check and findDrafts feeds the badge`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        templates_statusHelpers(released)
+    }
+
+    private fun templates_statusHelpers(released: Template) {
+        // §6's release-pin check reads this: RELEASED for the current, null for a miss.
+        repository
+            .findVersionStatus(workspaceId, "fetch_orders.sql", 1)
+            .shouldBe(PipelineVersionStatus.RELEASED)
+        repository.findVersionStatus(workspaceId, "fetch_orders.sql", 9).shouldBeNull()
+
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+        val drafts = repository.findDrafts(workspaceId, listOf("fetch_orders.sql", "absent.sql"))
+        drafts.keys shouldContainExactly setOf("fetch_orders.sql")
+        drafts["fetch_orders.sql"]?.version shouldBe 2
     }
 
     private fun insertUser(
@@ -379,16 +673,12 @@ class TemplateRepositoryIntegrationTest {
 
     private companion object {
         /**
-         * The shipped migrations in version order — V1 alone would miss the `workspaces`
-         * re-key (V4) the repository now writes against.
+         * The shipped migrations in version order — DERIVED from the migration directory
+         * (`ShippedMigrations`), never hand-copied: this list said "V1–V4" for two migrations
+         * after V4 landed (035/H), and a hand-maintained copy re-acquires exactly that drift
+         * the moment the next migration ships.
          */
-        val MIGRATION_PATHS =
-            listOf(
-                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-                "modules/app/src/main/resources/db/migration/V3__execution_lineage.sql",
-                "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
-            )
+        val MIGRATION_PATHS: List<String> = ShippedMigrations.paths()
 
         @Container
         @JvmStatic

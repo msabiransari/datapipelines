@@ -52,6 +52,7 @@ class SseContentNegotiationTest {
                     resultStore = mockk<ResultStore>(),
                     resultUrls = mockk<ResultUrlFactory>(),
                     streamer = mockk<SseLogStreamer>(),
+                    pipelines = mockk<co.datapipelines.pipeline.PipelineRepository>(),
                 ),
             ).setControllerAdvice(ApiExceptionHandler())
             .build()

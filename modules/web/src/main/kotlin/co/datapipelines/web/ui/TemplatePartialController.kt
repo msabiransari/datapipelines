@@ -44,6 +44,9 @@ class TemplatePartialController(
             )
         val items = raw.take(size)
         model.addAttribute("templates", items)
+        // versioning §7: the pending-release badge for templates (§6) — mirrors the
+        // pipelines list; released content stays what the row shows until lock.
+        model.addAttribute("drafts", templates.findDrafts(workspaceId, items.map { it.id }))
         model.addAttribute("q", q ?: "")
         model.addAttribute("selectedDialect", dialect ?: "")
         model.addAttribute("offset", page)

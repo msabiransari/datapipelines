@@ -11,6 +11,7 @@ import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineDeserializer
+import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
@@ -82,7 +83,7 @@ class McpServerAutoConfiguration {
                 executionRunner.getIfAvailable(),
             ),
             PipelinesCreateTool(pipelines, deserializer, pipelineValidator, serializer),
-            PipelinesUpdateTool(pipelines, deserializer, pipelineValidator, serializer),
+            PipelinesUpdateTool(pipelines, PipelineDraftService(pipelines), deserializer, pipelineValidator, serializer),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesCreateTool(templates, templateValidator),

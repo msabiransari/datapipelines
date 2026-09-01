@@ -76,6 +76,41 @@ class ListPartialsRenderTest {
     }
 
     @Test
+    fun `the pending-release badge renders when a draft exists`() {
+        // versioning §7: unreleased (often agent) work must be VISIBLE on the list. The
+        // badge was silently absent from first paint once (035): the full-page controller
+        // rendered the partial with its own model and no `drafts` attribute, which the
+        // template's null-guard swallowed — this render test is the guard against exactly
+        // that silent absence, in both the with-draft and without-draft shapes.
+        val record = pipelineRecord()
+        val draft =
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = record.id,
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = record.ownerId,
+            )
+        val withDraft =
+            engine.process(
+                "partials/pipelines",
+                webContext().apply {
+                    fillPipelinesModel(listOf(record))
+                    setVariable("drafts", mapOf(record.id to draft))
+                },
+            )
+        withDraft shouldContain "draft v2 pending release"
+
+        val withoutDraft =
+            engine.process(
+                "partials/pipelines",
+                webContext().apply { fillPipelinesModel(listOf(record)) },
+            )
+        withoutDraft shouldNotContain "pending release"
+    }
+
+    @Test
     fun `pipelines partial renders the design-system table`() {
         val html =
             engine.process(
@@ -178,6 +213,7 @@ class ListPartialsRenderTest {
 
     private fun WebContext.fillPipelinesModel(rows: List<PipelineRecord>) {
         setVariable("pipelines", rows)
+        setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")
         setVariable("offset", 0)
         setVariable("hasMore", true)
@@ -186,6 +222,7 @@ class ListPartialsRenderTest {
 
     private fun WebContext.fillTemplatesModel(rows: List<Template>) {
         setVariable("templates", rows)
+        setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable("q", "")
         setVariable("selectedDialect", "")
         setVariable("offset", 0)

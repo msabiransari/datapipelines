@@ -4,13 +4,18 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
@@ -37,9 +42,13 @@ class TemplatesControllerTest {
             every { engineFor(any()) } returns engine
         }
 
+    private val drafts = mockk<TemplateDraftService>()
+    private val releases = mockk<TemplateReleaseService>()
+
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
-    private val controller = TemplatesController(repository, validator, engines, TemplateImportService(repository, validator))
+    private val controller =
+        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -91,7 +100,9 @@ class TemplatesControllerTest {
     fun `get latest and get specific version`() {
         authenticate()
         every { repository.findLatest(any(), "fetch_orders.sql") } returns template(2)
-        controller.get("fetch_orders.sql").data.version shouldBe 2
+        every { repository.findDraftDetail(any(), "fetch_orders.sql") } returns null
+        val latest = controller.get("fetch_orders.sql").data
+        latest.get("version").asInt() shouldBe 2
 
         every { repository.findVersion(any(), "fetch_orders.sql", 1) } returns template(1)
         controller.getVersion("fetch_orders.sql", 1).data.version shouldBe 1
@@ -114,14 +125,68 @@ class TemplatesControllerTest {
     }
 
     @Test
-    fun `update creates the next version and 404s on an unknown id`() {
+    fun `update requires If-Match, writes the draft branch, and 404s on an unknown id`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.update(any(), "fetch_orders.sql", any(), userId) } returns template(3)
-        controller.update("fetch_orders.sql", createBody).data.version shouldBe 3
 
-        every { repository.update(any(), "nope.sql", any(), userId) } returns null
-        shouldThrow<ApiException> { controller.update("nope.sql", createBody) }.code shouldBe "template.not_found"
+        // §4.2: no If-Match, no participation in the protocol at all — a 400, not a conflict.
+        val missing = shouldThrow<ApiException> { controller.update("fetch_orders.sql", null, createBody) }
+        missing.details["reason"] shouldBe "precondition_missing"
+
+        val detail =
+            TemplateVersionDetail(
+                templateId = "fetch_orders.sql",
+                version = 3,
+                status = PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v3",
+                createdAt = Instant.parse("2026-08-02T00:00:00Z"),
+                createdBy = userId,
+            )
+        every { drafts.write(any(), "fetch_orders.sql", any(), "hash-v2", userId) } returns detail
+        every { repository.findVersion(any(), "fetch_orders.sql", 3) } returns
+            template(3).copy(status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v3")
+        val data = controller.update("fetch_orders.sql", "hash-v2", createBody).data
+        data.get("version").asInt() shouldBe 3
+        data.get("status").asText() shouldBe "DRAFT"
+        data.get("body_hash").asText() shouldBe "hash-v3"
+
+        val notFoundError =
+            DatapipelinesException(
+                PipelineErrorCodes.Template.NOT_FOUND,
+                "Template 'nope.sql' not found.",
+                emptyMap(),
+            )
+        every { drafts.write(any(), "nope.sql", any(), any(), userId) } throws notFoundError
+        val thrown =
+            shouldThrow<DatapipelinesException> { controller.update("nope.sql", "hash-v2", createBody) }
+        thrown.code shouldBe "template.not_found"
+    }
+
+    @Test
+    fun `release and discard require If-Match and delegate to the lifecycle service`() {
+        authenticate()
+        val releaseMissing = shouldThrow<ApiException> { controller.release("fetch_orders.sql", null) }
+        releaseMissing.details["reason"] shouldBe "precondition_missing"
+        val discardMissing = shouldThrow<ApiException> { controller.discard("fetch_orders.sql", null) }
+        discardMissing.details["reason"] shouldBe "precondition_missing"
+
+        every { releases.release(any(), "fetch_orders.sql", "hash-v3", userId) } returns
+            TemplateReleaseService.Released(
+                TemplateVersionDetail(
+                    templateId = "fetch_orders.sql",
+                    version = 3,
+                    status = PipelineVersionStatus.RELEASED,
+                    bodyHash = "hash-v3",
+                    createdAt = Instant.parse("2026-08-02T00:00:00Z"),
+                    createdBy = userId,
+                ),
+                template(3),
+            )
+        val released = controller.release("fetch_orders.sql", "hash-v3").data
+        released.get("status").asText() shouldBe "RELEASED"
+
+        every { releases.discard(any(), "fetch_orders.sql", "hash-v3") } returns Unit
+        controller.discard("fetch_orders.sql", "hash-v3")
     }
 
     @Test
@@ -166,7 +231,7 @@ class TemplatesControllerTest {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every { repository.existsId(any(), "fetch_orders.sql") } returns true
-        every { repository.update(any(), "fetch_orders.sql", any(), userId) } returns template(2)
+        every { repository.appendReleasedVersion(any(), "fetch_orders.sql", any(), userId) } returns template(2)
         every { repository.existsId(any(), "new.sql") } returns false
         every { repository.create(any(), any(), userId) } returns template().copy(id = "new.sql")
 

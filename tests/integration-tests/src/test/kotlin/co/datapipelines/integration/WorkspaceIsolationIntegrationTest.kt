@@ -398,9 +398,9 @@ class WorkspaceIsolationIntegrationTest {
                 )
                 statement.execute(
                     """
-                    INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) VALUES
-                        ('$PIPE_ACME', 1, '$PIPELINE_BODY'::jsonb, '$ALICE'),
-                        ('$PIPE_GLOBEX', 1, '$PIPELINE_BODY'::jsonb, '$BOB')
+                    INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at) VALUES
+                        ('$PIPE_ACME', 1, '$PIPELINE_BODY'::jsonb, 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW()),
+                        ('$PIPE_GLOBEX', 1, '$PIPELINE_BODY'::jsonb, 'seed-hash', 'RELEASED', '$BOB', '$BOB', NOW())
                     """.trimIndent(),
                 )
                 // Same template name in both workspaces.
@@ -413,9 +413,9 @@ class WorkspaceIsolationIntegrationTest {
                 )
                 statement.execute(
                     """
-                    INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, created_by) VALUES
-                        ('$TPL_ACME_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', '$ALICE'),
-                        ('$TPL_GLOBEX_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 2', '$BOB')
+                    INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, body_hash, status, created_by, released_by, released_at) VALUES
+                        ('$TPL_ACME_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW()),
+                        ('$TPL_GLOBEX_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 2', 'seed-hash', 'RELEASED', '$BOB', '$BOB', NOW())
                     """.trimIndent(),
                 )
                 // One execution per pipeline — visibility scopes via the pipeline's workspace (§5.3).

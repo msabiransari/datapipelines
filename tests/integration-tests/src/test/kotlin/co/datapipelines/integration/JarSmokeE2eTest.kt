@@ -278,9 +278,11 @@ class JarSmokeE2eTest {
                         "'Smoke Pipe', '', '$USER', '$WORKSPACE', 1)",
                 )
                 s.execute(
-                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) " +
+                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash," +
+                        " status, created_by, released_by, released_at) " +
                         "VALUES ('$PIPELINE', 1, " +
-                        "'{\"name\":\"smoke_pipe\",\"nodes\":[],\"parameters\":{}}'::jsonb, '$USER')",
+                        "'{\"name\":\"smoke_pipe\",\"nodes\":[],\"parameters\":{}}'::jsonb," +
+                        " 'seed-hash', 'RELEASED', '$USER', '$USER', NOW())",
                 )
                 s.execute(
                     "INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, " +
@@ -294,9 +296,10 @@ class JarSmokeE2eTest {
                         "'$SEEDED_TEMPLATE', 'Smoke Template', '', 1, '$USER')",
                 )
                 s.execute(
-                    "INSERT INTO template_versions (template_id, version, engine, dialect, body, " +
-                        "created_by) VALUES ('$TEMPLATE', 1, 'freemarker', 'POSTGRES', " +
-                        "'SELECT 1 AS smoke', '$USER')",
+                    "INSERT INTO template_versions (template_id, version, engine, dialect, body," +
+                        " body_hash, status, created_by, released_by, released_at)" +
+                        " VALUES ('$TEMPLATE', 1, 'freemarker', 'POSTGRES', " +
+                        "'SELECT 1 AS smoke', 'seed-hash', 'RELEASED', '$USER', '$USER', NOW())",
                 )
             }
         }

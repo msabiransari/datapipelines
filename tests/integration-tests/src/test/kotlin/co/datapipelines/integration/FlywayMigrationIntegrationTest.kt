@@ -59,6 +59,7 @@ class FlywayMigrationIntegrationTest {
                 "3|execution lineage|true",
                 "4|workspaces rekey|true",
                 "5|local password auth|true",
+                "6|version lifecycle|true",
             )
     }
 
@@ -157,11 +158,13 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_executions.idx_executions_user",
                 "pipeline_executions.pipeline_executions_pkey",
                 "pipeline_versions.pipeline_versions_pkey",
+                "pipeline_versions.uq_pipeline_versions_one_draft",
                 "pipelines.idx_pipelines_owner",
                 "pipelines.pipelines_pkey",
                 "pipelines.uq_pipelines_workspace_name",
                 "template_versions.idx_template_versions_dialect",
                 "template_versions.template_versions_pkey",
+                "template_versions.uq_template_versions_one_draft",
                 "templates.idx_templates_active",
                 "templates.templates_pkey",
                 "templates.uq_templates_workspace_name",
@@ -207,10 +210,129 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
                 "chk_dialect",
+                "chk_pipeline_versions_status",
                 "chk_status",
+                "chk_template_versions_status",
                 "chk_triggered_via",
                 "chk_workspace_member_role",
             )
+    }
+
+    @Test
+    fun `V6 adds the version lifecycle columns to both version tables`() {
+        // metadata-db §4.5/§4.9 (versioning.md §11): status backfills RELEASED via the
+        // column default; body_hash is backfilled by the SAME sha256 expression the
+        // repositories use and then forced NOT NULL; released_at is DB-generated at
+        // release and NULL until then; updated_by/updated_at carry the last DRAFT write.
+        val columns =
+            query(
+                """
+                SELECT table_name || '|' || column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name IN ('pipeline_versions', 'template_versions')
+                   AND column_name IN ('status', 'body_hash', 'released_at', 'released_by', 'updated_by', 'updated_at')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "pipeline_versions|body_hash|NO|NONE",
+                "pipeline_versions|released_at|YES|NONE",
+                "pipeline_versions|released_by|YES|NONE",
+                "pipeline_versions|status|NO|'RELEASED'::text",
+                "pipeline_versions|updated_at|YES|NONE",
+                "pipeline_versions|updated_by|YES|NONE",
+                "template_versions|body_hash|NO|NONE",
+                "template_versions|released_at|YES|NONE",
+                "template_versions|released_by|YES|NONE",
+                "template_versions|status|NO|'RELEASED'::text",
+                "template_versions|updated_at|YES|NONE",
+                "template_versions|updated_by|YES|NONE",
+            )
+    }
+
+    /**
+     * The D17 promotion classification registry (metadata-db §5A, 035/G): every live table
+     * must be classified, and every classified table must exist.
+     *
+     * The twelve-name literal in `creates exactly the twelve tables…` asks "is this table
+     * EXPECTED?"; this asks the second question — "is it CLASSIFIED?" — by parsing §5A's
+     * table and comparing both directions, the `verifyModuleDependencies` shape: a
+     * mechanical enumeration compared against a declared list that mirrors a doc section.
+     * A new table fails here until its §5A row lands, and a §5A row for a table that does
+     * not exist fails here too — a one-directional guard would let the doc rot.
+     */
+    @Test
+    fun `every live table is classified in metadata-db 5A and every classified table exists`() {
+        val classified = promotionClassification()
+
+        val live =
+            query(
+                """
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public' AND tablename <> 'flyway_schema_history'
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        val unclassified = live - classified.keys
+        val nonexistent = classified.keys - live.toSet()
+
+        if (unclassified.isNotEmpty()) {
+            io.kotest.assertions.fail(
+                "Table(s) ${unclassified.sorted()} exist in the schema but have no row in metadata-db.md §5A " +
+                    "Promotion Classification. Add a row there (| table | verdict | resource | version series | " +
+                    "export key | why |, verdict one of promotable / environment-local / derived) AND to this " +
+                    "test's expected-table list — in the SAME commit. The classification is what keeps the schema " +
+                    "and the promotion design in step (D17).",
+            )
+        }
+        if (nonexistent.isNotEmpty()) {
+            io.kotest.assertions.fail(
+                "metadata-db.md §5A classifies ${nonexistent.sorted()}, which do not exist in the schema — the " +
+                    "registry has drifted from the migrations. Ship the migration the row describes, or remove " +
+                    "the row; a classified-but-absent table is a row that will mislead the next migration author.",
+            )
+        }
+        classified.size shouldBe live.size
+    }
+
+    /** §5A's rows as `{table → verdict}`; a malformed or absent section fails the parse rather than being skipped. */
+    private fun promotionClassification(): Map<String, String> {
+        val doc = repoFile("docs/metadata-db.md").readText()
+        val match =
+            Regex(
+                "^## 5A\\. Promotion Classification$(.*?)^## ",
+                setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL),
+            ).find(doc) ?: error(
+                "metadata-db.md has no '## 5A. Promotion Classification' section — the classification registry " +
+                    "FlywayMigrationIntegrationTest parses is missing. Add the section (one row per §4 table) or " +
+                    "update this test's parser if the section moved.",
+            )
+        val rows =
+            Regex("""^\|\s*`([a-z_]+)`\s*\|\s*(promotable|environment-local|derived)\s*\|""", RegexOption.MULTILINE)
+                .findAll(match.groupValues[1])
+                .associate { it.groupValues[1] to it.groupValues[2] }
+        if (rows.isEmpty()) {
+            error(
+                "metadata-db.md §5A parsed zero classification rows — the table's columns must be " +
+                    "`| table | verdict | resource | version series | export key | why |` with the verdict one of " +
+                    "promotable / environment-local / derived.",
+            )
+        }
+        return rows
+    }
+
+    /** Walks up from the working directory to locate a repo file (the shared test pattern). */
+    private fun repoFile(relativePath: String): java.io.File {
+        var dir: java.io.File? = java.io.File("").absoluteFile
+        while (dir != null) {
+            val candidate = java.io.File(dir, relativePath)
+            if (candidate.isFile) return candidate
+            dir = dir.parentFile
+        }
+        error("$relativePath not found walking up from ${java.io.File("").absolutePath}")
     }
 
     @Test
@@ -322,10 +444,13 @@ class FlywayMigrationIntegrationTest {
                 }
             connection
                 .prepareStatement(
-                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) VALUES (?, 1, CAST('{}' AS jsonb), ?)",
+                    "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash," +
+                        " status, created_by, released_by, released_at) " +
+                        "VALUES (?, 1, CAST('{}' AS jsonb), 'seed-hash', 'RELEASED', ?, ?, NOW())",
                 ).use {
                     it.setObject(1, pipelineId)
                     it.setObject(2, userId)
+                    it.setObject(3, userId)
                     it.executeUpdate()
                 }
 

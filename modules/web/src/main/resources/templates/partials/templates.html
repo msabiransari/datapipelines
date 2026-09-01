@@ -35,7 +35,13 @@
         <tr th:each="t : ${templates}"
             style="cursor: pointer;"
             th:attr="onclick='location.href=\'/templates/' + ${t.id} + '/editor\''">
-          <td th:text="${t.id}"></td>
+          <td>
+            <span th:text="${t.id}"></span>
+            <!-- versioning §7: unreleased edits visible on the list (templates §6). -->
+            <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
+                  th:text="'draft v' + ${drafts[t.id].version} + ' pending release'"
+                  title="A draft exists; release it from the editor to publish."></span>
+          </td>
           <td th:text="${t.displayName}"></td>
           <td>
             <span class="ds-badge ds-badge-default" th:text="${t.dialect.wire}"></span>

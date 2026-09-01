@@ -48,6 +48,8 @@ class TemplateUiController(
             )
         val items = raw.take(size)
         model.addAttribute("templates", items)
+        // versioning §7: the pending-release badge — same source as the partial controller.
+        model.addAttribute("drafts", templates.findDrafts(workspaceId, items.map { it.id }))
         model.addAttribute("q", q ?: "")
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", raw.size > size)

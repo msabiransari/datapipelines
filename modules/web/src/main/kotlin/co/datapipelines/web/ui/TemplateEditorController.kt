@@ -34,9 +34,16 @@ class TemplateEditorController(
         request: HttpServletRequest,
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val template = templates.findLatest(workspaceId, id)
+        // versioning §6/§7: the editor shows the DRAFT when one exists — the working copy a
+        // human reviews — with its pending-release affordance; the list keeps showing the
+        // released content until lock.
+        val draft = templates.findDraftDetail(workspaceId, id)
+        val template = draft?.let { templates.findVersion(workspaceId, id, it.version) } ?: templates.findLatest(workspaceId, id)
         model.addAttribute("template", template)
         model.addAttribute("versions", templates.listVersions(workspaceId, id))
+        model.addAttribute("hasDraft", draft != null)
+        model.addAttribute("draftVersion", draft?.version)
+        model.addAttribute("draftHash", draft?.bodyHash)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "templates/editor"
     }

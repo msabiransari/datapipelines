@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -58,6 +59,15 @@ data class Template(
     val createdAt: Instant,
     @field:JsonProperty("created_by") @get:JsonProperty("created_by") @param:JsonProperty("created_by")
     val createdBy: UUID,
+    /**
+     * The version's lifecycle status (versioning §3.1/§6, since V6) — `RELEASED` on the
+     * pre-lifecycle projection; defaulted so existing constructors keep compiling, and so a
+     * read that does not select the column still renders an honest value.
+     */
+    val status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+    /** The version's SHA-256 content hash (versioning §4) — the mutation precondition token. */
+    @field:JsonProperty("body_hash") @get:JsonProperty("body_hash") @param:JsonProperty("body_hash")
+    val bodyHash: String = "",
 ) {
     companion object {
         /** The only `schema_version` v1 accepts (templates.md §3.2). */

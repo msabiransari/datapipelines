@@ -33,7 +33,14 @@
         <tr th:each="p : ${pipelines}"
             style="cursor: pointer;"
             th:attr="onclick='location.href=\'/pipelines/' + ${p.id} + '/editor\''">
-          <td th:text="${p.name}"></td>
+          <td>
+            <span th:text="${p.name}"></span>
+            <!-- versioning §7: unreleased edits visible on the list; the name column keeps
+                 showing the RELEASED name until lock (§3.5). -->
+            <span th:if="${drafts != null && drafts[p.id] != null}" class="ds-badge ds-badge-warning"
+                  th:text="'draft v' + ${drafts[p.id].version} + ' pending release'"
+                  title="A draft exists; release it from the editor to publish."></span>
+          </td>
           <td th:text="${p.displayName}"></td>
           <td th:text="${p.description}"></td>
           <td class="num" th:text="${'v' + p.currentVersion}"></td>

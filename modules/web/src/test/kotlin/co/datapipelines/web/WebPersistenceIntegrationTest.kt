@@ -111,8 +111,8 @@ class WebPersistenceIntegrationTest {
                 )
                 jdbc.update(
                     """
-                    INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by)
-                    VALUES (:id, 1, CAST('{}' AS jsonb), :owner)
+                    INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at)
+                    VALUES (:id, 1, CAST('{}' AS jsonb), 'seed-hash', 'RELEASED', :owner, :owner, NOW())
                     """.trimIndent(),
                     mapOf("id" to id, "owner" to userId),
                 )

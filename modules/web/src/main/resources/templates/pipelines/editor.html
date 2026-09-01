@@ -11,12 +11,16 @@
   <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
 
   <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}"></script>
+  <!-- The draft lifecycle state the editor is showing (versioning §3.5/§7): draft.js reads
+       it to render the pending-release affordances and to pin Execute to the draft version. -->
+  <script type="application/json" id="pipeline-lifecycle" th:utext="${lifecycleJson}"></script>
 
   <script th:src="@{/js/pipeline-editor/init.js}"></script>
   <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
   <script th:src="@{/js/pipeline-editor/graph.js}"></script>
   <script th:src="@{/js/pipeline-editor/sse.js}"></script>
   <script th:src="@{/js/pipeline-editor/execute.js}"></script>
+  <script th:src="@{/js/pipeline-editor/draft.js}"></script>
   <script th:src="@{/js/pipeline-editor/details.js}"></script>
   <script th:src="@{/js/pipeline-editor/error.js}"></script>
   <script th:src="@{/js/pipeline-editor/result.js}"></script>
@@ -29,6 +33,20 @@
       <a th:href="@{/pipelines}" class="ds-button ds-button-ghost ds-button-sm">&larr; Back</a>
       <h1 class="pe-pipeline-title" x-text="pipeline.display_name || pipeline.name"></h1>
       <div class="pe-toolbar-actions">
+        <!-- versioning §3.5/§7: the pending-release affordance. Shown only while a draft
+             exists — Execute targets the draft, and Release is the human action that
+             moves the list to the draft's name (agents never release, D4). -->
+        <span th:if="${hasDraft}" class="ds-badge ds-badge-warning"
+              th:text="'Draft v' + ${draftVersion} + ' — pending release'"
+              title="The list still shows the released version; release to publish this draft."></span>
+        <button th:if="${hasDraft}" class="ds-button ds-button-primary ds-button-sm"
+                id="pe-release-draft" th:attr="data-id=${pipelineId}, data-hash=${draftHash}">
+          Release v<span th:text="${draftVersion}"></span>
+        </button>
+        <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm"
+                id="pe-discard-draft" th:attr="data-id=${pipelineId}, data-hash=${draftHash}">
+          Discard draft
+        </button>
         <button class="ds-button ds-button-primary" x-bind:disabled="isExecuting" @click="executePipeline()">
           <span x-show="!isExecuting">Execute</span>
           <span x-show="isExecuting">Running...</span>

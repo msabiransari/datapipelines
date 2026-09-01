@@ -17,6 +17,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -44,7 +45,13 @@ import java.util.concurrent.TimeUnit
  * One container for the class, truncated before each test. Per the shared-test-container
  * discipline the project already follows: each spec cleans the tables it touches, in FK
  * order, rather than dropping the schema.
+ *
+ * `LargeClass` is suppressed: this suite is the repository's contract in one place — CRUD,
+ * concurrency, and the version lifecycle (V6) read against the SAME shipped schema and
+ * fixtures; splitting it would scatter one table's invariants across files, the exact
+ * argument `PipelineRepository` itself makes.
  */
+@Suppress("LargeClass")
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PipelineRepositoryIntegrationTest {
@@ -107,7 +114,9 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `update appends a new immutable version and bumps current_version`() {
+    fun `appendReleasedVersion appends a new RELEASED version and bumps current_version`() {
+        // The version-less import path (versioning §9.2: allocate-next-local). The PUT path
+        // goes through createDraft/writeDraft — see the lifecycle tests below.
         val v1 = Fixtures.pipeline()
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
         val v2 =
@@ -116,24 +125,25 @@ class PipelineRepositoryIntegrationTest {
                 nodes = v1.nodes + Fixtures.node(id = "extra", output = NodeOutput.Tempdb("stg_extra")),
             )
 
-        val updated = checkNotNull(repository.update(WORKSPACE_ID, record.id, v2, serializer.write(v2), owner))
+        val updated = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, v2, serializer.write(v2), owner))
 
         updated.currentVersion shouldBe 2
         updated.displayName shouldBe "Monthly Revenue v2"
         repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(2, 1)
-        // Version 1's body is untouched — pipelines are immutable per version (§2).
+        repository.listVersions(WORKSPACE_ID, record.id).map { it.status } shouldContainExactly
+            listOf(PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
+        // Version 1's body is untouched — RELEASED rows are never UPDATEd (§3.1).
         PipelineDeserializer().readOrThrow(checkNotNull(repository.findVersionBody(WORKSPACE_ID, record.id, 1))) shouldBe v1
         PipelineDeserializer().readOrThrow(checkNotNull(repository.findVersionBody(WORKSPACE_ID, record.id, 2))) shouldBe v2
     }
 
     @Test
-    fun `update sets updated_at, because this schema has no triggers`() {
-        // metadata-db §2: every UPDATE sets updated_at in its own SET clause; "an UPDATE that
-        // forgets updated_at is a bug in the repository method".
+    fun `appendReleasedVersion sets updated_at, because this schema has no triggers`() {
+        // metadata-db §2: every UPDATE on pipelines sets updated_at in its own SET clause.
         val body = Fixtures.pipeline()
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
-        val updated = checkNotNull(repository.update(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
+        val updated = checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, body, serializer.write(body), owner))
 
         // Strictly greater, not `>=`. A repository method that forgot `updated_at = NOW()`
         // leaves the INSERT default in place, which satisfies `>=` — so the old assertion could
@@ -144,10 +154,10 @@ class PipelineRepositoryIntegrationTest {
     }
 
     @Test
-    fun `update on an unknown id returns null and writes nothing`() {
+    fun `appendReleasedVersion on an unknown id returns null and writes nothing`() {
         val body = Fixtures.pipeline()
 
-        repository.update(WORKSPACE_ID, UUID.randomUUID(), body, serializer.write(body), owner).shouldBeNull()
+        repository.appendReleasedVersion(WORKSPACE_ID, UUID.randomUUID(), body, serializer.write(body), owner).shouldBeNull()
 
         countRows("pipeline_versions") shouldBe 0
     }
@@ -313,7 +323,7 @@ class PipelineRepositoryIntegrationTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                repository.update(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), owner)
+                repository.appendReleasedVersion(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), owner)
             }
 
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
@@ -414,6 +424,426 @@ class PipelineRepositoryIntegrationTest {
         nameFromJsonb shouldBe "monthly_revenue"
     }
 
+    // =============================================================================================
+    // The draft/release lifecycle (versioning §3–§5, V6) — the §13 floor.
+    // =============================================================================================
+
+    /** Creates v1 and returns (record, v1 body, v1's stored detail) — the base every lifecycle test starts from. */
+    private fun createdPipeline(name: String = "monthly_revenue"): Triple<PipelineRecord, Pipeline, PipelineVersionDetail> {
+        val body = Fixtures.pipeline(name = name)
+        val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
+        return Triple(record, body, detail)
+    }
+
+    @Test
+    fun `createDraft copies the released version to a draft and leaves the released row untouched`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val v2 = v1.copy(displayName = "Draft name")
+
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner))
+
+        draft.version shouldBe 2
+        draft.status shouldBe PipelineVersionStatus.DRAFT
+        // The pre-allocated number and the DB-computed hash are what the protocol echoes back.
+        draft.bodyHash shouldNotBe v1Detail.bodyHash
+        draft.updatedBy shouldBe owner
+        draft.updatedAt shouldNotBe null
+        // §3.4: current_version does NOT move while a draft exists.
+        repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 1
+        // §3.1: the RELEASED row is never UPDATEd — its lifecycle fields are untouched.
+        val releasedAfter = checkNotNull(repository.findVersionDetail(WORKSPACE_ID, record.id, 1))
+        releasedAfter.bodyHash shouldBe v1Detail.bodyHash
+        releasedAfter.updatedBy shouldBe null
+        releasedAfter.updatedAt shouldBe null
+        countRows("pipeline_versions") shouldBe 2
+    }
+
+    @Test
+    fun `writeDraft overwrites the draft in place - no new row`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft =
+            checkNotNull(
+                repository.createDraft(
+                    WORKSPACE_ID,
+                    record.id,
+                    serializer.write(v1.copy(description = "first")),
+                    v1Detail.bodyHash,
+                    owner,
+                ),
+            )
+
+        val rewritten =
+            checkNotNull(
+                repository.writeDraft(
+                    WORKSPACE_ID,
+                    record.id,
+                    serializer.write(v1.copy(description = "second")),
+                    draft.bodyHash,
+                    owner,
+                ),
+            )
+
+        rewritten.version shouldBe draft.version
+        countRows("pipeline_versions") shouldBe 2
+        val bodyAfter =
+            PipelineDeserializer().readOrThrow(
+                checkNotNull(repository.findVersionBody(WORKSPACE_ID, record.id, 2)),
+            )
+        bodyAfter.description shouldBe "second"
+    }
+
+    @Test
+    fun `every mutation with a stale hash writes nothing - the precondition is load-bearing`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner))
+        val stale = "deadbeef"
+
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
+        repository.writeDraft(WORKSPACE_ID, record.id, serializer.write(v1), stale, owner).shouldBeNull()
+        repository.releaseDraft(WORKSPACE_ID, record.id, v1.name, v1.displayName, v1.description, stale, owner).shouldBeNull()
+        repository.discardDraft(WORKSPACE_ID, record.id, stale).shouldBeNull()
+
+        countRows("pipeline_versions") shouldBe 2
+        repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 1
+        checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id)).bodyHash shouldBe draft.bodyHash
+    }
+
+    @Test
+    fun `releaseDraft flips the draft, bumps the pointer, and rides the metadata`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val v2 = v1.copy(name = "monthly_revenue", displayName = "The Draft Name", description = "The draft description")
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner))
+
+        val released =
+            checkNotNull(
+                repository.releaseDraft(
+                    WORKSPACE_ID,
+                    record.id,
+                    v2.name,
+                    v2.displayName,
+                    v2.description,
+                    draft.bodyHash,
+                    owner,
+                ),
+            )
+
+        released.version.version shouldBe 2
+        released.version.status shouldBe PipelineVersionStatus.RELEASED
+        released.record.currentVersion shouldBe 2
+        // §3.5: metadata rides the release — the index row adopts the released body's values.
+        released.record.displayName shouldBe "The Draft Name"
+        released.record.description shouldBe "The draft description"
+        // §8: released_at is DB-generated and now set, by the actor who released.
+        released.version.releasedAt shouldNotBe null
+        released.version.releasedBy shouldBe owner
+        repository.findDraftDetail(WORKSPACE_ID, record.id) shouldBe null
+        repository.listVersions(WORKSPACE_ID, record.id).map { it.status } shouldContainExactly
+            listOf(PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
+    }
+
+    @Test
+    fun `discarding a never-executed draft hard-deletes it and returns the number to the pool`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner))
+
+        repository.discardDraft(WORKSPACE_ID, record.id, draft.bodyHash) shouldBe DiscardOutcome.Deleted
+
+        countRows("pipeline_versions") shouldBe 1
+        // The number returns to the pool: a new draft re-allocates v2.
+        checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner)).version shouldBe 2
+    }
+
+    @Test
+    fun `discarding an executed draft flips it to DISCARDED - the FK blocks the delete`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner))
+        insertExecution(record.id, draft.version)
+
+        val outcome = repository.discardDraft(WORKSPACE_ID, record.id, draft.bodyHash)
+
+        val flipped = outcome.shouldBeInstanceOf<DiscardOutcome.FlippedToDiscarded>()
+        flipped.detail.status shouldBe PipelineVersionStatus.DISCARDED
+        flipped.detail.version shouldBe 2
+        countRows("pipeline_versions") shouldBe 2
+        // §3.4: the number stays consumed — a new draft allocates v3, never v2 again.
+        checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner)).version shouldBe 3
+    }
+
+    @Test
+    fun `a second DRAFT row violates the one-draft partial unique index`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner)
+
+        // Raw SQL, bypassing the repository's guard entirely: the INDEX is the authority.
+        val thrown =
+            shouldThrow<DuplicateKeyException> {
+                jdbc.update(
+                    """
+                    INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by)
+                    VALUES (:id, 99, CAST('{}' AS jsonb), 'x', 'DRAFT', :actor)
+                    """.trimIndent(),
+                    mapOf("id" to record.id, "actor" to owner),
+                )
+            }
+        thrown.mostSpecificCause.message?.contains("uq_pipeline_versions_one_draft") shouldBe true
+    }
+
+    @Test
+    fun `two concurrent first-writes - exactly one draft, the loser carries the winner's hash`() {
+        // B1: the partial unique index is what makes copy-on-write race-safe. Two writers that
+        // both saw "released" both insert; one wins; the loser's violation surfaces as
+        // pipeline.version.conflict pointing at the WINNER's draft hash (§3.3).
+        val (record, v1, v1Detail) = createdPipeline()
+        val bodyJson = serializer.write(v1)
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+
+        try {
+            // Each attempt records BOTH outcomes: the detail on success, the error on failure.
+            // A loser is legal in two shapes, both 409 material at the service layer: the
+            // index/PK violation (true interleaving — both computed v2 from one snapshot) or
+            // the suppressed insert (serialized — it saw the winner's draft, wrote nothing).
+            data class Attempt(
+                val detail: PipelineVersionDetail?,
+                val error: Throwable?,
+            )
+
+            val attempts =
+                (1..2).map {
+                    val isolated = PipelineRepository(NamedParameterJdbcTemplate(dataSource()))
+                    pool.submit<Attempt> {
+                        start.await()
+                        var detail: PipelineVersionDetail? = null
+                        var error: Throwable? = null
+                        try {
+                            detail = isolated.createDraft(WORKSPACE_ID, record.id, bodyJson, v1Detail.bodyHash, owner)
+                        } catch (t: Throwable) {
+                            error = t
+                        }
+                        Attempt(detail, error)
+                    }
+                }
+            start.countDown()
+            val outcomes = attempts.map { it.get(CONCURRENCY_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+
+            // Exactly one winner; exactly one draft; the released row untouched.
+            outcomes.count { it.detail != null } shouldBe 1
+            val winnerDetail = outcomes.single { it.detail != null }.detail
+            val loser = outcomes.single { it.detail == null }
+            if (loser.error != null) {
+                val conflict = loser.error.shouldBeInstanceOf<DatapipelinesException>()
+                conflict.code shouldBe PipelineErrorCodes.Versioning.VERSION_CONFLICT
+                conflict.details["current_body_hash"] shouldBe winnerDetail?.bodyHash
+                conflict.details["current_status"] shouldBe "DRAFT"
+            } else {
+                // Serialized loser: the guard passed but the NOT EXISTS suppressed the insert —
+                // null return, zero rows written, which the service maps to the same 409.
+                countRows("pipeline_versions") shouldBe 2
+            }
+            val liveDraft = checkNotNull(repository.findDraftDetail(WORKSPACE_ID, record.id))
+            liveDraft.bodyHash shouldBe winnerDetail?.bodyHash
+            liveDraft.version shouldBe 2
+            countRows("pipeline_versions") shouldBe 2
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `the draft service takes the write branch, checks names early, and maps stale bases to conflicts`() {
+        val service = PipelineDraftService(repository)
+        val other = Fixtures.pipeline(name = "other_name")
+        repository.create(WORKSPACE_ID, NewPipeline.from(other, owner), serializer.write(other), owner)
+        val (record, v1, v1Detail) = createdPipeline()
+
+        // First write: copy-on-write branch (§5.1) with the released row's hash.
+        val draftOne = v1.copy(description = "draft one")
+        val first =
+            service.write(
+                WORKSPACE_ID,
+                record.id,
+                draftOne,
+                serializer.write(draftOne),
+                v1Detail.bodyHash,
+                owner,
+            )
+        first.version.status shouldBe PipelineVersionStatus.DRAFT
+        first.version.version shouldBe 2
+
+        // Second write: in-place branch (§5.2) with the DRAFT's hash.
+        val draftTwo = v1.copy(description = "draft two")
+        val second =
+            service.write(
+                WORKSPACE_ID,
+                record.id,
+                draftTwo,
+                serializer.write(draftTwo),
+                first.version.bodyHash,
+                owner,
+            )
+        second.version.version shouldBe 2
+        countRows("pipeline_versions") shouldBe 3 // v1 + one draft… + the other pipeline's v1
+
+        // §3.5: a draft rename onto a taken name fails AT WRITE TIME, not at release.
+        val renamed = v1.copy(name = "other_name")
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                service.write(WORKSPACE_ID, record.id, renamed, serializer.write(renamed), second.version.bodyHash, owner)
+            }
+        thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
+
+        // A stale base is a 409 carrying the current draft's state (§4.2).
+        val stale =
+            shouldThrow<DatapipelinesException> {
+                service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner)
+            }
+        stale.code shouldBe PipelineErrorCodes.Versioning.VERSION_CONFLICT
+        stale.details["current_body_hash"] shouldBe second.version.bodyHash
+        stale.details["current_status"] shouldBe "DRAFT"
+
+        // Unknown pipeline: not-found, not a conflict.
+        val notFound =
+            shouldThrow<DatapipelinesException> {
+                service.write(WORKSPACE_ID, UUID.randomUUID(), v1, serializer.write(v1), v1Detail.bodyHash, owner)
+            }
+        notFound.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
+    }
+
+    @Test
+    fun `computeBodyHash agrees with the stored hash of a written row`() {
+        // The one-expression rule, mechanically: what the repository would hash a body AS is
+        // what the database stored for that body.
+        val (record, v1, v1Detail) = createdPipeline()
+        v1Detail.bodyHash shouldBe repository.computeBodyHash(serializer.write(v1))
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1), v1Detail.bodyHash, owner))
+        draft.bodyHash shouldBe repository.computeBodyHash(serializer.write(v1))
+    }
+
+    @Test
+    fun `importPipelineVersion creates a new pipeline at the exact source version`() {
+        // §9.2 row 1: absent target — insert as RELEASED at the payload's number, released_at
+        // from source, current_version following it. The id is the cross-env identity (D5).
+        val body = Fixtures.pipeline(name = "promoted_pipeline")
+        val record =
+            repository.importPipelineVersion(
+                WORKSPACE_ID,
+                NewPipeline.from(body, owner, id = UUID.randomUUID()),
+                version = 3,
+                bodyJson = serializer.write(body),
+                bodyHash = "declared-hash",
+                releasedAt = Instant.parse("2026-08-31T14:03:11Z"),
+                actor = owner,
+            )
+
+        record.currentVersion shouldBe 3
+        repository.listVersions(WORKSPACE_ID, record.id).map { it.version } shouldContainExactly listOf(3)
+        val detail = checkNotNull(repository.findVersionDetail(WORKSPACE_ID, record.id, 3))
+        detail.status shouldBe PipelineVersionStatus.RELEASED
+        detail.bodyHash shouldBe "declared-hash"
+        detail.releasedAt shouldBe Instant.parse("2026-08-31T14:03:11Z")
+        detail.releasedBy shouldBe owner
+    }
+
+    @Test
+    fun `insertReleasedVersion fills gaps and rides metadata only when newest`() {
+        // §9.2 rows on an EXISTING pipeline. The true gap shape: the target sits at v3
+        // (a preserved import that jumped), and a v2 arriving afterwards must NOT move
+        // current_version or the index metadata — "gaps below current_version are expected
+        // and harmless" (§9.2).
+        val v3 = Fixtures.pipeline(name = "target_pipeline")
+        val record =
+            repository.importPipelineVersion(
+                WORKSPACE_ID,
+                NewPipeline.from(v3, owner),
+                version = 3,
+                bodyJson = serializer.write(v3),
+                bodyHash = "hash-v3",
+                releasedAt = Instant.EPOCH,
+                actor = owner,
+            )
+        record.currentVersion shouldBe 3
+
+        val v2 = v3.copy(description = "v2 body")
+        repository.insertReleasedVersion(
+            WORKSPACE_ID,
+            record.id,
+            2,
+            v2.name,
+            v2.displayName,
+            v2.description,
+            serializer.write(v2),
+            "hash-v2",
+            Instant.EPOCH,
+            owner,
+        )
+        repository.findById(WORKSPACE_ID, record.id)?.currentVersion shouldBe 3
+        repository.findById(WORKSPACE_ID, record.id)?.description shouldBe v3.description
+
+        // A same-number re-import writes nothing and answers null (the sequential case);
+        // the caller re-reads and classifies per §9.2's conflict rows.
+        val reinserted =
+            repository.insertReleasedVersion(
+                WORKSPACE_ID,
+                record.id,
+                3,
+                v2.name,
+                v2.displayName,
+                v2.description,
+                serializer.write(v3),
+                "hash-v3",
+                Instant.EPOCH,
+                owner,
+            )
+        reinserted.shouldBeNull()
+        val versionsAfter = repository.listVersions(WORKSPACE_ID, record.id).map { it.version }
+        versionsAfter shouldContainExactly listOf(3, 2)
+    }
+
+    @Test
+    fun `findDrafts returns the badge map and releasedAtFor returns both stamps and gaps`() {
+        val withDraft = Fixtures.pipeline(name = "has_draft")
+        val record = repository.create(WORKSPACE_ID, NewPipeline.from(withDraft, owner), serializer.write(withDraft), owner)
+        val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(withDraft), releasedHash, owner)
+        val plain = Fixtures.pipeline(name = "no_draft")
+        val plainRecord = repository.create(WORKSPACE_ID, NewPipeline.from(plain, owner), serializer.write(plain), owner)
+
+        val drafts = repository.findDrafts(WORKSPACE_ID, listOf(record.id, plainRecord.id))
+        drafts.keys shouldContainExactly setOf(record.id)
+        drafts[record.id]?.version shouldBe 2
+
+        // §8's derivation input: released_at present for the released v1, absent for the draft v2.
+        val stamps =
+            repository.releasedAtFor(
+                WORKSPACE_ID,
+                listOf(record.id to 1, record.id to 2, plainRecord.id to 1),
+            )
+        stamps[record.id to 1] shouldNotBe null
+        stamps[record.id to 2] shouldBe null
+        stamps[plainRecord.id to 1] shouldNotBe null
+        val emptyStamps = repository.releasedAtFor(WORKSPACE_ID, emptyList())
+        emptyStamps shouldBe emptyMap()
+    }
+
+    /** A minimal execution row referencing (pipeline_id, version) — the FK that makes discard a flip. */
+    private fun insertExecution(
+        pipelineId: UUID,
+        version: Int,
+    ): UUID =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                INSERT INTO pipeline_executions
+                    (pipeline_id, pipeline_version, status, triggered_by, triggered_via, root_execution_id)
+                VALUES (:pipelineId, :version, 'SUCCESS', :actor, 'REST', gen_random_uuid())
+                RETURNING execution_id
+                """.trimIndent(),
+                mapOf("pipelineId" to pipelineId, "version" to version, "actor" to owner),
+                UUID::class.java,
+            ),
+        )
+
     private fun insertUser(
         email: String = "owner@example.com",
         subject: String = "sub-1",
@@ -453,16 +883,12 @@ class PipelineRepositoryIntegrationTest {
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
         /**
-         * The shipped migrations in version order — V1 alone would miss the `workspaces`
-         * re-key (V4) the repository now writes against.
+         * The shipped migrations in version order — DERIVED from the migration directory
+         * (`ShippedMigrations`), never hand-copied: this list said "V1–V4" for two migrations
+         * after V4 landed (035/H), and a hand-maintained copy re-acquires exactly that drift
+         * the moment the next migration ships.
          */
-        val MIGRATION_PATHS =
-            listOf(
-                "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
-                "modules/app/src/main/resources/db/migration/V2__datasource_introspection_include_schemas.sql",
-                "modules/app/src/main/resources/db/migration/V3__execution_lineage.sql",
-                "modules/app/src/main/resources/db/migration/V4__workspaces_rekey.sql",
-            )
+        val MIGRATION_PATHS: List<String> = ShippedMigrations.paths()
 
         /** Generous: the assertion is about the outcome, not about how fast Postgres is. */
         const val CONCURRENCY_TIMEOUT_SECONDS = 30L
