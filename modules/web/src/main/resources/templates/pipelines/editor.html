@@ -13,6 +13,7 @@
   <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}"></script>
 
   <script th:src="@{/js/pipeline-editor/init.js}"></script>
+  <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
   <script th:src="@{/js/pipeline-editor/graph.js}"></script>
   <script th:src="@{/js/pipeline-editor/sse.js}"></script>
   <script th:src="@{/js/pipeline-editor/execute.js}"></script>
@@ -80,6 +81,7 @@
               <label class="pe-label" x-text="key"></label>
               <template x-if="parameterOverrides[key] !== undefined">
                 <input type="text" class="pe-input" x-model="parameterOverrides[key]"
+                  @input="onParameterInput()"
                   x-bind:placeholder="parameters[key].default ? 'Default: ' + JSON.stringify(parameters[key].default) : (parameters[key].required ? 'Required' : 'Optional')" />
               </template>
               <template x-if="parameterOverrides[key] === undefined">
@@ -104,6 +106,14 @@
 
       <!-- Right sidebar: Node details -->
       <aside class="pe-details-panel" x-bind:class="{ 'pe-details-visible': selectedNode }" aria-label="Node details">
+        <template x-if="!selectedNode">
+          <div class="pe-details-body">
+            <div class="ds-empty">
+              <p class="ds-empty-title">Select a node</p>
+              <p class="ds-empty-description">Click a node in the graph to see its details and rendered SQL.</p>
+            </div>
+          </div>
+        </template>
         <template x-if="selectedNode">
           <div>
             <div class="pe-details-header">
@@ -111,57 +121,80 @@
               <button class="pe-details-close" @click="selectedNode = null" aria-label="Close details">&times;</button>
             </div>
             <div class="pe-details-body">
-              <div class="pe-field">
-                <label class="pe-label">Type</label>
-                <div class="pe-value" x-text="selectedNode.type"></div>
-              </div>
-              <template x-if="selectedNode.type === 'PIPELINE' && selectedNode.pipeline">
+              <!-- Identity -->
+              <div class="pe-details-section">
+                <h3 class="pe-details-heading">Identity</h3>
                 <div class="pe-field">
-                  <label class="pe-label">Child Pipeline</label>
+                  <label class="pe-label">Type</label>
+                  <div class="pe-value"><span class="ds-badge ds-badge-default" x-text="selectedNode.type"></span></div>
+                </div>
+                <div class="pe-field">
+                  <label class="pe-label">Description</label>
+                  <div class="pe-value" x-text="selectedNode.description || '—'" x-bind:title="selectedNode.description || ''"></div>
+                </div>
+                <template x-if="selectedNode.type === 'PIPELINE' && selectedNode.pipeline">
+                  <div class="pe-field">
+                    <label class="pe-label">Child Pipeline</label>
+                    <div class="pe-value">
+                      <a class="pe-link"
+                         x-bind:href="'/pipelines?q=' + encodeURIComponent(selectedNode.pipeline.name)"
+                         x-text="selectedNode.pipeline.name + ' @ v' + selectedNode.pipeline.version"></a>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- SQL — the node's rendered SQL, resolved server-side from its PINNED
+                   template (contract §2.3: SQL lives in template entities, not nodes) -->
+              <div class="pe-details-section">
+                <h3 class="pe-details-heading">SQL
+                  <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
+                </h3>
+                <!-- Filled by htmx.ajax on selection change; the URL carries §6.3 wire
+                     parameters built by the page's own coerceValue (init.js). -->
+                <div id="pe-node-sql"></div>
+              </div>
+
+              <!-- Configuration -->
+              <div class="pe-details-section">
+                <h3 class="pe-details-heading">Configuration</h3>
+                <div class="pe-field">
+                  <label class="pe-label">Source</label>
+                  <div class="pe-value" x-text="selectedNode.source || '—'" x-bind:title="selectedNode.source || ''"></div>
+                </div>
+                <div class="pe-field" x-show="selectedNode.type !== 'PIPELINE'">
+                  <label class="pe-label">Template</label>
                   <div class="pe-value">
                     <a class="pe-link"
-                       x-bind:href="'/pipelines?q=' + encodeURIComponent(selectedNode.pipeline.name)"
-                       x-text="selectedNode.pipeline.name + ' @ v' + selectedNode.pipeline.version"></a>
+                       x-bind:href="'/templates/' + encodeURIComponent(selectedNode.template?.id || '') + '/editor'"
+                       x-text="(selectedNode.template?.id || '—') + (selectedNode.template?.version ? ' @ v' + selectedNode.template.version : '')"></a>
                   </div>
                 </div>
-              </template>
-              <div class="pe-field">
-                <label class="pe-label">Source</label>
-                <div class="pe-value" x-text="selectedNode.source || '—'"></div>
-              </div>
-              <div class="pe-field">
-                <label class="pe-label">Template</label>
-                <div class="pe-value" x-text="selectedNode.template?.id || '—'"></div>
-              </div>
-              <template x-if="selectedNode.template && selectedNode.template.version">
-                <div class="pe-field">
-                  <label class="pe-label">Template Version</label>
-                  <div class="pe-value" x-text="selectedNode.template.version"></div>
-                </div>
-              </template>
-              <div class="pe-field">
-                <label class="pe-label">Description</label>
-                <div class="pe-value" x-text="selectedNode.description || '—'"></div>
-              </div>
-              <template x-if="selectedNode.depends_on && selectedNode.depends_on.length">
-                <div class="pe-field">
-                  <label class="pe-label">Depends On</label>
-                  <ul class="pe-depends-list">
-                    <template x-for="dep in selectedNode.depends_on">
-                      <li x-text="dep" class="pe-depends-item"></li>
-                    </template>
-                  </ul>
-                </div>
-              </template>
-              <template x-if="selectedNode.output">
                 <div class="pe-field">
                   <label class="pe-label">Output</label>
-                  <div class="pe-value" x-text="JSON.stringify(selectedNode.output)"></div>
+                  <div class="pe-value" x-text="outputText(selectedNode)" x-bind:title="outputText(selectedNode)"></div>
                 </div>
-              </template>
-              <div class="pe-field" x-show="nodeStates[selectedNode.id]">
-                <label class="pe-label">Status</label>
-                <div class="pe-value" x-text="nodeStates[selectedNode.id]"></div>
+                <template x-if="selectedNode.depends_on && selectedNode.depends_on.length">
+                  <div class="pe-field">
+                    <label class="pe-label">Depends On</label>
+                    <ul class="pe-depends-list">
+                      <template x-for="dep in selectedNode.depends_on">
+                        <li x-text="dep" class="pe-depends-item"></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Runtime -->
+              <div class="pe-details-section" x-show="nodeStates[selectedNode.id]">
+                <h3 class="pe-details-heading">Runtime</h3>
+                <div class="pe-field">
+                  <label class="pe-label">Status</label>
+                  <div class="pe-value">
+                    <span class="ds-badge" x-bind:class="statusBadgeClass(nodeStates[selectedNode.id])" x-text="nodeStates[selectedNode.id]"></span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -181,7 +214,7 @@
       </div>
       <div x-show="!resultPanel.expired && resultPanel.data">
         <div class="pe-result-table-container">
-          <table class="pe-result-table">
+          <table class="ds-table">
             <thead>
               <tr>
                 <template x-for="col in resultPanel.columns" :key="col">
@@ -201,9 +234,13 @@
           </table>
         </div>
         <div class="pe-result-actions">
-          <button class="ds-button ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
+          <!-- Client-side cursor paging over a stored result (027b C, frozen):
+               prevPage/nextPage and hasPrev/hasNext keep their exact bindings;
+               limit-authoritative, total_rows-denominated arithmetic lives in
+               result.js. This row is restyled, not rewired. -->
+          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
           <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
-          <button class="ds-button ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
           <div class="pe-result-downloads">
             <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
             <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>

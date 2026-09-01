@@ -22,6 +22,11 @@
     this.executionId = null;
   }
 
+  function pipelineLabel(editor) {
+    var p = editor.pipeline || {};
+    return p.display_name || p.name || "Pipeline";
+  }
+
   SseHandler.prototype.connect = function (executionId, pipelineId) {
     var self = this;
     self.executionId = executionId;
@@ -200,13 +205,22 @@
       case "pipeline_completed":
         self.terminalSeen = true;
         editor.isExecuting = false;
-        editor.setBanner("Pipeline completed successfully", "success");
+        // Shape D (ui-screens.md §5.1): a stream-borne event has no HTTP response
+        // to hang an OOB swap on, so the ONE client-side builder reports it. The
+        // terminal events also ANNOUNCE now — they previously did not (only
+        // node-level events did); this is an addition, not a preservation.
+        if (window.DpToast && window.DpToast.show) {
+          window.DpToast.show("success", "Pipeline completed", pipelineLabel(editor) + " finished");
+        }
+        editor.announceStatus("Pipeline completed successfully");
         break;
 
       case "pipeline_failed":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        // A failure detail is not a 6s notification — the modal keeps it (§9).
         editor.showError(payload.message || "Pipeline execution failed");
+        editor.announceStatus("Pipeline execution failed");
         break;
 
       case "data_ready":
@@ -227,7 +241,11 @@
             }
           });
         }
-        editor.setBanner("Execution aborted", "aborted");
+        var abortReason = payload && payload.reason ? String(payload.reason) : null;
+        if (window.DpToast && window.DpToast.show) {
+          window.DpToast.show("warning", "Execution aborted", abortReason || "The execution was aborted");
+        }
+        editor.announceStatus(abortReason ? "Execution aborted (" + abortReason + ")" : "Execution aborted");
         break;
 
       default:
@@ -238,17 +256,27 @@
   SseHandler.prototype.cancel = function () {
     var self = this;
     if (!self.executionId) return;
-    if (self.abortController) {
-      self.abortController.abort();
-    }
-    self.isConnected = false;
-    // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
+    // §6.3/§15.2: the DELETE makes the server emit execution_aborted ON the
+    // still-open stream. The old order aborted the reader FIRST, so the client
+    // never consumed its own terminal event and the aborted end state (banner,
+    // node sweep, and now the toast) could never render from the UI's own Cancel
+    // button (031 F5). Send the DELETE with the reader open; abort only as the
+    // fallback when no terminal event arrives.
     fetch("/api/v1/executions/" + self.executionId, {
       method: "DELETE",
+      // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
       headers: { "DP-CSRF-Token": readCookie("dp_csrf") },
       credentials: "same-origin",
     })
-      .catch(function () {});
+      .catch(function () {})
+      .then(function () {
+        setTimeout(function () {
+          if (!self.terminalSeen && self.abortController) {
+            self.abortController.abort();
+            self.isConnected = false;
+          }
+        }, 5000);
+      });
   };
 
   SseHandler.prototype.handleConnectionLoss = function () {
@@ -295,6 +323,14 @@
         } else if (status === "failed") {
           self.editor.isExecuting = false;
           self.editor.setBanner("Pipeline failed", "error");
+        } else if (status === "aborted") {
+          // The recovery poll previously had no aborted branch (031 F5): a cancel
+          // that raced a dropped stream fell through to "Connection lost".
+          self.editor.isExecuting = false;
+          if (window.DpToast && window.DpToast.show) {
+            window.DpToast.show("warning", "Execution aborted", "The execution was aborted");
+          }
+          self.editor.announceStatus("Execution aborted");
         } else if (status === "running") {
           if (self.pollCount <= self.maxPolls) {
             setTimeout(function () { self.pollExecution(); }, 2000);
