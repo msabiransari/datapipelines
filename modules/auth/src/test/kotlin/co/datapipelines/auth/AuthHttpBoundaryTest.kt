@@ -61,6 +61,8 @@ class AuthHttpBoundaryTest {
 
     @Autowired private lateinit var servletContext: ServletContext
 
+    @Autowired private lateinit var authFilters: AuthFilters
+
     @LocalServerPort
     private var port: Int = 0
 
@@ -442,9 +444,15 @@ class AuthHttpBoundaryTest {
      * The login rate limit is pinned to 4 ([props]). Five `/login` calls must yield
      * exactly one 429 — the FIFTH. A double-executed [LoginRateLimitFilter] counts
      * two per request and 429s on the third call instead.
+     *
+     * The window is reset first (034 F4): the budget is per-IP, in-memory and SHARED
+     * by the whole context, so a second consumer of `/login` or `/oauth2/` in this
+     * class would pre-consume it and make the resulting early-429 mimic the very
+     * double-execution this test detects.
      */
     @Test
     fun `the login rate limiter meters each request exactly once`() {
+        authFilters.loginRateLimit.resetWindowsForTest()
         repeat(LOGIN_LIMIT) {
             call(HttpMethod.GET, "/login").statusCode.value() shouldNotBe 429
         }

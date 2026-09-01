@@ -16,8 +16,13 @@ import java.util.UUID
 class PipelineEditorController(
     private val pipelines: PipelineRepository,
     private val themeResolver: ThemeResolver,
-    private val mapper: ObjectMapper = PipelineJson.objectMapper(),
 ) {
+    // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an
+    // ObjectMapper-typed parameter even when it has a default, and that mapper lacks the
+    // contract modules (see PipelineNodeSqlPartialController, 032). Guarded by
+    // ObjectMapperDefaultParameterKonsistTest.
+    private val mapper: ObjectMapper = PipelineJson.objectMapper()
+
     @GetMapping("/pipelines/{id}/editor")
     fun editor(
         @PathVariable id: UUID,

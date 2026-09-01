@@ -83,7 +83,7 @@ class EmbeddedDialectBehaviorTest {
         // type branch nor the state branch can see it. (A database SHUTDOWN under a live
         // connection arrives as JdbcSQLNonTransientConnectionException state 90121, which the
         // existing type branch already classifies — verified 2026-08-16.)
-        val h2 = java.sql.DriverManager.getConnection("jdbc:h2:mem:f1pin;DB_CLOSE_DELAY=-1", "sa", "")
+        val h2 = java.sql.DriverManager.getConnection("jdbc:h2:mem:f1pin", "sa", "")
         h2.close()
         val h2Thrown = shouldThrow<SQLException> { h2.schema }
         (h2Thrown is org.h2.jdbc.JdbcSQLNonTransientException) shouldBe true
@@ -102,10 +102,11 @@ class EmbeddedDialectBehaviorTest {
         duckClosed.sqlState shouldBe null
         duckClosed.errorCode shouldBe 0
         duckClosed.message shouldBe "Connection was closed"
-        val duckLive = java.sql.DriverManager.getConnection("jdbc:duckdb::memory:")
         val duckQueryError =
-            shouldThrow<SQLException> {
-                duckLive.createStatement().use { it.executeQuery("SELECT * FROM no_such_table_f1pin") }
+            java.sql.DriverManager.getConnection("jdbc:duckdb::memory:").use { duckLive ->
+                shouldThrow<SQLException> {
+                    duckLive.createStatement().use { it.executeQuery("SELECT * FROM no_such_table_f1pin") }
+                }
             }
         (duckQueryError.message == "Connection was closed") shouldBe false
 

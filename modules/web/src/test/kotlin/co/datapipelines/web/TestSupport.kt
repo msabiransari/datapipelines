@@ -33,6 +33,37 @@ object TestRepoFiles {
             .readText()
 
     /**
+     * Asserts [classpathPath] — a resource a test found by scanning the classpath — also
+     * exists under one of [sourceDirs], the repo-relative directories the build COPIES
+     * resources from, returning the path for chaining (034 D1).
+     *
+     * The test classpath is the BUILD OUTPUT, and `build/resources` keeps a file deleted
+     * from source until `clean` — `--rerun-tasks` re-runs tasks but removes no orphaned
+     * resources, so a scanner that trusts the classpath audits ghosts (the 029+031 merged
+     * tree went red on `partials/datasource-row.html`, deleted in `ee2aa83`). A ghost now
+     * fails HERE with "stale build artifact" instead of a confusing content error. One
+     * helper for every classpath scanner in this module: the cause is fixed once. The
+     * source dirs are a parameter because not everything packaged lives under this module's
+     * own main resources — test fixtures ship from `src/test/resources` and the packaged
+     * spec set is copied from the repo-root `docs/` (033).
+     */
+    fun requireInSources(
+        classpathPath: String,
+        vararg sourceDirs: String,
+    ): String {
+        require(sourceDirs.any { File(root, "$it/$classpathPath").isFile }) {
+            "'$classpathPath' is on the test classpath but under none of ${sourceDirs.toList()} — " +
+                "a stale build artifact (build/resources is not pruned by --rerun-tasks). " +
+                "Run ./gradlew :modules:web:clean (or a full clean) and re-run."
+        }
+        return classpathPath
+    }
+
+    /** [requireInSources] rooted at this module's own main AND test resources. */
+    fun requireInModuleResources(classpathPath: String): String =
+        requireInSources(classpathPath, "modules/web/src/main/resources", "modules/web/src/test/resources")
+
+    /**
      * Every shipped migration as a repo-relative path, in NUMERIC version order — derived from
      * the real directory, never a hand-copied list: a migration added to `app` but not to a
      * literal list would run this suite against a stale schema (the R4 F5 failure that

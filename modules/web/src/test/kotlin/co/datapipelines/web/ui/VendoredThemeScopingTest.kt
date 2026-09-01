@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -27,6 +28,7 @@ class VendoredThemeScopingTest {
             resolver
                 .getResources("classpath*:static/vendor/design-system/themes/*.css")
                 .filter { it.filename != null }
+                .onEach { TestRepoFiles.requireInModuleResources("static/vendor/design-system/themes/" + it.filename) }
         resources.shouldNotBeEmpty()
         val offenders = resources.filterNot { it.isRootScoped() }
         offenders.map { it.filename } shouldBe emptyList()
@@ -37,6 +39,7 @@ class VendoredThemeScopingTest {
         val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
         resolver
             .getResources("classpath*:static/vendor/design-system/themes/*.css")
+            .onEach { TestRepoFiles.requireInModuleResources("static/vendor/design-system/themes/" + it.filename) }
             .mapNotNull { it.filename }
             .let { names ->
                 names.shouldNotBeEmpty()

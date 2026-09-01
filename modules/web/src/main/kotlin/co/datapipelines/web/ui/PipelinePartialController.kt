@@ -33,7 +33,9 @@ class PipelinePartialController(
         if (query == null) {
             val pageRows = pipelines.findAll(workspaceId, null, size + 1, page)
             items = pageRows.take(size)
-            total = page + items.size + (if (pageRows.size > size) 1 else 0)
+            // The truthful total (034 E3) — the old estimate ("rows so far + 1 if more")
+            // rendered "Showing 25 of 26" on a 100-row workspace.
+            total = pipelines.countAll(workspaceId)
             hasMore = pageRows.size > size
         } else {
             val all = filter(pipelines.findAll(workspaceId), query)

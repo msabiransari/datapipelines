@@ -208,8 +208,11 @@
 
   // Class emission (pipeline-editor.md §5.1): `idle` is explicit so setNodeState()'s
   // removeClass of all five states stays symmetric; TYPE is a class per node type;
-  // `caller` marks the result node — omitted output means caller (pipeline-contract
-  // §4.7/§9) and only DQL nodes can resolve to it (DML/DDL forbid an output block).
+  // `caller` marks the result node, mirroring the server's Node.isCallerNode (which has
+  // no type guard): an explicit output.target "caller" on ANY type — contract §4.9
+  // permits a standard §4.7 output block on a PIPELINE node — or a DQL node with the
+  // output block omitted (the D1 default; DML/DDL forbid the block, so the DQL guard on
+  // the omitted arm is load-bearing — without it every DML/DDL node would mark caller).
   function nodeClasses(n) {
     var classes = ["idle"];
     var type = (n.type || "").toUpperCase();
@@ -218,7 +221,7 @@
     } else if (type === "DQL" || type === "DML" || type === "DDL") {
       classes.push("type-" + type.toLowerCase());
     }
-    if (type === "DQL" && (!n.output || n.output.target === "caller")) {
+    if ((n.output && n.output.target === "caller") || (type === "DQL" && !n.output)) {
       classes.push("caller");
     }
     return classes.join(" ");

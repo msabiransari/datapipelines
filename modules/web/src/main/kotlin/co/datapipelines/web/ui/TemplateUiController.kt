@@ -36,11 +36,12 @@ class TemplateUiController(
                 Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
             }
         val workspaceId = currentPrincipal().requireWorkspace().id
+        val query = q?.trim()?.takeIf { it.isNotEmpty() }
         val raw =
             templates.list(
                 workspaceId,
                 dialect = dialectFilter,
-                q = q?.trim()?.takeIf { it.isNotEmpty() },
+                q = query,
                 offset = page,
                 limit =
                     size + 1,
@@ -51,6 +52,9 @@ class TemplateUiController(
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", raw.size > size)
         model.addAttribute("totalLabel", "Page of templates")
+        // The truthful total under the same filters (034 E3), rendered by the shared pager
+        // inside the included partials/templates fragment.
+        model.addAttribute("total", templates.count(workspaceId, dialect = dialectFilter, q = query))
         return "templates/list"
     }
 

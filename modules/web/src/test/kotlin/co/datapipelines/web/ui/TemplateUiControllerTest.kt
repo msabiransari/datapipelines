@@ -65,6 +65,7 @@ class TemplateUiControllerTest {
                 template(),
                 template("orders_v2.sql"),
             )
+        every { repository.count(any(), null, null) } returns 42
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null, null)
@@ -74,6 +75,8 @@ class TemplateUiControllerTest {
         @Suppress("UNCHECKED_CAST")
         val result = model["templates"] as List<Template>
         result shouldHaveSize 2
+        // 034 E3: the pager's total is the repository's truthful count, not an estimate.
+        model["total"] shouldBe 42
     }
 
     @Test
@@ -81,6 +84,7 @@ class TemplateUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), Dialect.POSTGRES, "orders", 0, 26) } returns listOf(template())
+        every { repository.count(any(), Dialect.POSTGRES, "orders") } returns 1
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "orders", "POSTGRES", null)
@@ -96,6 +100,7 @@ class TemplateUiControllerTest {
     fun `partial returns fragment view`() {
         authenticate()
         every { repository.list(any(), null, null, 0, 26) } returns listOf(template())
+        every { repository.count(any(), null, null) } returns 1
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -111,6 +116,7 @@ class TemplateUiControllerTest {
         authenticate()
         val many = (1..26).map { template("t$it.sql") }
         every { repository.list(any(), null, null, 0, 26) } returns many
+        every { repository.count(any(), null, null) } returns 100
 
         val partialController = TemplatePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -120,6 +126,8 @@ class TemplateUiControllerTest {
         val result = model["templates"] as List<Template>
         result shouldHaveSize 25
         model["hasMore"] shouldBe true
+        // 034 E3: "Showing 25 of 100", not the old "rows so far + 1" estimate.
+        model["total"] shouldBe 100
     }
 
     @Test
@@ -128,6 +136,7 @@ class TemplateUiControllerTest {
 
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), null, null, 0, 26) } returns emptyList()
+        every { repository.count(any(), null, null) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)
@@ -142,6 +151,7 @@ class TemplateUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.list(any(), null, null, 0, 26) } returns emptyList()
+        every { repository.count(any(), null, null) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)

@@ -6,6 +6,31 @@
   function setupA11y(context) {
     editor = context;
     buildNodeList();
+    installEscapeHandler();
+  }
+
+  // §14.1: Escape closes the TOPMOST open surface — error modal, then result panel,
+  // then the details panel — one per press, matching the close paths the UI already
+  // has (init.js's canvas-tap, ResultPanel.hide, the modal dismiss). Attached once:
+  // setupA11y re-runs would otherwise stack duplicate listeners.
+  var escapeInstalled = false;
+  function installEscapeHandler() {
+    if (escapeInstalled || typeof document.addEventListener !== "function") return;
+    escapeInstalled = true;
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !editor) return;
+      if (editor.errorModal && editor.errorModal.visible) {
+        editor.errorModal.visible = false;
+        editor.errorModal.message = "";
+      } else if (editor.resultPanel && editor.resultPanel.visible && editor.resultPanelInstance) {
+        editor.resultPanelInstance.hide();
+      } else if (editor.selectedNode) {
+        editor.selectedNode = null;
+      } else {
+        return;
+      }
+      e.preventDefault();
+    });
   }
 
   function buildNodeList() {
@@ -45,9 +70,31 @@
           e.preventDefault();
           focusPrevSibling(this);
         }
+        if (e.key === "Home") {
+          e.preventDefault();
+          focusEdgeItem(this, true);
+        }
+        if (e.key === "End") {
+          e.preventDefault();
+          focusEdgeItem(this, false);
+        }
       });
       list.appendChild(li);
     }
+  }
+
+  // §14.1: Home/End jump to the first/last option (the WAI listbox pattern), moving
+  // the roving tabindex with the focus exactly like the arrows do.
+  function focusEdgeItem(el, first) {
+    var list = el.parentNode;
+    if (!list) return;
+    var items = list.querySelectorAll('[role="option"]');
+    if (!items.length) return;
+    var target = first ? items[0] : items[items.length - 1];
+    if (target === el) return;
+    el.setAttribute("tabindex", "-1");
+    target.setAttribute("tabindex", "0");
+    target.focus();
   }
 
   function focusNextSibling(el) {

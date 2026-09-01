@@ -89,6 +89,18 @@ class LoginRateLimitFilter(
         return false
     }
 
+    /**
+     * Test-only reset of the in-memory windows. The exact-once metering test
+     * (`AuthHttpBoundaryTest`) owns the shared per-IP budget for its assertions; any
+     * SECOND consumer of a metered path (`/login`, `/oauth2/`) in the same application
+     * context would otherwise pre-consume that budget and make the test's early-429
+     * mimic the double-execution bug it exists to detect (D9, 034 F4). The windows are
+     * per-instance state, so clearing them changes no runtime behavior.
+     */
+    internal fun resetWindowsForTest() {
+        windows.clear()
+    }
+
     private companion object {
         val METERED_PREFIXES = listOf("/oauth2/", "/login")
         const val WINDOW_SECONDS = 60L

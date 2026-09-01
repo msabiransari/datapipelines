@@ -55,7 +55,19 @@ if ((DEMO)); then
   touch "$DEMO_ENV" # --stop/--status --demo may run before any --start --demo scaffolded it
   COMPOSE+=(--env-file "$DEMO_ENV" --env-file "$DEPLOY_ENV" --profile demo)
 fi
-IMAGE_TAG="datapipelines:local"
+# The image tag follows the compose project (default "deploy" — the files' pinned
+# name): a hardcoded single tag meant every lane's --start rebuilt the tag every
+# OTHER lane's stack resolves (034 F2 — 031's build overwrote 029's mid-round).
+# The default lane keeps the documented tag; a second isolated copy gets its own.
+# IMAGE_TAG in the environment overrides the derivation entirely.
+if [[ -z ${IMAGE_TAG:-} ]]; then
+  if [[ ${APP_COMPOSE_PROJECT:-deploy} == deploy ]]; then
+    IMAGE_TAG="datapipelines:local"
+  else
+    IMAGE_TAG="datapipelines:local-${APP_COMPOSE_PROJECT}"
+  fi
+fi
+export IMAGE_TAG
 BUILDER_IMAGE="eclipse-temurin:21-jdk"
 GRADLE_CACHE="$PWD/.gradle-docker"
 HEALTH_URL="http://localhost:8080/health"

@@ -45,9 +45,13 @@ class ExampleContentSeeder(
     properties: BootstrapProperties,
     private val pipelineImportService: PipelineImportService,
     private val templateImportService: TemplateImportService,
-    private val mapper: ObjectMapper = ObjectMapper(),
 ) : PersonalWorkspaceSeeder {
     private val log = LoggerFactory.getLogger(ExampleContentSeeder::class.java)
+
+    // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an
+    // ObjectMapper-typed parameter even when it has a default (guarded by
+    // ObjectMapperDefaultParameterKonsistTest). Declared before `content`, which uses it.
+    private val mapper: ObjectMapper = ObjectMapper()
 
     /** Null when no examples file is configured — the seeder is then a deliberate no-op. */
     private val content: Content? = properties.examplesPath()?.let(::load)

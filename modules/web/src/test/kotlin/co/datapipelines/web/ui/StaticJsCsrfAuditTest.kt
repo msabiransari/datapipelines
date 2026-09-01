@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -57,7 +58,10 @@ class StaticJsCsrfAuditTest {
         PathMatchingResourcePatternResolver(javaClass.classLoader)
             .getResources("classpath*:static/js/**/*.js")
             .filter { it.filename != null }
-            .map { "static/js/" + it.url.path.substringAfter("static/js/") to it.inputStream.readBytes().decodeToString() }
+            .map {
+                val path = TestRepoFiles.requireInModuleResources("static/js/" + it.url.path.substringAfter("static/js/"))
+                path to it.inputStream.readBytes().decodeToString()
+            }
 
     private companion object {
         val STATE_CHANGING_METHOD_REGEX =

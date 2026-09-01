@@ -62,6 +62,7 @@ class PipelineUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline("other"))
+        every { repository.countAll(any()) } returns 2
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null)
@@ -152,6 +153,7 @@ class PipelineUiControllerTest {
     fun `partial returns fragment view with correct model`() {
         authenticate()
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline(), pipeline())
+        every { repository.countAll(any()) } returns 3
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -167,6 +169,7 @@ class PipelineUiControllerTest {
     fun `partial paginates correctly`() {
         authenticate()
         every { repository.findAll(any(), null, pageSize + 1, 25) } returns (1..5).map { pipeline("p${it + 25}") }
+        every { repository.countAll(any()) } returns 30
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -177,6 +180,8 @@ class PipelineUiControllerTest {
         result shouldHaveSize 5
         model["offset"] shouldBe 25
         model["hasMore"] shouldBe false
+        // 034 E3: the total is the repository's truthful count, not "rows so far".
+        model["total"] shouldBe 30
     }
 
     @Test
@@ -185,6 +190,7 @@ class PipelineUiControllerTest {
 
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
+        every { repository.countAll(any()) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)
@@ -199,6 +205,7 @@ class PipelineUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
+        every { repository.countAll(any()) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null)

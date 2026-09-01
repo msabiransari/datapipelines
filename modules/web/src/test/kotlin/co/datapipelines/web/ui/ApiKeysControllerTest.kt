@@ -261,6 +261,12 @@ class ApiKeysPartialControllerTest {
         response.body!! shouldContain "hx-swap-oob=\"beforeend:#toast\""
         response.body!! shouldContain "revoked"
         response.headers["HX-Trigger"] shouldBe null // E3: nothing has ever listened for keyRevoked
+        // 034 E2: the rebuilt row is the template row's shape — the padding lives in
+        // .ds-table's CSS, so a rebuilt row and a template-rendered row look the same.
+        response.body!! shouldNotContain "padding:var(--gap-xs)"
+        response.body!! shouldContain "ds-badge ds-badge-danger" // the revoked marker is the badge, not "(revoked)" text
+        response.body!! shouldContain "ds-badge ds-badge-default" // the scope chips
+        response.body!! shouldContain "<td class=\"num\">"
     }
 
     private fun engine(): SpringTemplateEngine =
