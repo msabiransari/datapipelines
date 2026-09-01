@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineValidator
@@ -19,12 +20,16 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 class PipelineLifecycleConfiguration {
     @Bean
-    fun pipelineDraftService(pipelines: PipelineRepository): PipelineDraftService = PipelineDraftService(pipelines)
+    fun pipelineDraftService(
+        pipelines: PipelineRepository,
+        authoring: AuthoringGuard,
+    ): PipelineDraftService = PipelineDraftService(pipelines, authoring)
 
     @Bean
     fun pipelineReleaseService(
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         validator: PipelineValidator,
-    ): PipelineReleaseService = PipelineReleaseService(pipelines, templates, validator)
+        authoring: AuthoringGuard,
+    ): PipelineReleaseService = PipelineReleaseService(pipelines, templates, validator, authoring)
 }

@@ -47,8 +47,10 @@ class TemplatesControllerTest {
 
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
+    private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
+
     private val controller =
-        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases)
+        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, guard)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -97,6 +99,32 @@ class TemplatesControllerTest {
     }
 
     @Test
+    fun `create and delete refuse with the catalogued code when authoring is disabled`() {
+        // versioning §5.5's template mirror: a promotion receiver fails closed.
+        authenticate()
+        val receiver =
+            TemplatesController(
+                repository,
+                validator,
+                engines,
+                TemplateImportService(repository, validator),
+                drafts,
+                releases,
+                co.datapipelines.pipeline.AuthoringGuard(false),
+            )
+
+        val create =
+            shouldThrow<DatapipelinesException> {
+                receiver.create("""{"dialect":"POSTGRES","display_name":"X","description":"d","body":"SELECT 1"}""")
+            }
+        create.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+        create.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
+
+        val delete = shouldThrow<DatapipelinesException> { receiver.delete("fetch_orders.sql") }
+        delete.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+    }
+
+    @Test
     fun `get latest and get specific version`() {
         authenticate()
         every { repository.findLatest(any(), "fetch_orders.sql") } returns template(2)
@@ -109,8 +137,35 @@ class TemplatesControllerTest {
     }
 
     @Test
+    fun `get returns the working version - the draft's projection when one exists`() {
+        authenticate()
+        // §7.1's template mirror: the default read is the DRAFT, else an author rebases on
+        // the released body and quietly discards the draft with the next write.
+        every { repository.findDraftDetail(any(), "fetch_orders.sql") } returns
+            TemplateVersionDetail(
+                templateId = "fetch_orders.sql",
+                version = 2,
+                status = PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = Instant.parse("2026-08-02T00:00:00Z"),
+                createdBy = userId,
+            )
+        every { repository.findVersion(any(), "fetch_orders.sql", 2) } returns
+            template(2).copy(body = "SELECT 2", status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v2")
+
+        val data = controller.get("fetch_orders.sql").data
+
+        data.get("version").asInt() shouldBe 2
+        data.get("status").asText() shouldBe "DRAFT"
+        data.get("body").asText() shouldBe "SELECT 2"
+        data.get("body_hash").asText() shouldBe "hash-v2"
+        data.get("draft").get("version").asInt() shouldBe 2
+    }
+
+    @Test
     fun `misses are template-not_found, with the version in details for a versioned miss`() {
         authenticate()
+        every { repository.findDraftDetail(any(), "nope.sql") } returns null
         every { repository.findLatest(any(), "nope.sql") } returns null
         shouldThrow<ApiException> { controller.get("nope.sql") }.code shouldBe "template.not_found"
 

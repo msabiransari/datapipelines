@@ -41,6 +41,7 @@ class PipelinesControllerTest {
             bodies = PipelineBodies(repository),
             drafts = drafts,
             releases = releases,
+            authoring = co.datapipelines.pipeline.AuthoringGuard(true),
         )
 
     private val userId = UUID.randomUUID()
@@ -120,7 +121,7 @@ class PipelinesControllerTest {
     }
 
     @Test
-    fun `get merges server and lifecycle fields, and the draft pointer when one exists`() {
+    fun `get returns the working version - the draft's body, status and hash when one exists`() {
         authenticate()
         val draftDetail =
             PipelineVersionDetail(
@@ -134,20 +135,38 @@ class PipelinesControllerTest {
                 updatedAt = Instant.parse("2026-08-02T00:00:00Z"),
             )
         every { repository.findById(any(), pipelineId) } returns record
-        every { repository.findVersionBody(any(), pipelineId, 1) } returns """{"schema_version":1,"name":"monthly_revenue"}"""
-        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns releasedDetail
         every { repository.findDraftDetail(any(), pipelineId) } returns draftDetail
+        every { repository.findVersionBody(any(), pipelineId, 2) } returns """{"schema_version":1,"name":"monthly_revenue"}"""
 
         val data = controller.get(pipelineId).data
 
+        // §7.1: the DEFAULT body is the working version — the draft when one exists — and
+        // the response states which version and status it returned.
         data.get("name").asText() shouldBe "monthly_revenue"
-        data.get("id").asText() shouldBe pipelineId.toString()
-        data.get("created_at").asText() shouldBe "2026-08-01T00:00:00Z"
-        // §7's read shape: the released row's status/hash, current_version, and the pointer.
-        data.get("status").asText() shouldBe "RELEASED"
+        data.get("version").asInt() shouldBe 2
+        data.get("status").asText() shouldBe "DRAFT"
+        data.get("body_hash").asText() shouldBe "hash-v2"
+        // current_version still names the latest RELEASED version (§7.1: never repointed).
         data.get("current_version").asInt() shouldBe 1
         data.get("draft").get("version").asInt() shouldBe 2
         data.get("draft").get("body_hash").asText() shouldBe "hash-v2"
+    }
+
+    @Test
+    fun `get without a draft returns the released version as the working version`() {
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns releasedDetail
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns """{"schema_version":1,"name":"monthly_revenue"}"""
+
+        val data = controller.get(pipelineId).data
+
+        data.get("version").asInt() shouldBe 1
+        data.get("status").asText() shouldBe "RELEASED"
+        data.get("body_hash").asText() shouldBe "hash-v1"
+        data.get("current_version").asInt() shouldBe 1
+        data.has("draft") shouldBe false
     }
 
     @Test
@@ -188,6 +207,29 @@ class PipelinesControllerTest {
         data.get("status").asText() shouldBe "DRAFT"
         data.get("body_hash").asText() shouldBe "hash-v2"
         data.get("current_version").asInt() shouldBe 1
+    }
+
+    @Test
+    fun `a no-op update answers with the current RELEASED state and no draft pointer`() {
+        authenticate()
+        val body =
+            """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
+                """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        val storedBody = """{"schema_version":1,"name":"monthly_revenue"}"""
+        // versioning §5.1: identical body ⇒ the service returns the RELEASED detail and
+        // the STORED body; the response must say so plainly — not a 4xx, not a draft.
+        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId) } returns
+            PipelineDraftService.DraftWrite(record, releasedDetail, storedBody)
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+
+        val data = controller.update(pipelineId, "hash-v1", body).data
+
+        data.get("version").asInt() shouldBe 1
+        data.get("status").asText() shouldBe "RELEASED"
+        data.get("body_hash").asText() shouldBe "hash-v1"
+        data.get("current_version").asInt() shouldBe 1
+        data.has("draft") shouldBe false
     }
 
     @Test
@@ -239,5 +281,33 @@ class PipelinesControllerTest {
 
         every { repository.softDelete(any(), pipelineId) } returns false
         shouldThrow<ApiException> { controller.delete(pipelineId) }.code shouldBe "pipeline.execution.not_found"
+    }
+
+    @Test
+    fun `create and delete refuse with the catalogued code when authoring is disabled`() {
+        // versioning §5.5: a promotion receiver's write path fails closed. The refusal is
+        // a DatapipelinesException the REST layer maps through ApiErrorCatalog (403).
+        authenticate()
+        val receiver =
+            PipelinesController(
+                pipelines = repository,
+                validator = validator,
+                bodies = PipelineBodies(repository),
+                drafts = drafts,
+                releases = releases,
+                authoring = co.datapipelines.pipeline.AuthoringGuard(false),
+            )
+
+        val body =
+            """{"schema_version":1,"name":"x","display_name":"X","description":"","parameters":{},"nodes":[]}"""
+        val create =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                receiver.create(body)
+            }
+        create.code shouldBe "pipeline.authoring.disabled"
+        create.details["config_key"] shouldBe "datapipelines.deployment.authoring-enabled"
+
+        val delete = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { receiver.delete(pipelineId) }
+        delete.code shouldBe "pipeline.authoring.disabled"
     }
 }

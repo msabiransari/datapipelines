@@ -23,6 +23,7 @@ import java.util.UUID
 class TemplateReleaseService(
     private val templates: TemplateRepository,
     private val validator: TemplateValidator,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
 ) {
     /** What a release produced: the released version detail and the stored template at it. */
     data class Released(
@@ -33,7 +34,8 @@ class TemplateReleaseService(
     /**
      * Releases the template's DRAFT at [expectedHash].
      *
-     * @throws DatapipelinesException `template.version.not_draft` or `template.version.conflict`
+     * @throws DatapipelinesException `template.authoring.disabled` (§5.5),
+     *   `template.version.not_draft` or `template.version.conflict`
      *   (stale hash); `TemplateValidationException` when the draft content no longer validates.
      */
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
@@ -43,6 +45,9 @@ class TemplateReleaseService(
         expectedHash: String,
         actor: UUID,
     ): Released {
+        // §5.5: release is an authoring action — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
+
         val draft =
             templates.findDraftDetail(workspaceId, id)
                 ?: throw notDraft(id)
@@ -73,13 +78,17 @@ class TemplateReleaseService(
     /**
      * Discards the template's DRAFT at [expectedHash] (a hard delete — see the class KDoc).
      *
-     * @throws DatapipelinesException `template.version.not_draft` or `template.version.conflict`.
+     * @throws DatapipelinesException `template.authoring.disabled` (§5.5),
+     *   `template.version.not_draft` or `template.version.conflict`.
      */
     fun discard(
         workspaceId: UUID,
         id: String,
         expectedHash: String,
     ) {
+        // §5.5: discard is an authoring action — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
+
         templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
         if (!templates.discardDraft(workspaceId, id, expectedHash)) {
             throw conflictAfterGuardFailure(workspaceId, id)

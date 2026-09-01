@@ -44,6 +44,7 @@ private const val RENDER_CONTEXT_DESC =
  */
 class TemplatesCreateTool(
     private val templates: TemplateRepository,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val validator: TemplateValidator,
 ) : McpTool {
     override val definition: McpSchema.Tool =
@@ -63,6 +64,8 @@ class TemplatesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        // versioning §5.5: creation is authoring — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
         val workspaceId = ctx.principal.requireWorkspace().id
         val draft =
             TemplateDraft(

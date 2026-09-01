@@ -10,6 +10,7 @@ import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -72,7 +73,21 @@ class TemplateToolsTest {
     }
 
     @Test
+    fun `create refuses with the catalogued code when authoring is disabled`() {
+        val error =
+            shouldThrow<DatapipelinesException> {
+                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(false), validator).call(
+                    McpArguments(mapOf("dialect" to "POSTGRES", "display_name" to "X", "description" to "d", "body" to "SELECT 1")),
+                    authorCtx,
+                )
+            }
+        error.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+        error.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
+    }
+
+    @Test
     fun `get returns the latest version by default, including body and imports`() {
+        every { templates.findDraftDetail(any(), any()) } returns null
         every { templates.findLatest(any(), "revenue.sql") } returns McpFixtures.template()
 
         every { templates.findLatest(any(), "with_imports.sql") } returns
@@ -90,8 +105,40 @@ class TemplateToolsTest {
     }
 
     @Test
+    fun `get defaults to the working version - the draft when one exists`() {
+        // §7.1's template mirror: with a draft open, the DEFAULT read returns the draft's
+        // version (never the released body an agent would silently rebase over).
+        every { templates.findDraftDetail(any(), "revenue.sql") } returns
+            TemplateVersionDetail(
+                templateId = "revenue.sql",
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+        every { templates.findVersion(any(), "revenue.sql", 2) } returns
+            McpFixtures
+                .template()
+                .copy(
+                    version = 2,
+                    body = "SELECT 2",
+                    status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                    bodyHash = "hash-v2",
+                )
+
+        val template = TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "revenue.sql")), readCtx) as Template
+
+        template.version shouldBe 2
+        template.body shouldBe "SELECT 2"
+        template.status shouldBe co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+    }
+
+    @Test
     fun `get distinguishes an unknown template from an unknown version`() {
+        every { templates.findDraftDetail(any(), "nope") } returns null
         every { templates.findLatest(any(), "nope") } returns null
+        every { templates.findDraftDetail(any(), "revenue.sql") } returns null
         every { templates.findVersion(any(), "revenue.sql", 9) } returns null
         every { templates.existsId(any(), "revenue.sql") } returns true
 
@@ -115,7 +162,7 @@ class TemplateToolsTest {
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
         every { templates.create(any(), any(), McpFixtures.USER) } returns McpFixtures.template()
 
-        TemplatesCreateTool(templates, validator).call(
+        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
             McpArguments(
                 mapOf(
                     "dialect" to "POSTGRES",
@@ -139,7 +186,7 @@ class TemplateToolsTest {
     @Test
     fun `create rejects a malformed imports entry as a protocol error`() {
         shouldThrow<McpError> {
-            TemplatesCreateTool(templates, validator).call(
+            TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
                 McpArguments(
                     mapOf(
                         "dialect" to "POSTGRES",
@@ -240,13 +287,14 @@ class TemplateToolsTest {
                 "body" to "<#macro d></#macro>",
                 "is_library" to true,
             )
-        TemplatesCreateTool(templates, validator).call(McpArguments(library), authorCtx)
+        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(McpArguments(library), authorCtx)
 
         assertAll(
             { draft.captured.isLibrary shouldBe true },
             {
                 shouldThrow<McpError> {
-                    TemplatesCreateTool(templates, validator).call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
+                    TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
+                        .call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },
         )

@@ -22,6 +22,7 @@ import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.core.env.StandardEnvironment
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -120,6 +121,7 @@ class WebsiteFactsGuardTest {
                 pipelineValidator = mockk<PipelineValidator>(),
                 templateValidator = mockk<TemplateValidator>(),
                 templateEngines = mockk<WorkspaceTemplateEngines>(),
+                environment = StandardEnvironment(),
                 executionRunner = executionRunner,
             ).size
     }

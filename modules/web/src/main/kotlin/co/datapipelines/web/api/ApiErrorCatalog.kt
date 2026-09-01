@@ -67,6 +67,10 @@ object ApiErrorCatalog {
             "pipeline.version." to HttpStatus.CONFLICT,
             "pipeline.release." to HttpStatus.CONFLICT,
             "pipeline.promotion." to HttpStatus.CONFLICT,
+            // versioning §5.5: the authoring capability refusal — a promotion receiver's
+            // write path refuses, naming the reason. §13.13 documents both mirrors 403.
+            "pipeline.authoring." to HttpStatus.FORBIDDEN,
+            "template.authoring." to HttpStatus.FORBIDDEN,
             "auth.api_key." to HttpStatus.UNAUTHORIZED,
             "auth.session." to HttpStatus.UNAUTHORIZED,
             "auth.scope." to HttpStatus.FORBIDDEN,
@@ -169,6 +173,11 @@ object ApiErrorCatalog {
 
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
 
+    /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
+    private const val RECEIVER_USER_MESSAGE =
+        "This server doesn't allow creating or editing — it only receives promoted content. " +
+            "Make your changes in the authoring environment."
+
     private val FAMILY_USER_MESSAGE: Map<String, String> =
         linkedMapOf(
             "pipeline.validation." to "This pipeline isn't valid yet. Check the highlighted problem and try again.",
@@ -224,5 +233,7 @@ object ApiErrorCatalog {
                 "You're sending requests faster than we allow. Wait a moment and try again.",
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to
                 "That idempotency key was already used with a different request. Use a new key.",
+            PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
+            PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )
 }

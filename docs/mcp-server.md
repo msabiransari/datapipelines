@@ -223,19 +223,19 @@ Fetch a full pipeline definition.
 ```json
 {
   "name": "pipelines_get",
-  "description": "Get the full definition of a pipeline (latest version, or a specific version). Use this to read the pipeline body before executing or modifying it.",
+  "description": "Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
     "properties": {
       "id": {"type": "string", "format": "uuid", "description": "Pipeline ID."},
-      "version": {"type": "integer", "description": "Specific version. Defaults to latest."}
+      "version": {"type": "integer", "description": "Specific version. Defaults to the working version: the draft when one exists, else the latest released."}
     }
   }
 }
 ```
 
-Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)) merged with the fields the version-lifecycle protocol needs (versioning §4.2, since 035): the version's `body_hash` and `status` — echo `body_hash` back as `expected_hash` on `pipelines_update` — plus `current_version` (the latest RELEASED version, what execute-default runs) and a `draft` pointer when unreleased edits exist.
+Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)) merged with the fields the version-lifecycle protocol needs (versioning §4.2, since 035): the version's `body_hash` and `status` — echo `body_hash` back as `expected_hash` on `pipelines_update` — plus `current_version` (the latest RELEASED version, what execute-default runs) and a `draft` pointer when unreleased edits exist. Since 039 the DEFAULT body is the **working version** (versioning §7): the DRAFT when one exists, else the latest released — an agent that read released while a draft was open would rebase on stale content and quietly discard the draft with its next write. The response always states which `version` and `status` it returned; an explicit `version` argument still wins.
 
 **Scope:** `read`.
 
@@ -355,19 +355,19 @@ Fetch a template body.
 ```json
 {
   "name": "templates_get",
-  "description": "Get the body and metadata of a specific template version, including its imports array (the library macros it can call). Defaults to the latest version.",
+  "description": "Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
     "properties": {
       "id": {"type": "string"},
-      "version": {"type": "integer", "description": "Defaults to latest."}
+      "version": {"type": "integer", "description": "Specific version. Defaults to the working version: the draft when one exists, else the latest released."}
     }
   }
 }
 ```
 
-**Scope:** `read`.
+**Scope:** `read`. The returned projection states its `version` and `status` — since 039 the default is the **working version** (versioning §7: the DRAFT when one exists, else the latest released), the template mirror of `pipelines_get`.
 
 #### 6.2.8 `templates_create`
 

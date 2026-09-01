@@ -1,5 +1,6 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
@@ -18,11 +19,15 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 class TemplateLifecycleConfiguration {
     @Bean
-    fun templateDraftService(templates: TemplateRepository): TemplateDraftService = TemplateDraftService(templates)
+    fun templateDraftService(
+        templates: TemplateRepository,
+        authoring: AuthoringGuard,
+    ): TemplateDraftService = TemplateDraftService(templates, authoring)
 
     @Bean
     fun templateReleaseService(
         templates: TemplateRepository,
         validator: TemplateValidator,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator)
+        authoring: AuthoringGuard,
+    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring)
 }

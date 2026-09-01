@@ -38,6 +38,7 @@ class PipelineReleaseService(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val validator: PipelineValidator,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /** What a release produced: the bumped record, the released version, the released body. */
@@ -61,6 +62,9 @@ class PipelineReleaseService(
         expectedHash: String,
         actor: UUID,
     ): Released {
+        // §5.5: release is an authoring action — a promotion receiver refuses it.
+        authoring.requirePipelineAuthoring()
+
         val draft =
             pipelines.findDraftDetail(workspaceId, pipelineId)
                 ?: throw notDraft(pipelineId)
@@ -118,18 +122,23 @@ class PipelineReleaseService(
      * Discards the pipeline's DRAFT at [expectedHash] — hard-delete when never executed,
      * DISCARDED-flip when the executions FK blocks the delete.
      *
-     * @throws DatapipelinesException `pipeline.version.not_draft` or `pipeline.version.conflict`.
+     * @throws DatapipelinesException `pipeline.authoring.disabled` (§5.5),
+     *   `pipeline.version.not_draft` or `pipeline.version.conflict`.
      */
     fun discard(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
-    ): Discarded =
-        when (val outcome = pipelines.discardDraft(workspaceId, pipelineId, expectedHash)) {
+    ): Discarded {
+        // §5.5: discard is an authoring action — a promotion receiver refuses it.
+        authoring.requirePipelineAuthoring()
+
+        return when (val outcome = pipelines.discardDraft(workspaceId, pipelineId, expectedHash)) {
             co.datapipelines.pipeline.DiscardOutcome.Deleted -> Discarded.Deleted
             is co.datapipelines.pipeline.DiscardOutcome.FlippedToDiscarded -> Discarded.Flipped(outcome.detail)
             null -> throw conflictAfterGuardFailure(workspaceId, pipelineId)
         }
+    }
 
     /**
      * The guard failed AFTER we saw a draft — either the hash went stale under us (409

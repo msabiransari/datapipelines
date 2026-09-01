@@ -353,6 +353,12 @@ object PipelineErrorCodes {
 
         /** §13.9 / versioning §3 — release/discard requested but no DRAFT version exists. */
         const val VERSION_NOT_DRAFT = "template.version.not_draft"
+
+        /**
+         * §13.13 / versioning §5.5 — the template-surface mirror of
+         * `pipeline.authoring.disabled`.
+         */
+        const val AUTHORING_DISABLED = "template.authoring.disabled"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -434,5 +440,14 @@ object PipelineErrorCodes {
 
         /** §13.13 / versioning §10.3 — push of a version not newer than the target's current. */
         const val PROMOTION_NOT_NEWER = "pipeline.promotion.not_newer"
+
+        /**
+         * §13.13 / versioning §5.5 — an authoring write (create, update/draft, release,
+         * discard, delete) on a deployment with `datapipelines.deployment.authoring-enabled=false`. Drafts
+         * are a capability of authoring environments; a promotion receiver never authors
+         * (D7), so its write path refuses, naming the reason. Reads, execution and import
+         * are unaffected.
+         */
+        const val AUTHORING_DISABLED = "pipeline.authoring.disabled"
     }
 }

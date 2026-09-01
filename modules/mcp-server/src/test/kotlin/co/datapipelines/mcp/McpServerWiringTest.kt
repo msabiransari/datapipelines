@@ -45,6 +45,7 @@ class McpServerWiringTest {
     private val resultStore = mockk<ResultStore>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
+    private val authoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
     private fun tools(): List<McpTool> {
         val deserializer = PipelineDeserializer()
@@ -56,17 +57,17 @@ class McpServerWiringTest {
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
             PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, deserializer),
-            PipelinesCreateTool(pipelines, deserializer, validator, PipelineSerializer()),
+            PipelinesCreateTool(pipelines, authoringGuard, deserializer, validator, PipelineSerializer()),
             PipelinesUpdateTool(
                 pipelines,
-                co.datapipelines.pipeline.PipelineDraftService(pipelines),
+                co.datapipelines.pipeline.PipelineDraftService(pipelines, authoringGuard),
                 deserializer,
                 validator,
                 PipelineSerializer(),
             ),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
-            TemplatesCreateTool(templates, templateValidator),
+            TemplatesCreateTool(templates, authoringGuard, templateValidator),
             TemplatesRenderTool(templates, engines),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),

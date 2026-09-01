@@ -51,7 +51,9 @@ class PipelineAuthoringToolsTest {
 
     private val drafts = mockk<PipelineDraftService>()
 
-    private fun createTool() = PipelinesCreateTool(pipelines, PipelineDeserializer(), validator, PipelineSerializer())
+    private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
+
+    private fun createTool() = PipelinesCreateTool(pipelines, guard, PipelineDeserializer(), validator, PipelineSerializer())
 
     private fun updateTool() = PipelinesUpdateTool(pipelines, drafts, PipelineDeserializer(), validator, PipelineSerializer())
 
@@ -126,7 +128,12 @@ class PipelineAuthoringToolsTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER)
-        } returns PipelineDraftService.DraftWrite(McpFixtures.pipelineRecord(version = 1), draftDetail(version = 2), "body")
+        } returns
+            PipelineDraftService.DraftWrite(
+                McpFixtures.pipelineRecord(version = 1),
+                draftDetail(version = 2),
+                """{"schema_version":1}""",
+            )
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -146,6 +153,55 @@ class PipelineAuthoringToolsTest {
             },
             { payload["current_version"] shouldBe 1 },
         )
+    }
+
+    @Test
+    fun `a no-op update answers with the RELEASED state and carries no draft pointer`() {
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every {
+            drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER)
+        } returns
+            PipelineDraftService.DraftWrite(
+                McpFixtures.pipelineRecord(version = 1),
+                draftDetail(version = 1).copy(status = PipelineVersionStatus.RELEASED, updatedBy = null, updatedAt = null),
+                """{"schema_version":1}""",
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            updateTool().call(
+                McpArguments(args.rawMap() + mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "expected_hash" to "hash-v1")),
+                ctx,
+            ) as Map<String, Any?>
+
+        // versioning §5.1: the body already equals the released one — the agent must SEE
+        // status RELEASED and no draft, so it knows nothing was opened or burned.
+        assertAll(
+            { payload["version"] shouldBe 1 },
+            { payload["status"] shouldBe "RELEASED" },
+            { payload["body_hash"] shouldBe "hash-v1" },
+            { payload.containsKey("draft") shouldBe false },
+            { payload["current_version"] shouldBe 1 },
+        )
+    }
+
+    @Test
+    fun `create refuses with the catalogued code when authoring is disabled`() {
+        // versioning §5.5: the MCP surface shares the guard — a promotion receiver's
+        // agent gets the same catalogued refusal, not a silent success.
+        val tool =
+            PipelinesCreateTool(
+                pipelines,
+                co.datapipelines.pipeline.AuthoringGuard(false),
+                PipelineDeserializer(),
+                validator,
+                PipelineSerializer(),
+            )
+
+        val error =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { tool.call(args, ctx) }
+        error.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        error.details["config_key"] shouldBe "datapipelines.deployment.authoring-enabled"
     }
 
     @Test

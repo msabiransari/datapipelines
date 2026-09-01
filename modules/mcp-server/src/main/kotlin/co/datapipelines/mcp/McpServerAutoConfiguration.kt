@@ -10,6 +10,7 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
@@ -62,6 +63,7 @@ class McpServerAutoConfiguration {
         pipelineValidator: PipelineValidator,
         templateValidator: TemplateValidator,
         templateEngines: WorkspaceTemplateEngines,
+        environment: org.springframework.core.env.Environment,
         // P7: the recording execution path `web` supplies in the assembled application.
         // A provider, because `web`'s bean exists only where the engine is fully wired —
         // in a bare module context the tool falls back to the shared executor (records
@@ -70,6 +72,10 @@ class McpServerAutoConfiguration {
     ): List<McpTool> {
         val deserializer = PipelineDeserializer()
         val serializer = PipelineSerializer()
+        // The authoring capability (versioning §5.5), read from the same property web's
+        // guard bean reads — built locally so this module needs no bean from `web`; the
+        // flag is immutable configuration, so two instances cannot disagree.
+        val authoring = AuthoringGuard.from(environment)
         return listOf(
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
@@ -82,11 +88,11 @@ class McpServerAutoConfiguration {
                 executorConfig.result,
                 executionRunner.getIfAvailable(),
             ),
-            PipelinesCreateTool(pipelines, deserializer, pipelineValidator, serializer),
-            PipelinesUpdateTool(pipelines, PipelineDraftService(pipelines), deserializer, pipelineValidator, serializer),
+            PipelinesCreateTool(pipelines, authoring, deserializer, pipelineValidator, serializer),
+            PipelinesUpdateTool(pipelines, PipelineDraftService(pipelines, authoring), deserializer, pipelineValidator, serializer),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
-            TemplatesCreateTool(templates, templateValidator),
+            TemplatesCreateTool(templates, authoring, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),

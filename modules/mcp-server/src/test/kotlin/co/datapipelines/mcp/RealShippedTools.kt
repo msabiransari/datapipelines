@@ -15,6 +15,7 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.mockk.every
 import io.mockk.mockk
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.core.env.StandardEnvironment
 
 /**
  * The REAL `mcpTools` `@Bean` method's output, with mocked collaborators (033/C2).
@@ -40,6 +41,7 @@ fun realShippedTools(): List<McpTool> {
         pipelineValidator = mockk<PipelineValidator>(),
         templateValidator = mockk<TemplateValidator>(),
         templateEngines = mockk<WorkspaceTemplateEngines>(),
+        environment = StandardEnvironment(),
         executionRunner = executionRunner,
     )
 }

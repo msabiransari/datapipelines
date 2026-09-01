@@ -11,6 +11,7 @@ import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
@@ -30,6 +31,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistry
 
@@ -72,6 +74,29 @@ class DomainConfiguration {
 
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)
+
+    /**
+     * The authoring capability (versioning §5.5, configuration.md §3.19) — the one object
+     * every pipeline/template write path consults. Built from the Environment here and
+     * consumed by both write surfaces; `mcp-server` builds its own instance from the same
+     * property (immutable config — two instances cannot disagree).
+     */
+    @Bean
+    fun authoringGuard(environment: Environment): AuthoringGuard = AuthoringGuard.from(environment)
+
+    /**
+     * The §7 boot checks around that capability (configuration.md §3.19): the deployment
+     * posture line (the `name` label's ONLY consumer — no code branches on it, pinned by
+     * [DeploymentNameBranchingGuardTest]), the receiver-also-authors WARN — currently
+     * ONE-SIDED, its promotion half a seam the promotion round wires — and the refusal
+     * when an authoring-disabled deployment still holds drafts, naming them.
+     */
+    @Bean
+    fun authoringStartupCheck(
+        environment: Environment,
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates)
 
     /**
      * The AES-256-GCM encryptor for stored datasource passwords (datasources §6).

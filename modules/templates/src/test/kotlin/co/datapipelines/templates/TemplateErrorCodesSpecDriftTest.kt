@@ -48,9 +48,12 @@ class TemplateErrorCodesSpecDriftTest {
             // datasource drift guard applies to `pipeline.execution.datasource_unreachable`).
             // §13.9 gained `template.version.*` (draft/release lifecycle) on 2026-08-31
             // (versioning.md) — lifecycle codes, same deliberate exclusion.
+            // §13.9 gained `template.authoring.disabled` on 2026-09-01 (039 C, versioning
+            // §5.5) — the template mirror of the authoring-capability refusal.
             val nonValidationShape =
                 documented.filterNot {
                     it.startsWith("template.validation.") || it.startsWith("template.version.") ||
+                        it.startsWith("template.authoring.") ||
                         it == PipelineErrorCodes.Template.NOT_FOUND
                 }
             nonValidationShape.shouldBeEmpty()

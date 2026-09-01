@@ -59,6 +59,7 @@ class TemplatesController(
     private val importService: TemplateImportService,
     private val drafts: TemplateDraftService,
     private val releases: TemplateReleaseService,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -68,6 +69,8 @@ class TemplatesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<Template> {
+        // §5.5: creation is authoring — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
@@ -75,9 +78,10 @@ class TemplatesController(
     }
 
     /**
-     * §8.2 — the latest RELEASED version, with the lifecycle read shape: the version's
-     * `status`/`body_hash` (on the [Template] projection since V6) and the `draft` pointer
-     * when one exists (versioning §7).
+     * §8.2 — the **working version**: the DRAFT's projection when one exists, else the
+     * latest RELEASED version (versioning §7, since 039 — the mirror of §5.2). The
+     * response carries the returned version's `status`/`body_hash` (on the [Template]
+     * projection since V6) and the `draft` pointer when one exists.
      */
     @GetMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -85,8 +89,12 @@ class TemplatesController(
         @PathVariable id: String,
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val template = templates.findLatest(workspaceId, id) ?: throw ApiErrors.templateNotFound(id)
-        return ApiResponse.of(withDraftPointer(template, templates.findDraftDetail(workspaceId, id)))
+        val draft = templates.findDraftDetail(workspaceId, id)
+        val template =
+            draft?.let { templates.findVersion(workspaceId, id, it.version) }
+                ?: templates.findLatest(workspaceId, id)
+                ?: throw ApiErrors.templateNotFound(id)
+        return ApiResponse.of(withDraftPointer(template, draft))
     }
 
     /** §8.3 — a specific version, including of a soft-deleted template (templates.md §5.1). */
@@ -189,6 +197,8 @@ class TemplatesController(
     fun delete(
         @PathVariable id: String,
     ) {
+        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
+        authoring.requireTemplateAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
         if (!templates.softDelete(workspaceId, id)) throw ApiErrors.templateNotFound(id)
     }

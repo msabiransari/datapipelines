@@ -158,6 +158,21 @@ datapipelines:
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
 
+  # §3.19 — the deployment-role settings (versioning §5.5). `name` is a LABEL only —
+  # nothing branches on it (pinned by DeploymentNameBranchingGuardTest); it is logged
+  # once at boot beside the authoring state and is deliberately NOT on /info.
+  # `authoring-enabled` is the capability: default ON, because someone running one box
+  # authors there and runs there; false turns this deployment into a promotion receiver
+  # whose pipeline/template authoring writes (create, update/draft, release, discard,
+  # delete) refuse with `*.authoring.disabled`. Reads, execution and import are
+  # unaffected. Startup REFUSES when authoring is disabled while drafts still exist (§7).
+  # The `promotion` sub-block is RESERVED (versioning §10.6's fenced sample) and ships
+  # with promotion itself — configuration.md declares only shipped keys, so it is
+  # deliberately absent here.
+  deployment:
+    name: ${DATAPIPELINES_DEPLOYMENT_NAME:}
+    authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
+
   # §3.17 — workspace provisioning (design 2026-08-16-workspaces §7). `auto-per-user`
   # mints a personal workspace on first OIDC login; `self-serve` lets any authenticated
   # user create workspaces; `closed` is admin-only creation.

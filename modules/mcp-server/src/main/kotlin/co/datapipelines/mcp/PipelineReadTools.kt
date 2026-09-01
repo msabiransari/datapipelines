@@ -86,8 +86,13 @@ class PipelinesListTool(
  * carrying server-assigned fields — merged with the fields the hash protocol needs
  * (versioning §4.2/§12): the version's `body_hash` and `status` (echo this hash back as
  * `expected_hash` when you update), `current_version` (the latest RELEASED version — what
- * execute-default runs), and the `draft` pointer when one exists. `version` defaults to the
- * pipeline's current version.
+ * execute-default runs), and the `draft` pointer when one exists.
+ *
+ * Since 039 the DEFAULT is the **working version** (versioning §7): the DRAFT when one
+ * exists, else `current_version` — an agent that read released while a draft was open
+ * would rebase on stale content and quietly discard the draft with its next write. The
+ * response always states which `version` and `status` it returned; an explicit `version`
+ * argument still wins.
  */
 class PipelinesGetTool(
     private val pipelines: PipelineRepository,
@@ -96,10 +101,11 @@ class PipelinesGetTool(
         McpTools.tool(
             name = "pipelines_get",
             description =
-                "Get the full definition of a pipeline (latest version, or a specific version). Use this to read the " +
-                    "pipeline body before executing or modifying it. The result carries body_hash and status — echo " +
-                    "body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased " +
-                    "edits exist.",
+                "Get the full definition of a pipeline (the working version by default — the draft when unreleased " +
+                    "edits exist, else the latest released version — or a specific version). Use this to read the " +
+                    "pipeline body before executing or modifying it. The result carries the version, its status and " +
+                    "body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present " +
+                    "when unreleased edits exist.",
             schema =
                 """
                 {
@@ -107,7 +113,7 @@ class PipelinesGetTool(
                   "required": ["id"],
                   "properties": {
                     "id": {"type": "string", "format": "uuid", "description": "Pipeline ID."},
-                    "version": {"type": "integer", "description": "Specific version. Defaults to latest."}
+                    "version": {"type": "integer", "description": "Specific version. Defaults to the working version: the draft when one exists, else the latest released."}
                   }
                 }
                 """.trimIndent(),
@@ -120,7 +126,13 @@ class PipelinesGetTool(
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
         val record = pipelines.findById(workspaceId, id) ?: throw McpNotFound.pipeline(id)
-        return body(workspaceId, id, args.version() ?: record.currentVersion)
+        // The explicit argument is validated and wins BEFORE any working-version lookup
+        // (B3) — then the working version (§7): the draft if one exists, else
+        // current_version. Derived, never stored — current_version keeps meaning
+        // "latest released" everywhere else.
+        val explicit = args.version()
+        val version = explicit ?: pipelines.findDraftDetail(workspaceId, id)?.version ?: record.currentVersion
+        return body(workspaceId, id, version)
     }
 
     private fun body(

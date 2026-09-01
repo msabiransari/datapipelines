@@ -29,7 +29,13 @@ import java.util.UUID
  * keeps the Flyway dependency in `app` only, so a domain module never gains a schema-creation
  * tool, yet the test still runs the exact DDL the application migrates with (including the D3
  * `no params_schema` column shape and the V4 surrogate-key re-key).
+ *
+ * `LargeClass` is suppressed for the same reason `PipelineRepositoryIntegrationTest`
+ * suppresses it: the version-lifecycle round made this suite the repository's contract in
+ * one place — CRUD, listing, and the draft/release lifecycle read against the SAME shipped
+ * schema — and splitting it would scatter one table's invariants across files.
  */
+@Suppress("LargeClass")
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemplateRepositoryIntegrationTest {
@@ -65,11 +71,12 @@ class TemplateRepositoryIntegrationTest {
         imports: List<TemplateImport> = emptyList(),
         isLibrary: Boolean = false,
         dialect: Dialect = Dialect.POSTGRES,
+        displayName: String = "Fetch Orders",
     ): TemplateDraft =
         TemplateDraft(
             id = id,
             dialect = dialect,
-            displayName = "Fetch Orders",
+            displayName = displayName,
             description = "Pulls orders.",
             imports = imports,
             body = body,
@@ -388,6 +395,85 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `a no-op createDraft - content identical to released - returns RELEASED, creates no draft, still moves metadata`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        // Same CONTENT (§4.1's field object), new metadata — the no-op is defined on the
+        // hash, and display_name/description are not in it (§6's asymmetry).
+        val noop =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 1", displayName = "Renamed, same SQL"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        noop.version shouldBe 1
+        noop.status shouldBe PipelineVersionStatus.RELEASED
+        noop.bodyHash shouldBe released.bodyHash
+        // No draft row, no burned number; the metadata moved because a metadata-only save
+        // is a real save of the index row.
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.displayName shouldBe "Renamed, same SQL"
+        // The next real CONTENT change allocates v2 — the number was never consumed.
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                "fetch_orders.sql",
+                draft(body = "SELECT 2"),
+                released.bodyHash,
+                actor,
+            ),
+        ).version shouldBe 2
+    }
+
+    @Test
+    fun `a no-op createDraft with a stale hash writes nothing - the no-op arm carries the guard`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), "stale", actor).shouldBeNull()
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+    }
+
+    @Test
+    fun `identical content while a draft exists is a stale base, not a no-op`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draft =
+            checkNotNull(
+                repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+            )
+
+        // The released body PUT back unchanged while a draft exists: 409 material (null),
+        // never "RELEASED, no draft" — the draft owns the working state.
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), released.bodyHash, actor).shouldBeNull()
+        checkNotNull(repository.findDraftDetail(workspaceId, "fetch_orders.sql")).bodyHash shouldBe draft.bodyHash
+    }
+
+    @Test
+    fun `a draft edited back to its released parent is left alone - never auto-discarded`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draft =
+            checkNotNull(
+                repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+            )
+
+        val reverted = checkNotNull(repository.writeDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
+
+        reverted.status shouldBe PipelineVersionStatus.DRAFT
+        checkNotNull(repository.findDraftDetail(workspaceId, "fetch_orders.sql")).version shouldBe draft.version
+    }
+
+    @Test
     fun `writeDraft overwrites the draft in place - no new row`() {
         repository.create(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
@@ -507,7 +593,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `the template draft service branches, and a stale base is a version conflict`() {
-        val service = TemplateDraftService(repository)
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
         repository.create(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
 
@@ -527,6 +613,49 @@ class TemplateRepositoryIntegrationTest {
                 service.write(workspaceId, "nope.sql", draft(id = "nope.sql"), released.bodyHash, actor)
             }
         notFound.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
+    }
+
+    @Test
+    fun `the template draft service refuses writes when authoring is disabled - and imports create no draft`() {
+        // C2/C3's template mirror: the write path fails closed, and the import paths
+        // (promotion) land RELEASED rows without ever opening a draft — if any import
+        // statement below grew draft-creation logic, this is the test that goes red.
+        val disabled = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(false))
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        val refused =
+            io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                disabled.write(workspaceId, "fetch_orders.sql", draft(body = "SELECT 9"), released.bodyHash, actor)
+            }
+        refused.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+        refused.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
+
+        checkNotNull(repository.importTemplateVersion(workspaceId, draft(id = "promoted.sql"), 4, "hash-4", java.time.Instant.EPOCH, actor))
+        checkNotNull(
+            repository.insertReleasedVersion(
+                workspaceId,
+                "fetch_orders.sql",
+                draft(body = "SELECT 5"),
+                3,
+                "hash-3",
+                java.time.Instant.EPOCH,
+                actor,
+            ),
+        )
+        checkNotNull(repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 6"), actor))
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions WHERE status = 'DRAFT'", Int::class.java) shouldBe 0
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+    }
+
+    @Test
+    fun `findAllDraftTemplateNames names every draft - the boot check's evidence`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+
+        repository.findAllDraftTemplateNames() shouldContainExactly listOf("fetch_orders.sql")
     }
 
     @Test

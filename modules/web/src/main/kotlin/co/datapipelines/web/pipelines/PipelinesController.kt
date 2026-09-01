@@ -2,12 +2,14 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
@@ -56,6 +58,7 @@ class PipelinesController(
     private val bodies: PipelineBodies,
     private val drafts: PipelineDraftService,
     private val releases: PipelineReleaseService,
+    private val authoring: AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
@@ -66,6 +69,9 @@ class PipelinesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
+        // §5.5: creation is authoring — a promotion receiver refuses it (the guard names
+        // the reason; update/release/discard are guarded inside the lifecycle services).
+        authoring.requirePipelineAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val (pipeline, canonical) = validated(body, workspaceId)
@@ -78,9 +84,13 @@ class PipelinesController(
     }
 
     /**
-     * §5.2 — the latest RELEASED version's full JSON, plus the lifecycle read shape: the
-     * released row's `status`/`body_hash`, `current_version`, and the `draft` pointer when
-     * one exists. The default body remains the released version (versioning §7).
+     * §5.2 — the **working version's** full JSON: the DRAFT when one exists, else the
+     * current RELEASED version (versioning §7, since 039 — a RELEASED version is never
+     * modified and a draft is always reused, so authoring reads must show the draft or an
+     * editor rebases on released and quietly discards it). The response states which
+     * `version` and `status` it returned; `current_version` still names the latest RELEASED
+     * version (the execute-default pointer, unmoved), and the `draft` pointer is present
+     * whenever one exists.
      */
     @Suppress("ThrowsCount") // the miss paths each throw the same catalogued 404 for a different absent read
     @GetMapping("/{id}")
@@ -90,13 +100,14 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val body =
-            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val version =
-            pipelines.findCurrentVersionDetail(workspaceId, record.id)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
         val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        val version =
+            draft
+                ?: pipelines.findCurrentVersionDetail(workspaceId, record.id)
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val body =
+            pipelines.findVersionBody(workspaceId, record.id, version.version)
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(record, body, version, draft))
     }
 
@@ -134,7 +145,9 @@ class PipelinesController(
      * §5.5 — update, writing the DRAFT branch (versioning §5.1/§5.2): the first write after a
      * release copies the released version to a draft; later writes overwrite that draft in
      * place. Requires the `If-Match` hash precondition; the response carries the draft's
-     * `version`, `status: "DRAFT"` and `body_hash`.
+     * `version`, `status: "DRAFT"` and `body_hash`. A PUT whose body is identical to the
+     * released one is a NO-OP (versioning §5.1): no draft is created and the response
+     * reports the current state — `status: "RELEASED"`, no draft pointer.
      */
     @PutMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -158,8 +171,16 @@ class PipelinesController(
                 expectedHash = expectedHash,
                 actor = principal.userId,
             )
-        val draft = pipelines.findDraftDetail(workspaceId, id) ?: written.version
-        return ApiResponse.of(PipelineResponses.full(written.record, canonical, written.version, draft))
+        // A no-op write (written.version.status == RELEASED, versioning §5.1) reports the
+        // current state and must NOT carry a draft pointer: the usual `?: written.version`
+        // fallback would paint a "draft" pointer onto the released row it just reported.
+        val draft =
+            if (written.version.status == PipelineVersionStatus.RELEASED) {
+                null
+            } else {
+                pipelines.findDraftDetail(workspaceId, id) ?: written.version
+            }
+        return ApiResponse.of(PipelineResponses.full(written.record, written.bodyJson, written.version, draft))
     }
 
     /**
@@ -202,6 +223,8 @@ class PipelinesController(
     fun delete(
         @PathVariable id: UUID,
     ) {
+        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
+        authoring.requirePipelineAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
         if (!pipelines.softDelete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
     }

@@ -50,11 +50,14 @@ the body calls macros by alias (`<@dates.date_range …/>`). Library templates
 
 **Versioning** — create lands v1 RELEASED and immediately executable; every later save is
 draft-first: the first save after a release opens a DRAFT (copy-on-write), later saves
-overwrite that one draft in place. Your updates are NOT published until a human releases
-the draft from the UI — **leave the draft for a human to release** (by design, D4; there is
-no release tool and that absence is deliberate). Pipeline nodes pin template versions
-immutably; updating a template does not change existing pipelines until you update the
-node reference. Drafts are executable — running your own draft is the expected test loop.
+overwrite that one draft in place. A save whose body is identical to the released one is a
+no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
+with no draft pointer; that is success, not an error. Your updates are NOT published until
+a human releases the draft from the UI — **leave the draft for a human to release** (by
+design, D4; there is no release tool and that absence is deliberate). Pipeline nodes pin
+template versions immutably; updating a template does not change existing pipelines until
+you update the node reference. Drafts are executable — running your own draft is the
+expected test loop.
 
 **Parameters** — typed with the canonical logical types: `BOOLEAN`, `INTEGER`,
 `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `DATE`, `TIMESTAMP`, etc. (11 total —
@@ -178,6 +181,7 @@ Codes you will meet most often:
 | `template.not_found` / `datasource.not_found` | Reference points at nothing | Create the referenced entity or fix the id |
 | `pipeline.version.conflict` | The pipeline changed after you loaded it (stale `expected_hash`) | Re-read with `pipelines_get`, rebase your edit onto the current body/hash, retry — NEVER retry blindly |
 | `pipeline.version.not_draft` | Release/discard hit a pipeline with no draft | Nothing to act on for an agent — the draft was already released or discarded |
+| `pipeline.authoring.disabled` / `template.authoring.disabled` | This server has authoring turned off — it is a promotion receiver | Do not retry; tell the user this server only receives promoted content. Reads, execution and import still work |
 | `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
 | `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
 | `pipeline.node.query_execution_failed` | A node's SQL failed | Read `node_stats` + `executions_get` for the node error, re-render its template with the failed parameters |
@@ -195,10 +199,13 @@ Reachability and TTL errors are the world's state — probe, then retry once.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` requires `expected_hash` — the
-   `body_hash` from `pipelines_get` or your previous update's result. It is the protocol
-   that keeps two writers (you and a human, two sessions, two tabs) from silently
-   overwriting each other; a blind retry after a 409 is how an agent destroys a human's
-   edit. Read → edit → write with the hash you read.
+   `body_hash` from `pipelines_get` or your previous update's result. `pipelines_get`
+   (and `templates_get`) default to the **working version** — the draft when unreleased
+   edits exist, else the latest released — and say which `version`/`status` they returned,
+   so you always edit the newest content. The hash is the protocol that keeps two writers
+   (you and a human, two sessions, two tabs) from silently overwriting each other; a blind
+   retry after a 409 is how an agent destroys a human's edit. Read → edit → write with the
+   hash you read.
 5. **One caller node, or zero.** Two caller nodes fail validation; use a tempdb node +
    a projection node instead of two outputs.
 6. **Stage with tempdb.** Multi-node pipelines chain through `output: tempdb` tables —
