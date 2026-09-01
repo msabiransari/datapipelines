@@ -560,6 +560,15 @@ its `pipelines_update` published something, and it did not.
 same discipline §13 applies to catalogue rows and their constants, for the same reason. A
 skill that lags is worse than one that is silent, because agents act on it with confidence.
 
+**Audited 2026-08-31 at `7f87118`: the skill is otherwise accurate, so `:51` is the only
+lie this spec introduces.** All 18 `McpToolCatalog.NAMES` tools are named in it, the "18 MCP
+tools" count matches, and it already discloses the REST/MCP execute asymmetry the
+architecture audit records as D6 (`SKILL.md:146` — "REST execute accepts `Idempotency-Key`;
+the MCP tool has no key"). **Do not update the skill for this spec before the behaviour
+ships** — a skill describing an unimplemented lifecycle is the same defect in the opposite
+direction, and the architecture audit's M11 exists because three such claims are live in
+`deployment.md` today.
+
 ### 12.1 What this spec obliges the implementor to change
 
 | Skill content | Why it changes |

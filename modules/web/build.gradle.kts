@@ -82,7 +82,11 @@ tasks.named<ProcessResources>("processResources") {
     from(rootProject.layout.projectDirectory.dir("docs")) {
         into("docs")
         include("*.md")
-        exclude("semantic-layer-research.md", "SPEC-REVIEW-2026-08.md")
+        // Contributor material, not product documentation: research notes, the spec-review
+        // record, and audit findings records pending review. An operator running this
+        // deployment is not the audience, and shipping "pending review" findings in the
+        // product jar would read as product docs.
+        exclude("semantic-layer-research.md", "SPEC-REVIEW-2026-08.md", "ARCH-AUDIT-2026-08.md")
     }
 }
 
