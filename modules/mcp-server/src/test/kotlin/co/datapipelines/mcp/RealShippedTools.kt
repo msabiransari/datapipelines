@@ -40,6 +40,7 @@ fun realShippedTools(): List<McpTool> {
         pipelineValidator = mockk<PipelineValidator>(),
         templateValidator = mockk<TemplateValidator>(),
         templateEngines = mockk<WorkspaceTemplateEngines>(),
+        environment = org.springframework.core.env.StandardEnvironment(),
         executionRunner = executionRunner,
     )
 }

@@ -342,6 +342,23 @@ class TemplateRepository(
     }
 
     /**
+     * Every template name holding a DRAFT, across ALL workspaces (soft-deleted parents
+     * included). The authoring-disabled boot check's evidence (versioning §5.5).
+     */
+    fun findAllDraftTemplateNames(): List<String> =
+        jdbc
+            .query(
+                """
+                SELECT t.name
+                  FROM template_versions v
+                  JOIN templates t ON t.id = v.template_id
+                 WHERE v.status = 'DRAFT'
+                 ORDER BY t.name
+                """.trimIndent(),
+                emptyMap<String, Any>(),
+            ) { rs, _ -> rs.getString("name") }
+
+    /**
      * One template version's lifecycle status, or null when it does not exist — what the
      * pipeline-release pin check reads (versioning §6: a pipeline may be released only when
      * every template version its body pins is RELEASED).

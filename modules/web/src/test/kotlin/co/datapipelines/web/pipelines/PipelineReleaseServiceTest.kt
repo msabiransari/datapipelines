@@ -11,6 +11,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.Called
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -27,7 +28,26 @@ class PipelineReleaseServiceTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>()
     private val validator = mockk<PipelineValidator>()
-    private val service = PipelineReleaseService(pipelines, templates, validator)
+    private val service = PipelineReleaseService(pipelines, templates, validator, co.datapipelines.pipeline.AuthoringGuard(true))
+
+    @Test
+    fun `release and discard refuse when authoring is disabled`() {
+        // versioning §5.5: release and discard are authoring actions — a receiver refuses.
+        val receiver = PipelineReleaseService(pipelines, templates, validator, co.datapipelines.pipeline.AuthoringGuard(false))
+
+        val release =
+            shouldThrow<DatapipelinesException> {
+                receiver.release(UUID.randomUUID(), UUID.randomUUID(), "hash", UUID.randomUUID())
+            }
+        release.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+
+        val discard =
+            shouldThrow<DatapipelinesException> {
+                receiver.discard(UUID.randomUUID(), UUID.randomUUID(), "hash")
+            }
+        discard.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        io.mockk.verify { pipelines wasNot Called }
+    }
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()

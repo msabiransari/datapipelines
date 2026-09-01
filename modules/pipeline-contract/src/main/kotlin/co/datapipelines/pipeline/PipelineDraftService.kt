@@ -40,6 +40,7 @@ import java.util.UUID
  */
 class PipelineDraftService(
     private val pipelines: PipelineRepository,
+    private val authoring: AuthoringGuard,
 ) {
     /**
      * What a draft write produced: the unchanged record, the version row's state (DRAFT for
@@ -57,10 +58,11 @@ class PipelineDraftService(
      * is the first writer after a release (§5.1), overwriting it in place otherwise (§5.2).
      *
      * @throws DatapipelinesException `pipeline.execution.not_found` (unknown pipeline),
+     *   `pipeline.authoring.disabled` (receiver write path, versioning §5.5),
      *   `pipeline.validation.duplicate_name` (§3.5 rename check), or
      *   `pipeline.version.conflict` (stale [expectedHash], with the current hash/author in details).
      */
-    @Suppress("ThrowsCount") // three throws, three catalogued refusals a caller must distinguish
+    @Suppress("ThrowsCount") // four throws, four catalogued refusals a caller must distinguish
     fun write(
         workspaceId: UUID,
         pipelineId: UUID,
@@ -69,6 +71,10 @@ class PipelineDraftService(
         expectedHash: String,
         actor: UUID,
     ): DraftWrite {
+        // §5.5: drafts are an authoring capability — a promotion receiver refuses at the
+        // write path, fail-closed, before anything is read or written.
+        authoring.requirePipelineAuthoring()
+
         val record =
             pipelines.findById(workspaceId, pipelineId)
                 ?: throw notFound(pipelineId)

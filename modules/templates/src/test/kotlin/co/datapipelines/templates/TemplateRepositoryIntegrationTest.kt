@@ -581,7 +581,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `the template draft service branches, and a stale base is a version conflict`() {
-        val service = TemplateDraftService(repository)
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
         repository.create(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
 
@@ -601,6 +601,39 @@ class TemplateRepositoryIntegrationTest {
                 service.write(workspaceId, "nope.sql", draft(id = "nope.sql"), released.bodyHash, actor)
             }
         notFound.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
+    }
+
+    @Test
+    fun `the template draft service refuses writes when authoring is disabled - and imports create no draft`() {
+        // C2/C3's template mirror: the write path fails closed, and the import paths
+        // (promotion) land RELEASED rows without ever opening a draft — if any import
+        // statement below grew draft-creation logic, this is the test that goes red.
+        val disabled = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(false))
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        val refused =
+            io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                disabled.write(workspaceId, "fetch_orders.sql", draft(body = "SELECT 9"), released.bodyHash, actor)
+            }
+        refused.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+        refused.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
+
+        checkNotNull(repository.importTemplateVersion(workspaceId, draft(id = "promoted.sql"), 4, "hash-4", java.time.Instant.EPOCH, actor))
+        checkNotNull(repository.insertReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 5"), 3, "hash-3", java.time.Instant.EPOCH, actor))
+        checkNotNull(repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 6"), actor))
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions WHERE status = 'DRAFT'", Int::class.java) shouldBe 0
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+    }
+
+    @Test
+    fun `findAllDraftTemplateNames names every draft - the boot check's evidence`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor)
+
+        repository.findAllDraftTemplateNames() shouldContainExactly listOf("fetch_orders.sql")
     }
 
     @Test

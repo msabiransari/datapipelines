@@ -30,6 +30,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistry
 
@@ -72,6 +73,29 @@ class DomainConfiguration {
 
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)
+
+    /**
+     * The authoring capability (versioning §5.5, configuration.md §3.19) — the one object
+     * every pipeline/template write path consults. Built from the Environment here and
+     * consumed by both write surfaces; `mcp-server` builds its own instance from the same
+     * property (immutable config — two instances cannot disagree).
+     */
+    @Bean
+    fun authoringGuard(environment: Environment): co.datapipelines.pipeline.AuthoringGuard =
+        co.datapipelines.pipeline.AuthoringGuard.from(environment)
+
+    /**
+     * The §7 boot consistency checks around that capability (configuration.md §7): a
+     * promotion server-key configured on an authoring-enabled server WARNs (D7's violation
+     * stated in config — but a one-box deployment may legitimately be both), and existing
+     * drafts on an authoring-DISABLED server refuse startup, naming them.
+     */
+    @Bean
+    fun authoringStartupCheck(
+        environment: Environment,
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates)
 
     /**
      * The AES-256-GCM encryptor for stored datasource passwords (datasources §6).

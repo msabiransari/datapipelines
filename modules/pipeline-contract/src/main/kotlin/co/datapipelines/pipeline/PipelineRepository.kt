@@ -319,6 +319,24 @@ class PipelineRepository(
     }
 
     /**
+     * Every pipeline name holding a DRAFT, across ALL workspaces (soft-deleted parents
+     * included — a draft under a deleted pipeline still blocks a same-number promotion
+     * import, §9.2). The authoring-disabled boot check's evidence (versioning §5.5).
+     */
+    fun findAllDraftPipelineNames(): List<String> =
+        jdbc
+            .query(
+                """
+                SELECT p.name
+                  FROM pipeline_versions v
+                  JOIN pipelines p ON p.id = v.pipeline_id
+                 WHERE v.status = 'DRAFT'
+                 ORDER BY p.name
+                """.trimIndent(),
+                emptyMap<String, Any>(),
+            ) { rs, _ -> rs.getString("name") }
+
+    /**
      * `released_at` for each `(pipelineId, version)` pair — §8's draft-run derivation, read
      * for the execution history's informational draft markers. Null values are kept: a
      * version with no `released_at` (still DRAFT, or DISCARDED) makes every execution of it

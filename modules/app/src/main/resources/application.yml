@@ -158,6 +158,23 @@ datapipelines:
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
 
+  # §3.19 — the AUTHORING capability (versioning §5.5). Default ON: someone running one
+  # box authors there and runs there, and an environment-named flag would lock them out.
+  # false turns this server into a promotion receiver: every pipeline/template authoring
+  # write (create, update/draft, release, discard, delete) is refused with
+  # `*.authoring.disabled`. Reads, execution and import are unaffected. Startup REFUSES
+  # when authoring is disabled while drafts still exist (§7).
+  authoring:
+    enabled: ${DATAPIPELINES_AUTHORING_ENABLED:true}
+
+  # §3.20 — the receiver-side pre-shared promotion key (versioning §10.6). Absent/empty =
+  # this server is not a promotion receiver. The promotion endpoint itself ships with
+  # versioning §10; today the key participates in the §7 boot consistency check only
+  # (server-key set + authoring enabled = the WARNed receiver-also-authors combination).
+  # It is a bearer secret: never logged, compared constant-time when the endpoint lands.
+  promotion:
+    server-key: ${DATAPIPELINES_PROMOTION_SERVER_KEY:}
+
   # §3.17 — workspace provisioning (design 2026-08-16-workspaces §7). `auto-per-user`
   # mints a personal workspace on first OIDC login; `self-serve` lets any authenticated
   # user create workspaces; `closed` is admin-only creation.

@@ -19,6 +19,7 @@ import java.util.UUID
  */
 class TemplateDraftService(
     private val templates: TemplateRepository,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
 ) {
     /**
      * Writes [draft] as the template's version — creating the draft first when the caller is
@@ -29,7 +30,8 @@ class TemplateDraftService(
      * metadata (`display_name`/`description`) still moved, per §6's asymmetry. A draft
      * edited back to its released parent is left alone; discard stays explicit.
      *
-     * @throws DatapipelinesException `template.not_found`, or `template.version.conflict`
+     * @throws DatapipelinesException `template.not_found`, `template.authoring.disabled`
+     *   (receiver write path, versioning §5.5), or `template.version.conflict`
      *   (stale [expectedHash], with the current hash/author in details).
      */
     fun write(
@@ -39,6 +41,9 @@ class TemplateDraftService(
         expectedHash: String,
         actor: UUID,
     ): TemplateVersionDetail {
+        // §5.5: the template mirror of the pipeline guard — fail-closed at the write path.
+        authoring.requireTemplateAuthoring()
+
         if (templates.findLatest(workspaceId, id) == null) throw notFound(id)
 
         val existingDraft = templates.findDraftDetail(workspaceId, id)

@@ -59,6 +59,7 @@ class TemplatesController(
     private val importService: TemplateImportService,
     private val drafts: TemplateDraftService,
     private val releases: TemplateReleaseService,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -68,6 +69,8 @@ class TemplatesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<Template> {
+        // §5.5: creation is authoring — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
@@ -194,6 +197,8 @@ class TemplatesController(
     fun delete(
         @PathVariable id: String,
     ) {
+        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
+        authoring.requireTemplateAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
         if (!templates.softDelete(workspaceId, id)) throw ApiErrors.templateNotFound(id)
     }

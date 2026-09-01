@@ -48,7 +48,7 @@ class TemplatesControllerTest {
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
     private val controller =
-        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases)
+        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, co.datapipelines.pipeline.AuthoringGuard(true))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -94,6 +94,24 @@ class TemplatesControllerTest {
         val stored = controller.create(createBody).data
         stored.id shouldBe "fetch_orders.sql"
         stored.version shouldBe 1
+    }
+
+    @Test
+    fun `create and delete refuse with the catalogued code when authoring is disabled`() {
+        // versioning §5.5's template mirror: a promotion receiver fails closed.
+        authenticate()
+        val receiver =
+            TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, co.datapipelines.pipeline.AuthoringGuard(false))
+
+        val create =
+            shouldThrow<DatapipelinesException> {
+                receiver.create("""{"dialect":"POSTGRES","display_name":"X","description":"d","body":"SELECT 1"}""")
+            }
+        create.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
+        create.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
+
+        val delete = shouldThrow<DatapipelinesException> { receiver.delete("fetch_orders.sql") }
+        delete.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
     }
 
     @Test

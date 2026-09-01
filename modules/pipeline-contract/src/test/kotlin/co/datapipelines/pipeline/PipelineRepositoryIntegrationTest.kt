@@ -712,7 +712,7 @@ class PipelineRepositoryIntegrationTest {
 
     @Test
     fun `the draft service takes the write branch, checks names early, and maps stale bases to conflicts`() {
-        val service = PipelineDraftService(repository)
+        val service = PipelineDraftService(repository, AuthoringGuard(true))
         val other = Fixtures.pipeline(name = "other_name")
         repository.create(WORKSPACE_ID, NewPipeline.from(other, owner), serializer.write(other), owner)
         val (record, v1, v1Detail) = createdPipeline()
@@ -772,7 +772,7 @@ class PipelineRepositoryIntegrationTest {
 
     @Test
     fun `the draft service answers a no-op write with the current released state`() {
-        val service = PipelineDraftService(repository)
+        val service = PipelineDraftService(repository, AuthoringGuard(true))
         val (record, v1, v1Detail) = createdPipeline()
 
         val written = service.write(WORKSPACE_ID, record.id, v1, serializer.write(v1), v1Detail.bodyHash, owner)
@@ -782,6 +782,64 @@ class PipelineRepositoryIntegrationTest {
         written.version.version shouldBe 1
         written.bodyJson shouldBe checkNotNull(repository.findVersionBody(WORKSPACE_ID, record.id, 1))
         repository.findDraftDetail(WORKSPACE_ID, record.id) shouldBe null
+    }
+
+    @Test
+    fun `the draft service refuses writes when authoring is disabled - and imports create no draft`() {
+        // C2: the write path fails closed on a receiver. C3: promotion imports RELEASED
+        // versions and must be the ONE writer a receiver accepts — draft creation hangs
+        // off the WRITE path only. If it were ever attached to "a released row was
+        // written" (any import statement below), every import on an authoring-disabled
+        // server would create the drafts this rule forbids — and this test goes red.
+        val disabled = PipelineDraftService(repository, AuthoringGuard(false))
+        val (record, v1, v1Detail) = createdPipeline()
+
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                disabled.write(WORKSPACE_ID, record.id, v1.copy(description = "edit"), serializer.write(v1.copy(description = "edit")), v1Detail.bodyHash, owner)
+            }
+        refused.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        refused.details["config_key"] shouldBe AuthoringGuard.CONFIG_KEY
+
+        // Every import path lands RELEASED rows directly — none opens a draft.
+        val promoted = Fixtures.pipeline(name = "promoted_pipeline")
+        checkNotNull(
+            repository.importPipelineVersion(
+                WORKSPACE_ID,
+                NewPipeline.from(promoted, owner, id = UUID.randomUUID()),
+                version = 4,
+                bodyJson = serializer.write(promoted),
+                bodyHash = "hash-4",
+                releasedAt = Instant.EPOCH,
+                actor = owner,
+            ),
+        )
+        checkNotNull(
+            repository.insertReleasedVersion(
+                WORKSPACE_ID,
+                record.id,
+                version = 3,
+                name = v1.name,
+                displayName = v1.displayName,
+                description = v1.description,
+                bodyJson = serializer.write(v1),
+                bodyHash = "hash-3",
+                releasedAt = Instant.EPOCH,
+                actor = owner,
+            ),
+        )
+        checkNotNull(repository.appendReleasedVersion(WORKSPACE_ID, record.id, v1.copy(description = "versionless import"), serializer.write(v1.copy(description = "versionless import")), owner))
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pipeline_versions WHERE status = 'DRAFT'", Int::class.java) shouldBe 0
+        repository.findDraftDetail(WORKSPACE_ID, record.id) shouldBe null
+    }
+
+    @Test
+    fun `findAllDraftPipelineNames names every draft across workspaces - the boot check's evidence`() {
+        val (record, v1, v1Detail) = createdPipeline()
+        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v1.copy(description = "draft")), v1Detail.bodyHash, owner)
+
+        repository.findAllDraftPipelineNames() shouldContainExactly listOf("monthly_revenue")
     }
 
     @Test

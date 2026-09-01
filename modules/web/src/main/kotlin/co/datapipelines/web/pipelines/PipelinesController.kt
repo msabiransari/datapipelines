@@ -2,6 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineDraftService
@@ -57,6 +58,7 @@ class PipelinesController(
     private val bodies: PipelineBodies,
     private val drafts: PipelineDraftService,
     private val releases: PipelineReleaseService,
+    private val authoring: AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
 ) {
@@ -67,6 +69,9 @@ class PipelinesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
+        // §5.5: creation is authoring — a promotion receiver refuses it (the guard names
+        // the reason; update/release/discard are guarded inside the lifecycle services).
+        authoring.requirePipelineAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val (pipeline, canonical) = validated(body, workspaceId)
@@ -218,6 +223,8 @@ class PipelinesController(
     fun delete(
         @PathVariable id: UUID,
     ) {
+        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
+        authoring.requirePipelineAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
         if (!pipelines.softDelete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
     }

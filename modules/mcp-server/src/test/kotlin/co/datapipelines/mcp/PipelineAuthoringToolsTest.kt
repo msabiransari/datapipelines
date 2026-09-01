@@ -51,7 +51,7 @@ class PipelineAuthoringToolsTest {
 
     private val drafts = mockk<PipelineDraftService>()
 
-    private fun createTool() = PipelinesCreateTool(pipelines, PipelineDeserializer(), validator, PipelineSerializer())
+    private fun createTool() = PipelinesCreateTool(pipelines, co.datapipelines.pipeline.AuthoringGuard(true), PipelineDeserializer(), validator, PipelineSerializer())
 
     private fun updateTool() = PipelinesUpdateTool(pipelines, drafts, PipelineDeserializer(), validator, PipelineSerializer())
 
@@ -175,6 +175,18 @@ class PipelineAuthoringToolsTest {
             { payload.containsKey("draft") shouldBe false },
             { payload["current_version"] shouldBe 1 },
         )
+    }
+
+    @Test
+    fun `create refuses with the catalogued code when authoring is disabled`() {
+        // versioning §5.5: the MCP surface shares the guard — a promotion receiver's
+        // agent gets the same catalogued refusal, not a silent success.
+        val tool = PipelinesCreateTool(pipelines, co.datapipelines.pipeline.AuthoringGuard(false), PipelineDeserializer(), validator, PipelineSerializer())
+
+        val error =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { tool.call(args, ctx) }
+        error.code shouldBe PipelineErrorCodes.Versioning.AUTHORING_DISABLED
+        error.details["config_key"] shouldBe "datapipelines.authoring.enabled"
     }
 
     @Test

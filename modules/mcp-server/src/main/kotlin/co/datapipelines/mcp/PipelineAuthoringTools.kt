@@ -114,6 +114,7 @@ internal class PipelineSaveSupport(
 /** `pipelines_create` (mcp-server.md §6.2.4). Scope: `author`. */
 class PipelinesCreateTool(
     private val pipelines: PipelineRepository,
+    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     deserializer: PipelineDeserializer,
     validator: PipelineValidator,
     serializer: PipelineSerializer = PipelineSerializer(),
@@ -136,6 +137,9 @@ class PipelinesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        // versioning §5.5: creation is authoring — a promotion receiver refuses it
+        // (pipeline.authoring.disabled names the reason).
+        authoring.requirePipelineAuthoring()
         val workspaceId = ctx.principal.requireWorkspace().id
         val (pipeline, body) = support.validated(args, workspaceId)
         val record = pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = ctx.principal.userId), body, ctx.principal.userId)

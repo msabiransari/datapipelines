@@ -41,6 +41,7 @@ class PipelinesControllerTest {
             bodies = PipelineBodies(repository),
             drafts = drafts,
             releases = releases,
+            authoring = co.datapipelines.pipeline.AuthoringGuard(true),
         )
 
     private val userId = UUID.randomUUID()
@@ -280,5 +281,30 @@ class PipelinesControllerTest {
 
         every { repository.softDelete(any(), pipelineId) } returns false
         shouldThrow<ApiException> { controller.delete(pipelineId) }.code shouldBe "pipeline.execution.not_found"
+    }
+
+    @Test
+    fun `create and delete refuse with the catalogued code when authoring is disabled`() {
+        // versioning §5.5: a promotion receiver's write path fails closed. The refusal is
+        // a DatapipelinesException the REST layer maps through ApiErrorCatalog (403).
+        authenticate()
+        val receiver =
+            PipelinesController(
+                pipelines = repository,
+                validator = validator,
+                bodies = PipelineBodies(repository),
+                drafts = drafts,
+                releases = releases,
+                authoring = co.datapipelines.pipeline.AuthoringGuard(false),
+            )
+
+        val create = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+            receiver.create("""{"schema_version":1,"name":"x","display_name":"X","description":"","parameters":{},"nodes":[]}""")
+        }
+        create.code shouldBe "pipeline.authoring.disabled"
+        create.details["config_key"] shouldBe "datapipelines.authoring.enabled"
+
+        val delete = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { receiver.delete(pipelineId) }
+        delete.code shouldBe "pipeline.authoring.disabled"
     }
 }
