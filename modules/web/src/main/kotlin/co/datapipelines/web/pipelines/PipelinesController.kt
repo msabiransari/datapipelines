@@ -79,9 +79,13 @@ class PipelinesController(
     }
 
     /**
-     * §5.2 — the latest RELEASED version's full JSON, plus the lifecycle read shape: the
-     * released row's `status`/`body_hash`, `current_version`, and the `draft` pointer when
-     * one exists. The default body remains the released version (versioning §7).
+     * §5.2 — the **working version's** full JSON: the DRAFT when one exists, else the
+     * current RELEASED version (versioning §7, since 039 — a RELEASED version is never
+     * modified and a draft is always reused, so authoring reads must show the draft or an
+     * editor rebases on released and quietly discards it). The response states which
+     * `version` and `status` it returned; `current_version` still names the latest RELEASED
+     * version (the execute-default pointer, unmoved), and the `draft` pointer is present
+     * whenever one exists.
      */
     @Suppress("ThrowsCount") // the miss paths each throw the same catalogued 404 for a different absent read
     @GetMapping("/{id}")
@@ -91,13 +95,14 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val body =
-            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val version =
-            pipelines.findCurrentVersionDetail(workspaceId, record.id)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
         val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        val version =
+            draft
+                ?: pipelines.findCurrentVersionDetail(workspaceId, record.id)
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val body =
+            pipelines.findVersionBody(workspaceId, record.id, version.version)
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(PipelineResponses.full(record, body, version, draft))
     }
 

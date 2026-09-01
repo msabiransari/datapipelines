@@ -209,17 +209,20 @@ Response: `201 Created`
 
 Server assigns: `id`, `version` (starts at `1`), `owner` (from auth), `created_at`, `updated_at`.
 
-### 5.2 Get pipeline (latest version)
+### 5.2 Get pipeline (working version)
 
 ```
 GET /pipelines/{id}
 ```
 
 Response: `200 OK` with full pipeline JSON (including server-assigned fields). The default
-body remains the **released** version; since the version lifecycle (versioning §7) the
-response also carries the released version's `status` (`RELEASED`) and `body_hash` (the
-precondition token for a first write), `current_version` (the latest RELEASED version), and
-a `draft` pointer — `{version, body_hash, updated_by, updated_at}` — when a draft exists.
+body is the **working version** (versioning §7, since 039): the DRAFT when one exists, else
+the current released version — authoring reads must show the draft, or an editor rebases on
+released content and quietly discards it. The response states which `version` and `status`
+it returned, carries that version's `body_hash` (the precondition token for the next
+write), `current_version` (the latest RELEASED version — the execute-default pointer,
+unmoved), and a `draft` pointer — `{version, body_hash, updated_by, updated_at}` — when a
+draft exists.
 
 ### 5.3 Get pipeline (specific version)
 
@@ -743,14 +746,16 @@ Templates declare no parameter schema — variables are declared by the pipeline
 
 Response: `201 Created` with full template (including version `1`, `created_at`).
 
-### 8.2 Get template (latest version)
+### 8.2 Get template (working version)
 
 ```
 GET /templates/{id}
 ```
 
-Response carries the version's `status` and `body_hash` and, when a draft exists, a
-`draft` pointer — the template mirror of §5.2 (versioning §6/§7).
+Response carries the **working version's** projection (versioning §7, since 039 — the
+template mirror of §5.2): the DRAFT when one exists, else the latest released version. The
+projection states its `version`, `status` and `body_hash`, and a `draft` pointer is present
+when a draft exists.
 
 ### 8.3 Get template (specific version)
 

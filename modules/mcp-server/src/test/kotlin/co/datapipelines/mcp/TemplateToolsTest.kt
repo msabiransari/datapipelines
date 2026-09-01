@@ -9,6 +9,7 @@ import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
@@ -73,6 +74,7 @@ class TemplateToolsTest {
 
     @Test
     fun `get returns the latest version by default, including body and imports`() {
+        every { templates.findDraftDetail(any(), any()) } returns null
         every { templates.findLatest(any(), "revenue.sql") } returns McpFixtures.template()
 
         every { templates.findLatest(any(), "with_imports.sql") } returns
@@ -90,8 +92,40 @@ class TemplateToolsTest {
     }
 
     @Test
+    fun `get defaults to the working version - the draft when one exists`() {
+        // §7.1's template mirror: with a draft open, the DEFAULT read returns the draft's
+        // version (never the released body an agent would silently rebase over).
+        every { templates.findDraftDetail(any(), "revenue.sql") } returns
+            TemplateVersionDetail(
+                templateId = "revenue.sql",
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+        every { templates.findVersion(any(), "revenue.sql", 2) } returns
+            McpFixtures
+                .template()
+                .copy(
+                    version = 2,
+                    body = "SELECT 2",
+                    status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                    bodyHash = "hash-v2",
+                )
+
+        val template = TemplatesGetTool(templates).call(McpArguments(mapOf("id" to "revenue.sql")), readCtx) as Template
+
+        template.version shouldBe 2
+        template.body shouldBe "SELECT 2"
+        template.status shouldBe co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+    }
+
+    @Test
     fun `get distinguishes an unknown template from an unknown version`() {
+        every { templates.findDraftDetail(any(), "nope") } returns null
         every { templates.findLatest(any(), "nope") } returns null
+        every { templates.findDraftDetail(any(), "revenue.sql") } returns null
         every { templates.findVersion(any(), "revenue.sql", 9) } returns null
         every { templates.existsId(any(), "revenue.sql") } returns true
 

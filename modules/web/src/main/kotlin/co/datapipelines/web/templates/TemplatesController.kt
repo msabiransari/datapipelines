@@ -75,9 +75,10 @@ class TemplatesController(
     }
 
     /**
-     * §8.2 — the latest RELEASED version, with the lifecycle read shape: the version's
-     * `status`/`body_hash` (on the [Template] projection since V6) and the `draft` pointer
-     * when one exists (versioning §7).
+     * §8.2 — the **working version**: the DRAFT's projection when one exists, else the
+     * latest RELEASED version (versioning §7, since 039 — the mirror of §5.2). The
+     * response carries the returned version's `status`/`body_hash` (on the [Template]
+     * projection since V6) and the `draft` pointer when one exists.
      */
     @GetMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -85,8 +86,12 @@ class TemplatesController(
         @PathVariable id: String,
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val template = templates.findLatest(workspaceId, id) ?: throw ApiErrors.templateNotFound(id)
-        return ApiResponse.of(withDraftPointer(template, templates.findDraftDetail(workspaceId, id)))
+        val draft = templates.findDraftDetail(workspaceId, id)
+        val template =
+            draft?.let { templates.findVersion(workspaceId, id, it.version) }
+                ?: templates.findLatest(workspaceId, id)
+                ?: throw ApiErrors.templateNotFound(id)
+        return ApiResponse.of(withDraftPointer(template, draft))
     }
 
     /** §8.3 — a specific version, including of a soft-deleted template (templates.md §5.1). */

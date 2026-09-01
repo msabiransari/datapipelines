@@ -71,7 +71,13 @@ class TemplatesListTool(
         )
 }
 
-/** `templates_get` (mcp-server.md §6.2.7). Scope: `read`. */
+/** `templates_get` (mcp-server.md §6.2.7). Scope: `read`.
+ *
+ * Since 039 the DEFAULT is the **working version** (versioning §7): the DRAFT when one
+ * exists, else the latest released version — an agent that read released while a draft was
+ * open would rebase on stale content with its next write. The returned projection states
+ * its `version` and `status`; an explicit `version` argument still wins.
+ */
 class TemplatesGetTool(
     private val templates: TemplateRepository,
 ) : McpTool {
@@ -79,8 +85,9 @@ class TemplatesGetTool(
         McpTools.tool(
             name = "templates_get",
             description =
-                "Get the body and metadata of a specific template version, including its imports array (the library " +
-                    "macros it can call). Defaults to the latest version.",
+                "Get the body and metadata of a template version, including its imports array (the library " +
+                    "macros it can call). Defaults to the working version — the draft when unreleased edits " +
+                    "exist, else the latest released.",
             schema =
                 """
                 {
@@ -88,7 +95,7 @@ class TemplatesGetTool(
                   "required": ["id"],
                   "properties": {
                     "id": {"type": "string"},
-                    "version": {"type": "integer", "description": "Defaults to latest."}
+                    "version": {"type": "integer", "description": "Specific version. Defaults to the working version: the draft when one exists, else the latest released."}
                   }
                 }
                 """.trimIndent(),
@@ -100,8 +107,14 @@ class TemplatesGetTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
-        val version = args.version() ?: return templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
-        return templates.findVersion(workspaceId, id, version)
-            ?: if (templates.existsId(workspaceId, id)) throw McpNotFound.templateVersion(id, version) else throw McpNotFound.template(id)
+        // The explicit argument wins BEFORE the working-version lookup (B3); the default
+        // is the DRAFT when one exists, else the latest released (§7's template mirror).
+        val version = args.version() ?: templates.findDraftDetail(workspaceId, id)?.version
+        return when (version) {
+            null -> templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
+            else ->
+                templates.findVersion(workspaceId, id, version)
+                    ?: if (templates.existsId(workspaceId, id)) throw McpNotFound.templateVersion(id, version) else throw McpNotFound.template(id)
+        }
     }
 }

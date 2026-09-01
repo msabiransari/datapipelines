@@ -198,10 +198,13 @@ Reachability and TTL errors are the world's state — probe, then retry once.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
 4. **Carry the hash you read.** `pipelines_update` requires `expected_hash` — the
-   `body_hash` from `pipelines_get` or your previous update's result. It is the protocol
-   that keeps two writers (you and a human, two sessions, two tabs) from silently
-   overwriting each other; a blind retry after a 409 is how an agent destroys a human's
-   edit. Read → edit → write with the hash you read.
+   `body_hash` from `pipelines_get` or your previous update's result. `pipelines_get`
+   (and `templates_get`) default to the **working version** — the draft when unreleased
+   edits exist, else the latest released — and say which `version`/`status` they returned,
+   so you always edit the newest content. The hash is the protocol that keeps two writers
+   (you and a human, two sessions, two tabs) from silently overwriting each other; a blind
+   retry after a 409 is how an agent destroys a human's edit. Read → edit → write with the
+   hash you read.
 5. **One caller node, or zero.** Two caller nodes fail validation; use a tempdb node +
    a projection node instead of two outputs.
 6. **Stage with tempdb.** Multi-node pipelines chain through `output: tempdb` tables —

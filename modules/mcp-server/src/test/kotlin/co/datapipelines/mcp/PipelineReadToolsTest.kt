@@ -102,6 +102,42 @@ class PipelineReadToolsTest {
     }
 
     @Test
+    fun `get defaults to the working version - the draft's body and status when one exists`() {
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+                updatedBy = McpFixtures.USER,
+                updatedAt = java.time.Instant.EPOCH,
+            )
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "the_draft_body")
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 2) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+
+        val body = PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val tree = McpTools.readTree(body.toString())
+
+        // §7.1: the default is the working version — an agent must read the draft, never
+        // silently rebase on released content — and the result says which one it returned.
+        tree["name"].asText() shouldBe "the_draft_body"
+        tree["version"].asInt() shouldBe 2
+        tree["status"].asText() shouldBe "DRAFT"
+        tree["body_hash"].asText() shouldBe "hash-v2"
+    }
+
+    @Test
     fun `get honours an explicit version`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 4)
         every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
