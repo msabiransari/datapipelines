@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.2 — reviewed; §15 items 1–3 ratified 2026-08-31
+**Status:** v1.3 — §15 items 1–3 ratified 2026-08-31; §10.6 credential ratified 2026-09-01
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-08-31
@@ -479,41 +479,71 @@ import service's combined `missing_datasources` report) rather than failing mid-
 
 ---
 
-### 10.6 The promotion-peer credential (ratified 2026-08-31)
+### 10.6 The promotion-peer credential — a shared server key (ratified 2026-09-01)
 
-§10.1 says "base URL + API key". That is under-specified, and the gap is the reason
-promotion could not be built from this spec alone: **an API key in this system is
-workspace-pinned and user-owned**, and neither property is right for a deployment writing to
-another deployment. The machine-auth design note's fork F10 named this credential as unnamed;
-this section names it, and **this doc is its authority** — F10 defers here rather than
-re-deciding it.
+§10.1 said "base URL + API key", which was under-specified: an API key here is workspace-pinned
+and user-owned, and neither property is right for one deployment writing to another.
 
-**Shape.**
+**Ratified shape (operator, 2026-09-01): a pre-shared server key, not a principal.** The
+RECEIVER holds a long secret in configuration; the SENDER holds that same secret alongside the
+target's base URL and presents it on the promotion call; the receiver validates it before
+accepting any payload. No service account, no `users` row for the credential itself, no scope
+matrix entry — promotion is a deployment trusting a deployment, and modelling it as a principal
+was more machinery than the problem needs.
 
 | Property | Value | Why |
 |---|---|---|
-| Ownership | A **service principal**, not an interactive user | It must survive the deactivation of whoever configured it. A user-owned key dies with its owner's account and takes the promotion path down with it. |
-| Backing row | A real `users` row, flagged non-interactive | Not a choice: `pipeline_versions.created_by` and `pipeline_executions.triggered_by` are `NOT NULL REFERENCES users(id)`. Imported rows need an actor, so the actor must exist. |
-| Login | Impossible — no password, no OIDC identity, no session mint | The row exists to satisfy the FK and to name the actor in history, never to authenticate a human. This is the boundary the credential-minting class (four findings to date) keeps testing. |
-| Scope | The import endpoint only | Not `MUTATE_PIPELINES_TEMPLATES`, which would let a leaked promotion key author freely on the receiver. Promotion writes one shape through one door. |
-| Direction | Held by the SENDER, accepted by the RECEIVER | The receiver never calls out; a compromised receiver cannot reach back into dev. |
-| Workspace | Bound to the target workspace on the receiver | Preserves workspace isolation across the promotion boundary. |
+| Receiver config | a long secret under the promotion key shown below | The receiver is the one that must be able to refuse. |
+| Absent key | **Promotion disabled, endpoint refuses** | Fail closed. A deployment that never configured a key must not silently accept pushes. |
+| Sender config | target base URL + the same secret | Held with the sender's other deployment secrets — never in a pipeline body (§2 principle 1 forbids env-specific values there). |
+| Transport | A request header, TLS only, compared in constant time, never logged | It is a bearer secret; a timing-safe compare and a redacted log line are the whole discipline. |
+| Scope | The promotion/import endpoint ONLY | It is not a master key. No other route consults it, and it grants no read access. |
+| Direction | Receiver validates; receiver never calls the sender | A compromised receiver cannot reach back into dev. |
+| Rotation | Change both sides; no user account is involved | The property a user-owned key could not give: rotation and revocation touch no human's account, and offboarding cannot break production promotion. |
 
-**Consequences to accept deliberately:**
+The configuration shape, named here so the implementing round does not invent a second
+spelling. It is **not yet in `configuration.md`** — that doc is the operator-facing authority for
+SHIPPED keys, and declaring an unimplemented one there is the same defect the architecture
+audit records as M11:
 
-- The receiver's history attributes every promoted version to the service principal, not to
-  the human who released it in dev. The released body carries its own `released_by`, so the
-  human is recoverable from the artifact — but the receiver's `created_by` is the promoter.
-- The sender stores a credential that can write to a higher environment. It belongs with the
-  deployment's other secrets, never in the pipeline body (§2 principle 1 forbids
-  env-specific values in the body, and this is exactly such a value).
-- Revocation is a receiver-side action, and it stops promotion without touching any human
-  account — which is the property a user-owned key could not give.
+```yaml
+# receiver (e.g. uat) — absent means promotion is refused
+datapipelines:
+  promotion:
+    server-key: ${DATAPIPELINES_PROMOTION_SERVER_KEY:}
 
-**Not in scope here:** the credential's issuance UI, rotation schedule, and whether the same
-principal type later serves the application-execution case the machine-auth note describes.
-Those are that note's to settle once it is ratified; this section constrains only what
-promotion needs.
+# sender (e.g. dev) — the target and the same secret
+datapipelines:
+  promotion:
+    target:
+      base-url: ${DATAPIPELINES_PROMOTION_TARGET_URL:}
+      server-key: ${DATAPIPELINES_PROMOTION_TARGET_KEY:}
+```
+
+The implementing round adds both to `configuration.md` in the commit that makes them real.
+
+**The one gap this shape does not close, and it needs a decision before implementation.**
+`pipeline_versions.created_by` and `pipeline_executions.triggered_by` are
+`NOT NULL REFERENCES users(id)`. A payload authenticated by a server key carries no user, and
+the source deployment's user ids are meaningless on the receiver — different `users` table. So
+an imported row still needs an actor that exists locally. Three options, none free:
+
+1. **A single reserved non-interactive `users` row** created by migration (no password, no OIDC
+   identity, cannot log in), used as `created_by` for every promoted row. Cheapest; the
+   receiver's history then attributes all promoted versions to "promotion", with the releasing
+   human recoverable from the artifact's own `released_by`.
+2. **Make the column nullable** plus a CHECK that exactly one of `created_by` /
+   `promoted_from` is set. Cleaner modelling, a migration on a hot table, and every reader of
+   `created_by` must handle null.
+3. **Map by email** — carry the source's releasing user's email and resolve it locally. Rejected
+   here: it silently creates or mis-attributes when the human has no account on the receiver.
+
+**Recommendation: (1)**, and note it is NOT the service principal an earlier draft of this
+section proposed — it is a row that exists solely to satisfy a foreign key and to name the actor
+in history, with no credential attached to it at all. The machine-auth note's F10 defers to this
+section; **F2's service-account question remains open there**, because an application EXECUTING a
+pipeline is a different problem from a deployment PROMOTING one, and D16's own headline is that
+execution is blocked by the SSE contract before auth is even reached.
 
 ## 11. Schema Changes (Amendment for Implementation)
 
@@ -677,6 +707,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.3 | operator ratification | §10.6 replaced: the promotion credential is a **pre-shared server key**, not a principal. The receiver holds a promotion server key and refuses when it is absent (fail closed); the sender holds the same secret with the target URL and presents it on the promotion call. No service account, no scope-matrix entry, no `users` row for the credential — promotion is a deployment trusting a deployment, and the earlier service-principal draft was more machinery than the problem needs. Records the one gap the shape does not close: `created_by`/`triggered_by` are NOT NULL FKs to `users`, so an imported row still needs a local actor; three options given, a single reserved non-interactive row recommended, awaiting ratification. F10 defers here; F2's service-account question stays with the machine-auth note, because an application EXECUTING a pipeline is a different problem from a deployment PROMOTING one. |
 | 2026-08-31 | v1.2 | operator request | New §12: the agent-facing skill (`.agents/skills/datapipelines/SKILL.md`) is updated in the SAME commit as the behaviour it describes. Concrete for this spec — `SKILL.md:51` says "every save creates a new version", which D2 makes false, so an agent holding the current skill would believe a `pipelines_update` published something it left as a draft. Enumerates what this round obliges (versioning concept, golden path stopping short of release, draft execution, the new 409s, the hash protocol, the references list), what the implementor must DECIDE rather than assume (whether the draft result reshapes the MCP tool surface, which `mcp-server.md` and `McpToolCatalog` own), and the general rule: the test is "would an agent holding the current skill now be wrong?" Notes that the skill has no drift guard, so the rule is carried by review. Sections 12–14 renumbered to 13–15. |
 | 2026-08-31 | v1.1 | operator ratification | §15's first three open items decided and written into their sections. §3.5 rewritten: the `pipelines` row is an INDEX over the current released body — the metadata is not duplicated, one side is the artifact and the other is how you find it — so metadata rides the release by definition rather than by preference, plus a draft-write-time uniqueness check reusing `pipeline.validation.duplicate_name` (no catalogue addition). New §10.6 specifies the promotion-peer credential as a non-interactive service principal, scoped to the import endpoint, backed by a real `users` row because `created_by`/`triggered_by` are NOT NULL FKs; this doc is its authority and the machine-auth note's F10 defers here. §8 drops the `ran_draft` column for derivation from `released_at`, with its cross-clock precondition stated (`started_at` is application-supplied) and `released_at` required to be database-generated. |
 | 2026-08-31 | v1.0 | orchestrator review | Review pass before commit. Corrected §3.4: the executions FK is `NO ACTION` (its declaration carries no `ON DELETE` clause), not `RESTRICT` — it blocks identically here, but an implementer reading the old wording would have written the wrong DDL. §13 (Testing Requirements) now states the operational half of the drift coupling: catalogue rows and constants land in the SAME commit, because the drift test lives on `main` permanently. Also grouped the doc into `DocsCatalog` "Contracts" — 033's in-app docs index fails at init on an ungrouped doc, so the spec could not land without it. Verified against the tree: the import-renumbering defect (§9.1), `PipelineImportService.SERVER_FIELDS`, the executions composite FK, and the absence of `status`/`body_hash` today. |
