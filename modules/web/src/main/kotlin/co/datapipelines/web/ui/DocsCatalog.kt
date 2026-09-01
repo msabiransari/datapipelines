@@ -174,7 +174,16 @@ class DocsCatalog(
                 "Operations manual" to
                     listOf("deployment", "configuration", "auth", "datasources", "observability", "mcp-server"),
                 "Contracts" to
-                    listOf("pipeline-contract", "templates", "rest-api", "type-system", "enums", "staging", "dag-executor"),
+                    listOf(
+                        "pipeline-contract",
+                        "templates",
+                        "versioning",
+                        "rest-api",
+                        "type-system",
+                        "enums",
+                        "staging",
+                        "dag-executor",
+                    ),
                 "Reference" to
                     listOf("metadata-db", "module-structure", "pipeline-editor", "ui-screens", "roadmap", "readme"),
             )

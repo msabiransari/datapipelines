@@ -729,7 +729,8 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 |---|---|---|
 | `pipeline.import.missing_datasource` | 400 | Imported pipeline references a datasource name not registered in this env (as `source` or `output.datasource`) |
 | `pipeline.import.missing_template` | 400 | Imported pipeline references a template version not present in this env |
-| `pipeline.import.version_conflict` | 409 | Pipeline id+version already exists |
+| `pipeline.import.version_conflict` | 409 | Pipeline id+version already exists **with different content** (or the id collides with a soft-deleted pipeline's retained id); a same-hash re-import of an existing released version is an idempotent no-op (preserved-version import rules: [Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
+| `pipeline.import.hash_mismatch` | 400 | Import payload's declared `body_hash` doesn't match the hash recomputed from its body — transfer corruption or canonicalization drift between app versions ([Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
 
 ### 13.3 Pipeline execution (run-time)
 
@@ -840,6 +841,8 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
 | `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
+| `template.version.conflict` | 409 | Content-hash precondition failed on a template draft write/release/discard — another writer changed it after the caller loaded it ([Versioning §4](versioning.md#4-content-hash-body_hash)) |
+| `template.version.not_draft` | 409 | Template release or discard requested but no DRAFT version exists ([Versioning §3](versioning.md#3-version-lifecycle)) |
 
 ### 13.10 Result retrieval
 
@@ -881,6 +884,20 @@ otherwise see any workspace and so gets a real 404.
 | `workspace.validation.duplicate_name` | 409 | Workspace name exists (global namespace, soft-deleted included — house rule) |
 | `workspace.in_use` | 409 | Delete blocked: workspace still owns non-deleted pipelines/templates/datasources; also refuses a member removal that would leave the workspace without an owner (`details.blocked_by: owner_membership`) |
 
+### 13.13 Versioning / draft-release lifecycle / promotion
+
+Defined and described in [Versioning](versioning.md). Codes are additive; the draft/release
+lifecycle and the preserved-version import rules live there (this table is the catalog
+entry, Versioning is the semantics).
+
+| Code | HTTP | Description |
+|---|---|---|
+| `pipeline.version.conflict` | 409 | Content-hash precondition failed on a draft create/write, release, or discard — another writer changed the pipeline after the caller loaded it; `details` carries `current_body_hash`, `current_status`, `updated_by`, `updated_at` (Versioning §4.2) |
+| `pipeline.version.not_draft` | 409 | Pipeline release or discard requested but no DRAFT version exists (Versioning §5.3/§5.4) |
+| `pipeline.release.template_not_released` | 409 | Pipeline release blocked: the draft pins template version(s) still in DRAFT — release those templates first (Versioning §5.3 precondition 2) |
+| `pipeline.promotion.not_released` | 409 | Promotion selected a pipeline whose candidate version is not RELEASED — drafts are never promoted (Versioning §10.3 guard 1) |
+| `pipeline.promotion.not_newer` | 409 | Promotion push of a version not greater than the target environment's current version for that pipeline — same-version pushes are a bug, not a no-op (Versioning §10.3 guard 2) |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
@@ -893,11 +910,13 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 | Get pipeline (latest version) | `GET /pipelines/{id}` | Returns highest version. |
 | Get pipeline (specific version) | `GET /pipelines/{id}/versions/{version}` | |
 | List pipeline versions | `GET /pipelines/{id}/versions` | Returns version metadata. |
-| Update pipeline (creates new version) | `PUT /pipelines/{id}` | Body: full pipeline JSON. Server bumps `version`. |
+| Update pipeline (writes the draft) | `PUT /pipelines/{id}` | Body: full pipeline JSON. Copy-on-write: first change after a release creates a DRAFT of the next version; further changes overwrite the draft in place. Hash-preconditioned. Never appends a released version. See [Versioning](versioning.md). |
+| Release pipeline (lock) | `POST /pipelines/{id}/release` | Human/UI action: promotes the DRAFT to RELEASED, bumps `current_version`. Hash-preconditioned; requires pinned template versions released. |
+| Discard draft | `POST /pipelines/{id}/draft/discard` | Deletes the DRAFT (or flips it to DISCARDED if an execution references it). |
 | Delete pipeline | `DELETE /pipelines/{id}` | Soft delete. Executions of deleted pipelines fail with `pipeline.execution.not_found`. |
 | List pipelines | `GET /pipelines` | Filterable by owner, datasource, etc. |
 | Execute pipeline | `POST /pipelines/{id}/execute` | Body: `{parameters: {...}}`. Returns SSE stream. See [REST API spec](rest-api.md). |
-| Import pipeline | `POST /pipelines/import` | Body: full pipeline JSON (possibly with id). |
+| Import pipeline | `POST /pipelines/import` | Body: full pipeline JSON (possibly with id). A carried `version` is honored (preserved-version import, [Versioning §9.2](versioning.md#92-import-with-preserved-versions)); absent, the next local version is allocated. |
 | Export pipeline | `GET /pipelines/{id}/export` | Returns pipeline JSON + manifest of referenced templates. |
 
 ---

@@ -46,7 +46,14 @@ class TemplateErrorCodesSpecDriftTest {
             // gate C) — a surface-raised lookup code, deliberately NOT a `template.validation.*`
             // write-time rule, so the shape guard admits exactly it (same exclusion style the
             // datasource drift guard applies to `pipeline.execution.datasource_unreachable`).
-            documented.filterNot { it.startsWith("template.validation.") || it == PipelineErrorCodes.Template.NOT_FOUND }.shouldBeEmpty()
+            // §13.9 gained `template.version.*` (draft/release lifecycle) on 2026-08-31
+            // (versioning.md) — lifecycle codes, same deliberate exclusion.
+            val nonValidationShape =
+                documented.filterNot {
+                    it.startsWith("template.validation.") || it.startsWith("template.version.") ||
+                        it == PipelineErrorCodes.Template.NOT_FOUND
+                }
+            nonValidationShape.shouldBeEmpty()
         }
     }
 

@@ -80,8 +80,13 @@ class ApiErrorCatalogSpecDriftTest {
          * 88 → 89 in the post-merge 026 security fix: §13.7 gains `auth.session_required`,
          * landed in the SAME commit as its constant and catalog row (MISTAKES.md — a
          * catalogued code split from its constant leaves `main` red between the two).
+         *
+         * 89 → 97 with the versioning spec (versioning.md): the draft/release lifecycle,
+         * preserved-version import and promotion add their rows to §13. Re-derived from the
+         * merged document's own parse, not by adding up the rows a diff showed — this literal
+         * is the one thing in the file that cannot be checked by the parse it guards.
          */
-        const val SECTION_13_ROW_COUNT = 89
+        const val SECTION_13_ROW_COUNT = 97
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
         const val SECTION_12_CODE_COUNT = 47

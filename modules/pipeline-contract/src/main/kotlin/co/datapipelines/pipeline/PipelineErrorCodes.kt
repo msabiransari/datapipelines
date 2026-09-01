@@ -217,6 +217,9 @@ object PipelineErrorCodes {
         const val MISSING_DATASOURCE = "pipeline.import.missing_datasource"
         const val MISSING_TEMPLATE = "pipeline.import.missing_template"
         const val VERSION_CONFLICT = "pipeline.import.version_conflict"
+
+        /** §13.2 / versioning §9.2 — declared body_hash ≠ hash recomputed from the payload body. */
+        const val HASH_MISMATCH = "pipeline.import.hash_mismatch"
     }
 
     /** §13.3 — pipeline execution (run-time). */
@@ -344,6 +347,12 @@ object PipelineErrorCodes {
         const val DUPLICATE_NAME = "template.validation.duplicate_name"
 
         const val NOT_FOUND = "template.not_found"
+
+        /** §13.9 / versioning §4.2 — hash precondition failed on a template draft mutation. */
+        const val VERSION_CONFLICT = "template.version.conflict"
+
+        /** §13.9 / versioning §3 — release/discard requested but no DRAFT version exists. */
+        const val VERSION_NOT_DRAFT = "template.version.not_draft"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -404,5 +413,26 @@ object PipelineErrorCodes {
          * pipelines/templates/datasources (or a removal would orphan its owner).
          */
         const val IN_USE = "workspace.in_use"
+    }
+
+    /**
+     * §13.13 — the draft/release version lifecycle and environment promotion
+     * (versioning.md). Semantics live there; this object is the constant spelling.
+     */
+    object Versioning {
+        /** §13.13 / versioning §4.2 — hash precondition failed; another writer got there first. */
+        const val VERSION_CONFLICT = "pipeline.version.conflict"
+
+        /** §13.13 / versioning §3 — release or discard requested but no DRAFT version exists. */
+        const val NOT_DRAFT = "pipeline.version.not_draft"
+
+        /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
+        const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"
+
+        /** §13.13 / versioning §10.3 — promotion selected a non-RELEASED version. */
+        const val PROMOTION_NOT_RELEASED = "pipeline.promotion.not_released"
+
+        /** §13.13 / versioning §10.3 — push of a version not newer than the target's current. */
+        const val PROMOTION_NOT_NEWER = "pipeline.promotion.not_newer"
     }
 }

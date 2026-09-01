@@ -61,6 +61,12 @@ object ApiErrorCatalog {
             "pipeline.execution." to HttpStatus.INTERNAL_SERVER_ERROR,
             "pipeline.node." to HttpStatus.INTERNAL_SERVER_ERROR,
             "pipeline.staging." to HttpStatus.INTERNAL_SERVER_ERROR,
+            // The versioning lifecycle (versioning.md): every one of these is a state or
+            // precondition conflict — a stale content hash, a release with no draft, a
+            // promotion of something not released or not newer. §13 documents them all 409.
+            "pipeline.version." to HttpStatus.CONFLICT,
+            "pipeline.release." to HttpStatus.CONFLICT,
+            "pipeline.promotion." to HttpStatus.CONFLICT,
             "auth.api_key." to HttpStatus.UNAUTHORIZED,
             "auth.session." to HttpStatus.UNAUTHORIZED,
             "auth.scope." to HttpStatus.FORBIDDEN,
@@ -69,6 +75,7 @@ object ApiErrorCatalog {
             "auth.password." to HttpStatus.FORBIDDEN,
             "datasource.validation." to HttpStatus.BAD_REQUEST,
             "template.validation." to HttpStatus.BAD_REQUEST,
+            "template.version." to HttpStatus.CONFLICT,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
             "workspace." to HttpStatus.FORBIDDEN,
         )

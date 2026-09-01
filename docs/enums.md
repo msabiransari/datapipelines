@@ -323,6 +323,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `rate_limit.exceeded` | Rate limit hit (single code for all layers) | pipeline-contract §13.11 |
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
+| `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
+| `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
