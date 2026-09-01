@@ -46,7 +46,7 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
-# §8.3.1: no graceful drain ships yet, so 30s (the stock default) is honest —
-# there is nothing to wait for beyond in-flight HTTP requests. When the drain
-# lands this default becomes execution-timeout-seconds + 30 (§8.3.2).
+# §8.3.1/§8.3.2: the drain cancels in-flight executions and flushes within a
+# bounded 20 seconds — 30s covers it with margin. The pod also gets the §8.3.2
+# `preStop: sleep 5` (baked into the Deployment template).
 terminationGracePeriodSeconds: 30

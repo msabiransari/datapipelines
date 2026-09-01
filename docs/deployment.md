@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.5
+**Status:** v1.6
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-01
@@ -362,29 +362,39 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 1. Review release notes for breaking changes.
 2. Backup metadata DB.
-3. Stop the old version. There is no drain (§8.3.1): stopping an instance aborts its in-flight executions, so prefer a quiet window.
+3. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
 4. Start the new version (migrations apply on startup).
 5. Verify `/health` returns UP.
 6. Restore traffic.
 
-For k8s: rolling update via `kubectl rollout`. Each terminated pod aborts its in-flight executions (§8.3.1) — there is no graceful drain yet, so schedule rollouts accordingly.
+For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
-#### 8.3.1 Shutdown behavior (as shipped)
+#### 8.3.1 Graceful shutdown mechanism
 
-There is **no graceful drain today**. On `SIGTERM` the instance stops with its in-flight executions mid-run:
+Shutdown is a defined sequence, not "stop the process and hope". On `SIGTERM` the instance, in this order:
 
-- **No `Statement.cancel()` reaches the source database.** A query in flight keeps running on the source server to its own timeout.
-- **No `execution_aborted` event and no status update.** The execution's row stays `RUNNING` in execution history; nothing reaps it (the stale-execution sweep is not wired — `datapipelines.executions.stale-timeout-minutes` is defined but unread).
-- `/ready` reports readiness until the process is gone; it does not flip early to bleed traffic off.
+1. **Fails readiness first.** `ReadinessState.REFUSING_TRAFFIC` is published before anything is cancelled, so `/ready` starts returning 503 while the process is still fully up and the load balancer / k8s Service bleeds traffic off. The order is the contract: flipping after the drain would keep fresh work flowing into an instance that is already cancelling it. `/health` keeps reporting UP, so nothing kills the pod for being unhealthy mid-drain.
+2. **Cancels every in-flight execution** through the ordinary cancellation path ([DAG Executor §8.3](dag-executor.md#83-cancellation)): `Statement.cancel()` on every registered statement first — which is what actually stops the query on the source database, so the drain is more than a status update — then the root `Job` cancellation, `execution_aborted` (`reason: "shutdown"`) emitted to connected streams, tempdb dropped and connections released in `finally`, and the row written `ABORTED`. The drain **cancels; it does not wait for executions to finish** — an execution in flight at SIGTERM ends `ABORTED`, not `SUCCESS`.
+3. **Waits for the flush, bounded** (20 seconds). An execution leaves the live count only after its `ABORTED` status and events are written, so the wait means the bookkeeping reached Postgres and Redis before exit; the bound means a wedged execution meets the kubelet's deadline rather than hanging shutdown forever.
+4. **Exits.** The web server's own graceful shutdown (`server.shutdown: graceful`) runs after the drain, so SSE clients are still connected while their terminal events arrive, and in-flight ordinary requests complete rather than being cut off.
 
-The accepted loss, stated plainly: an execution in flight when an instance stops is **lost, not preserved**. Its client must re-execute (§6.2). There is no execution hand-off to another instance and no resumption — in-memory H2 staging makes migration impossible, and pretending otherwise would be worse than the honest abort. The missing half today is visibility: the abort is silent in history until the sweep ships.
+**The accepted loss, stated plainly:** an execution running when an instance stops is **cancelled, not preserved**. It ends `ABORTED` with `reason: "shutdown"`, is visible as such in execution history, and its client must re-execute. There is no execution hand-off to another instance and no resumption — in-memory H2 staging makes migration impossible, and pretending otherwise would be worse than the honest abort. Bounded, visible loss beats a silent hang.
+
+One residual race, honestly: a request that reaches the instance *between* the readiness flip and the web server stopping can still launch an execution. The drain re-cancels on every flush tick, so such an execution is cancelled within ~100ms of starting — but the right answer is that traffic should have stopped at the readiness flip, which is what the `preStop` in §8.3.2 exists to give the endpoints controller time to do.
 
 #### 8.3.2 Kubernetes pod lifecycle
 
-The stock pod defaults are safe **today**: with no drain to honor (§8.3.1), the default 30-second `terminationGracePeriodSeconds` suffices and no `preStop` hook is needed. Expect every pod termination — rollout, scale-down, node drain — to lose that pod's in-flight executions as §8.3.1 describes.
+```yaml
+terminationGracePeriodSeconds: 30      # covers the bounded drain flush (§8.3.1 step 3)
+lifecycle:
+  preStop:
+    exec:
+      command: ["sleep", "5"]
+```
 
-- A `PodDisruptionBudget` (§6.4) still earns its place: it keeps voluntary disruptions to one pod at a time, bounding how many in-flight executions a rollout or node drain kills at once.
-- Size pods per §6.6; nothing about the lifecycle changes the heap arithmetic.
+- **`terminationGracePeriodSeconds: 30`.** The drain cancels rather than waits (§8.3.1), so the only clock that matters is the bounded flush — 30 seconds covers it with margin. Anything shorter risks the kubelet `SIGKILL`ing mid-flush: executions die without their `finally` blocks, so no `execution_aborted` event and no status update — rows left `RUNNING` in history (§6.2).
+- **`preStop: sleep 5`** closes the standard k8s race: endpoint removal and `SIGTERM` are concurrent, so without it the pod can flip readiness microseconds before the Service stops routing to it. Five seconds of overlap is enough for Endpoints propagation — and it is what makes step 1's readiness flip actually take traffic off the pod before step 2 cancels.
+- A `PodDisruptionBudget` (§6.4) keeps node drains from taking every replica's drain at once.
 
 ### 8.4 Rollback
 
@@ -675,6 +685,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.6 | multi-instance readiness (036) | **The drain now ships (ARCH-AUDIT M1), and §8.3.1/§8.3.2 describe it.** On SIGTERM: readiness flips to REFUSING_TRAFFIC first, every local execution is cancelled through the ordinary path (`Statement.cancel()` first, `execution_aborted` with `reason: "shutdown"`, row `ABORTED`), the flush is awaited with a 20s bound, and `server.shutdown: graceful` lets in-flight requests end. The drain CANCELS rather than draining-to-completion — the v1.2 text's "drain up to `execution-timeout-seconds`" behavior is deliberately not what shipped; `terminationGracePeriodSeconds: 30` (not 630) and `preStop: sleep 5` are the matching pod settings, and the Helm chart carries both. The §6.2 crash bullet is still honest (the sweep lands next). |
 | 2026-09-01 | v1.5 | multi-instance readiness (036) | **Honesty fix (ARCH-AUDIT M11): the doc promised three things the code does not do.** §8.3.1/§8.3.2 rewritten as shutdown behavior *as shipped* — no drain, no `server.shutdown: graceful`, no readiness flip, no sweep; the old drain-to-timeout/`cancelAll(shutdown)` sequence and the `terminationGracePeriodSeconds: 630` + `preStop` guidance described unimplemented code. §6.2 instance-crash bullet no longer claims rows are "swept to `ABORTED`" (the sweep exists but has no caller). §5.2's "shutdown grace" gloss on `execution-timeout-seconds` removed. §6.4's `deploy/helm/` reference made real: a minimal chart (Deployment, Service, optional HPA/PDB) now ships. The drain and sweep claims return with the code that implements them. |
 | 2026-08-31 | v1.4 | website + docs in-app (033) | New §6.7: the app serves the marketing site (`/`, public) and the packaged spec set (`/docs`, session-only); the dashboard moved to `/dashboard`; the standalone `website/` static deploy retires to the `websiteExport` cold-fallback procedure; public surface defended by cache headers, NOT the login rate limiter (OPEN-ITEMS T46). Header version corrected (v1.3's entry had not bumped it). |
 | 2026-08-05 | v1.0 draft | initial draft | Initial deployment spec sketch — Docker image, infra requirements, configuration, deployment patterns, upgrade/rollback, security checklist |

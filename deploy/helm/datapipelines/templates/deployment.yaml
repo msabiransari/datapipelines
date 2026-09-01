@@ -25,6 +25,12 @@ spec:
         - name: {{ include "datapipelines.name" . }}
           image: {{ include "datapipelines.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # §8.3.2: endpoint removal and SIGTERM are concurrent — the sleep gives the
+          # endpoints controller time to stop routing BEFORE the readiness flip and drain.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           ports:
             - name: http
               containerPort: 8080

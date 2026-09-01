@@ -61,6 +61,15 @@ Ranked by severity. The request path is genuinely multi-instance-ready in places
 **Proposed fix:** lifecycle bean calling `cancelAllLocal()` before `executionScope.close()`; `server.shutdown: graceful`; Spring availability probes. All primitives exist — this is wiring, not design.
 **Verification:** code-read (zero callers is a grep-level fact).
 
+**[resolved — 036, branch `fix/multi-instance`]** `ExecutionDrainLifecycle` (web/config) is the
+missing caller: on stop it publishes `ReadinessState.REFUSING_TRAFFIC` **first** (order asserted
+by `ExecutionDrainLifecycleTest`), then `cancelAllLocal()`, then a bounded flush wait on
+`liveExecutions` (added to the `CancellationRegistry` interface for exactly this). Default
+`SmartLifecycle` phase stops it before the web server's graceful-shutdown lifecycle and before
+`executionScope.close()`. `server.shutdown: graceful` set in `application.yml`. **B3 confirmed:**
+`cancelAllLocal()` → `registry.cancelAll` → per-execution `cancel()` → `cancelStatements()` →
+JDBC `Statement.cancel()` — the drain reaches the source database, it is not a status flip.
+
 ### M2 — Crash sweep implemented but never scheduled — CRITICAL **[verified]**
 **Evidence:** `ExecutionRepository.sweepStaleRunning(olderThan)` (`modules/dag/.../executor/ExecutionRepository.kt:362`) flips stale `RUNNING` rows to `ABORTED` with `pipeline.execution.instance_lost`. **Only test code calls it.** The config key it consumes (`datapipelines.executions.stale-timeout-minutes`, `application.yml:201`) is dead.
 **Failure mode:** combined with M1, every pod-killed execution stays `RUNNING` forever — directly contradicting `deployment.md:226` (see M11) ("swept to ABORTED by the stale-execution sweep"). Secondary: `DELETE /executions/{id}` on such a row returns 204 and writes a Redis cancellation flag no live instance polls — silent no-op.

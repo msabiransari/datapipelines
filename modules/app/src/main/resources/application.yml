@@ -36,6 +36,12 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Spring Boot's own framework wiring key (like `management.server.port` above — not a
+  # datapipelines.* configuration key). Graceful web shutdown (deployment.md §8.3.1): on
+  # SIGTERM the web server stops accepting new requests and lets in-flight ones end instead
+  # of cutting them off. The execution drain itself is ExecutionDrainLifecycle, which stops
+  # FIRST (higher SmartLifecycle phase), so cancellations flush while the server is still up.
+  shutdown: graceful
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
 # controllers (observability.md §6). NO /actuator path is reachable on the
