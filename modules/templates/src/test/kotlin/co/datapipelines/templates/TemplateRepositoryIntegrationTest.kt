@@ -65,11 +65,12 @@ class TemplateRepositoryIntegrationTest {
         imports: List<TemplateImport> = emptyList(),
         isLibrary: Boolean = false,
         dialect: Dialect = Dialect.POSTGRES,
+        displayName: String = "Fetch Orders",
     ): TemplateDraft =
         TemplateDraft(
             id = id,
             dialect = dialect,
-            displayName = "Fetch Orders",
+            displayName = displayName,
             description = "Pulls orders.",
             imports = imports,
             body = body,
@@ -385,6 +386,79 @@ class TemplateRepositoryIntegrationTest {
         // The metadata (display_name/description) moved at save time — the template asymmetry.
         repository.findLatest(workspaceId, "fetch_orders.sql")?.displayName shouldBe "Fetch Orders"
         checkNotNull(repository.findVersion(workspaceId, "fetch_orders.sql", 2)).body shouldBe "SELECT 2"
+    }
+
+    @Test
+    fun `a no-op createDraft - content identical to released - returns RELEASED, creates no draft, still moves metadata`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        // Same CONTENT (§4.1's field object), new metadata — the no-op is defined on the
+        // hash, and display_name/description are not in it (§6's asymmetry).
+        val noop =
+            checkNotNull(
+                repository.createDraft(
+                    workspaceId,
+                    "fetch_orders.sql",
+                    draft(body = "SELECT 1", displayName = "Renamed, same SQL"),
+                    released.bodyHash,
+                    actor,
+                ),
+            )
+
+        noop.version shouldBe 1
+        noop.status shouldBe PipelineVersionStatus.RELEASED
+        noop.bodyHash shouldBe released.bodyHash
+        // No draft row, no burned number; the metadata moved because a metadata-only save
+        // is a real save of the index row.
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+        repository.findLatest(workspaceId, "fetch_orders.sql")?.displayName shouldBe "Renamed, same SQL"
+        // The next real CONTENT change allocates v2 — the number was never consumed.
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                "fetch_orders.sql",
+                draft(body = "SELECT 2"),
+                released.bodyHash,
+                actor,
+            ),
+        ).version shouldBe 2
+    }
+
+    @Test
+    fun `a no-op createDraft with a stale hash writes nothing - the no-op arm carries the guard`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), "stale", actor).shouldBeNull()
+
+        jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions", Int::class.java) shouldBe 1
+        repository.findDraftDetail(workspaceId, "fetch_orders.sql").shouldBeNull()
+    }
+
+    @Test
+    fun `identical content while a draft exists is a stale base, not a no-op`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draft = checkNotNull(repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor))
+
+        // The released body PUT back unchanged while a draft exists: 409 material (null),
+        // never "RELEASED, no draft" — the draft owns the working state.
+        repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), released.bodyHash, actor).shouldBeNull()
+        checkNotNull(repository.findDraftDetail(workspaceId, "fetch_orders.sql")).bodyHash shouldBe draft.bodyHash
+    }
+
+    @Test
+    fun `a draft edited back to its released parent is left alone - never auto-discarded`() {
+        repository.create(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
+        val draft = checkNotNull(repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor))
+
+        val reverted = checkNotNull(repository.writeDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
+
+        reverted.status shouldBe PipelineVersionStatus.DRAFT
+        checkNotNull(repository.findDraftDetail(workspaceId, "fetch_orders.sql")).version shouldBe draft.version
     }
 
     @Test

@@ -24,6 +24,11 @@ class TemplateDraftService(
      * Writes [draft] as the template's version — creating the draft first when the caller is
      * the first writer after a release (§5.1), overwriting it in place otherwise (§5.2).
      *
+     * A save whose CONTENT already equals the released content is a no-op (§5.1): the
+     * returned detail carries `status = RELEASED` and no draft was created — but index
+     * metadata (`display_name`/`description`) still moved, per §6's asymmetry. A draft
+     * edited back to its released parent is left alone; discard stays explicit.
+     *
      * @throws DatapipelinesException `template.not_found`, or `template.version.conflict`
      *   (stale [expectedHash], with the current hash/author in details).
      */

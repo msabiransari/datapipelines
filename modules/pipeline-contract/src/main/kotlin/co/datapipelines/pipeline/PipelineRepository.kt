@@ -429,6 +429,17 @@ class PipelineRepository(
      * (stale base, no released version, unknown pipeline) — the caller re-reads to build the
      * 409. A loser of the index race gets `pipeline.version.conflict` carrying the WINNER's
      * draft hash, thrown here because the constraint violation already names the outcome.
+     *
+     * ## A no-op write returns the RELEASED state, not a draft (versioning §5.1)
+     *
+     * The draft insert is suppressed when the incoming body's hash **equals** the released
+     * body's — the comparison is hash-to-hash, IN the statement, by the same
+     * [BODY_HASH_EXPR] the INSERT would store. A returned detail with
+     * `status = RELEASED` is therefore the no-op signal: nothing was written, no version
+     * number was consumed, and the row returned is the current released version — the
+     * caller shows it as the current state rather than inferring the no-op from an absence.
+     * Only a body that genuinely differs opens a draft, which is what makes draft-existence
+     * a truthful "unreleased changes exist" signal (versioning §7).
      */
     fun createDraft(
         workspaceId: UUID,
@@ -456,6 +467,12 @@ class PipelineRepository(
      * Draft write — in-place overwrite of the DRAFT (versioning §5.2). There is no third
      * write branch: a PUT never appends a released version and never touches a RELEASED or
      * DISCARDED row.
+     *
+     * A draft edited back to content identical to its RELEASED parent is **left alone** —
+     * this method writes it in place (same content, restamped) and nothing auto-discards
+     * it. Silently deleting a draft row, its version number and its `updated_by` history
+     * because someone reverted would be surprising; discard stays explicit (§5.4). Do not
+     * "fix" this.
      *
      * Returns null when no DRAFT matched the [expectedHash] — stale base or no draft; the
      * caller re-reads and maps the 409 (or takes the create branch when no draft exists).
@@ -847,7 +864,15 @@ class PipelineRepository(
          * `current_version + 1`, but a DISCARDED row keeps its number consumed (§3.4:
          * "never reused once any execution has referenced them"), so allocation reads the
          * MAX, not the pointer. The BODY still copies from the current released version:
-         * a discard does not change what the released content is. */
+         * a discard does not change what the released content is.
+         *
+         * The `<> v.body_hash` predicate is the NO-OP guard (versioning §5.1): a PUT whose
+         * body already equals the released one must not burn a version number or light the
+         * pending-release badge. Hash-to-hash in the database — comparing in Kotlin would
+         * re-derive the canonical form a second time, exactly the defect 035 found live.
+         * The `noop` arm returns the RELEASED detail in that case (status RELEASED is the
+         * no-op signal); `draft` and `noop` are mutually exclusive on the same parameters,
+         * and both join `guard`, so a stale precondition still yields zero rows ⇒ 409. */
         val CREATE_DRAFT_SQL =
             """
             WITH guard AS (
@@ -868,11 +893,28 @@ class PipelineRepository(
                   JOIN pipelines p ON p.id = v.pipeline_id
                  WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
                    AND p.is_deleted = FALSE AND v.version = p.current_version AND v.status = 'RELEASED'
+                   AND $BODY_HASH_EXPR <> v.body_hash
                    AND NOT EXISTS (SELECT 1 FROM pipeline_versions d
-                                    WHERE d.pipeline_id = :pipelineId AND d.status = 'DRAFT')
+                                   WHERE d.pipeline_id = :pipelineId AND d.status = 'DRAFT')
                 RETURNING $DETAIL_COLS_PLAIN
+            ), noop AS (
+                SELECT v.pipeline_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                  FROM pipeline_versions v
+                  JOIN pipelines p ON p.id = v.pipeline_id
+                  JOIN guard ON TRUE
+                 WHERE v.pipeline_id = :pipelineId AND p.workspace_id = :workspaceId
+                   AND p.is_deleted = FALSE AND v.version = p.current_version AND v.status = 'RELEASED'
+                   AND $BODY_HASH_EXPR = v.body_hash
+                   -- A draft that raced in owns the pipeline's working state: the caller's
+                   -- "identical to released" write is then a stale base (409), not a no-op —
+                   -- answering RELEASED/no-draft while a draft exists would be a lie.
+                   AND NOT EXISTS (SELECT 1 FROM pipeline_versions d
+                                   WHERE d.pipeline_id = :pipelineId AND d.status = 'DRAFT')
             )
             SELECT $DETAIL_COLS_PLAIN FROM draft, guard
+            UNION ALL
+            SELECT $DETAIL_COLS_PLAIN FROM noop
             """.trimIndent()
 
         /** versioning §5.2 — in-place draft write. */

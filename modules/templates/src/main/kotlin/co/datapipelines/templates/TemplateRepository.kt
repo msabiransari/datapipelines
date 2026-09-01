@@ -414,6 +414,16 @@ class TemplateRepository(
      * The draft pre-allocates `current_version + 1` (§3.4); index metadata
      * (`display_name`/`description`) moves at save time — the documented template asymmetry.
      *
+     * ## A no-op write returns the RELEASED state, not a draft (versioning §5.1)
+     *
+     * The draft insert is suppressed when the incoming CONTENT hash equals the released
+     * content's — compared in the statement by the same [TEMPLATE_HASH_EXPR] the INSERT
+     * would store. A returned detail with `status = RELEASED` is the no-op signal: no
+     * draft, no burned version number, and the row returned is the current released
+     * version. Index metadata still moves in that case: `display_name`/`description` are
+     * NOT part of the hashed artifact (the §6 asymmetry), so a save that changes only them
+     * is a real save of the index row, not a no-op.
+     *
      * Null when the guard failed (stale hash, unknown template, no released version); the
      * race loser gets `template.version.conflict` carrying the winner's hash.
      */
@@ -433,7 +443,11 @@ class TemplateRepository(
                 ).singleOrNull()
         }
 
-    /** Draft write — in-place overwrite of the DRAFT (versioning §5.2), metadata moving at save time. */
+    /**
+     * Draft write — in-place overwrite of the DRAFT (versioning §5.2), metadata moving at save
+     * time. A draft edited back to content identical to its RELEASED parent is **left alone**
+     * (written in place, never auto-discarded) — discard stays explicit (§5.4). Do not "fix" this.
+     */
     fun writeDraft(
         workspaceId: UUID,
         id: String,
@@ -728,7 +742,16 @@ class TemplateRepository(
          *
          * The pre-allocated number is `max(existing version) + 1` — the pointer-plus-one in
          * §3.4's prose, made safe against any preserved-version import that landed a higher
-         * number; the CONTENT still copies from the current released version. */
+         * number; the CONTENT still copies from the current released version.
+         *
+         * The `<> v.body_hash` predicate is the NO-OP guard (versioning §5.1, the pipeline
+         * mirror): identical content must not burn a version number. The `noop` arm returns
+         * the RELEASED detail in that case (status RELEASED is the no-op signal). `meta`
+         * fires when EITHER arm matched — index metadata is not part of the hashed artifact,
+         * so a content-identical save that renames `display_name`/`description` still moves
+         * it (§6's asymmetry). Both arms join `guard`, so a stale precondition still yields
+         * zero rows ⇒ 409. A draft edited back to its released parent is left alone (never
+         * auto-discarded) — see [writeDraft]. */
         private val CREATE_DRAFT_SQL =
             """
             WITH guard AS (
@@ -747,20 +770,39 @@ class TemplateRepository(
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
                    AND v.version = t.current_version AND v.status = 'RELEASED'
+                   AND $TEMPLATE_HASH_EXPR <> v.body_hash
                    AND NOT EXISTS (SELECT 1 FROM template_versions d
-                                    WHERE d.template_id = v.template_id AND d.status = 'DRAFT')
+                                   WHERE d.template_id = v.template_id AND d.status = 'DRAFT')
                 RETURNING $DETAIL_COLS_PLAIN
+            ), noop AS (
+                SELECT v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                  JOIN guard ON TRUE
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                   AND v.version = t.current_version AND v.status = 'RELEASED'
+                   AND $TEMPLATE_HASH_EXPR = v.body_hash
+                   -- A draft that raced in owns the working state: identical content is then
+                   -- a stale base (409), never a no-op (the pipeline mirror's reason).
+                   AND NOT EXISTS (SELECT 1 FROM template_versions d
+                                   WHERE d.template_id = v.template_id AND d.status = 'DRAFT')
             ), meta AS (
                 UPDATE templates
                    SET display_name = :displayName, description = :description, updated_at = NOW()
                  WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
-                   AND EXISTS (SELECT 1 FROM draft)
+                   AND (EXISTS (SELECT 1 FROM draft) OR EXISTS (SELECT 1 FROM noop))
                 RETURNING 1
             )
             SELECT t.name AS template_id, draft.version, draft.status, draft.body_hash,
                    draft.created_at, draft.created_by, draft.released_at, draft.released_by,
                    draft.updated_by, draft.updated_at
               FROM draft, guard, meta
+              JOIN templates t ON t.name = :name
+            UNION ALL
+            SELECT t.name AS template_id, noop.version, noop.status, noop.body_hash,
+                   noop.created_at, noop.created_by, noop.released_at, noop.released_by,
+                   noop.updated_by, noop.updated_at
+              FROM noop, meta
               JOIN templates t ON t.name = :name
             """.trimIndent()
 

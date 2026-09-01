@@ -50,11 +50,14 @@ the body calls macros by alias (`<@dates.date_range …/>`). Library templates
 
 **Versioning** — create lands v1 RELEASED and immediately executable; every later save is
 draft-first: the first save after a release opens a DRAFT (copy-on-write), later saves
-overwrite that one draft in place. Your updates are NOT published until a human releases
-the draft from the UI — **leave the draft for a human to release** (by design, D4; there is
-no release tool and that absence is deliberate). Pipeline nodes pin template versions
-immutably; updating a template does not change existing pipelines until you update the
-node reference. Drafts are executable — running your own draft is the expected test loop.
+overwrite that one draft in place. A save whose body is identical to the released one is a
+no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
+with no draft pointer; that is success, not an error. Your updates are NOT published until
+a human releases the draft from the UI — **leave the draft for a human to release** (by
+design, D4; there is no release tool and that absence is deliberate). Pipeline nodes pin
+template versions immutably; updating a template does not change existing pipelines until
+you update the node reference. Drafts are executable — running your own draft is the
+expected test loop.
 
 **Parameters** — typed with the canonical logical types: `BOOLEAN`, `INTEGER`,
 `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `DATE`, `TIMESTAMP`, etc. (11 total —

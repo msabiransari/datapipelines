@@ -257,7 +257,11 @@ current hash/author in `details`. A draft renaming onto a taken name fails HERE 
 `pipeline.validation.duplicate_name` (versioning §3.5), not at release.
 
 Response: `200 OK` with the draft version (`version`, `status: "DRAFT"`, `body_hash`,
-`current_version` — the released pointer, unmoved).
+`current_version` — the released pointer, unmoved). A PUT whose body is identical to the
+released one is a **no-op** (versioning §5.1): no draft is created, no version number is
+consumed, and the response reports the current state — `status: "RELEASED"`, the released
+version's `body_hash`, no `draft` pointer. Not a 4xx: the write was well-formed and the
+outcome is "already in that state".
 
 ### 5.10 Release pipeline
 
@@ -776,7 +780,10 @@ stale is `409 template.version.conflict`. The draft versions the CONTENT fields 
 documented asymmetry: they are not part of the versioned artifact).
 
 Response: `200 OK` with the draft version's projection (`version`, `status: "DRAFT"`,
-`body_hash`).
+`body_hash`). Content identical to the released version is a no-op (versioning §5.1): the
+response carries `status: "RELEASED"` and no draft was created — though
+`display_name`/`description` still moved at save time (the §6 asymmetry: they are not part
+of the hashed artifact).
 
 ### 8.9 Release template
 

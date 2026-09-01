@@ -219,7 +219,11 @@ class PipelinesUpdateTool(
                 expectedHash = expectedHash,
                 actor = ctx.principal.userId,
             )
-        return support.response(written.record, body, written.version, written.version)
+        // A no-op update (versioning §5.1) reports status RELEASED and carries NO draft
+        // pointer — the body already equals the released one, nothing was opened.
+        val draftPointer =
+            if (written.version.status == co.datapipelines.pipeline.PipelineVersionStatus.RELEASED) null else written.version
+        return support.response(written.record, written.bodyJson, written.version, draftPointer)
     }
 
     private companion object {

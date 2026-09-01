@@ -30,13 +30,22 @@ import java.util.UUID
  *    current RELEASED row's for a first write (§4.2). Zero rows ⇒ stale base ⇒ 409 with
  *    the current state in `details`; the server never merges and never overwrites.
  *
+ * A PUT whose body already equals the released one is a **no-op** (§5.1): no draft, no
+ * burned version number — the result reports the current RELEASED state instead. A draft
+ * edited back to match its released parent is left alone (never auto-discarded); discard
+ * stays explicit.
+ *
  * Callers have ALREADY run §12 save-time validation and canonicalization — this service
  * takes the validated [Pipeline] and its canonical JSON, not the raw wire body.
  */
 class PipelineDraftService(
     private val pipelines: PipelineRepository,
 ) {
-    /** What a draft write produced: the unchanged record, the version row's state, the stored body. */
+    /**
+     * What a draft write produced: the unchanged record, the version row's state (DRAFT for
+     * a real write, RELEASED for a no-op — §5.1), the stored body (the incoming canonical
+     * for a write, the released row's body for a no-op).
+     */
     data class DraftWrite(
         val record: PipelineRecord,
         val version: PipelineVersionDetail,
@@ -85,6 +94,18 @@ class PipelineDraftService(
             // branch, whose guard decides.
         }
         val created = pipelines.createDraft(workspaceId, pipelineId, canonical, expectedHash, actor)
+        if (created?.status == PipelineVersionStatus.RELEASED) {
+            // A no-op write (versioning §5.1): the incoming body already equals the
+            // released one, so no draft was created and no version number was consumed.
+            // The response shows the current state — RELEASED, no draft — rather than
+            // making the caller infer it from an absence. The stored body (not the
+            // incoming canonical) is what the row actually says.
+            val storedBody =
+                checkNotNull(pipelines.findVersionBody(workspaceId, pipelineId, created.version)) {
+                    "no-op draft create reported released version ${created.version} of $pipelineId, but its body is gone"
+                }
+            return DraftWrite(record, created, storedBody)
+        }
         return if (created != null) {
             DraftWrite(record, created, canonical)
         } else {

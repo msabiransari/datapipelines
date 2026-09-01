@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
@@ -134,7 +135,9 @@ class PipelinesController(
      * §5.5 — update, writing the DRAFT branch (versioning §5.1/§5.2): the first write after a
      * release copies the released version to a draft; later writes overwrite that draft in
      * place. Requires the `If-Match` hash precondition; the response carries the draft's
-     * `version`, `status: "DRAFT"` and `body_hash`.
+     * `version`, `status: "DRAFT"` and `body_hash`. A PUT whose body is identical to the
+     * released one is a NO-OP (versioning §5.1): no draft is created and the response
+     * reports the current state — `status: "RELEASED"`, no draft pointer.
      */
     @PutMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -158,8 +161,16 @@ class PipelinesController(
                 expectedHash = expectedHash,
                 actor = principal.userId,
             )
-        val draft = pipelines.findDraftDetail(workspaceId, id) ?: written.version
-        return ApiResponse.of(PipelineResponses.full(written.record, canonical, written.version, draft))
+        // A no-op write (written.version.status == RELEASED, versioning §5.1) reports the
+        // current state and must NOT carry a draft pointer: the usual `?: written.version`
+        // fallback would paint a "draft" pointer onto the released row it just reported.
+        val draft =
+            if (written.version.status == PipelineVersionStatus.RELEASED) {
+                null
+            } else {
+                pipelines.findDraftDetail(workspaceId, id) ?: written.version
+            }
+        return ApiResponse.of(PipelineResponses.full(written.record, written.bodyJson, written.version, draft))
     }
 
     /**

@@ -191,6 +191,29 @@ class PipelinesControllerTest {
     }
 
     @Test
+    fun `a no-op update answers with the current RELEASED state and no draft pointer`() {
+        authenticate()
+        val body =
+            """{"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue",""" +
+                """"description":"d","parameters":{},"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        val storedBody = """{"schema_version":1,"name":"monthly_revenue"}"""
+        // versioning §5.1: identical body ⇒ the service returns the RELEASED detail and
+        // the STORED body; the response must say so plainly — not a 4xx, not a draft.
+        every { drafts.write(any(), pipelineId, any(), any(), "hash-v1", userId) } returns
+            PipelineDraftService.DraftWrite(record, releasedDetail, storedBody)
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+
+        val data = controller.update(pipelineId, "hash-v1", body).data
+
+        data.get("version").asInt() shouldBe 1
+        data.get("status").asText() shouldBe "RELEASED"
+        data.get("body_hash").asText() shouldBe "hash-v1"
+        data.get("current_version").asInt() shouldBe 1
+        data.has("draft") shouldBe false
+    }
+
+    @Test
     fun `release requires If-Match and delegates to the release service`() {
         authenticate()
         shouldThrow<ApiException> { controller.release(pipelineId, null) }.details["reason"] shouldBe "precondition_missing"
