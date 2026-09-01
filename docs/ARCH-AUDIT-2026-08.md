@@ -69,6 +69,10 @@ by `ExecutionDrainLifecycleTest`), then `cancelAllLocal()`, then a bounded flush
 `executionScope.close()`. `server.shutdown: graceful` set in `application.yml`. **B3 confirmed:**
 `cancelAllLocal()` → `registry.cancelAll` → per-execution `cancel()` → `cancelStatements()` →
 JDBC `Statement.cancel()` — the drain reaches the source database, it is not a status flip.
+**Verified live (two-instance harness, `tests/integration-tests/multi-instance/`):** SIGTERM
+mid-`pg_sleep(300)` → row `ABORTED` at the first poll, ordered `shutdown.readiness_refused` →
+`shutdown.drain_cancelled` → `shutdown.drain_complete` in the logs, and the query gone from
+`pg_stat_activity` (the driver reported "canceling statement due to user request").
 
 ### M2 — Crash sweep implemented but never scheduled — CRITICAL **[verified]**
 **Evidence:** `ExecutionRepository.sweepStaleRunning(olderThan)` (`modules/dag/.../executor/ExecutionRepository.kt:362`) flips stale `RUNNING` rows to `ABORTED` with `pipeline.execution.instance_lost`. **Only test code calls it.** The config key it consumes (`datapipelines.executions.stale-timeout-minutes`, `application.yml:201`) is dead.
@@ -88,6 +92,9 @@ flag written in the window expires by TTL. **Sibling finding reported (not fixed
 `ExecutionEventRepository.deleteOlderThan` (the `event-retention-days` retention job) has the
 exact same zero-callers shape and the audit did not flag it — scheduling deletes was beyond this
 round's brief; see the 036 handback.
+**Verified live (two-instance harness):** SIGKILL mid-execution → row stayed `RUNNING`, then the
+SURVIVING instance's sweep flipped it to `ABORTED` with `pipeline.execution.instance_lost` ~118s
+after start (staleness 1m + 60s cadence); the victim's logs carry zero `shutdown.*` lines.
 
 ### M3 — Datasource connection pools never expire cross-instance — CRITICAL **[verified]**
 **Evidence:** `modules/datasources/.../datasources/pooling/ConnectionPoolManager.kt:60,63` (note the `pooling` subpackage — an earlier revision of this line omitted it, and a grep on the shorter path finds nothing) — `pools` ConcurrentHashMap, `poolFor` = `computeIfAbsent` keyed by datasource name only; no TTL, no version check. Eviction happens only on the writing instance (`DefaultDatasourceRegistry.kt:130` update, `:150` delete).
