@@ -51,7 +51,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 15 tools, resources, prompts — a thin adapter over REST |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
-| [versioning.md](versioning.md) | v1.0 proposed | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
+| [versioning.md](versioning.md) | v1.1 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
 
 ### Operations
 
@@ -67,6 +67,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Deferred (v1.1/v2), rejected-with-reasoning, operator responsibilities — prevents re-litigation |
 | [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) | The 2026-08 consistency campaign: findings, ratified decisions D1–D15, per-doc resolutions |
+| [ARCH-AUDIT-2026-08.md](ARCH-AUDIT-2026-08.md) | Service-layer gap + multi-instance readiness audit (2026-08-31): findings M1–M10, S1–S5, drift list — pending review |
 | [../DEVELOPMENT.md](../DEVELOPMENT.md) | Developer setup: local infra, OIDC setup, build/run/test, git workflow |
 
 ## House rules (cross-cutting)

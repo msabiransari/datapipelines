@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.0 — proposed (pending review)
+**Status:** v1.1 — reviewed; §14 items 1–3 ratified 2026-08-31
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-08-31
@@ -125,10 +125,41 @@ must re-read and rebase.
 
 ### 3.5 What rides the draft vs. the release
 
-Pipeline-row metadata (`name`, `display_name`, `description` on `pipelines`) **rides the
-release**: a draft carries its own metadata in its row, the RELEASED row and the
-`pipelines` row keep the released values until lock. The editor shows draft metadata with a
-"pending release" affordance. (Flagged for reviewer confirmation — see §14.)
+`name`, `display_name` and `description` exist in two places, and that is deliberate — they
+are not two copies of one fact:
+
+- **`pipeline_versions.body_json` is the artifact.** The contract requires those fields
+  (§3.1) and environment-portability requires the body to stand alone (§2 principle 1): an
+  export bundle that did not describe its own pipeline could not be imported.
+- **The `pipelines` row is an INDEX over the artifact.** `UNIQUE (name)` needs a real
+  column; the list screens' search filters `PipelineRecord.name/displayName/description`
+  directly; every join reads the row without parsing JSONB.
+
+**Ratified 2026-08-31 — the row indexes the CURRENT RELEASED body.** Metadata edits ride
+the release: a draft carries its metadata in its own version row, and the `pipelines` row
+keeps the released values until lock. This is not a preference between two workable
+options. Populating the row from a draft would make it an index over a *mixture* — some
+rows describing released content, some describing unreleased edits, with nothing in the
+schema marking which — and every consumer of the row (search, list, name lookup) would
+silently inherit that ambiguity.
+
+The editor shows draft metadata with a "pending release" affordance; the list shows the
+released name until lock.
+
+**Draft-write-time uniqueness check (ratified, and the reason this is safe).** Because
+`UNIQUE (name)` lives on the row and the row is not updated until release, a draft rename
+to a taken name would otherwise fail only at Release — after the work is done. So a draft
+write that changes `name` validates it immediately:
+
+```sql
+SELECT 1 FROM pipelines
+ WHERE name = :newName AND workspace_id = :workspaceId AND id <> :thisPipelineId;
+```
+
+A hit is `pipeline.validation.duplicate_name` (409 — the existing code, no catalogue
+addition) at draft-write time. Uniqueness is checked AGAINST the index without being
+enforced FROM it, so the early failure costs nothing structurally. The release-time
+constraint remains as the backstop: it is the authority, this is the courtesy.
 
 ---
 
@@ -320,9 +351,23 @@ Drafts are executable — the editor's test loop depends on it (single-node run,
 run). Because a draft **is** a version row, the existing composite FK records the run
 against the real draft version number; nothing about the execution schema weakens.
 
-- `pipeline_executions` gains a `ran_draft BOOLEAN NOT NULL DEFAULT FALSE` snapshot, set at
-  execution time, so history distinguishes draft runs from released runs after the version
-  is later released (otherwise the distinction is lost when `status` flips).
+- **A draft run is DERIVED, not recorded (ratified 2026-08-31).** For an execution of
+  version *N*: it was a draft run when `started_at < released_at`, or when that version has
+  no `released_at` (still DRAFT, or DISCARDED). No schema column. The derivation is sound
+  because a version's lifecycle is one-way — RELEASED never returns to DRAFT (§3.1: a write
+  after release opens a NEW version), and numbers are never reused (§3.4), so each
+  `(pipeline_id, version)` has exactly one `released_at` to compare against.
+
+  **The precondition, stated because it is not obvious.** `started_at` is
+  **application-supplied**, not a database default: `ExecutionRepository` binds `:startedAt`
+  from the record (its INSERT names `started_at` explicitly). So this comparison spans two
+  clocks whenever the release and the execution are served by different instances. The
+  failure window is sub-second and either side of a release; the consequence is a history
+  LABEL, never execution behaviour, never promotion eligibility (§10.3 reads `status`, not
+  this derivation). **`released_at` must therefore be set by the database (`NOW()`) at
+  release**, so at most one of the two timestamps can drift. If a future requirement makes
+  the draft/released distinction load-bearing rather than informational, record it instead
+  of deriving it.
 - Draft executions appear in history with a draft marker; they are never promotable and
   never count as validation for release (the human decides that).
 
@@ -434,6 +479,42 @@ import service's combined `missing_datasources` report) rather than failing mid-
 
 ---
 
+### 10.6 The promotion-peer credential (ratified 2026-08-31)
+
+§10.1 says "base URL + API key". That is under-specified, and the gap is the reason
+promotion could not be built from this spec alone: **an API key in this system is
+workspace-pinned and user-owned**, and neither property is right for a deployment writing to
+another deployment. The machine-auth design note's fork F10 named this credential as unnamed;
+this section names it, and **this doc is its authority** — F10 defers here rather than
+re-deciding it.
+
+**Shape.**
+
+| Property | Value | Why |
+|---|---|---|
+| Ownership | A **service principal**, not an interactive user | It must survive the deactivation of whoever configured it. A user-owned key dies with its owner's account and takes the promotion path down with it. |
+| Backing row | A real `users` row, flagged non-interactive | Not a choice: `pipeline_versions.created_by` and `pipeline_executions.triggered_by` are `NOT NULL REFERENCES users(id)`. Imported rows need an actor, so the actor must exist. |
+| Login | Impossible — no password, no OIDC identity, no session mint | The row exists to satisfy the FK and to name the actor in history, never to authenticate a human. This is the boundary the credential-minting class (four findings to date) keeps testing. |
+| Scope | The import endpoint only | Not `MUTATE_PIPELINES_TEMPLATES`, which would let a leaked promotion key author freely on the receiver. Promotion writes one shape through one door. |
+| Direction | Held by the SENDER, accepted by the RECEIVER | The receiver never calls out; a compromised receiver cannot reach back into dev. |
+| Workspace | Bound to the target workspace on the receiver | Preserves workspace isolation across the promotion boundary. |
+
+**Consequences to accept deliberately:**
+
+- The receiver's history attributes every promoted version to the service principal, not to
+  the human who released it in dev. The released body carries its own `released_by`, so the
+  human is recoverable from the artifact — but the receiver's `created_by` is the promoter.
+- The sender stores a credential that can write to a higher environment. It belongs with the
+  deployment's other secrets, never in the pipeline body (§2 principle 1 forbids
+  env-specific values in the body, and this is exactly such a value).
+- Revocation is a receiver-side action, and it stops promotion without touching any human
+  account — which is the property a user-owned key could not give.
+
+**Not in scope here:** the credential's issuance UI, rotation schedule, and whether the same
+principal type later serves the application-execution case the machine-auth note describes.
+Those are that note's to settle once it is ratified; this section constrains only what
+promotion needs.
+
 ## 11. Schema Changes (Amendment for Implementation)
 
 [metadata-db.md](metadata-db.md) remains the sole DDL authority (its rule D4); these land
@@ -450,8 +531,10 @@ there at implementation time, in the same commit as the repositories:
 | `updated_by` | `UUID NULL` | Last draft writer — powers the 409 details. |
 | `updated_at` | `TIMESTAMPTZ NULL` | Draft rows only; RELEASED/DISCARDED stay NULL (the immutability note in metadata-db §4.5 is amended accordingly). |
 
-Plus: the two one-draft partial unique indexes (§3.3), and
-`pipeline_executions.ran_draft BOOLEAN NOT NULL DEFAULT FALSE` (§8).
+Plus the two one-draft partial unique indexes (§3.3). **No column is added to
+`pipeline_executions`** — §8 derives the draft/released distinction from `released_at`,
+which is why that column is specified as database-generated (`DEFAULT NOW()` at release)
+rather than application-supplied.
 
 The immutability KDoc blocks on both repositories are rewritten to the §3.1 discipline.
 
@@ -500,19 +583,28 @@ and the test goes red (a guard that cannot fail is not a guard).
 - **Draft retention jobs** — DISCARDED rows accumulate slowly (only executed-then-discarded
   drafts); a retention job is deferred until measured.
 
-## 14. Open Items for Review
+## 14. Ratified Decisions and Remaining Open Items
 
-1. §3.5 — pipeline-row metadata rides the release (draft shows its own metadata in the
-   editor; the `pipelines` row updates at lock). Alternative: metadata updates land
-   immediately on draft create. Recommend as written.
-2. §8 — `ran_draft` snapshot column vs. deriving from `released_at` comparison at read
-   time. Recommend the column (derivation breaks if a version is released, then a later
-   draft reuses… nothing — numbers are never reused — but the column is still the cheaper,
-   explicit record).
-3. §10.2 — the receiver inventory API shape (list with `(id, current_version, body_hash)`)
-   is named but not specified; rest-api.md owns it at implementation.
-4. Editor UX for the release action (button placement, "draft pending release" badge,
-   conflict reload flow) is pipeline-editor.md's next revision, not this doc's.
+Items 1–3 were **ratified by the operator on 2026-08-31** and are written into their
+sections; they are recorded here so a reader sees what was decided and why, without
+re-opening it.
+
+| # | Decision | Where | Reasoning that settled it |
+|---|---|---|---|
+| 1 | Metadata rides the release, plus a draft-write-time name-uniqueness check | §3.5 | The `pipelines` row is an INDEX over the current released body, not a second copy of the metadata — so indexing a draft would make it an index over a mixture. The early check removes the only real cost (a duplicate-name rename failing at Release rather than at the write). |
+| 2 | The promotion-peer credential is specified here, as a non-interactive service principal | §10.6 | §10.1's "API key" is workspace-pinned and user-owned; neither is right for one deployment writing to another. This doc is the credential's authority; the machine-auth note's F10 defers here. |
+| 3 | Draft runs are derived from `released_at`, not recorded in a column | §8 | The lifecycle is one-way and numbers are never reused, so the comparison is well-defined. Its precondition — `started_at` is application-supplied, so the comparison spans two clocks — is stated in §8, along with the requirement that `released_at` be database-generated. |
+
+**Remaining open, deliberately:**
+
+1. **The receiver inventory API shape.** §10.2 needs the target's per-pipeline
+   `(id, current_version, body_hash)`. `rest-api.md` owns the endpoint's shape at
+   implementation; this doc owns only what promotion needs from it.
+2. **Editor UX for the release action** — button placement, the "draft pending release"
+   badge, the conflict-reload flow. `pipeline-editor.md`'s next revision, not this doc's.
+3. **Whether the §10.6 service principal later serves the application-execution case** the
+   machine-auth note describes. That note settles it once ratified; §10.6 constrains only
+   promotion.
 
 ---
 
@@ -520,5 +612,6 @@ and the test goes red (a guard that cannot fail is not a guard).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-31 | v1.1 | operator ratification | §14's first three open items decided and written into their sections. §3.5 rewritten: the `pipelines` row is an INDEX over the current released body — the metadata is not duplicated, one side is the artifact and the other is how you find it — so metadata rides the release by definition rather than by preference, plus a draft-write-time uniqueness check reusing `pipeline.validation.duplicate_name` (no catalogue addition). New §10.6 specifies the promotion-peer credential as a non-interactive service principal, scoped to the import endpoint, backed by a real `users` row because `created_by`/`triggered_by` are NOT NULL FKs; this doc is its authority and the machine-auth note's F10 defers here. §8 drops the `ran_draft` column for derivation from `released_at`, with its cross-clock precondition stated (`started_at` is application-supplied) and `released_at` required to be database-generated. |
 | 2026-08-31 | v1.0 | orchestrator review | Review pass before commit. Corrected §3.4: the executions FK is `NO ACTION` (its declaration carries no `ON DELETE` clause), not `RESTRICT` — it blocks identically here, but an implementer reading the old wording would have written the wrong DDL. §12 now states the operational half of the drift coupling: catalogue rows and constants land in the SAME commit, because the drift test lives on `main` permanently. Also grouped the doc into `DocsCatalog` "Contracts" — 033's in-app docs index fails at init on an ungrouped doc, so the spec could not land without it. Verified against the tree: the import-renumbering defect (§9.1), `PipelineImportService.SERVER_FIELDS`, the executions composite FK, and the absence of `status`/`body_hash` today. |
 | 2026-08-31 | v1.0 | versioning design session | Initial spec: draft-in-version-table lifecycle (D1/D2), content-hash preconditions (D3), UI-only release (D4), version numbers as global identities + preserved-version import (D5), latest-released-only promotion with two-sided guards (D6/D7/D8). Records the verified import-renumbering defect as D5's rationale. |
