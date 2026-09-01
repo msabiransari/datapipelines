@@ -24,4 +24,8 @@ class UiConfig {
         userRepository: UserRepository,
         uiProperties: UiProperties,
     ): ThemeResolver = ThemeResolver(userRepository, uiProperties)
+
+    /** 033: the memoized in-product spec set (renders once at startup; see [DocsCatalog]). */
+    @Bean
+    fun docsCatalog(): DocsCatalog = DocsCatalog(javaClass.classLoader)
 }

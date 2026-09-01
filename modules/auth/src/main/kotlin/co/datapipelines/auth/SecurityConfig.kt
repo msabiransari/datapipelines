@@ -98,6 +98,16 @@ class SecurityConfig(
                     .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR)
                     .permitAll()
                     .requestMatchers(
+                        // 033: the marketing site owns `/` (owner decision 2026-08-31) —
+                        // public by design; the signed-in dashboard moved to /dashboard.
+                        // Constant content only (Decision 4): no DB access, defended by
+                        // cache headers — NO rate limiter (OPEN-ITEMS T46: the limiter
+                        // keys on remoteAddr, which is the LB's address behind the
+                        // documented deployment, so one client could 429 the homepage).
+                        "/",
+                        // 033: the marketing site's own assets (css/js/img). The design
+                        // system it references rides the already-public /vendor/** below.
+                        "/site/**",
                         "/health",
                         "/ready",
                         "/info",

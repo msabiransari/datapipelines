@@ -95,6 +95,16 @@ netty = "4.1.136.Final"
 
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
 duckdb-jdbc = "1.5.5.1"
+# commonmark: renders docs/*.md in-product at /docs (033). Latest stable on Maven
+# Central (verified 2026-08-31 against repo1.maven.org maven-metadata.xml —
+# 0.30.0, released 2026-08, active release line). ZERO compile/runtime deps
+# (its pom declares test-scoped only), so nothing transitive enters the build.
+# Extensions taken: gfm-tables (every spec doc carries pipe tables) and
+# gfm-strikethrough (auth.md §11's provider table strikes through the unsupported
+# Microsoft row — rendering the tildes literally would misrepresent the doc).
+# GFM task-list-items deliberately NOT taken: the one checklist (auth.md §13)
+# renders honestly as literal "- [ ]" without it.
+commonmark = "0.30.0"
 argon2-jvm = "2.12"
 jjwt = "0.13.0"
 mockk = "1.14.11"
@@ -180,6 +190,12 @@ jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 # --- Metrics / logging (BOM-managed) -----------------------------------------
 micrometer-core = { module = "io.micrometer:micrometer-core" }
 slf4j-api = { module = "org.slf4j:slf4j-api" }
+
+# --- Markdown rendering (033 docs-in-app; NOT BOM-managed) -------------------
+# Rationale and extension-selection notes are at the `commonmark` version pin.
+commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
+commonmark-ext-gfm-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-ext-gfm-strikethrough = { module = "org.commonmark:commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
 
 # --- MCP SDK — GATE G1 -------------------------------------------------------
 # RESOLVED 2026-08-07 against repo1.maven.org. The official Java MCP SDK is

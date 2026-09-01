@@ -98,7 +98,8 @@ class OidcSuccessHandler(
                     "active_workspace" to activeWorkspace?.name,
                 ),
         )
-        redirectStrategy.sendRedirect(request, response, "/")
+        // 033: the signed-in landing page moved to /dashboard (`/` is the public site).
+        redirectStrategy.sendRedirect(request, response, "/dashboard")
     }
 
     /**

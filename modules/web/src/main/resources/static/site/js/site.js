@@ -13,7 +13,7 @@
      as harmless belt-and-braces for dark.
      ------------------------------------------------------ */
   var STORAGE_KEY = 'dp-site-theme';
-  var THEME_DIR = 'assets/vendor/design-system/themes/';
+  var THEME_DIR = '/vendor/design-system/themes/';
   var MODES = ['auto', 'light', 'dark'];
   var themeLink = document.getElementById('dp-theme');
   var toggle = document.querySelector('[data-theme-toggle]');

@@ -29,7 +29,7 @@
   <nav class="app-nav">
     <div class="app-container app-nav-inner">
       <div class="app-nav-left">
-        <a class="app-brand" th:href="@{/}">datapipelines</a>
+        <a class="app-brand" th:href="@{/dashboard}">datapipelines</a>
         <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
               class="app-workspace-form">
           <label for="workspace-switcher" class="app-workspace-label">workspace</label>
@@ -44,8 +44,8 @@
         </form>
       </div>
       <div class="app-nav-links" th:if="${authenticated}">
-        <a th:href="@{/}" class="app-nav-link"
-           th:classappend="${currentPath != null and currentPath == '/'} ? 'active' : null">Dashboard</a>
+        <a th:href="@{/dashboard}" class="app-nav-link"
+           th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null">Dashboard</a>
         <a th:href="@{/pipelines}" class="app-nav-link"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null">Pipelines</a>
         <a th:href="@{/datasources}" class="app-nav-link"
@@ -58,6 +58,8 @@
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null">Workspaces</a>
         <a th:href="@{/settings}" class="app-nav-link"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/settings')} ? 'active' : null">Settings</a>
+        <a th:href="@{/docs}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null">Docs</a>
         <a th:href="@{/admin/users}" class="app-nav-link"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null">Admin</a>
         <form th:action="@{/logout}" method="post" class="app-logout-form">

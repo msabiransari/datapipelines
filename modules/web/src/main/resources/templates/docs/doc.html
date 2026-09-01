@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <link th:href="@{/css/docs.css}" rel="stylesheet">
+  <p style="margin-bottom: var(--gap-md);">
+    <a th:href="@{/docs}" style="color: var(--text-secondary); font-size: var(--text-sm);">&larr; Documentation</a>
+  </p>
+  <!-- 033/B1: th:utext — the rendered markdown is DATA. A "${" inside it (13 packaged docs
+       carry ${VAR} placeholders legitimately) is inserted literally; Thymeleaf never
+       evaluates it. Do NOT convert to an inline expression — see DocsController. -->
+  <article class="doc-body" th:utext="${docHtml}">rendered doc</article>
+</th:block>
+</html>

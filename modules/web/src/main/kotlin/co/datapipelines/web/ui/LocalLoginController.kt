@@ -74,7 +74,8 @@ class LocalLoginController(
                             "active_workspace" to activeWorkspace?.name,
                         ),
                 )
-                "redirect:/"
+                // 033: the signed-in landing page moved to /dashboard (`/` is the public site).
+                "redirect:/dashboard"
             }
 
             // Unknown email, OIDC-only account and wrong password all land here — the

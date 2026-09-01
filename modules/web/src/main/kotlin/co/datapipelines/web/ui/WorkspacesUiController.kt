@@ -144,7 +144,8 @@ class WorkspacesUiController(
             val target = workspaceService.resolveSwitch(principal, name.trim())
             val user = userService.snapshot(principal.userId) ?: return "redirect:/workspaces?error=unknown_user"
             response.addCookie(sessionCookie(jwtService.issue(user, target.name), authProperties))
-            "redirect:/"
+            // 033: the signed-in landing page moved to /dashboard (`/` is the public site).
+            "redirect:/dashboard"
         } catch (_: AuthException) {
             "redirect:/workspaces?error=switch_refused"
         }

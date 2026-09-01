@@ -53,7 +53,7 @@ against the code by drift tests. Start with:
 - [`docs/rest-api.md`](docs/rest-api.md) — REST surface
 - [`docs/auth.md`](docs/auth.md) — authentication and the scope matrix
 
-The marketing site lives in [`website/`](website/) — static HTML/CSS, deployable to any static host.
+The marketing site is served by the app itself at `/` (template and assets under `modules/web/src/main/resources/{templates/site,static/site}`), and the spec set renders in-product at `/docs` for signed-in users — see [`docs/deployment.md`](docs/deployment.md) for the static-export fallback.
 
 ## Using, deploying, contributing
 

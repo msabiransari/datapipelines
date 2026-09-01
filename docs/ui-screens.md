@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.14
+**Status:** v1.15
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-08-07
@@ -109,7 +109,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 
 | Attribute | Value |
 |---|---|
-| URL | `GET /` |
+| URL | `GET /dashboard` |
 | Auth required | Yes (`read`) |
 | Purpose | Landing page — overview of recent activity |
 | Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
@@ -332,6 +332,32 @@ The **switcher in the navbar** (§3) drives the active workspace; the screen's S
 
 Content: current / new / confirm fields with the policy floor stated inline (at least 12 characters, [Auth §5A.5](auth.md#5a5-enumeration-resistance-and-the-password-policy)). A `must_change_password` user additionally sees the one-time-password warning banner — every other route redirects here until the change succeeds ([Auth §5A.4](auth.md#5a4-forced-password-change)). An account without a local password (OIDC-only) sees an explanatory note instead of the form. Success is a §5.1 toast (Shape B); failure outcomes are field-level/credential validation and stay INLINE in `#password-change-result` — wrong current password, policy violation, confirmation mismatch — delivered by the screen's own `htmx:responseError` listener, because htmx never swaps 4xx and these refusals deliberately carry no `HX-Retarget` (this is the one screen where Shape B and inline errors coexist); the forced-change gate releases on the next navigation.
 
+### 4.15 Marketing site (public)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /` |
+| Auth required | No — the one public page (with `/site/**` assets); everything else defaults to authenticated |
+| Purpose | The product marketing page — hero, how-it-works, screenshots, security, roadmap |
+| Design primitives | The vendored design system via `/vendor/design-system/**` (the same copy the app serves; the retired `website/` directory carried a second vendored copy) |
+| JS | `static/site/js/site.js` — theme toggle + copy-to-clipboard only; fully readable without it |
+| htmx | No |
+
+Content: a single static page (`templates/site/index.html` + `static/site/**`), served by the app since v1.15 — the marketing site and the product are one deployment (owner decision 2026-08-31). The only dynamic fact, the MCP tool count, is baked at render time from `McpToolCatalog` (a compile-time constant — no DB access on any public route). Defence is `Cache-Control: public` on both `/` and `/site/**`, deliberately NOT the login rate limiter (OPEN-ITEMS T46: its `remoteAddr` key is the load balancer's address behind the documented deployment, so a limiter would let one client 429 the homepage). Signed-in users hitting `/` get the marketing page too — no auto-redirect; the dashboard is one nav link away at `/dashboard`. Emergency static fallback: `./gradlew :modules:web:websiteExport` renders the same template with facts baked ([Deployment §6.7](deployment.md#67-marketing-site--in-product-docs)).
+
+### 4.16 Documentation (in-product)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /docs` (grouped index), `GET /docs/{slug}` |
+| Auth required | Yes — session only (no API-key access; docs are a human surface) |
+| Purpose | The operations manual and spec set for the version being run — packaged into the jar, so the docs can never describe a different server |
+| Design primitives | `.ds-card` (index); `.doc-body` typography from `static/css/docs.css` (token-derived) |
+| JS | None |
+| htmx | No |
+
+Content: the packaged `docs/*.md` set (the exclusion policy — `docs/superpowers/`, `semantic-layer-research.md`, `SPEC-REVIEW-2026-08.md` — lives in `modules/web/build.gradle.kts`), grouped Operations manual / Contracts / Reference, rendered to HTML once at startup. Relative links resolve in-app to `/docs/{slug}` or rewrite to their canonical GitHub URL; heading anchors use the same slug algorithm `scripts/docs-audit.sh` validates against. Rendered markdown is inserted as data (`th:utext`) — `${...}` placeholders in config examples display verbatim.
+
 ---
 
 ## 5. htmx Usage Pattern
@@ -467,6 +493,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-31 | v1.15 | website + docs in-app (033) | §4.2 Dashboard moved from `/` to `GET /dashboard` — `/` is now the public marketing site (new §4.15, app-served, cache-defended per OPEN-ITEMS T46, no rate limiter); new §4.16 Documentation — the packaged spec set rendered in-product at `/docs` (session-only), with the §A link-rewrite rule (packaged slug or canonical GitHub URL, never a dead relative href) and `th:utext` doc-body insertion. Navbar gains the Docs entry; error pages and login/workspace-switch redirects point at `/dashboard`. The root `README.md` website pointer and the `website/` directory are gone (the app's vendored design system is the single copy). |
 | 2026-08-05 | v1.0 | initial draft | UI screens inventory: 12 screens (login, dashboard, pipeline list/editor, datasource list, template list/editor, execution history/detail, API keys, user settings, admin users), htmx patterns, error pages |
 | 2026-08-07 | v1.1 | consistency campaign | Per [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) §2.12: route convention §2.1 (pages / `/partials/**` / `/api/v1/**`, htmx never calls the JSON API) and all `hx-*` endpoints re-pointed at `/partials/**` incl. §4.10 API keys [1]; template-editor context form replaced with free-form key-value/JSON input — templates no longer declare variables [1b, D3]; §5 htmx example fixed (`hx-include` + `th:attr` `hx-vals` instead of `${q}` interpolation) [2]; §4 scope column declared a view of the authoritative [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative) matrix, datasource test corrected to `author`, key scopes ⊆ creator's scopes [3, D15]; §4.11 theme preference persisted on the `users` row via `PATCH /partials/profile/theme`, not session state [4]; §4.11 provider badge renders the configured provider `display-name` [5]; §4.9 result panel rebuilt on the uniform cursor with the TTL-expired state and `format`-parameter downloads [6, D9]; new §5.1 standard states (empty / loading via `hx-indicator` / errors via the `response-targets` extension into `#toast`) [7]; CSRF via `dp_csrf` cookie + `DP-CSRF-Token` header wired in the layout [D10] |
 | 2026-08-28 | v1.9 | workspaces surfaces slice | New **§4.13 Workspaces** screen (create per mode, open-join, owned-workspace member management, switch) + navbar **workspace switcher** (§3: POST /workspace/switch re-stamps the session claim; hx-headers carries DP-Workspace for partials). §4.5 datasource list re-grounded: workspace-scoped listing, workspace/readonly columns, register modal with the D8-gated `global` (admin-only, visible-disabled) and `readonly` checkboxes, Register hidden for gated-off members. |

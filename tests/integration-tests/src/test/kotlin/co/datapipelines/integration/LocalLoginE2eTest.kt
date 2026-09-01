@@ -72,14 +72,14 @@ class LocalLoginE2eTest {
         val response = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
 
         response.statusCode shouldBe 302
-        response.location shouldBe "http://localhost:$port/"
+        response.location shouldBe "http://localhost:$port/dashboard"
         val session = response.sessionCookie()
         // The session a local login mints authenticates exactly like an OIDC one.
         given()
             .port(port)
             .cookie("dp_session", session)
             .`when`()
-            .get("/")
+            .get("/dashboard")
             .then()
             .statusCode(200)
 

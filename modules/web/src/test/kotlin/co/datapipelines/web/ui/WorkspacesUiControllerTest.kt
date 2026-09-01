@@ -285,7 +285,7 @@ class WorkspacesUiControllerTest {
         every { jwtService.issue(user, "globex") } returns "fresh-jwt"
 
         val response = MockHttpServletResponse()
-        controller.switch(response, "globex") shouldBe "redirect:/"
+        controller.switch(response, "globex") shouldBe "redirect:/dashboard"
         response.getCookie("dp_session")?.value shouldBe "fresh-jwt"
 
         every { workspaceService.resolveSwitch(principal, "rival") } throws WorkspaceMembershipRequiredException()

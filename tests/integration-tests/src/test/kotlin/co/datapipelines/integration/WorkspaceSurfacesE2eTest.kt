@@ -465,7 +465,7 @@ class WorkspaceSurfacesE2eTest {
             .post("/workspace/switch?name=acme")
             .then()
             .statusCode(302)
-            .header("Location", Matchers.endsWith("/"))
+            .header("Location", Matchers.endsWith("/dashboard"))
 
         val cookie =
             given()

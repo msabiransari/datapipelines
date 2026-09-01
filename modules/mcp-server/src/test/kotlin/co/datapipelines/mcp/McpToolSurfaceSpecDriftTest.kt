@@ -1,24 +1,9 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.AuditLogger
-import co.datapipelines.datasources.DatasourceRegistry
-import co.datapipelines.datasources.SchemaIntrospector
-import co.datapipelines.executor.ExecutionRepository
-import co.datapipelines.executor.PipelineExecutor
-import co.datapipelines.executor.ResultStore
-import co.datapipelines.executor.ResultUrlFactory
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
-import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.WorkspaceTemplateEngines
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
-import io.mockk.mockk
 import io.modelcontextprotocol.json.McpJsonDefaults
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
@@ -39,7 +24,11 @@ import org.junit.jupiter.api.assertAll
  */
 class McpToolSurfaceSpecDriftTest {
     private val spec = SpecFiles.read(SpecFiles.MCP_SPEC_PATH)
-    private val tools = shippedTools().associateBy { it.name }
+
+    // 033/C3: the REAL bean method's output (see RealShippedTools.kt) — not the hand-built
+    // fixture this class used to keep, whose "built exactly as the autoconfiguration builds
+    // it" comment was a claim, not a constraint.
+    private val tools = realShippedTools().associateBy { it.name }
 
     /**
      * The one tool §6.2 documents in prose instead of a JSON block ("Same input as
@@ -57,7 +46,10 @@ class McpToolSurfaceSpecDriftTest {
                 .toList()
 
         assertAll(
-            { listed.size shouldBe 18 },
+            // 033/C3: the count comes from the catalog, not a hardcoded 18 — a 19th tool
+            // shipped without a spec row turns the names assertion red, and a spec row
+            // without a tool turns the catalog binding red (McpToolCatalogBindingTest).
+            { listed.size shouldBe McpToolCatalog.NAMES.size },
             { tools.keys shouldContainExactlyInAnyOrder listed },
         )
     }
@@ -141,36 +133,4 @@ class McpToolSurfaceSpecDriftTest {
             .replace("{execution_id}", McpFixtures.EXECUTION_ID.toString())
             .replace("{version}", "2")
             .replace("{name}", "pg-prod")
-
-    /** The production tool list, built exactly as the autoconfiguration builds it. */
-    private fun shippedTools(): List<McpTool> {
-        val pipelines = mockk<PipelineRepository>()
-        val templates = mockk<TemplateRepository>()
-        val datasources = mockk<DatasourceRegistry>()
-        val executions = mockk<ExecutionRepository>()
-        val resultStore = mockk<ResultStore>()
-        val urls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
-        val deserializer = PipelineDeserializer()
-        val introspector = mockk<SchemaIntrospector>()
-        return listOf(
-            PipelinesListTool(pipelines),
-            PipelinesGetTool(pipelines),
-            PipelineExecuteTool(pipelines, mockk<PipelineExecutor>(), resultStore, urls, deserializer),
-            PipelinesCreateTool(pipelines, deserializer, mockk<PipelineValidator>(), PipelineSerializer()),
-            PipelinesUpdateTool(pipelines, deserializer, mockk<PipelineValidator>(), PipelineSerializer()),
-            TemplatesListTool(templates),
-            TemplatesGetTool(templates),
-            TemplatesCreateTool(templates, mockk<TemplateValidator>()),
-            TemplatesRenderTool(templates, mockk<WorkspaceTemplateEngines>()),
-            DatasourcesListTool(datasources),
-            DatasourcesGetTool(datasources),
-            DatasourcesTestTool(datasources),
-            DatasourcesGetSchemasTool(introspector, datasources),
-            DatasourcesGetTablesTool(introspector, datasources),
-            DatasourcesGetColumnsTool(introspector, datasources),
-            ExecutionsListTool(executions),
-            ExecutionsGetTool(executions),
-            ExecutionsGetResultTool(executions, resultStore, urls),
-        ).also { mockk<AuditLogger>(relaxed = true) }
-    }
 }
