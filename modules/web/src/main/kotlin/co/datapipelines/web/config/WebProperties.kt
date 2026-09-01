@@ -119,3 +119,22 @@ data class StagingH2Properties(
 data class IdempotencyProperties(
     val ttlSeconds: Long = 86_400,
 )
+
+/**
+ * The `datapipelines.executions.*` keys ([Configuration §3.11](../../../../../../../docs/configuration.md)).
+ *
+ * Only the key running code reads is bound. (`event-retention-days` is deliberately NOT bound
+ * here: `ExecutionEventRepository.deleteOlderThan` has no production caller either — an
+ * unscheduled retention job of the exact M2 shape, reported in the 036 handback rather than
+ * silently wired in this round.) The default MUST equal configuration.md §3.11 —
+ * `WebPropertiesSpecDriftTest` fails the build on any divergence.
+ */
+@ConfigurationProperties(prefix = "datapipelines.executions")
+data class ExecutionsProperties(
+    /** `stale-timeout-minutes` — a `RUNNING` row older than this belongs to a dead instance. */
+    val staleTimeoutMinutes: Long = 60,
+) {
+    init {
+        require(staleTimeoutMinutes > 0) { "datapipelines.executions.stale-timeout-minutes must be > 0" }
+    }
+}

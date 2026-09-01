@@ -77,6 +77,12 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.idempotency.ttl-seconds") shouldBe IdempotencyProperties().ttlSeconds.toString()
     }
 
+    @Test
+    fun `executions property defaults match configuration-md section 3-11`() {
+        val props = ExecutionsProperties()
+        documented.getValue("datapipelines.executions.stale-timeout-minutes") shouldBe props.staleTimeoutMinutes.toString()
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables

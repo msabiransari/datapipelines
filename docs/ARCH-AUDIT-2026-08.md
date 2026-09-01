@@ -76,6 +76,19 @@ JDBC `Statement.cancel()` — the drain reaches the source database, it is not a
 **Proposed fix:** a `@Scheduled` sweeper (would be the first in the codebase). The `UPDATE … WHERE status='RUNNING' AND started_at < :t` is naturally idempotent — all N replicas may run it without leader election.
 **Verification:** code-read.
 
+**[resolved — 036, branch `fix/multi-instance`]** dag's `StaleExecutionSweeper` (KDoc carries the
+no-leader-election reasoning) + `web`'s `SweepSchedulingConfiguration` — the project's first and
+only `@EnableScheduling`, `@Scheduled` fixed-delay 60s, default single-thread scheduler; cadence
+deliberately a code constant, not a new config key. `datapipelines.executions.stale-timeout-minutes`
+is now bound (`ExecutionsProperties`, drift-guarded). The NOT-list entry is updated above and
+module-structure §5.6 records the new lifecycle surface. **C3 (the DELETE-on-stale-row no-op):**
+fixed **by construction** — the row reaches `ABORTED` at the next tick, after which the same
+DELETE is refused `pipeline.execution.not_running` instead of returning the lying 204; the Redis
+flag written in the window expires by TTL. **Sibling finding reported (not fixed):**
+`ExecutionEventRepository.deleteOlderThan` (the `event-retention-days` retention job) has the
+exact same zero-callers shape and the audit did not flag it — scheduling deletes was beyond this
+round's brief; see the 036 handback.
+
 ### M3 — Datasource connection pools never expire cross-instance — CRITICAL **[verified]**
 **Evidence:** `modules/datasources/.../datasources/pooling/ConnectionPoolManager.kt:60,63` (note the `pooling` subpackage — an earlier revision of this line omitted it, and a grep on the shorter path finds nothing) — `pools` ConcurrentHashMap, `poolFor` = `computeIfAbsent` keyed by datasource name only; no TTL, no version check. Eviction happens only on the writing instance (`DefaultDatasourceRegistry.kt:130` update, `:150` delete).
 **Failure mode:** operator repoints a datasource or rotates its password via instance A. Instance B's `DatasourceMetadataCache` TTL-expires after 60s and serves fresh metadata — but every execution on B still leases from the **old Hikari pool** (old URL, old credentials) **until B restarts**. If old credentials are invalidated: permanent execution failures on B. If the old host stays up: B silently reads/writes the wrong database. A soft-deleted datasource keeps serving queries on B indefinitely. This defeats the TTL design's own DS-SEC-15 reasoning — the pool layer reintroduces unbounded staleness the metadata layer explicitly bounded.
@@ -159,7 +172,7 @@ corrected, and `deploy/helm/` made real with a minimal chart (Deployment/Service
 - **MCP transport** — `HttpServletStatelessServerTransport` (`McpServerFactory.kt:67`), no session state.
 - **JWT/OAuth2 login** — stateless HS256 shared secret; encrypted-cookie OAuth2 state; instance-agnostic.
 - **Flyway** — 11.7.2 with `flyway-database-postgresql`, in-app at startup; the lock table serializes concurrent instance startups.
-- **No `@Scheduled`/Quartz/`GlobalScope`/hand-rolled cron anywhere** (the M2 sweeper would be the first). Background threads are per-instance infrastructure, all properly closed.
+- ~~**No `@Scheduled`/Quartz/`GlobalScope`/hand-rolled cron anywhere**~~ **CHANGED 2026-09-01 (036, M2):** the codebase now has exactly ONE scheduled job — the crash sweep (`web`'s `SweepSchedulingConfiguration`, `@Scheduled` fixed-delay 60s over dag's `StaleExecutionSweeper`, default single-thread scheduler). It is deliberately lock-free (idempotent `UPDATE`; every replica may run it). `GlobalScope` and hand-rolled cron remain absent; any further scheduled job is a new lifecycle surface and belongs on the module-structure record (§5.6). Other background threads remain per-instance infrastructure, all properly closed.
 - **No filesystem writes** (no `MultipartFile` anywhere); bootstrap files are read-only mounts.
 - **In-process locks** (`H2Staging` Mutex, `SecretHasher` Semaphore, `PipelineExecutor` node-parallelism Semaphore) — local resource guards, none assume fleet-wide single-writer.
 - **No hostname/pod-identity assumptions**; only loopback binding is the management port (`application.yml:71`), deliberate.

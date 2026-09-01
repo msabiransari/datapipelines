@@ -55,6 +55,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     StagingH2Properties::class,
     IdempotencyProperties::class,
     PipelineProperties::class,
+    ExecutionsProperties::class,
 )
 class DomainConfiguration {
     @Bean
