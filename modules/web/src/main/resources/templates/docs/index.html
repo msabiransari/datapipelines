@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);">Documentation</h1>
+    <!-- 033: the docs ship in the jar — this index always matches the running version. -->
+    <p style="color: var(--text-secondary); font-size: var(--text-sm);">The operations manual and specifications for the version you are running.</p>
+  </div>
+
+  <section th:each="group : ${groups}" style="margin-bottom: var(--gap-lg);">
+    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);"
+        th:text="${group.name}">Group</h2>
+    <div class="ds-card">
+      <ul style="list-style: none; margin: 0; padding: 0;">
+        <li th:each="doc : ${group.docs}"
+            style="padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border-subtle);">
+          <a th:href="@{/docs/{slug}(slug=${doc.slug})}" th:text="${doc.title}">Doc</a>
+        </li>
+      </ul>
+    </div>
+  </section>
+</th:block>
+</html>

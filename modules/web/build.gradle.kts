@@ -26,6 +26,11 @@ dependencies {
     implementation(libs.spring.boot.starter.data.redis)
     implementation(libs.micrometer.core)
     implementation(libs.jackson.module.kotlin)
+    // 033: renders the packaged spec set (classpath:docs/*.md) at /docs. Extension
+    // selection justified at the version pin in libs.versions.toml.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
+    implementation(libs.commonmark.ext.gfm.strikethrough)
 
     // DEVIATION from §5.9's external-dep list, following the precedent `auth` and
     // `mcp-server` set, and reported to the orchestrator. All three are existing catalog
@@ -63,6 +68,22 @@ dependencies {
     // directly (spring-jdbc is a main dependency — see above).
     // Konsist architecture guard for the web layer (module-structure.md §7.8).
     testImplementation(libs.konsist)
+}
+
+// 033 — the spec set ships IN THE JAR: docs served in-product always describe the version
+// they run on (the round's structural argument). Packaged = root docs/*.md MINUS the
+// excluded set (owner decision: docs/superpowers/ is unshipped-work plans,
+// semantic-layer-research.md and SPEC-REVIEW-2026-08.md are research/contributor material).
+// The exclusion is what makes link rewriting mandatory (033 §A): packaged docs link to
+// non-packaged targets, and those links must not ship dead. DocsRenderer rewrites them to
+// canonical GitHub URLs; DocsRenderingTest asserts every relative link resolves one way or
+// the other. scripts/docs-audit.sh keeps guarding the source set — this copies, never edits.
+tasks.named<ProcessResources>("processResources") {
+    from(rootProject.layout.projectDirectory.dir("docs")) {
+        into("docs")
+        include("*.md")
+        exclude("semantic-layer-research.md", "SPEC-REVIEW-2026-08.md")
+    }
 }
 
 // 027b A/B/C+D — automated coverage for the pipeline-editor JS (the SSE frame
@@ -125,4 +146,30 @@ fun nodeVersion(node: File): String =
 
 tasks.named("check") {
     dependsOn("editorJsTest")
+}
+
+// 033 Decision 3 — S3 cold fallback for the marketing site. `websiteExport` renders
+// templates/site/index.html (the SAME template the app serves) with its facts baked, and
+// copies the assets the rendered page references, into build/website-export/ — ready for
+// an emergency `aws s3 sync` (procedure in docs/deployment.md). The renderer lives in the
+// test source set (SiteExportMain) because the offline Thymeleaf render needs spring-test's
+// mock web context; drop this block if the fallback rots unused.
+val websiteExportAssets =
+    tasks.register<Copy>("websiteExportAssets") {
+        group = "distribution"
+        description = "Copies the marketing site's assets into build/website-export (033 fallback)."
+        from("src/main/resources/static/site") { into("site") }
+        from("src/main/resources/static/vendor/design-system") { into("vendor/design-system") }
+        into(layout.buildDirectory.dir("website-export"))
+    }
+
+tasks.register<JavaExec>("websiteExport") {
+    group = "distribution"
+    description = "Renders the marketing site to static HTML + assets under build/website-export (033 S3 cold fallback)."
+    dependsOn("testClasses", websiteExportAssets)
+    mainClass.set("co.datapipelines.web.ui.SiteExportMainKt")
+    classpath = sourceSets["test"].runtimeClasspath
+    // Resolved in doFirst: a Provider passed through vararg `args` stringifies instead of unwrapping.
+    val outDir = layout.buildDirectory.dir("website-export")
+    doFirst { args(outDir.get().asFile.absolutePath) }
 }

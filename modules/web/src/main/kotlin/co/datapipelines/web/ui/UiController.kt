@@ -29,7 +29,9 @@ class UiController(
         return "login"
     }
 
-    @GetMapping("/")
+    // 033: `/` is the public marketing site (SiteController); the signed-in
+    // dashboard lives here. No auto-redirect from `/` — owner decision, 033 §E.
+    @GetMapping("/dashboard")
     fun dashboard(
         model: Model,
         request: HttpServletRequest,

@@ -73,7 +73,7 @@ class LocalAdminSeedE2eTest {
     /** (3) — the seeded credential logs in, and the §5A.4 gate engages immediately. */
     private fun assertGateEngaged(adminLogin: LoginResponse) {
         adminLogin.statusCode shouldBe 302
-        adminLogin.location shouldBe "http://localhost:$port/"
+        adminLogin.location shouldBe "http://localhost:$port/dashboard"
         val adminSession = adminLogin.sessionCookie()
 
         val gated = getNoFollow("/", adminSession)
@@ -109,7 +109,7 @@ class LocalAdminSeedE2eTest {
             .port(port)
             .cookie("dp_session", adminSession)
             .`when`()
-            .get("/")
+            .get("/dashboard")
             .then()
             .statusCode(200)
     }
@@ -143,7 +143,7 @@ class LocalAdminSeedE2eTest {
             .port(port)
             .cookie("dp_session", userSession)
             .`when`()
-            .get("/")
+            .get("/dashboard")
             .then()
             .statusCode(200)
     }

@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.2
+**Status:** v1.4
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-08-07
+**Last updated:** 2026-08-31
 
 ---
 
@@ -293,6 +293,26 @@ The 0.5 covers what the heap number does not: metaspace, code cache, thread stac
 **Servlet threads (MCP blocking calls).** An MCP `pipelines_execute` call ([MCP Server §6.2.3](mcp-server.md#623-pipelines_execute)) is a **single blocking HTTP request** that holds one servlet thread until the execution reaches a terminal state or `datapipelines.executor.execution-timeout-seconds` (default 600) elapses. Per-user concurrency is bounded (`max-concurrent-executions-per-user`, default 10) but the default Tomcat pool is 200 threads, so on the order of ~20 concurrent long-running MCP callers can saturate it and starve REST/UI traffic on the same instance for minutes. Size `server.tomcat.threads.max` at or above the expected count of simultaneously-blocking MCP executions plus normal REST concurrency, or isolate `/mcp` on its own connector/instance. This is in addition to raising proxy/LB idle timeouts above `execution-timeout-seconds` (MCP Server §6.2.3).
 
 **CPU.** Execution is coroutine-based and largely I/O-bound on source databases; 2 vCPU per instance is a reasonable floor. Scale out on `max-concurrent-executions-global` pressure, not CPU.
+
+### 6.7 Marketing site & in-product docs
+
+Since v1.4 the app serves the marketing site and the documentation itself — the site and the product are ONE deployment (owner decision 2026-08-31). There is no separate static deploy to keep available, and the docs shipped in the jar always match the version running them.
+
+- **`GET /`** — the marketing site (public). Template `templates/site/index.html`, assets under `static/site/**`, referencing the app's vendored design system at `/vendor/design-system/**` (the retired `website/` directory carried a second vendored copy — the app copy is now the single sync target of `scripts/sync-design-system.sh`). The only dynamic fact (the MCP tool count) is a compile-time constant baked at render time; public routes touch no database.
+- **`GET /dashboard`** — the signed-in dashboard, moved off `/`. There is no auto-redirect: signed-in users hitting `/` get the marketing page.
+- **`GET /docs`** — the packaged spec set (`docs/*.md` minus the contributor/research exclusions, packaged by `processResources` in `modules/web/build.gradle.kts`), session-authenticated. Public doc access remains the GitHub repo.
+- **Public-surface defence is cache headers, not a rate limiter.** `/` is `Cache-Control: public, max-age=300`; `/site/**` is public with a 1-hour TTL plus `Last-Modified` revalidation. The login rate limiter is deliberately NOT applied here: it keys on `remoteAddr`, which behind the LB patterns of §6.2/§6.4 is the load balancer's address — one client could 429 the whole anonymous surface (OPEN-ITEMS T46, awaiting its owner decision on forwarded-header trust).
+- **Allowlist.** `/` and `/site/**` join the `permitAll` list in `SecurityConfig` with their reasons inline; nothing else was widened.
+
+**S3/CloudFront cold fallback (kept, drop if it rots unused).** If the app is down but marketing must stay up, the same template renders to static files with facts baked:
+
+```bash
+./gradlew :modules:web:websiteExport          # → modules/web/build/website-export/
+aws s3 sync modules/web/build/website-export/ s3://YOUR-BUCKET/ --delete
+aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
+```
+
+The export renders `/`-rooted links (`/site/...`, `/vendor/design-system/...`), which the bucket layout mirrors exactly — upload the CONTENTS of `website-export/`, not the folder. S3 static website hosting (or CloudFront with an origin access control) serves `index.html` as the index document. Nothing fingerprinted: keep TTLs short for `index.html` and longer for `vendor/**` (those files change only when the design system is re-vendored). This is an emergency procedure, not a second primary deploy — the app is the primary.
 
 ---
 
@@ -666,6 +686,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-08-31 | v1.4 | website + docs in-app (033) | New §6.7: the app serves the marketing site (`/`, public) and the packaged spec set (`/docs`, session-only); the dashboard moved to `/dashboard`; the standalone `website/` static deploy retires to the `websiteExport` cold-fallback procedure; public surface defended by cache headers, NOT the login rate limiter (OPEN-ITEMS T46). Header version corrected (v1.3's entry had not bumped it). |
 | 2026-08-05 | v1.0 draft | initial draft | Initial deployment spec sketch — Docker image, infra requirements, configuration, deployment patterns, upgrade/rollback, security checklist |
 | 2026-08-05 | v1.1 | horizontal scaling | Added multi-instance horizontal scaling section. Application is stateless for all CRUD/UI/MCP/auth. In-flight executions are instance-local (acceptable for short-running pipelines). No sticky sessions required. Added multi-instance checklist. Added LB idle-timeout + SSE heartbeat note. |
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.15](SPEC-REVIEW-2026-08.md#215-deploymentmd): §5 env-var tables replaced by the startup-requirements list + pointer to configuration.md; the inline-vs-claim-check threshold key (superseded by the D9 result keys) and every other key configuration.md does not define were deleted [D8]; §4.2 rewritten as the result store with required `maxmemory-policy noeviction` and a sizing model [D9]; §8.3.1/§8.3.2 graceful-shutdown mechanism (readiness fail → drain to `execution-timeout-seconds` → `cancelAll(shutdown)` → exit) with k8s `preStop` + `terminationGracePeriodSeconds`, accepted loss stated [D7]; §6.2 instance-local story updated to cancel-on-disconnect + cross-instance cancel via Redis flag [D7]; Appendix A compose made bootable (OIDC provider env vars, Redis password wired to `requirepass`, noeviction, mounted provider YAML); new §3.5 JDBC driver matrix (bundled vs `-Poracle`/`-Pmysql` vs `lib/` drop-in); new §6.6 resource sizing (heap, container limit, `-XX:MaxRAMPercentage`); `-Duser.timezone=UTC` made normative in the image and bare-JVM entrypoints ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)); §6.2 diagram residue and §11 malformed bullet fixed |

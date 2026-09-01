@@ -83,7 +83,7 @@ class JarSmokeE2eTest {
 
     @Test
     fun `the dashboard and both partials render from the jar`() {
-        get("/").second shouldBe 200
+        get("/dashboard").second shouldBe 200
         // B2: the partials are fetched by the page's hx-gets — assert them directly.
         val stats = get("/partials/dashboard-stats")
         stats.second shouldBe 200

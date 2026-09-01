@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,19 +10,19 @@
   <meta property="og:url" content="https://datapipelines.co/">
   <meta property="og:title" content="datapipelines.co — Agent-native Data Pipelines">
   <meta property="og:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
-  <meta property="og:image" content="https://datapipelines.co/assets/img/execution-result.png">
+  <meta property="og:image" content="https://datapipelines.co/site/img/execution-result.png">
   <meta property="og:image:width" content="1440">
   <meta property="og:image:height" content="1000">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="datapipelines.co — Agent-native Data Pipelines">
   <meta name="twitter:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
-  <meta name="twitter:image" content="https://datapipelines.co/assets/img/execution-result.png">
+  <meta name="twitter:image" content="https://datapipelines.co/site/img/execution-result.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20width='24'%20height='24'%20rx='5'%20fill='black'/%3E%3Ccircle%20cx='7'%20cy='12'%20r='2'%20fill='white'/%3E%3Ccircle%20cx='17'%20cy='7'%20r='2'%20fill='white'/%3E%3Ccircle%20cx='17'%20cy='17'%20r='2'%20fill='white'/%3E%3Cpath%20d='M8.6%2010.9%2015.4%207.9M8.6%2013.1l6.8%203' %20stroke='white'%20stroke-width='1.6'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="assets/vendor/design-system/tokens.css">
-  <link rel="stylesheet" href="assets/vendor/design-system/base.css">
-  <link rel="stylesheet" href="assets/vendor/design-system/motion.css">
-  <link id="dp-theme" rel="stylesheet" href="assets/vendor/design-system/themes/auto.css">
-  <link rel="stylesheet" href="assets/css/site.css">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/tokens.css}">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/base.css}">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/motion.css}">
+  <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}">
+  <link rel="stylesheet" th:href="@{/site/css/site.css}">
 </head>
 <body id="top">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -46,6 +46,7 @@
         <a href="#security">Security</a>
         <a href="#roadmap">Roadmap</a>
         <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
+        <a class="nav-github" th:href="@{/login}">Sign in</a>
       </nav>
       <details class="nav-mobile">
         <summary aria-label="Open menu">
@@ -60,6 +61,7 @@
           <a href="#security">Security</a>
           <a href="#roadmap">Roadmap</a>
           <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
+          <a th:href="@{/login}">Sign in</a>
         </nav>
       </details>
     </div>
@@ -91,7 +93,7 @@
         </div>
         <figure class="hero-shot ds-animate-fade-in">
           <!-- screenshot: execution detail of a real SUCCESS run of the seeded rainy_vs_dry_ridership pipeline, triggered over REST with an API key (untouched capture) -->
-          <img src="assets/img/execution-result.png" width="1440" height="1000" alt="Execution detail for the seeded rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
+          <img th:src="@{/site/img/execution-result.png}" width="1440" height="1000" alt="Execution detail for the seeded rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
           <figcaption>A real SUCCESS execution, triggered over REST with an API key — exactly the agent flow. Rows included, so the agent can check its own work.</figcaption>
         </figure>
       </div>
@@ -118,7 +120,7 @@
               <!-- claim: docs/mcp-server.md §4.1 -->
               <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
               <!-- claim: docs/mcp-server.md §6.2.1–6.2.18 -->
-              <p>Exactly 18 tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
+              <p>Exactly <span th:text="${toolCount}">18</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
             </li>
             <li>
               <h3>Author as a JSON contract</h3>
@@ -140,7 +142,7 @@
           <figure class="how-figure">
             <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
               <title id="flow-title">Agent-to-engine flow</title>
-              <desc id="flow-desc">An AI agent with a scoped API key talks to the /mcp endpoint (18 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (18 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
               <defs>
                 <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
@@ -154,7 +156,7 @@
               <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
 
               <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
-              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle">/mcp — 18 MCP tools</text>
+              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 18 MCP tools</text>
               <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
 
               <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>
@@ -419,14 +421,14 @@
           <figure class="shot">
             <!-- screenshot: pipeline editor rendering the DAG of the seeded revenue_by_borough pipeline (untouched capture) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Pipeline editor screenshot — scrolls horizontally on narrow screens">
-              <img src="assets/img/editor-light.png" width="1440" height="900" alt="The pipeline editor for revenue_by_borough: a settings and parameters panel on the left, and the pipeline DAG on the right — two staging nodes, stage_trips_monthly and stage_zones, both feeding the borough_revenue node, with the Execute button at top right." loading="lazy">
+              <img th:src="@{/site/img/editor-light.png}" width="1440" height="900" alt="The pipeline editor for revenue_by_borough: a settings and parameters panel on the left, and the pipeline DAG on the right — two staging nodes, stage_trips_monthly and stage_zones, both feeding the borough_revenue node, with the Execute button at top right." loading="lazy">
             </div>
             <figcaption>The pipeline editor — the seeded revenue_by_borough DAG, with settings and parameters. Untouched capture of the current build.</figcaption>
           </figure>
           <figure class="shot">
             <!-- screenshot: datasources page — the three seeded global+readonly demo datasources (SQLite reference, Postgres taxi, MySQL weather) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Datasources screenshot — scrolls horizontally on narrow screens">
-              <img src="assets/img/datasources.png" width="1440" height="900" alt="The datasources page listing the three seeded demo datasources — sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) — all global, all read-only, each with Test and View actions." loading="lazy">
+              <img th:src="@{/site/img/datasources.png}" width="1440" height="900" alt="The datasources page listing the three seeded demo datasources — sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) — all global, all read-only, each with Test and View actions." loading="lazy">
             </div>
             <figcaption>Datasources — three engines, one registry, governed read-only. Fewer charts than a BI tool, more honesty.</figcaption>
           </figure>
@@ -534,6 +536,6 @@
     </div>
   </footer>
 
-  <script src="assets/js/site.js"></script>
+  <script th:src="@{/site/js/site.js}"></script>
 </body>
 </html>

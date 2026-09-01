@@ -78,7 +78,7 @@ class OidcSuccessHandlerTest {
         cookie.getAttribute("SameSite") shouldBe "Lax"
         cookie.path shouldBe "/"
         cookie.maxAge shouldBe 8 * 3600
-        response.redirectedUrl shouldBe "/"
+        response.redirectedUrl shouldBe "/dashboard"
     }
 
     @Test

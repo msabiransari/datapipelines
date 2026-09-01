@@ -446,7 +446,7 @@ Identifier routing is a dialect property too ([DialectAdapter.schemaArrivesInCat
 
 Rules:
 
-- **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-api-v1-datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+- **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-apiv1datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
 - **Read-only by construction**: only `DatabaseMetaData` calls, no statements.
 - **`table` and `schema` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`. The escape applies only to the true pattern arguments (`schemaPattern`, `tableNamePattern`); the JDBC **catalog argument is a literal** ("must match the catalog name as it is stored") and is never escaped — an escaped catalog would match nothing for a MySQL database whose stored name carries `_`/`%`.
 - **An unknown table or schema filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
