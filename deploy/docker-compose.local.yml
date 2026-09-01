@@ -4,10 +4,13 @@
 #
 #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up -d
 #
+# The tag interpolates IMAGE_TAG (default the documented `datapipelines:local`):
+# app.sh exports a per-PROJECT tag for second isolated copies, so one lane's
+# rebuild cannot swap the image under another lane's running stack (034 F2).
 # Everything else — services, env contract, healthchecks, volumes — is the
 # production shape from docker-compose.yml, unchanged. Secrets still come from
 # deploy/.env (see .env.example).
 services:
   datapipelines:
-    image: datapipelines:local
+    image: ${IMAGE_TAG:-datapipelines:local}
     pull_policy: never

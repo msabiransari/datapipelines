@@ -327,12 +327,13 @@ class SchemaIntrospector(
     }
 
     /**
-     * The connection-failure family of a post-lease [SQLException]: SQLState class `08`
-     * (connection exception), the JDBC connection-exception subclasses,
-     * [java.sql.SQLRecoverableException] (whose subclasses include the connection-died-mid-read
-     * family some drivers raise), [java.sql.SQLTimeoutException] (extends SQLTransientException,
-     * not the connection family — but a dead network surfaces as exactly this shape), and the
-     * per-driver connection-loss knowledge — SQLite's null-state result codes, h2's 90xxx
+     * The connection-failure family of a post-lease [SQLException]: the named SQLState
+     * membership ([CONNECTION_FAILURE_SQLSTATE_CLASSES] plus [CONNECTION_FAILURE_SQLSTATES]),
+     * the JDBC connection-exception subclasses, [java.sql.SQLRecoverableException] (whose
+     * subclasses include the connection-died-mid-read family some drivers raise),
+     * [java.sql.SQLTimeoutException] (extends SQLTransientException, not the connection
+     * family — but a dead network surfaces as exactly this shape), and the per-driver
+     * connection-loss knowledge — SQLite's null-state result codes, h2's 90xxx
      * closed-connection codes, and the DuckDB/SQLite closed-connection lifecycle messages
      * (see the per-predicate KDocs for each driver's evidence). Everything else is NOT a
      * connection failure.
@@ -357,7 +358,8 @@ class SchemaIntrospector(
 
     /** The connection-family test for ONE exception, without chain inspection. */
     private fun SQLException.directlyIsConnectionFailure(): Boolean =
-        sqlState?.startsWith("08") == true ||
+        sqlState?.take(2) in CONNECTION_FAILURE_SQLSTATE_CLASSES ||
+            sqlState in CONNECTION_FAILURE_SQLSTATES ||
             this is java.sql.SQLTransientConnectionException ||
             this is java.sql.SQLNonTransientConnectionException ||
             this is java.sql.SQLRecoverableException ||
@@ -544,6 +546,31 @@ class SchemaIntrospector(
     }
 
     private companion object {
+        /**
+         * The SQLState membership of the connection-failure family — the predicate's
+         * contract as a VISIBLE NAMED SET (034 C2): five rounds each widened this
+         * classifier for the shapes they enumerated and missed the adjacent shape in the
+         * same predicate, so the family is a list now, and the next adjacent shape is a
+         * one-line addition here plus its pin in `SchemaIntrospectorCapAndLeaseTest`, not
+         * a sixth discovery.
+         *
+         * [CONNECTION_FAILURE_SQLSTATE_CLASSES] holds whole CLASSES (leading two
+         * characters) — today only `08`, the SQL standard's own connection-exception
+         * class. [CONNECTION_FAILURE_SQLSTATES] holds individual states whose class is
+         * NOT wholly connection-shaped: PostgreSQL's class-57 (operator intervention)
+         * shutdown states 57P01 (admin_shutdown), 57P02 (crash_shutdown), 57P03
+         * (cannot_connect_now) and 57P04 (database_shutdown, PG 16), which pgjdbc raises
+         * as PLAIN `PSQLException`s — a `pg_terminate_backend` or server shutdown
+         * mid-introspection used to fall through to the 400 "reports no current schema"
+         * branch instead of the 502 unreachable translation. The rest of class 57 is
+         * deliberately NOT in the family: 57014 (query_canceled) means the STATEMENT
+         * died and the connection is alive — pinned to `CurrentSchemaUnknownException`
+         * by `SchemaIntrospectorRoutingTest` (a class-wide "57" was the brief's first
+         * draft and broke exactly that pin).
+         */
+        val CONNECTION_FAILURE_SQLSTATE_CLASSES = setOf("08")
+        val CONNECTION_FAILURE_SQLSTATES = setOf("57P01", "57P02", "57P03", "57P04")
+
         /**
          * The §7A listing cap — bounds ONE introspection call's payload and walk, shared by the
          * tables and schemas listings (both hold the pooled lease while they iterate; on MySQL

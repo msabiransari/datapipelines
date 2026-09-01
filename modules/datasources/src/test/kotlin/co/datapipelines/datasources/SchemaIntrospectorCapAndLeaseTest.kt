@@ -168,6 +168,87 @@ class SchemaIntrospectorCapAndLeaseTest {
     }
 
     @Test
+    fun `the connection-failure SQLState family is exactly the named set`() {
+        // The SET is the contract now (034 C2): five rounds each widened this classifier for
+        // the shapes they enumerated and missed the adjacent shape in the same predicate. The
+        // family is pinned as a visible list — the next adjacent shape is a one-line addition
+        // HERE plus the same line in SchemaIntrospector's CONNECTION_FAILURE_SQLSTATE_CLASSES /
+        // CONNECTION_FAILURE_SQLSTATES, and this test is red until both exist.
+        // 08 = SQL-standard connection exception (whole class); 57P01-04 = the PostgreSQL
+        // operator-intervention SHUTDOWN states (raised by pgjdbc as PLAIN PSQLExceptions, so
+        // a plain SQLException is the faithful carrier). Class 57 is NOT wholly in the
+        // family — see the non-member test for 57014.
+        val family =
+            listOf(
+                // class 08 representative
+                "08001",
+                // the named shutdown states
+                "57P01",
+                "57P02",
+                "57P03",
+                "57P04",
+            )
+        assertAll(
+            family.map { representative ->
+                {
+                    val meta = mockk<DatabaseMetaData>()
+                    every { meta.searchStringEscape } returns "\\"
+                    every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                        SQLException("operator intervention", representative)
+                    val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                    shouldThrow<DatasourceUnreachableException> { introspector.tables(name) }
+                }
+            },
+        )
+    }
+
+    @Test
+    fun `every postgres class-57 shutdown state after the lease is the module's unreachable`() {
+        // The 034 instance of the recurrence: pg_terminate_backend / server shutdown during
+        // the query-backed getSchema() used to surface as 400 parameter_required "reports no
+        // current schema" instead of the 502 the unreachable translation exists to produce.
+        assertAll(
+            listOf("57P01", "57P02", "57P03", "57P04").map { shutdownState ->
+                {
+                    val meta = mockk<DatabaseMetaData>()
+                    every { meta.searchStringEscape } returns "\\"
+                    every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                        SQLException("terminating connection due to administrator command", shutdownState)
+                    val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                    shouldThrow<DatasourceUnreachableException> { introspector.tables(name) }
+                }
+            },
+        )
+    }
+
+    @Test
+    fun `SQLState classes OUTSIDE the named family after the lease propagate as defects`() {
+        // The other half of the set contract: widening is deliberate, never a side effect —
+        // adjacent non-member classes stay defects (0A feature-not-supported, 23 integrity,
+        // 42 syntax/undefined). "42" is the one a careless "any server error means down"
+        // would swallow: 42P01 (undefined table) is a REAL Postgres server error that must
+        // keep propagating. 57014 (query_canceled) is the class-57 sibling the shutdown
+        // states were nearly widened over: the STATEMENT died, the connection is alive —
+        // SchemaIntrospectorRoutingTest pins it to CurrentSchemaUnknownException at the
+        // getSchema() boundary, so here it must NOT read as a connection failure.
+        assertAll(
+            listOf("0A000", "23505", "42P01", "57014").map { state ->
+                {
+                    val meta = mockk<DatabaseMetaData>()
+                    every { meta.searchStringEscape } returns "\\"
+                    every { meta.getTables(null, null, "%", any<Array<String>>()) } throws
+                        SQLException("server error", state)
+                    val (introspector, name) = introspectorOver(Dialect.H2, meta)
+
+                    shouldThrow<SQLException> { introspector.tables(name) }
+                }
+            },
+        )
+    }
+
+    @Test
     fun `a SQLTimeoutException after the lease is the module's unreachable`() {
         // SQLTimeoutException extends SQLTransientException — NOT the connection-exception
         // family — yet a dead network surfaces as exactly this shape. Round 3: the timeout

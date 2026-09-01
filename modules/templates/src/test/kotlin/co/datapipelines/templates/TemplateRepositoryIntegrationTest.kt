@@ -264,6 +264,40 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `count is the list page's truthful total under the same filters`() {
+        // 034 E3: the pager's "of M" comes from this count, so it must agree with list()
+        // under EVERY filter combination — the two share one WHERE (LIST_WHERE) to make
+        // drift structural, and this test is the behavior proof of the sharing.
+        repository.create(workspaceId, draft(id = "a.sql"), actor)
+        repository.create(workspaceId, draft(id = "b.sql", dialect = Dialect.MYSQL), actor)
+        repository.create(
+            workspaceId,
+            TemplateDraft(
+                id = "rollup.sql",
+                dialect = Dialect.SQLITE,
+                displayName = "Revenue Rollup",
+                description = "Aggregates orders.",
+                imports = emptyList(),
+                body = "SELECT 1",
+                isLibrary = false,
+            ),
+            actor,
+        )
+        repository.create(workspaceId, draft(id = "gone.sql"), actor)
+        repository.softDelete(workspaceId, "gone.sql")
+
+        repository.count(workspaceId) shouldBe 3
+        repository.count(workspaceId, dialect = Dialect.MYSQL) shouldBe 1
+        repository.count(workspaceId, q = "rollup") shouldBe 1
+        repository.count(workspaceId, q = "sqlite") shouldBe 1 // the dialect column is searchable
+        repository.count(workspaceId, dialect = Dialect.SQLITE, q = "revenue") shouldBe 1
+        repository.count(workspaceId, q = "nothing-matches") shouldBe 0
+        // And the agreement itself: the count equals the unpaged list size, not page-size-capped.
+        repository.list(workspaceId, limit = 2).size shouldBe 2
+        repository.count(workspaceId) shouldBe repository.list(workspaceId, limit = 200).size
+    }
+
+    @Test
     fun `list pages with limit and offset`() {
         listOf("a.sql", "b.sql", "c.sql").forEach { repository.create(workspaceId, draft(id = it), actor) }
 

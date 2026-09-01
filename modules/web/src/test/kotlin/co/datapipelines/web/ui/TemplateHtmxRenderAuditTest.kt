@@ -10,6 +10,7 @@ import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
@@ -350,7 +351,10 @@ class TemplateHtmxRenderAuditTest {
         PathMatchingResourcePatternResolver(javaClass.classLoader)
             .getResources("classpath*:templates/**/*.html")
             .filter { it.filename != null }
-            .map { "templates/" + it.url.path.substringAfter("templates/") to it.inputStream.readBytes().decodeToString() }
+            .map {
+                val path = TestRepoFiles.requireInModuleResources("templates/" + it.url.path.substringAfter("templates/"))
+                path to it.inputStream.readBytes().decodeToString()
+            }
 
     private companion object {
         /** A PLAIN mutating htmx attribute whose value holds an expression — never processed. */

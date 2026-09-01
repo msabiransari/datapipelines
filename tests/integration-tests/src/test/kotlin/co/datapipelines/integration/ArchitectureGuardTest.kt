@@ -35,9 +35,9 @@ class ArchitectureGuardTest {
      * declared explicitly as a `@Bean` method in a `@Configuration` class, so
      * no class, interface, or object may carry `@Service`, `@Component`, or
      * `@Repository`. Zero allowlist. Component scanning stays ON for
-     * `@Configuration` classes and the web edge (`@RestController`,
-     * `@ControllerAdvice`) — those annotations are not stereotypes and are
-     * not matched here.
+     * `@Configuration` classes and the web edge (`@Controller`, `@RestController`,
+     * `@ControllerAdvice`) — those annotations are not matched here (the match is
+     * by annotation NAME, so `@Controller`-meta-annotated classes are unaffected).
      */
     @Test
     fun `no stereotype annotations in production code`() {

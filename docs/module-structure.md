@@ -818,7 +818,7 @@ datapipelines:
   consumers are already wired; templates: `TemplatesConfiguration`). Component
   scanning stays on, but the only annotated production classes are
   configurations (`@Configuration` / `@AutoConfiguration`),
-  `@ConfigurationProperties`, and the web edge (`@RestController`,
+  `@ConfigurationProperties`, and the web edge (`@Controller`, `@RestController`,
   `@ControllerAdvice`). Enforced by `ArchitectureGuardTest` (§7.8).
 - **Transactions:** `@Transactional` is banned in production sources (guard,
   §7.8). First-choice atomicity is a single data-modifying CTE (the

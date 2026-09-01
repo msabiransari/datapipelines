@@ -32,11 +32,12 @@ class TemplatePartialController(
                 Dialect.entries.firstOrNull { it.wire.equals(d, ignoreCase = true) }
             }
         val workspaceId = currentPrincipal().requireWorkspace().id
+        val query = q?.trim()?.takeIf { it.isNotEmpty() }
         val raw =
             templates.list(
                 workspaceId,
                 dialect = dialectFilter,
-                q = q?.trim()?.takeIf { it.isNotEmpty() },
+                q = query,
                 offset = page,
                 limit =
                     size + 1,
@@ -47,6 +48,9 @@ class TemplatePartialController(
         model.addAttribute("selectedDialect", dialect ?: "")
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", raw.size > size)
+        // The truthful total under the same filters (034 E3) — the shared pager renders
+        // "Showing N of M" only when a total is supplied.
+        model.addAttribute("total", templates.count(workspaceId, dialect = dialectFilter, q = query))
         model.addAttribute("scopes", scopes())
         return "partials/templates"
     }

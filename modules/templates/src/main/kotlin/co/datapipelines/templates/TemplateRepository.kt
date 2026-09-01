@@ -127,17 +127,7 @@ class TemplateRepository(
         jdbc.query(
             """
             $SELECT_JOINED
-             WHERE t.is_deleted = FALSE
-               AND t.workspace_id = :workspaceId
-               AND v.version = t.current_version
-               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
-               AND (
-                     CAST(:pattern AS TEXT) IS NULL
-                     OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                     OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                     OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                     OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
-                   )
+            $LIST_WHERE
              ORDER BY t.name
              LIMIT :limit OFFSET :offset
             """.trimIndent(),
@@ -151,6 +141,34 @@ class TemplateRepository(
                 "offset" to maxOf(0, offset),
             ),
             MAPPER,
+        )
+
+    /**
+     * The truthful total of the [list] page — the same predicate, no paging (034 E3: the
+     * list screen's pager used to report an estimate, "Showing 25 of 26" on a 100-row
+     * workspace). The WHERE is the shared [LIST_WHERE], so the page and its total cannot
+     * drift apart.
+     */
+    fun count(
+        workspaceId: UUID,
+        dialect: Dialect? = null,
+        q: String? = null,
+    ): Int =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM templates t
+                  JOIN template_versions v ON v.template_id = t.id
+                $LIST_WHERE
+                """.trimIndent(),
+                mapOf(
+                    "dialect" to dialect?.wire,
+                    "pattern" to q?.let { "%${escapeLike(it)}%" },
+                    "workspaceId" to workspaceId,
+                ),
+                Int::class.java,
+            ),
         )
 
     /** Version metadata, newest first (§9 list-versions). */
@@ -325,6 +343,27 @@ class TemplateRepository(
                    v.body, v.created_at, v.created_by AS version_created_by
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
+            """.trimIndent()
+
+        /**
+         * The live-at-current-version page predicate of [list], shared with [count] (034 E3)
+         * so the page and its total can never disagree. Every optional filter is CAST in the
+         * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
+         * even prepare.
+         */
+        private val LIST_WHERE =
+            """
+            WHERE t.is_deleted = FALSE
+              AND t.workspace_id = :workspaceId
+              AND v.version = t.current_version
+              AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
+              AND (
+                    CAST(:pattern AS TEXT) IS NULL
+                    OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                    OR t.display_name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                    OR t.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                    OR v.dialect ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
+                  )
             """.trimIndent()
 
         private const val SELECT_VERSION =

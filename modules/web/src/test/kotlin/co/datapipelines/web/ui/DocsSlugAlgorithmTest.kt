@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -30,6 +31,7 @@ class DocsSlugAlgorithmTest {
             PathMatchingResourcePatternResolver(javaClass.classLoader)
                 .getResources("classpath*:docs/*.md")
                 .filter { it.filename != null }
+                .onEach { TestRepoFiles.requireInSources(it.filename!!, "docs") }
                 .flatMap { res ->
                     HEADING
                         .findAll(res.inputStream.readBytes().decodeToString())

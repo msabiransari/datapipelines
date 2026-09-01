@@ -78,6 +78,26 @@ test("the caller node is marked — omitted output means caller (contract §4.7)
   assert.match(els[1].classes, /\bcaller\b/);
 });
 
+test("a PIPELINE node with an explicit caller output is marked (contract §4.9) — DML/DDL never are", () => {
+  // Mirrors the server's Node.isCallerNode, which has no type guard: §4.9 permits a
+  // standard §4.7 output block — {"target":"caller"} included — on a PIPELINE node.
+  // The DQL guard on the omitted arm is load-bearing: §4.7 forbids DML/DDL an output
+  // block, so their output is ALWAYS omitted and an unguarded omitted arm would mark
+  // every one of them caller (034 E1).
+  const els = loadGraph().buildElements([
+    { id: "child", type: "PIPELINE", output: { target: "caller" } },
+    { id: "sideeffect", type: "PIPELINE" },
+    { id: "writer", type: "DML" },
+    { id: "migrator", type: "DDL" },
+    { id: "explicit", type: "DQL", output: { target: "caller" } },
+  ]);
+  assert.match(els[0].classes, /\bcaller\b/);
+  assert.ok(!/\bcaller\b/.test(els[1].classes));
+  assert.ok(!/\bcaller\b/.test(els[2].classes));
+  assert.ok(!/\bcaller\b/.test(els[3].classes));
+  assert.match(els[4].classes, /\bcaller\b/);
+});
+
 test("edges are still built from depends_on", () => {
   const els = loadGraph().buildElements([
     { id: "a", type: "DQL" }, { id: "b", type: "DQL", depends_on: ["a"] },

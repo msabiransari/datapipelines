@@ -86,28 +86,36 @@ class ApiKeysPartialController(
             return EMPTY_ROW_HTML
         }
         return keys.joinToString("") { key ->
-            val scopes = key.scopes.joinToString(", ") { it.wire }
+            val scopeBadges =
+                key.scopes.joinToString("") { """<span class="ds-badge ds-badge-default">${it.wire}</span>""" }
             val lastUsed =
                 key.lastUsedAt
                     ?.toString()
                     ?.take(TIMESTAMP_TRIM)
                     ?.replace("T", " ") ?: "never"
-            val revoked = if (key.isRevoked) " (revoked)" else ""
             val createdAt =
                 key.createdAt
                     .toString()
                     .take(TIMESTAMP_TRIM)
                     .replace("T", " ")
-            buildKeyRow(key, createdAt, lastUsed, scopes, revoked)
+            buildKeyRow(key, createdAt, lastUsed, scopeBadges)
         }
     }
 
+    /**
+     * One row, byte-for-byte the shape of the template's `keyRows` fragment
+     * (settings/api-keys.html): plain `<td>`s — the padding lives in `.ds-table`'s CSS —
+     * the revoked marker and scope chips as `ds-badge`s, and the action cell `class="num"`.
+     * The 029 treatment of the admin-users builder: a template-rendered row and a
+     * revoke-rebuilt row must be indistinguishable in the same table (034 E2). The name
+     * is escaped like every other Kotlin-built cell — `th:text` does the same job on the
+     * template side.
+     */
     private fun buildKeyRow(
         key: co.datapipelines.auth.ApiKey,
         createdAt: String,
         lastUsed: String,
-        scopes: String,
-        revoked: String,
+        scopeBadges: String,
     ): String {
         val revokeBtn =
             if (!key.isRevoked) {
@@ -118,12 +126,13 @@ class ApiKeysPartialController(
             } else {
                 ""
             }
+        val revokedBadge = if (key.isRevoked) """ <span class="ds-badge ds-badge-danger">revoked</span>""" else ""
         return """<tr>
-          <td style="padding:var(--gap-xs);font-family:var(--font-mono)">${key.name}$revoked</td>
-          <td style="padding:var(--gap-xs);color:var(--text-secondary)">$createdAt</td>
-          <td style="padding:var(--gap-xs);color:var(--text-secondary)">$lastUsed</td>
-          <td style="padding:var(--gap-xs)">$scopes</td>
-          <td style="padding:var(--gap-xs)">$revokeBtn</td>
+          <td><span>${ToastHtml.esc(key.name)}</span>$revokedBadge</td>
+          <td>$createdAt</td>
+          <td>$lastUsed</td>
+          <td>$scopeBadges</td>
+          <td class="num">$revokeBtn</td>
         </tr>"""
     }
 
@@ -132,10 +141,14 @@ class ApiKeysPartialController(
             ?: error("No authenticated principal")
 
     private companion object {
-        const val TIMESTAMP_TRIM = 19
+        /** Trims the ISO instant to the template fragment's `yyyy-MM-dd HH:mm` precision. */
+        const val TIMESTAMP_TRIM = 16
+
+        /** The template fragment's empty state (`ds-empty`), same markup, for a last-key revoke. */
         const val EMPTY_ROW_HTML =
-            """<tr><td colspan="5" style="padding:var(--gap-md);""" +
-                """text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">""" +
-                "No API keys found</td></tr>"
+            """<tr><td colspan="5"><div class="ds-empty">""" +
+                """<p class="ds-empty-title">No API keys yet</p>""" +
+                """<p class="ds-empty-description">Generate a key to call the REST API.</p>""" +
+                """</div></td></tr>"""
     }
 }

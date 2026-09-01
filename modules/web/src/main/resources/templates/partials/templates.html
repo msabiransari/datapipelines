@@ -49,7 +49,7 @@
 
     <th:block th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},
                        nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}">
-      <div th:replace="~{partials/pager :: pager('#template-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, null)}"></div>
+      <div th:replace="~{partials/pager :: pager('#template-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
     </th:block>
   </th:block>
 </div>

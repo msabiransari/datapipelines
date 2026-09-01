@@ -14,6 +14,14 @@ package co.datapipelines.auth
  * `FilterRegistrationBean(isEnabled = false)` workarounds that used to suppress
  * it were deleted with the scanning that made them necessary (015, spec D4);
  * exact-once execution is proven behaviorally by `AuthHttpBoundaryTest`.
+ *
+ * The flip side of non-bean filters (D9, 034 F4): the `GenericFilterBean`
+ * lifecycle is dropped with the registration. Every filter here extends
+ * `OncePerRequestFilter`, whose `afterPropertiesSet`/`init(FilterConfig)`/
+ * `destroy` callbacks are driven by the container or the bean factory — and
+ * these objects see NEITHER, so none of those callbacks ever fires. Any future
+ * setup must live in the constructor; state placed in an `init` override would
+ * silently never happen.
  */
 data class AuthFilters(
     val apiKey: ApiKeyFilter,
