@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.1 — reviewed; §14 items 1–3 ratified 2026-08-31
+**Status:** v1.2 — reviewed; §15 items 1–3 ratified 2026-08-31
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-08-31
@@ -290,7 +290,7 @@ Preconditions, evaluated server-side before the statement runs:
    A pin on a DRAFT template version fails with `pipeline.release.template_not_released`
    naming the template and version. (Pinning a DRAFT template version from a DRAFT pipeline
    is legal while iterating — §6 — and only becomes an error at pipeline release time.)
-3. Full §12 pipeline validation re-runs on the draft body. Release is the final save-time
+3. Full [pipeline-contract §12](pipeline-contract.md) validation re-runs on the draft body. Release is the final save-time
    gate; nothing is released that the validator would refuse.
 
 ### 5.4 Discard
@@ -540,7 +540,63 @@ The immutability KDoc blocks on both repositories are rewritten to the §3.1 dis
 
 ---
 
-## 12. Testing Requirements
+## 12. The Agent-Facing Skill Must Land With the Code
+
+`.agents/skills/datapipelines/SKILL.md` is what an agent reads before it touches this
+product. It is not documentation about the system — it is the system's instructions to its
+own callers, and MCP agents are the primary authoring surface here (contract §2; the
+editor is a viewer/executor). **A lifecycle change that reaches the API without reaching the
+skill leaves every agent operating on the old contract.**
+
+This is not hypothetical for this spec. `SKILL.md:51` currently states:
+
+> **Versioning** — every save creates a new version.
+
+D2 makes that **false**. After this round a save on a released version creates a DRAFT, and
+a save on a draft overwrites it in place. An agent holding the current skill will believe
+its `pipelines_update` published something, and it did not.
+
+**The rule: the skill is updated in the SAME commit as the behaviour it describes** — the
+same discipline §13 applies to catalogue rows and their constants, for the same reason. A
+skill that lags is worse than one that is silent, because agents act on it with confidence.
+
+### 12.1 What this spec obliges the implementor to change
+
+| Skill content | Why it changes |
+|---|---|
+| §"Core concepts" → Versioning (`:51`) | "Every save creates a new version" becomes the draft/release rule: create lands v1 RELEASED and immediately executable; every later save is draft-first (§3.2). |
+| §"The golden path" | The authoring loop gains its real shape: create → iterate on the draft → **stop**. The agent does not release (D4). Say so positively — "leave the draft for a human to release" — not as an omission. |
+| §"Execution semantics agents must know" | Drafts are executable, and a draft run is not a release (§8). An agent testing its own draft is the expected loop, not a workaround. |
+| §"Error handling" | The new 409s an agent will actually meet: `pipeline.version.conflict` (stale content hash — re-read and rebase, never retry blindly), `pipeline.version.not_draft`, and `pipeline.validation.duplicate_name` now arriving at draft-write time (§3.5). |
+| §"Best practices" | The hash precondition is a protocol, not a nuisance: read, edit, write with the hash you read. A blind retry after a 409 is how an agent silently overwrites a human's edit. |
+| §"References" | Add `docs/versioning.md`. |
+
+### 12.2 What the implementor must decide, not assume
+
+The skill says agents author and the UI releases. **Whether `pipelines_update` returning a
+draft is surfaced as a distinct tool result, or as the same result shape with a `status`
+field, changes what the agent can reason about** — and the MCP tool surface is
+`mcp-server.md`'s authority, guarded by `McpToolSurfaceSpecDriftTest` and the
+`McpToolCatalog` binding (033). If the round adds or reshapes a tool, that spec, the
+catalogue and the skill move together; if it only changes a payload, say so explicitly in
+the handback so the drift guards are known to have been considered rather than missed.
+
+**No new MCP tool for release** — D4 and §14 both settle that. The absence is deliberate and
+the skill should state it, so a later reader does not read the gap as an oversight and
+"fix" it.
+
+### 12.3 The general rule, beyond this spec
+
+Any round that changes what an agent can do, must do, or will be refused for, updates
+`SKILL.md` in the same commit. The test is not "did the API change" but **"would an agent
+holding the current skill now be wrong?"** If yes, the skill is part of the change set. The
+skill has no drift guard today — nothing fails when it goes stale — so this rule is carried
+by review, and a round that touched agent-visible behaviour without touching the skill
+should be asked why in its handback.
+
+---
+
+## 13. Testing Requirements
 
 House discipline: every guard below must be **falsifiable** — revert the production change
 and the test goes red (a guard that cannot fail is not a guard).
@@ -569,7 +625,7 @@ and the test goes red (a guard that cannot fail is not a guard).
 
 ---
 
-## 13. Out of Scope (Deliberate)
+## 14. Out of Scope (Deliberate)
 
 - **MCP release tool** — decided against (D4). The REST release endpoint exists for the UI;
   an agent holding a raw MUTATE-scoped API key could call it directly, which is acceptable
@@ -583,7 +639,7 @@ and the test goes red (a guard that cannot fail is not a guard).
 - **Draft retention jobs** — DISCARDED rows accumulate slowly (only executed-then-discarded
   drafts); a retention job is deferred until measured.
 
-## 14. Ratified Decisions and Remaining Open Items
+## 15. Ratified Decisions and Remaining Open Items
 
 Items 1–3 were **ratified by the operator on 2026-08-31** and are written into their
 sections; they are recorded here so a reader sees what was decided and why, without
@@ -612,6 +668,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-08-31 | v1.1 | operator ratification | §14's first three open items decided and written into their sections. §3.5 rewritten: the `pipelines` row is an INDEX over the current released body — the metadata is not duplicated, one side is the artifact and the other is how you find it — so metadata rides the release by definition rather than by preference, plus a draft-write-time uniqueness check reusing `pipeline.validation.duplicate_name` (no catalogue addition). New §10.6 specifies the promotion-peer credential as a non-interactive service principal, scoped to the import endpoint, backed by a real `users` row because `created_by`/`triggered_by` are NOT NULL FKs; this doc is its authority and the machine-auth note's F10 defers here. §8 drops the `ran_draft` column for derivation from `released_at`, with its cross-clock precondition stated (`started_at` is application-supplied) and `released_at` required to be database-generated. |
-| 2026-08-31 | v1.0 | orchestrator review | Review pass before commit. Corrected §3.4: the executions FK is `NO ACTION` (its declaration carries no `ON DELETE` clause), not `RESTRICT` — it blocks identically here, but an implementer reading the old wording would have written the wrong DDL. §12 now states the operational half of the drift coupling: catalogue rows and constants land in the SAME commit, because the drift test lives on `main` permanently. Also grouped the doc into `DocsCatalog` "Contracts" — 033's in-app docs index fails at init on an ungrouped doc, so the spec could not land without it. Verified against the tree: the import-renumbering defect (§9.1), `PipelineImportService.SERVER_FIELDS`, the executions composite FK, and the absence of `status`/`body_hash` today. |
+| 2026-08-31 | v1.2 | operator request | New §12: the agent-facing skill (`.agents/skills/datapipelines/SKILL.md`) is updated in the SAME commit as the behaviour it describes. Concrete for this spec — `SKILL.md:51` says "every save creates a new version", which D2 makes false, so an agent holding the current skill would believe a `pipelines_update` published something it left as a draft. Enumerates what this round obliges (versioning concept, golden path stopping short of release, draft execution, the new 409s, the hash protocol, the references list), what the implementor must DECIDE rather than assume (whether the draft result reshapes the MCP tool surface, which `mcp-server.md` and `McpToolCatalog` own), and the general rule: the test is "would an agent holding the current skill now be wrong?" Notes that the skill has no drift guard, so the rule is carried by review. Sections 12–14 renumbered to 13–15. |
+| 2026-08-31 | v1.1 | operator ratification | §15's first three open items decided and written into their sections. §3.5 rewritten: the `pipelines` row is an INDEX over the current released body — the metadata is not duplicated, one side is the artifact and the other is how you find it — so metadata rides the release by definition rather than by preference, plus a draft-write-time uniqueness check reusing `pipeline.validation.duplicate_name` (no catalogue addition). New §10.6 specifies the promotion-peer credential as a non-interactive service principal, scoped to the import endpoint, backed by a real `users` row because `created_by`/`triggered_by` are NOT NULL FKs; this doc is its authority and the machine-auth note's F10 defers here. §8 drops the `ran_draft` column for derivation from `released_at`, with its cross-clock precondition stated (`started_at` is application-supplied) and `released_at` required to be database-generated. |
+| 2026-08-31 | v1.0 | orchestrator review | Review pass before commit. Corrected §3.4: the executions FK is `NO ACTION` (its declaration carries no `ON DELETE` clause), not `RESTRICT` — it blocks identically here, but an implementer reading the old wording would have written the wrong DDL. §13 (Testing Requirements) now states the operational half of the drift coupling: catalogue rows and constants land in the SAME commit, because the drift test lives on `main` permanently. Also grouped the doc into `DocsCatalog` "Contracts" — 033's in-app docs index fails at init on an ungrouped doc, so the spec could not land without it. Verified against the tree: the import-renumbering defect (§9.1), `PipelineImportService.SERVER_FIELDS`, the executions composite FK, and the absence of `status`/`body_hash` today. |
 | 2026-08-31 | v1.0 | versioning design session | Initial spec: draft-in-version-table lifecycle (D1/D2), content-hash preconditions (D3), UI-only release (D4), version numbers as global identities + preserved-version import (D5), latest-released-only promotion with two-sided guards (D6/D7/D8). Records the verified import-renumbering defect as D5's rationale. |

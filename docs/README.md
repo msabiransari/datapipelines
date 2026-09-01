@@ -51,7 +51,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 15 tools, resources, prompts — a thin adapter over REST |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
-| [versioning.md](versioning.md) | v1.1 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
+| [versioning.md](versioning.md) | v1.2 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |
 
 ### Operations
 
