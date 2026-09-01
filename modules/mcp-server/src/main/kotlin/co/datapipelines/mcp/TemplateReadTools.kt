@@ -111,14 +111,18 @@ class TemplatesGetTool(
         // is the DRAFT when one exists, else the latest released (§7's template mirror).
         val version = args.version() ?: templates.findDraftDetail(workspaceId, id)?.version
         return when (version) {
-            null -> templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
-            else ->
+            null -> {
+                templates.findLatest(workspaceId, id) ?: throw McpNotFound.template(id)
+            }
+
+            else -> {
                 templates.findVersion(workspaceId, id, version)
                     ?: if (templates.existsId(workspaceId, id)) {
                         throw McpNotFound.templateVersion(id, version)
                     } else {
                         throw McpNotFound.template(id)
                     }
+            }
         }
     }
 }

@@ -128,11 +128,12 @@ class PipelineAuthoringToolsTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER)
-        } returns PipelineDraftService.DraftWrite(
-            McpFixtures.pipelineRecord(version = 1),
-            draftDetail(version = 2),
-            """{"schema_version":1}""",
-        )
+        } returns
+            PipelineDraftService.DraftWrite(
+                McpFixtures.pipelineRecord(version = 1),
+                draftDetail(version = 2),
+                """{"schema_version":1}""",
+            )
 
         @Suppress("UNCHECKED_CAST")
         val payload =
@@ -159,11 +160,12 @@ class PipelineAuthoringToolsTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every {
             drafts.write(any(), McpFixtures.PIPELINE_ID, any<Pipeline>(), any(), "hash-v1", McpFixtures.USER)
-        } returns PipelineDraftService.DraftWrite(
-            McpFixtures.pipelineRecord(version = 1),
-            draftDetail(version = 1).copy(status = PipelineVersionStatus.RELEASED, updatedBy = null, updatedAt = null),
-            """{"schema_version":1}""",
-        )
+        } returns
+            PipelineDraftService.DraftWrite(
+                McpFixtures.pipelineRecord(version = 1),
+                draftDetail(version = 1).copy(status = PipelineVersionStatus.RELEASED, updatedBy = null, updatedAt = null),
+                """{"schema_version":1}""",
+            )
 
         @Suppress("UNCHECKED_CAST")
         val payload =

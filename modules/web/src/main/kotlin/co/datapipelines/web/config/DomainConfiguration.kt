@@ -11,6 +11,7 @@ import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
@@ -81,8 +82,7 @@ class DomainConfiguration {
      * property (immutable config — two instances cannot disagree).
      */
     @Bean
-    fun authoringGuard(environment: Environment): co.datapipelines.pipeline.AuthoringGuard =
-        co.datapipelines.pipeline.AuthoringGuard.from(environment)
+    fun authoringGuard(environment: Environment): AuthoringGuard = AuthoringGuard.from(environment)
 
     /**
      * The §7 boot checks around that capability (configuration.md §3.19): the deployment

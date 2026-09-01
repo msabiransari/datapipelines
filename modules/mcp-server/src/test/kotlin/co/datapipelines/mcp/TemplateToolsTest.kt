@@ -9,8 +9,8 @@ import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect

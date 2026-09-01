@@ -92,7 +92,7 @@ class ApiErrorCatalogSpecDriftTest {
          */
         const val SECTION_13_ROW_COUNT = 99
 
-        /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's `pipeline.validation.datasource_readonly`). */
+        /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's datasource_readonly). */
         const val SECTION_12_CODE_COUNT = 47
     }
 }

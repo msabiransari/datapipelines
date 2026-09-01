@@ -29,7 +29,13 @@ import java.util.UUID
  * keeps the Flyway dependency in `app` only, so a domain module never gains a schema-creation
  * tool, yet the test still runs the exact DDL the application migrates with (including the D3
  * `no params_schema` column shape and the V4 surrogate-key re-key).
+ *
+ * `LargeClass` is suppressed for the same reason `PipelineRepositoryIntegrationTest`
+ * suppresses it: the version-lifecycle round made this suite the repository's contract in
+ * one place — CRUD, listing, and the draft/release lifecycle read against the SAME shipped
+ * schema — and splitting it would scatter one table's invariants across files.
  */
+@Suppress("LargeClass")
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemplateRepositoryIntegrationTest {
@@ -441,7 +447,10 @@ class TemplateRepositoryIntegrationTest {
     fun `identical content while a draft exists is a stale base, not a no-op`() {
         repository.create(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
-        val draft = checkNotNull(repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor))
+        val draft =
+            checkNotNull(
+                repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+            )
 
         // The released body PUT back unchanged while a draft exists: 409 material (null),
         // never "RELEASED, no draft" — the draft owns the working state.
@@ -453,7 +462,10 @@ class TemplateRepositoryIntegrationTest {
     fun `a draft edited back to its released parent is left alone - never auto-discarded`() {
         repository.create(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "fetch_orders.sql"))
-        val draft = checkNotNull(repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor))
+        val draft =
+            checkNotNull(
+                repository.createDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
+            )
 
         val reverted = checkNotNull(repository.writeDraft(workspaceId, "fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
 
@@ -620,7 +632,17 @@ class TemplateRepositoryIntegrationTest {
         refused.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
 
         checkNotNull(repository.importTemplateVersion(workspaceId, draft(id = "promoted.sql"), 4, "hash-4", java.time.Instant.EPOCH, actor))
-        checkNotNull(repository.insertReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 5"), 3, "hash-3", java.time.Instant.EPOCH, actor))
+        checkNotNull(
+            repository.insertReleasedVersion(
+                workspaceId,
+                "fetch_orders.sql",
+                draft(body = "SELECT 5"),
+                3,
+                "hash-3",
+                java.time.Instant.EPOCH,
+                actor,
+            ),
+        )
         checkNotNull(repository.appendReleasedVersion(workspaceId, "fetch_orders.sql", draft(body = "SELECT 6"), actor))
 
         jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_versions WHERE status = 'DRAFT'", Int::class.java) shouldBe 0

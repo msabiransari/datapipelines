@@ -70,10 +70,12 @@ class AuthoringStartupCheck(
             if (pipelineDrafts.isNotEmpty() || templateDrafts.isNotEmpty()) {
                 val message =
                     buildString {
-                        append("Authoring is disabled (datapipelines.deployment.authoring-enabled=false) but this " +
-                            "server holds existing drafts — someone authored on a promotion receiver, and version " +
-                            "alignment may already be broken (versioning §9.3). Release or discard them on an " +
-                            "authoring server, or re-import this workspace. Drafts found:")
+                        append(
+                            "Authoring is disabled (datapipelines.deployment.authoring-enabled=false) but this " +
+                                "server holds existing drafts — someone authored on a promotion receiver, and version " +
+                                "alignment may already be broken (versioning §9.3). Release or discard them on an " +
+                                "authoring server, or re-import this workspace. Drafts found:",
+                        )
                         pipelineDrafts.take(MAX_NAMED).forEach { append("\n  - pipeline: ").append(it) }
                         if (pipelineDrafts.size > MAX_NAMED) append("\n  - … and ${pipelineDrafts.size - MAX_NAMED} more pipelines")
                         templateDrafts.take(MAX_NAMED).forEach { append("\n  - template: ").append(it) }

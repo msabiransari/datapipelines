@@ -47,8 +47,10 @@ class TemplatesControllerTest {
 
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
+    private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
+
     private val controller =
-        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, co.datapipelines.pipeline.AuthoringGuard(true))
+        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, guard)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -101,7 +103,15 @@ class TemplatesControllerTest {
         // versioning §5.5's template mirror: a promotion receiver fails closed.
         authenticate()
         val receiver =
-            TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, co.datapipelines.pipeline.AuthoringGuard(false))
+            TemplatesController(
+                repository,
+                validator,
+                engines,
+                TemplateImportService(repository, validator),
+                drafts,
+                releases,
+                co.datapipelines.pipeline.AuthoringGuard(false),
+            )
 
         val create =
             shouldThrow<DatapipelinesException> {

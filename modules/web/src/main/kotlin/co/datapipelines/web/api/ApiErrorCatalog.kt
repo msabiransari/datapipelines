@@ -173,6 +173,11 @@ object ApiErrorCatalog {
 
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
 
+    /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
+    private const val RECEIVER_USER_MESSAGE =
+        "This server doesn't allow creating or editing — it only receives promoted content. " +
+            "Make your changes in the authoring environment."
+
     private val FAMILY_USER_MESSAGE: Map<String, String> =
         linkedMapOf(
             "pipeline.validation." to "This pipeline isn't valid yet. Check the highlighted problem and try again.",
@@ -228,9 +233,7 @@ object ApiErrorCatalog {
                 "You're sending requests faster than we allow. Wait a moment and try again.",
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to
                 "That idempotency key was already used with a different request. Use a new key.",
-            PipelineErrorCodes.Versioning.AUTHORING_DISABLED to
-                "This server doesn't allow creating or editing — it only receives promoted content. Make your changes in the authoring environment.",
-            PipelineErrorCodes.Template.AUTHORING_DISABLED to
-                "This server doesn't allow creating or editing — it only receives promoted content. Make your changes in the authoring environment.",
+            PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
+            PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )
 }

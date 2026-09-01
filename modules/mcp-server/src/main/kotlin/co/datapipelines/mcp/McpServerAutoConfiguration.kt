@@ -10,6 +10,7 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
@@ -74,7 +75,7 @@ class McpServerAutoConfiguration {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
         // flag is immutable configuration, so two instances cannot disagree.
-        val authoring = co.datapipelines.pipeline.AuthoringGuard.from(environment)
+        val authoring = AuthoringGuard.from(environment)
         return listOf(
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),

@@ -298,9 +298,12 @@ class PipelinesControllerTest {
                 authoring = co.datapipelines.pipeline.AuthoringGuard(false),
             )
 
-        val create = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-            receiver.create("""{"schema_version":1,"name":"x","display_name":"X","description":"","parameters":{},"nodes":[]}""")
-        }
+        val body =
+            """{"schema_version":1,"name":"x","display_name":"X","description":"","parameters":{},"nodes":[]}"""
+        val create =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                receiver.create(body)
+            }
         create.code shouldBe "pipeline.authoring.disabled"
         create.details["config_key"] shouldBe "datapipelines.deployment.authoring-enabled"
 
