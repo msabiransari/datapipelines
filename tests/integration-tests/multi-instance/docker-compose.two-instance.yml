@@ -1,0 +1,87 @@
+# 036 two-instance override — see README.md in this directory.
+#
+# Two app services (`app1`, `app2`) on DISTINCT host ports, layered on top of
+# deploy/docker-compose.yml + deploy/docker-compose.local.yml. The base
+# `datapipelines` service is simply never started (`up -d postgres redis app1
+# app2`); compose cannot reliably REPLACE its published port across files
+# (ports concatenate), so these are new services duplicating the base service's
+# environment/volumes/depends_on. Any change to the base service's contract in
+# deploy/docker-compose.yml must be mirrored here.
+#
+#   docker compose -p mi036 \
+#     -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.local.yml \
+#     -f tests/integration-tests/multi-instance/docker-compose.two-instance.yml \
+#     config
+#
+# `restart: "no"` is load-bearing: the harness kills these containers on
+# purpose (SIGTERM drain test, SIGKILL sweep test) — the base `unless-stopped`
+# would resurrect a killed instance and confound the evidence. The harness
+# recreates app1 explicitly between the two tests.
+
+x-app-common: &app-common
+  image: datapipelines:local-mi036
+  pull_policy: never
+  restart: "no"
+  environment:
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
+    SPRING_DATASOURCE_USERNAME: datapipelines
+    SPRING_DATASOURCE_PASSWORD: ${METADATA_DB_PASSWORD}
+
+    DATAPIPELINES_REDIS_HOST: redis
+    DATAPIPELINES_REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+    DATAPIPELINES_JWT_SECRET: ${JWT_SECRET}
+    DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+
+    DATAPIPELINES_AUTH_BASE_URL: ${DATAPIPELINES_AUTH_BASE_URL}
+
+    # Local password auth is the ONLY configured method here (no OIDC client
+    # ids) — the harness logs in as the seeded bootstrap admin.
+    GOOGLE_CLIENT_ID: ""
+    GOOGLE_CLIENT_SECRET: ""
+    DATAPIPELINES_AUTH_LOCAL_ENABLED: "true"
+    DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD: "mi036-onetime"
+    DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL: "mi-admin@example.com"
+    DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS: ""
+
+    DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: "auto-per-user"
+
+    # 036: the crash sweep flips RUNNING rows older than this to ABORTED
+    # (pipeline.execution.instance_lost). 1 minute keeps the sweep test under
+    # ~2.5 min: 1 min staleness + 60s sweep cadence + margin.
+    DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES: "1"
+
+    # Inert without the demo profile — mirrored from the base service so the
+    # two app services bind the same configuration surface.
+    DATAPIPELINES_WORKSPACES_OPEN_JOIN: "false"
+    DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: "true"
+    DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: ""
+    DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: ""
+    SAMPLE_DB_USER: "dp_demo_ro"
+    SAMPLE_PG_PASSWORD: ""
+    SAMPLE_MYSQL_PASSWORD: ""
+  volumes:
+    # Spring Boot's default config search includes the working directory (/),
+    # so this bind supplies the auth section exactly as the base stack does.
+    # ABSOLUTE path required: Compose v5 resolves relative bind sources against
+    # the directory of the file that DECLARES them (this one), not the first -f
+    # file — run.sh exports MI036_REPO_ROOT before any compose invocation.
+    - ${MI036_REPO_ROOT:?run.sh sets MI036_REPO_ROOT}/deploy/application.yml:/application.yml:ro
+    - sample-data:/srv/sample:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  app1:
+    <<: *app-common
+    ports:
+      - "18080:8080"
+
+  app2:
+    <<: *app-common
+    ports:
+      - "18081:8080"
