@@ -71,6 +71,7 @@ class PipelineTransferController(
     }
 
     /** §5.9 — export bundle: pipeline, referenced template versions, manifest. */
+    @Suppress("ThrowsCount") // the misses are the same catalogued 404 for different absent reads
     @GetMapping("/{id}/export")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun export(
@@ -83,16 +84,23 @@ class PipelineTransferController(
             pipelines.findVersionBody(workspaceId, id, record.currentVersion)
                 ?: throw ApiErrors.pipelineNotFound(id.toString())
         val pipeline = deserializer.readOrThrow(body)
+        // The lifecycle fields an import honors (versioning §9.2): the version's number,
+        // hash and release timestamp ride the exported pipeline object so a preserved-version
+        // import on the target can verify and re-stamp them.
+        val version =
+            pipelines.findCurrentVersionDetail(workspaceId, id)
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val bundled = if (includeTemplates) referencedTemplates(workspaceId, pipeline.nodes.map { it.template }) else emptyList()
         val data =
             mapOf(
-                "pipeline" to PipelineResponses.full(record, body),
+                "pipeline" to PipelineResponses.full(record, body, version),
                 "templates" to bundled,
                 "manifest" to
                     mapOf(
                         "pipeline_id" to record.id.toString(),
                         "pipeline_version" to record.currentVersion,
+                        "pipeline_body_hash" to version.bodyHash,
                         "template_count" to bundled.size,
                         "exported_at" to Instant.now().toString(),
                     ),

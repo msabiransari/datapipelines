@@ -54,22 +54,42 @@ internal class PipelineSaveSupport(
         return ExecutorJson.write(body)
     }
 
-    /** The create/update response: server-owned metadata plus the stored body (§6.2.4). */
+    /**
+     * The create/update response: server-owned metadata plus the stored body (§6.2.4), with
+     * the version's lifecycle state since the draft round — an agent must be able to SEE
+     * that its update landed as a DRAFT and read the hash to carry into its next write
+     * (versioning §7/§12).
+     */
     fun response(
         record: PipelineRecord,
         body: String,
+        version: co.datapipelines.pipeline.PipelineVersionDetail? = null,
+        draft: co.datapipelines.pipeline.PipelineVersionDetail? = null,
     ): Map<String, Any?> =
-        mapOf(
-            "id" to record.id.toString(),
-            "name" to record.name,
-            "display_name" to record.displayName,
-            "description" to record.description,
-            "owner_id" to record.ownerId.toString(),
-            "version" to record.currentVersion,
-            "created_at" to record.createdAt,
-            "updated_at" to record.updatedAt,
-            "body" to McpTools.readTree(body),
-        )
+        buildMap<String, Any?> {
+            put("id", record.id.toString())
+            put("name", record.name)
+            put("display_name", record.displayName)
+            put("description", record.description)
+            put("owner_id", record.ownerId.toString())
+            put("version", version?.version ?: record.currentVersion)
+            put("current_version", record.currentVersion)
+            put("status", version?.status?.name ?: "RELEASED")
+            put("body_hash", version?.bodyHash ?: "")
+            put("created_at", record.createdAt)
+            put("updated_at", record.updatedAt)
+            put("body", McpTools.readTree(body))
+            draft?.let {
+                put(
+                    "draft",
+                    mapOf(
+                        "version" to it.version,
+                        "body_hash" to it.bodyHash,
+                        "updated_at" to (it.updatedAt?.toString() ?: ""),
+                    ),
+                )
+            }
+        }
 
     companion object {
         /** The §6.2.4 `nodes` description, restated verbatim by both tools. */
@@ -119,7 +139,10 @@ class PipelinesCreateTool(
         val workspaceId = ctx.principal.requireWorkspace().id
         val (pipeline, body) = support.validated(args, workspaceId)
         val record = pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = ctx.principal.userId), body, ctx.principal.userId)
-        return support.response(record, body)
+        // Creation is not modification (§3.2): v1 lands RELEASED and immediately executable —
+        // read back the row the database stored so the response carries its real hash.
+        val version = pipelines.findCurrentVersionDetail(workspaceId, record.id)
+        return support.response(record, body, version)
     }
 
     private companion object {
@@ -145,11 +168,21 @@ class PipelinesCreateTool(
 /**
  * `pipelines_update` (mcp-server.md §6.2.5). Scope: `author`.
  *
- * "Same input as `pipelines_create` plus required `id`. Returns the new version. Same save-time
+ * "Same input as `pipelines_create` plus required `id` and `expected_hash`. Returns the new version. Same save-time
  * validation applies."
+ *
+ * Since the draft round (versioning §3.2/§7) an update always writes the DRAFT branch: the
+ * first write after a release copies the released version to a draft, later writes
+ * overwrite that one draft in place — an agent iterating produces ONE draft row it keeps
+ * overwriting, not a version per save. **The agent never releases** (D4): leave the draft
+ * for a human to review and release from the UI. `expected_hash` is the `body_hash` the
+ * caller read (from `pipelines_get` or a previous update's result) — the precondition that
+ * makes two writers (two agents, an agent and a human, two tabs) never silently overwrite
+ * each other; on `pipeline.version.conflict`, re-read and rebase, never retry blindly.
  */
 class PipelinesUpdateTool(
     private val pipelines: PipelineRepository,
+    private val drafts: co.datapipelines.pipeline.PipelineDraftService,
     deserializer: PipelineDeserializer,
     validator: PipelineValidator,
     serializer: PipelineSerializer = PipelineSerializer(),
@@ -160,8 +193,12 @@ class PipelinesUpdateTool(
         McpTools.tool(
             name = "pipelines_update",
             description =
-                "Update an existing pipeline, creating a new version. Same body rules and same save-time validation as " +
-                    "pipelines_create, plus the required id of the pipeline to update. Returns the new version.",
+                "Update an existing pipeline by writing its DRAFT — the first update after a release creates the draft " +
+                    "(copy-on-write); later updates overwrite that same draft in place. Requires expected_hash: the " +
+                    "body_hash you read (pipelines_get, or a previous update's result) for the version you based your " +
+                    "edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from " +
+                    "the UI. On pipeline.version.conflict someone modified it after you loaded it: re-read, rebase, " +
+                    "retry; never retry blindly.",
             schema = SCHEMA,
         )
 
@@ -171,9 +208,18 @@ class PipelinesUpdateTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id: UUID = args.requiredUuid("id")
+        val expectedHash = args.requiredString("expected_hash")
         val (pipeline, body) = support.validated(args, workspaceId)
-        val record = pipelines.update(workspaceId, id, pipeline, body, ctx.principal.userId) ?: throw McpNotFound.pipeline(id)
-        return support.response(record, body)
+        val written =
+            drafts.write(
+                workspaceId = workspaceId,
+                pipelineId = id,
+                pipeline = pipeline,
+                canonical = body,
+                expectedHash = expectedHash,
+                actor = ctx.principal.userId,
+            )
+        return support.response(written.record, body, written.version, written.version)
     }
 
     private companion object {
@@ -181,9 +227,10 @@ class PipelinesUpdateTool(
             """
             {
               "type": "object",
-              "required": ["id", "name", "display_name", "nodes"],
+              "required": ["id", "expected_hash", "name", "display_name", "nodes"],
               "properties": {
                 "id": {"type": "string", "format": "uuid", "description": "Pipeline to update."},
+                "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — pipelines_get or the previous update's result. A mismatch is a 409 conflict; re-read and rebase."},
                 "name": {"type": "string", "pattern": "^[a-z0-9_]+${'$'}"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},

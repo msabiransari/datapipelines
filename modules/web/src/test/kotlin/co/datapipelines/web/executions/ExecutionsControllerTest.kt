@@ -31,6 +31,7 @@ import java.util.UUID
 class ExecutionsControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val cancellation = mockk<ExecutionCancellationService>()
+    private val pipelines = mockk<co.datapipelines.pipeline.PipelineRepository>(relaxed = true)
     private val controller =
         ExecutionsController(
             executions = executions,
@@ -39,6 +40,7 @@ class ExecutionsControllerTest {
             resultStore = mockk(),
             resultUrls = mockk(),
             streamer = mockk(),
+            pipelines = pipelines,
         )
 
     private val owner = UUID.randomUUID()
@@ -119,6 +121,34 @@ class ExecutionsControllerTest {
         val error = shouldThrow<ApiException> { controller.cancel(executionId) }
         error.code shouldBe "pipeline.execution.not_running"
         verify(exactly = 0) { cancellation.cancel(any(), any()) }
+    }
+
+    @Test
+    fun `draft_run is derived - started_at before released_at, or no released_at`() {
+        // versioning §8: an execution of version N was a draft run when started_at <
+        // released_at, or when that version has no released_at (still DRAFT/DISCARDED).
+        // The marker is informational — a history label, never behaviour.
+        authenticate(owner, setOf(Scope.READ))
+        val running = record(ExecutionStatus.SUCCESS)
+        val key = running.pipelineId to running.pipelineVersion
+        every { executions.findByUser(any(), owner, any(), any(), any(), any(), any(), any()) } returns listOf(running)
+
+        fun listedDraftRun(): Boolean {
+            val items = controller.list(null, null, null, null, null, null).data.items
+            return items.single()["draft_run"] as Boolean
+        }
+
+        // started_at (EPOCH-ish) < released_at ⇒ draft run.
+        every { pipelines.releasedAtFor(any(), any()) } returns mapOf(key to java.time.Instant.parse("2026-09-02T00:00:00Z"))
+        listedDraftRun() shouldBe true
+
+        // released_at before started_at ⇒ it ran as a released version.
+        every { pipelines.releasedAtFor(any(), any()) } returns mapOf(key to java.time.Instant.parse("2026-08-01T00:00:00Z"))
+        listedDraftRun() shouldBe false
+
+        // No released_at at all (still a draft, or discarded): always a draft run.
+        every { pipelines.releasedAtFor(any(), any()) } returns mapOf(key to null)
+        listedDraftRun() shouldBe true
     }
 
     @Test

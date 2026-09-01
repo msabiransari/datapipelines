@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.3 — §15 items 1–3 ratified 2026-08-31; §10.6 credential ratified 2026-09-01
+**Status:** v1.4 — §15 items 1–3 ratified 2026-08-31; §10.6 credential ratified 2026-09-01; implementer's amendments from 035
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 
 ---
 
@@ -108,8 +108,10 @@ must re-read and rebase.
 
 ### 3.4 Version number allocation and discard
 
-- A draft **pre-allocates** `current_version + 1` at creation. The number is stable across
-  all in-place writes to that draft.
+- A draft **pre-allocates** `max(existing version) + 1` at creation — normally
+  `current_version + 1`, but a DISCARDED row keeps its number consumed (below), so
+  allocation reads the MAX rather than the pointer. The number is stable across all
+  in-place writes to that draft.
 - `pipelines.current_version` keeps its existing meaning — **the latest RELEASED version**.
   It does not move while a draft exists. Every existing reader (execute-default, editor
   load, datasource joins, MCP get) keeps its semantics unchanged.
@@ -167,12 +169,24 @@ constraint remains as the backstop: it is the authority, this is the courtesy.
 
 ### 4.1 Definition
 
-`body_hash` = **SHA-256 of the canonical body JSON**, stored on every version row at write
-time. For pipelines the canonical form is the one `PipelineSerializer` already emits (the
-portable seven-field body, pipeline-contract §3 note); templates gain the equivalent
-canonical serialization as part of this work. Canonicalization is **frozen**: key order is
-pinned by the serializer and must never drift between app versions — the hash is only as
-good as the canonical form.
+`body_hash` = **SHA-256 (hex) of the canonical body JSON**, stored on every version row at
+write time. Canonicalization is **frozen** — the hash is only as good as the canonical
+form — and v1.3 pins it mechanically:
+
+- **Pipelines**: the canonical form is the database's JSONB text projection of the body —
+  `encode(sha256(convert_to(body_json::text, 'UTF8')), 'hex')`, computed BY THE DATABASE in V6's
+  backfill and in every repository write, one expression everywhere. The serializer's
+  output remains the write FORMAT, but a JSONB column does not preserve the writer's key
+  order, so hashing the serializer string in the application while the backfill hashed the
+  stored projection would give two hashes for one body — exactly the "every pre-existing
+  row fails its first precondition check" failure §11's backfill option exists to avoid.
+  Database computation is also what makes §11's own "pgcrypto digest" backfill option
+  sound.
+- **Templates**: the canonical form is the version-owned field object
+  `{engine, dialect, is_library, imports, body}` projected through
+  `jsonb_build_object(…)` (which normalizes key order deterministically) and hashed with
+  the same expression. `display_name`/`description` are NOT in it — see §6's asymmetry
+  note.
 
 The stored hash doubles as:
 
@@ -283,6 +297,10 @@ WITH locked AS (
 SELECT * FROM locked, bumped          -- 0 rows ⇒ 409
 ```
 
+*(v1.3 dropped the sketch's `updated_at = NOW()` from the flip: §11's column note makes
+`updated_at` draft-write metadata — a release or discard does not restamp it, so a
+released row keeps the timestamp of its last draft write. The two sections now agree.)*
+
 Preconditions, evaluated server-side before the statement runs:
 
 1. The expected hash matches the draft (§4.2) — *you release what you tested*.
@@ -310,6 +328,17 @@ DELETE FROM pipeline_versions
 `template_versions` gains the identical statuses, hash column, one-draft index, and four
 write paths (mirrored codes `template.version.conflict`, `template.version.not_draft`).
 
+**The template metadata asymmetry (v1.3).** §3.5's metadata-rides-the-release is a
+PIPELINE rule, and it works there because the pipeline body *carries* its metadata — the
+draft row stages it inside `body_json`. A template's `display_name`/`description` live on
+the index row `templates` only and are not part of the versioned artifact, so a template
+draft stages what CAN be staged (engine/dialect/is_library/imports/body — exactly the
+canonical body of §4.1) and the index metadata keeps moving at save time. Templates have
+no rename (`name` is the identity), so §3.5's draft-write-time name check is pipeline-only.
+Template discard is likewise simpler: nothing references a `template_versions` row by FK
+(pipeline pins are numbers in JSON), so §3.4's executed-draft DISCARDED branch cannot fire
+— a template draft is always hard-deleted and its number always returns to the pool.
+
 Because drafts pre-allocate real version numbers, **a DRAFT pipeline can pin a DRAFT
 template version** by its number — this is the intended editor loop (edit SQL → run the
 node → tweak → release), and it is why drafts live in the version tables (D1). The rule
@@ -330,12 +359,22 @@ Additive; existing routes keep their shapes. Exact wire contracts land in
 
 | Route | Change |
 |---|---|
-| `POST /api/v1/pipelines` | Unchanged: creates v1 **RELEASED** (§3.2). |
+| `POST /api/v1/pipelines` | Unchanged: creates v1 **RELEASED** (§3.2). Response gains `status`/`body_hash`/`current_version`. |
 | `PUT /api/v1/pipelines/{id}` | **Semantics change:** always writes the draft branch (§5.1 or §5.2). Never appends a released version. Requires the hash precondition. Response carries the version's `status` and `body_hash`. |
 | `POST /api/v1/pipelines/{id}/release` | New. Hash-guarded (§5.3). UI-only in practice; no MCP tool is exposed for it (D4). |
-| `POST /api/v1/pipelines/{id}/draft/discard` | New. Hash-guarded (§5.4). |
-| `GET /api/v1/pipelines/{id}` | Read shape gains `current_version_status` and the draft pointer when one exists. Default body remains the **released** version. |
-| Templates (`/api/v1/templates/...`) | Mirror of all the above. |
+| `POST /api/v1/pipelines/{id}/draft/discard` | New. Hash-guarded (§5.4). `204`, both outcomes transparent. |
+| `GET /api/v1/pipelines/{id}` | Read shape gains the version's `status` and `body_hash`, `current_version`, and the `draft` pointer when one exists. Default body remains the **released** version. |
+| Templates (`/api/v1/templates/...`) | Mirror of all the above (release = §8.9, discard = §8.10 in rest-api.md). |
+
+**Exact spellings (v1.3, fixed in [rest-api.md](rest-api.md)):** the hash precondition
+travels as the standard **`If-Match` request header** carrying the `body_hash` — on PUT,
+release and discard, for pipelines and templates alike; absent/blank ⇒ `400
+pipeline.execution.invalid_parameter_type` with `details.reason = "precondition_missing"`
+(a caller that did not participate in the protocol at all, not a conflict). Release and
+discard distinguish their refusals: no DRAFT exists ⇒ `pipeline.version.not_draft` /
+`template.version.not_draft` (409); a DRAFT exists but the hash is stale ⇒
+`*.version.conflict` with the current state in `details`. The executions surfaces carry
+§8's marker as a `draft_run: true|false` field on each execution record.
 
 MCP authoring (`pipelines_update` tool) calls the same PUT and therefore lands its work as
 drafts on existing pipelines. An agent iterating produces **one** draft row that it keeps
@@ -405,6 +444,17 @@ harmless: `current_version` is "max released present".
 **Hash recompute guard:** the target recomputes the body hash from the payload body and
 refuses with `pipeline.import.hash_mismatch` if it differs from the declared hash — this
 catches transfer corruption and canonicalization drift between app versions in one place.
+
+**Wire spelling (v1.3):** a payload carrying `version` must also carry `body_hash`
+(absent ⇒ `hash_mismatch` with `details.reason = "body_hash_missing"`); `released_at` is
+honored when present (export emits it) so §8's derivation stays truthful on the target.
+The stored `released_by` is the IMPORTING actor — the source's releasing user may not
+exist locally (the promotion case is §10.6's service principal, out of this round). The
+template import mirrors the table entry-for-entry with `template.version.conflict`; the
+template-side hash-mismatch code does not exist in §13 and this round adds no rows, so
+the internally-inconsistent entry surfaces as `template.version.conflict` with
+`details.reason = "hash_mismatch"` — a catalog gap raised to the operator, not papered
+over.
 
 ### 9.3 The price of number preservation, accepted
 
@@ -559,12 +609,15 @@ there at implementation time, in the same commit as the repositories:
 | `released_at` | `TIMESTAMPTZ NULL` | NULL for drafts; set at release. |
 | `released_by` | `UUID NULL` | Actor of the release. |
 | `updated_by` | `UUID NULL` | Last draft writer — powers the 409 details. |
-| `updated_at` | `TIMESTAMPTZ NULL` | Draft rows only; RELEASED/DISCARDED stay NULL (the immutability note in metadata-db §4.5 is amended accordingly). |
+| `updated_at` | `TIMESTAMPTZ NULL` | Written by DRAFT writes only and never restamped afterwards — a released row keeps its last draft-write timestamp (the immutability note in metadata-db §4.5/§2 is amended accordingly). |
 
 Plus the two one-draft partial unique indexes (§3.3). **No column is added to
 `pipeline_executions`** — §8 derives the draft/released distinction from `released_at`,
-which is why that column is specified as database-generated (`DEFAULT NOW()` at release)
-rather than application-supplied.
+which is why that column is database-generated (`NOW()` in the release statement, not
+`DEFAULT` — it is NULL until the first release of that version) rather than
+application-supplied. The migration is `V6__version_lifecycle.sql`; metadata-db §4.5/§4.9
+carry the DDL (the authority) and §5A carries the promotion classification registry the
+migration test parses.
 
 The immutability KDoc blocks on both repositories are rewritten to the §3.1 discipline.
 
@@ -624,7 +677,21 @@ the handback so the drift guards are known to have been considered rather than m
 the skill should state it, so a later reader does not read the gap as an oversight and
 "fix" it.
 
-### 12.3 The general rule, beyond this spec
+### 12.3 The §12.2 decision, made and recorded (v1.3 / 035)
+
+The draft-returning `pipelines_update` is a **payload change, not a surface change**: all
+18 tool names stand, no tool is added or removed, and `mcp-server.md` §6.1 is untouched.
+Concretely: `pipelines_update` gains the REQUIRED `expected_hash` argument (same input as
+`pipelines_create` plus `id` and `expected_hash`), and both create and update results gain
+`status`, `body_hash`, `current_version` and — when a draft exists — a `draft` pointer;
+`pipelines_get` merges the same fields into the returned body. §6.2.5's prose and §6.2.2's
+result note in `mcp-server.md` were amended to say exactly this (the tool is documented in
+prose, so `McpToolSurfaceSpecDriftTest`'s schema comparison is unaffected by
+construction). Making `expected_hash` required is deliberate: D3 says no last-write-wins
+EVER, and an optional precondition is a protocol hole an agent will fall through — the
+refusal for omitting it is the input schema itself.
+
+### 12.4 The general rule, beyond this spec
 
 Any round that changes what an agent can do, must do, or will be refused for, updates
 `SKILL.md` in the same commit. The test is not "did the API change" but **"would an agent
@@ -707,6 +774,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.4 | 035 implementation | The implementer's amendments, landing with the code. §4.1: canonicalization pinned mechanically — the hash is computed BY THE DATABASE (`encode(sha256(convert_to(<jsonb>::text, 'UTF8')), 'hex')`) over the JSONB projection (pipelines) / the `jsonb_build_object` field object (templates), one expression shared by V6's backfill and every write; the serializer string is the write format, not the hash anchor. §3.4: draft allocation is `max(existing)+1` — a DISCARDED number is consumed, so the pointer alone would collide. §5.3: the sketch's `updated_at = NOW()` on the flip is dropped; §11's column note governs (draft-write metadata, never restamped). §6: template metadata asymmetry recorded (display_name/description are index-row, save-time; template discard always hard-deletes — no FK can block it). §7: exact REST spellings — `If-Match` header on PUT/release/discard, `pipeline.version.not_draft` vs `*.version.conflict` distinction, `draft_run` field name; §9.2: wire spelling (`body_hash` required with `version`, `released_at` honored, `released_by` = importing actor, template hash-mismatch gap surfaced as `template.version.conflict` + reason, raised not papered); §12.3 records the §12.2 decision (payload-only MCP change; `expected_hash` required on `pipelines_update`; mcp-server.md §6.2.2/§6.2.5 prose amended). |
 | 2026-09-01 | v1.3 | operator ratification | §10.6 replaced: the promotion credential is a **pre-shared server key**, not a principal. The receiver holds a promotion server key and refuses when it is absent (fail closed); the sender holds the same secret with the target URL and presents it on the promotion call. No service account, no scope-matrix entry, no `users` row for the credential — promotion is a deployment trusting a deployment, and the earlier service-principal draft was more machinery than the problem needs. Records the one gap the shape does not close: `created_by`/`triggered_by` are NOT NULL FKs to `users`, so an imported row still needs a local actor; three options given, a single reserved non-interactive row recommended, awaiting ratification. F10 defers here; F2's service-account question stays with the machine-auth note, because an application EXECUTING a pipeline is a different problem from a deployment PROMOTING one. |
 | 2026-08-31 | v1.2 | operator request | New §12: the agent-facing skill (`.agents/skills/datapipelines/SKILL.md`) is updated in the SAME commit as the behaviour it describes. Concrete for this spec — `SKILL.md:51` says "every save creates a new version", which D2 makes false, so an agent holding the current skill would believe a `pipelines_update` published something it left as a draft. Enumerates what this round obliges (versioning concept, golden path stopping short of release, draft execution, the new 409s, the hash protocol, the references list), what the implementor must DECIDE rather than assume (whether the draft result reshapes the MCP tool surface, which `mcp-server.md` and `McpToolCatalog` own), and the general rule: the test is "would an agent holding the current skill now be wrong?" Notes that the skill has no drift guard, so the rule is carried by review. Sections 12–14 renumbered to 13–15. |
 | 2026-08-31 | v1.1 | operator ratification | §15's first three open items decided and written into their sections. §3.5 rewritten: the `pipelines` row is an INDEX over the current released body — the metadata is not duplicated, one side is the artifact and the other is how you find it — so metadata rides the release by definition rather than by preference, plus a draft-write-time uniqueness check reusing `pipeline.validation.duplicate_name` (no catalogue addition). New §10.6 specifies the promotion-peer credential as a non-interactive service principal, scoped to the import endpoint, backed by a real `users` row because `created_by`/`triggered_by` are NOT NULL FKs; this doc is its authority and the machine-auth note's F10 defers here. §8 drops the `ran_draft` column for derivation from `released_at`, with its cross-clock precondition stated (`started_at` is application-supplied) and `released_at` required to be database-generated. |

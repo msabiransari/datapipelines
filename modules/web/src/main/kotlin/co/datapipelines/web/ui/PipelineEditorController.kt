@@ -33,13 +33,36 @@ class PipelineEditorController(
         val record =
             pipelines.findById(workspaceId, id)
                 ?: throw NoSuchElementException("Pipeline $id not found")
+        // versioning §3.5/§7: the editor shows the DRAFT when one exists (that is the
+        // working copy a human reviews), with its pending-release affordance; the list
+        // keeps showing the released name until lock. The default body of the REST GET
+        // stays the released version — this is the editor's load, not the API's.
+        val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        val shownVersion = draft?.version ?: record.currentVersion
         val body =
-            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
-                ?: throw NoSuchElementException("Pipeline $id version ${record.currentVersion} body not found")
-        val fullTree = PipelineResponses.full(record, body)
+            pipelines.findVersionBody(workspaceId, record.id, shownVersion)
+                ?: throw NoSuchElementException("Pipeline $id version $shownVersion body not found")
+        val versionDetail = draft ?: pipelines.findCurrentVersionDetail(workspaceId, record.id)
+        val fullTree = PipelineResponses.full(record, body, versionDetail, draft)
         val pipelineJson = mapper.writeValueAsString(fullTree)
 
         model.addAttribute("pipelineJson", pipelineJson)
+        model.addAttribute("pipelineId", id)
+        model.addAttribute("hasDraft", draft != null)
+        model.addAttribute("draftVersion", draft?.version)
+        model.addAttribute("draftHash", draft?.bodyHash)
+        model.addAttribute("releasedVersion", record.currentVersion)
+        model.addAttribute(
+            "lifecycleJson",
+            mapper.writeValueAsString(
+                buildMap<String, Any?> {
+                    put("hasDraft", draft != null)
+                    put("draftVersion", draft?.version)
+                    put("draftHash", draft?.bodyHash)
+                    put("releasedVersion", record.currentVersion)
+                },
+            ),
+        )
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "pipelines/editor"
     }

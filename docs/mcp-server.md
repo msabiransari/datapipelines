@@ -235,7 +235,7 @@ Fetch a full pipeline definition.
 }
 ```
 
-Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)).
+Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)) merged with the fields the version-lifecycle protocol needs (versioning §4.2, since 035): the version's `body_hash` and `status` — echo `body_hash` back as `expected_hash` on `pipelines_update` — plus `current_version` (the latest RELEASED version, what execute-default runs) and a `draft` pointer when unreleased edits exist.
 
 **Scope:** `read`.
 
@@ -316,9 +316,11 @@ The whole pipeline is validated before it is stored — no invalid pipeline ever
 
 #### 6.2.5 `pipelines_update`
 
-Update an existing pipeline (creates new version).
+Update an existing pipeline by writing its DRAFT (versioning §3.2/§7, since 035).
 
-Same input as `pipelines_create` plus required `id`. Returns the new version. Same save-time validation applies.
+Same input as `pipelines_create` plus required `id` and required `expected_hash` — the `body_hash` of the version this edit is based on (`pipelines_get` or the previous update's result). The first update after a release creates the draft (copy-on-write); later updates overwrite that same draft in place. Same save-time validation applies.
+
+Returns: the draft version — `version`, `status: "DRAFT"`, `body_hash` (carry this into the next write), `current_version` (the unmoved released pointer), and the `draft` pointer. **The update does NOT release**: an agent leaves the draft for a human to review and release from the UI (versioning D4). On `pipeline.version.conflict` someone else modified it after you loaded it — re-read, rebase, retry; never retry blindly.
 
 **Scope:** `author`.
 

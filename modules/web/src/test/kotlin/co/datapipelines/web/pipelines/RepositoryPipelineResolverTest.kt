@@ -94,7 +94,7 @@ class RepositoryPipelineResolverTest {
         val record = save(childPipeline("resolver_child"))
         // A second version with an observably different body: the pin must keep reading v1.
         val v2 = childPipeline("resolver_child").copy(description = "v2")
-        pipelines.update(DEFAULT_WORKSPACE_ID, record.id, v2, PipelineSerializer().write(v2), userId)
+        pipelines.appendReleasedVersion(DEFAULT_WORKSPACE_ID, record.id, v2, PipelineSerializer().write(v2), userId)
 
         val v1 = repositoryPipelineResolver(pipelines).resolve(DEFAULT_WORKSPACE_ID, "resolver_child", 1)
         val resolvedV2 = repositoryPipelineResolver(pipelines).resolve(DEFAULT_WORKSPACE_ID, "resolver_child", 2)

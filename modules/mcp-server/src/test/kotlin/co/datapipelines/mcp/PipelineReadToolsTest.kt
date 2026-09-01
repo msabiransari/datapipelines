@@ -84,7 +84,17 @@ class PipelineReadToolsTest {
     @Test
     fun `get returns the stored body of the current version`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 1,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                bodyHash = "hash-v1",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
 
         val body = PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
 
@@ -94,7 +104,17 @@ class PipelineReadToolsTest {
     @Test
     fun `get honours an explicit version`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 4)
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "v2")
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 2) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 2,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                bodyHash = "hash-v2",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
 
         val body =
             PipelinesGetTool(pipelines).call(

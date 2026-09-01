@@ -62,7 +62,9 @@ class PipelineUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline("other"))
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
         every { repository.countAll(any()) } returns 2
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null)
@@ -87,6 +89,7 @@ class PipelineUiControllerTest {
                 pipeline("beta"),
                 pipeline("gamma"),
             )
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "beta", null)
@@ -140,6 +143,7 @@ class PipelineUiControllerTest {
                 now,
             )
         every { repository.findAll(any()) } returns listOf(record1, record2, record3)
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), "bravo", null)
@@ -153,7 +157,9 @@ class PipelineUiControllerTest {
     fun `partial returns fragment view with correct model`() {
         authenticate()
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns listOf(pipeline(), pipeline(), pipeline())
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
         every { repository.countAll(any()) } returns 3
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -169,7 +175,9 @@ class PipelineUiControllerTest {
     fun `partial paginates correctly`() {
         authenticate()
         every { repository.findAll(any(), null, pageSize + 1, 25) } returns (1..5).map { pipeline("p${it + 25}") }
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
         every { repository.countAll(any()) } returns 30
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val partialController = PipelinePartialController(repository)
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -190,6 +198,7 @@ class PipelineUiControllerTest {
 
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
         every { repository.countAll(any()) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -205,6 +214,7 @@ class PipelineUiControllerTest {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         every { repository.findAll(any(), null, pageSize + 1, 0) } returns emptyList()
+        every { repository.findDrafts(any(), any()) } returns emptyMap()
         every { repository.countAll(any()) } returns 0
 
         val model: ExtendedModelMap = ExtendedModelMap()

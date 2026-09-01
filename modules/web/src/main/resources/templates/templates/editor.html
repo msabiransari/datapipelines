@@ -8,6 +8,17 @@
       <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0" th:text="'ID: ' + ${template?.id ?: '—'}">Template ID</p>
     </div>
     <div style="display:flex;gap:var(--gap-sm);align-items:center">
+      <!-- versioning §6/§7: the pending-release affordance. Release is the human action
+           that publishes the draft (agents never release, D4); discard deletes it (a
+           template draft is always deletable — nothing references it by FK). -->
+      <span th:if="${hasDraft}" class="ds-badge ds-badge-warning"
+            th:text="'Draft v' + ${draftVersion} + ' — pending release'"></span>
+      <button th:if="${hasDraft}" class="ds-button ds-button-primary ds-button-sm" id="tpl-release-draft"
+              th:attr="data-id=${template?.id}, data-hash=${draftHash}"
+              onclick="tplLifecycle('release')">Release</button>
+      <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm" id="tpl-discard-draft"
+              th:attr="data-id=${template?.id}, data-hash=${draftHash}"
+              onclick="tplLifecycle('discard')">Discard draft</button>
       <label for="versionSelect" style="color:var(--text-secondary);font-size:var(--text-sm)">Version:</label>
       <select id="versionSelect" class="ds-select" style="font-size:var(--text-sm)" onchange="updateVersion()">
         <th:block th:each="v : ${versions}">
@@ -83,6 +94,34 @@
 
   <script>
     let selectedTab = 'kv';
+
+    /* versioning §5.3/§5.4: the draft lifecycle actions — hash-guarded through the same
+       REST endpoints and the same CSRF double-submit pair every cookie-authenticated
+       state-changing fetch on this server uses. */
+    function tplLifecycle(action) {
+      var btn = document.getElementById(action === 'release' ? 'tpl-release-draft' : 'tpl-discard-draft');
+      var id = btn.getAttribute('data-id');
+      var hash = btn.getAttribute('data-hash');
+      if (action === 'discard' && !window.confirm('Discard this draft? Its version number returns to the pool.')) return;
+      btn.disabled = true;
+      var csrf = (document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/) || [])[1];
+      var url = action === 'release'
+        ? '/api/v1/templates/' + encodeURIComponent(id) + '/release'
+        : '/api/v1/templates/' + encodeURIComponent(id) + '/draft/discard';
+      fetch(url, {
+        method: 'POST',
+        headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf) : '', 'If-Match': hash },
+        credentials: 'same-origin'
+      }).then(function (response) {
+        if (response.ok) { window.location.reload(); return null; }
+        return response.json().catch(function () { return {}; }).then(function (err) {
+          throw new Error((err && err.error && err.error.message) || ('HTTP ' + response.status));
+        });
+      }).catch(function (err) {
+        btn.disabled = false;
+        window.alert((action === 'release' ? 'Release' : 'Discard') + ' refused: ' + err.message);
+      });
+    }
 
     function switchTab(tab) {
       selectedTab = tab;

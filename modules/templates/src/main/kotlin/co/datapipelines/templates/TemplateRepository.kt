@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -17,20 +18,46 @@ data class TemplateVersionSummary(
 )
 
 /**
- * Persistence for `templates` and `template_versions` (metadata-db §4.8/§4.9, §6).
+ * Persistence for `templates` and `template_versions` (metadata-db §4.8/§4.9, §6,
+ * versioning §6).
  *
  * `NamedParameterJdbcTemplate` exclusively — no JPA (module-structure §8.1). The repository
  * lives in the module that owns the entity (§3.1 rule 1); the `DataSource` bean is app-level
  * and schema creation belongs to `app`'s Flyway alone (rule 2), so nothing here creates or
  * alters a table.
  *
- * ## Immutable per version
+ * ## The version lifecycle (versioning §3.1/§6, since V6)
  *
- * A template is immutable per version (templates.md §5.1): [update] does not rewrite a body,
- * it appends a `template_versions` row and bumps `templates.current_version`. Both writes land
- * in **one** data-modifying-CTE statement so the pair is atomic without an enclosing
- * transaction — a `templates` row whose `current_version` names a version row that was never
- * inserted is unrepresentable. There is deliberately **no `params_schema` column** (D3).
+ * Same lifecycle as pipelines: [create] lands v1 RELEASED; [createDraft] copies the current
+ * released version to a DRAFT (the partial unique index `uq_template_versions_one_draft`
+ * makes concurrent first-writers race-safe, the loser surfacing as
+ * `template.version.conflict`); [writeDraft] overwrites the draft in place; [releaseDraft]
+ * flips it to RELEASED and bumps `templates.current_version`; [discardDraft] deletes the
+ * draft — always a hard delete here, because unlike `pipeline_versions` nothing references
+ * a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so
+ * §3.4's executed-draft branch cannot fire for templates.
+ *
+ * ## Draft content vs. index metadata — a deliberate asymmetry
+ *
+ * A template draft versions the **content fields** (`engine`, `dialect`, `is_library`,
+ * `imports`, `body`); `display_name` / `description` live on the index row `templates`
+ * only and are NOT part of the versioned artifact, so they keep updating at save time —
+ * there is no draft row that could stage them (versioning v1.3 documents the asymmetry;
+ * §3.5's metadata-rides-the-release is a pipeline rule, where the metadata is part of the
+ * portable body). Templates have no rename: `name` is the identity, so §3.5's
+ * draft-write-time name-uniqueness check is a pipeline-only concern.
+ *
+ * ## `body_hash` — one expression everywhere
+ *
+ * The canonical template body is the version-owned field object
+ * `{engine, dialect, is_library, imports, body}` projected through
+ * `jsonb_build_object(...)` (which normalizes key order deterministically) and hashed
+ * `encode(sha256(convert_to(<jsonb>::text, 'UTF8')), 'hex')` BY THE DATABASE — the same expression V6's
+ * backfill used, so writer and reader cannot disagree on a body's hash.
+ *
+ * `TooManyFunctions` is suppressed because the version-lifecycle round made this class the
+ * single owner of every `template_versions` statement — lifecycle reads, the four write
+ * paths, and both import modes — mirroring the `PipelineRepository` precedent.
  *
  * ## Surrogate key and workspace scoping (slice 2)
  *
@@ -42,6 +69,7 @@ data class TemplateVersionSummary(
  * request pipeline). **No default anywhere**: a missed caller is a compile error, never a
  * silent resolution in some default world.
  */
+@Suppress("TooManyFunctions")
 class TemplateRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
@@ -195,8 +223,8 @@ class TemplateRepository(
         }
 
     /**
-     * Inserts the template and its version 1 together in [workspaceId], returning what the
-     * database stored.
+     * Inserts the template and its version 1 — RELEASED on creation (§3.2) — together in
+     * [workspaceId], returning what the database stored.
      *
      * [draft] `id` is auto-generated when omitted (templates.md §3.2). The final `SELECT` reads
      * back server-assigned `created_at` / `updated_at`, never a hand-built value (metadata-db
@@ -243,12 +271,231 @@ class TemplateRepository(
         }
 
     /**
-     * Appends a new version and bumps `current_version`, in one statement.
-     *
-     * Returns null when no live template has this id in [workspaceId] — the caller decides
-     * whether that is a 404; the repository does not raise catalog errors for control flow.
+     * Translates the one-draft partial index violation into §13.9's
+     * `template.version.conflict` carrying the WINNER's draft state (versioning §3.3/§6):
+     * the loser of two simultaneous first-writes must re-read and rebase.
      */
-    fun update(
+    private fun <T> mappingDraftRace(
+        templateId: String,
+        block: () -> T,
+    ): T =
+        try {
+            block()
+        } catch (e: org.springframework.dao.DuplicateKeyException) {
+            if (e.mostSpecificCause.message?.contains(DRAFT_INDEX) != true) throw e
+            val winner = findDraftDetailUnchecked(templateId)
+            throw co.datapipelines.typesystem.DatapipelinesException(
+                code = PipelineErrorCodes.Template.VERSION_CONFLICT,
+                message = "Template was modified by someone else after you loaded it.",
+                details =
+                    mapOf(
+                        "current_body_hash" to (winner?.bodyHash ?: ""),
+                        "current_status" to (winner?.status?.name ?: "DRAFT"),
+                        "updated_by" to (winner?.updatedBy?.toString() ?: ""),
+                        "updated_at" to (winner?.updatedAt?.toString() ?: ""),
+                    ),
+                cause = e,
+            )
+        }
+
+    // ---------------------------------------------------------------------------------------------
+    // Lifecycle reads (versioning §4/§7)
+    // ---------------------------------------------------------------------------------------------
+
+    /** One version's lifecycle detail, or null when the template/version does not exist in the workspace. */
+    fun findVersionDetail(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                DETAIL_WHERE + " AND t.name = :name AND v.version = :version",
+                mapOf("name" to id, "version" to version, "workspaceId" to workspaceId),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /** The template's DRAFT, or null when none exists — the draft pointer of §7's read shape. */
+    fun findDraftDetail(
+        workspaceId: UUID,
+        id: String,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                DETAIL_WHERE + " AND t.name = :name AND v.status = 'DRAFT'",
+                mapOf("name" to id, "workspaceId" to workspaceId),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /** The DRAFT detail of each of [ids] that has one — the list screens' pending-release badge (§7). */
+    fun findDrafts(
+        workspaceId: UUID,
+        ids: Collection<String>,
+    ): Map<String, TemplateVersionDetail> {
+        if (ids.isEmpty()) return emptyMap()
+        return jdbc
+            .query(
+                DETAIL_WHERE + " AND v.status = 'DRAFT' AND t.name IN (:names)",
+                mapOf("names" to ids, "workspaceId" to workspaceId),
+                DETAIL_MAPPER,
+            ).associateBy { it.templateId }
+    }
+
+    /**
+     * One template version's lifecycle status, or null when it does not exist — what the
+     * pipeline-release pin check reads (versioning §6: a pipeline may be released only when
+     * every template version its body pins is RELEASED).
+     */
+    fun findVersionStatus(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+    ): co.datapipelines.pipeline.PipelineVersionStatus? =
+        jdbc
+            .query(
+                """
+                SELECT v.status
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND v.version = :version
+                """.trimIndent(),
+                mapOf("name" to id, "version" to version, "workspaceId" to workspaceId),
+            ) { rs, _ -> PipelineVersionStatus.fromWire(rs.getString("status")) }
+            .singleOrNull()
+
+    /**
+     * The content hash of a candidate template version, computed by the SAME database
+     * expression every write and the V6 backfill use — what §9.2's import hash-recompute
+     * guard reads. Never recomputed in Kotlin: a second implementation of the canonical
+     * form is where the writer's and the reader's hashes would silently diverge.
+     */
+    fun computeBodyHash(
+        engine: String,
+        dialect: String,
+        isLibrary: Boolean,
+        importsJson: String,
+        body: String,
+    ): String =
+        checkNotNull(
+            jdbc.queryForObject(
+                "SELECT encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', :dialect," +
+                    " 'is_library', :isLibrary, 'imports', CAST(:importsJson AS jsonb), 'body', :body)" +
+                    "::text, 'UTF8')), 'hex')",
+                mapOf(
+                    "engine" to engine,
+                    "dialect" to dialect,
+                    "isLibrary" to isLibrary,
+                    "importsJson" to importsJson,
+                    "body" to body,
+                ),
+                String::class.java,
+            ),
+        )
+
+    /** The race-loser's read of the winner — workspace unchecked because the INSERT already established the caller's scope. */
+    private fun findDraftDetailUnchecked(templateId: String): TemplateVersionDetail? =
+        jdbc
+            .query(
+                """
+                SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                       v.released_at, v.released_by, v.updated_by, v.updated_at
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND v.status = 'DRAFT'
+                """.trimIndent(),
+                mapOf("name" to templateId),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    // ---------------------------------------------------------------------------------------------
+    // Lifecycle writes (versioning §5/§6)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Draft create — copy-on-write from the current released version (versioning §5.1).
+     * The draft pre-allocates `current_version + 1` (§3.4); index metadata
+     * (`display_name`/`description`) moves at save time — the documented template asymmetry.
+     *
+     * Null when the guard failed (stale hash, unknown template, no released version); the
+     * race loser gets `template.version.conflict` carrying the winner's hash.
+     */
+    fun createDraft(
+        workspaceId: UUID,
+        id: String,
+        draft: TemplateDraft,
+        expectedHash: String,
+        actor: UUID,
+    ): TemplateVersionDetail? =
+        mappingDraftRace(id) {
+            jdbc
+                .query(
+                    CREATE_DRAFT_SQL,
+                    params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash),
+                    DETAIL_MAPPER,
+                ).singleOrNull()
+        }
+
+    /** Draft write — in-place overwrite of the DRAFT (versioning §5.2), metadata moving at save time. */
+    fun writeDraft(
+        workspaceId: UUID,
+        id: String,
+        draft: TemplateDraft,
+        expectedHash: String,
+        actor: UUID,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                WRITE_DRAFT_SQL,
+                params(workspaceId, id, draft, actor) + mapOf("expectedHash" to expectedHash),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Release (versioning §5.3): the DRAFT flips to RELEASED with a database-generated
+     * `released_at`, and `templates.current_version` moves to it. Null when no DRAFT
+     * matched [expectedHash].
+     */
+    fun releaseDraft(
+        workspaceId: UUID,
+        id: String,
+        expectedHash: String,
+        actor: UUID,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                RELEASE_DRAFT_SQL,
+                mapOf("name" to id, "workspaceId" to workspaceId, "expectedHash" to expectedHash, "actor" to actor),
+                DETAIL_MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Discard (versioning §5.4) — a hard delete: nothing references a `template_versions`
+     * row by FK, so §3.4's executed-draft DISCARDED branch cannot fire for templates and
+     * the version number always returns to the pool. False when no DRAFT matched
+     * [expectedHash].
+     */
+    fun discardDraft(
+        workspaceId: UUID,
+        id: String,
+        expectedHash: String,
+    ): Boolean =
+        jdbc.update(
+            """
+            DELETE FROM template_versions v
+             USING templates t
+             WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+               AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
+            """.trimIndent(),
+            mapOf("name" to id, "workspaceId" to workspaceId, "expectedHash" to expectedHash),
+        ) > 0
+
+    /**
+     * Appends the next version directly as RELEASED and bumps `current_version` — the
+     * version-LESS import path (§9.2: allocate-next-local when the payload carries no
+     * version). Not the PUT path: HTTP writes go through [createDraft]/[writeDraft].
+     *
+     * Returns null when no live template has this id in [workspaceId]; the caller decides
+     * whether that is a 404.
+     */
+    fun appendReleasedVersion(
         workspaceId: UUID,
         id: String,
         draft: TemplateDraft,
@@ -256,9 +503,67 @@ class TemplateRepository(
     ): Template? =
         jdbc
             .query(
-                UPDATE_SQL,
+                APPEND_RELEASED_SQL,
                 params(workspaceId, id, draft, updatedBy),
                 MAPPER,
+            ).singleOrNull()
+
+    /**
+     * Preserved-version import onto a NEW template (§9.2): the template row and its version
+     * at the payload's EXACT version land together as RELEASED, `released_at` from the
+     * source, `body_hash` the source declared (the caller has recomputed it from the
+     * payload body). Constraint violations raise for the caller to classify.
+     */
+    fun importTemplateVersion(
+        workspaceId: UUID,
+        draft: TemplateDraft,
+        version: Int,
+        bodyHash: String,
+        releasedAt: java.time.Instant?,
+        actor: UUID,
+    ): Template {
+        val id = draft.id ?: error("preserved-version import requires an id")
+        return mappingDuplicateName(id) {
+            jdbc
+                .query(
+                    IMPORT_NEW_TEMPLATE_SQL,
+                    params(workspaceId, id, draft, actor) +
+                        mapOf(
+                            "version" to version,
+                            "bodyHash" to bodyHash,
+                            "releasedAt" to releasedAt?.let(java.sql.Timestamp::from),
+                        ),
+                    MAPPER,
+                ).single()
+        }
+    }
+
+    /**
+     * Preserved-version import onto an EXISTING template (§9.2): inserts the version at the
+     * payload's EXACT number as RELEASED, bumping `current_version` (and index metadata)
+     * only when it is the new latest. Null when the number is already taken (the
+     * `NOT EXISTS` guard suppressed the insert) — the caller re-reads via
+     * [findVersionDetail] and classifies per §9.2's table.
+     */
+    fun insertReleasedVersion(
+        workspaceId: UUID,
+        id: String,
+        draft: TemplateDraft,
+        version: Int,
+        bodyHash: String,
+        releasedAt: java.time.Instant?,
+        actor: UUID,
+    ): TemplateVersionDetail? =
+        jdbc
+            .query(
+                INSERT_RELEASED_VERSION_SQL,
+                params(workspaceId, id, draft, actor) +
+                    mapOf(
+                        "version" to version,
+                        "bodyHash" to bodyHash,
+                        "releasedAt" to releasedAt?.let(java.sql.Timestamp::from),
+                    ),
+                DETAIL_MAPPER,
             ).singleOrNull()
 
     /** Soft-deletes the template (§9). Returns false when nothing live was there to delete in [workspaceId]. */
@@ -340,7 +645,7 @@ class TemplateRepository(
             """
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
-                   v.body, v.created_at, v.created_by AS version_created_by
+                   v.body, v.created_at, v.created_by AS version_created_by, v.status, v.body_hash
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
@@ -371,6 +676,31 @@ class TemplateRepository(
                 "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by " +
                 "FROM template_versions v JOIN templates t ON t.id = v.template_id"
 
+        /** The one-draft partial unique index (versioning §3.3, V6). */
+        private const val DRAFT_INDEX = "uq_template_versions_one_draft"
+
+        /**
+         * The canonical-hash SQL expression over a template's version-owned fields — the SAME
+         * one V6's backfill used, built from the write's own parameters so the hash can never
+         * disagree with the row being stored. `jsonb_build_object` normalizes key order, so
+         * parameter order is irrelevant to the result.
+         */
+        private const val TEMPLATE_HASH_EXPR =
+            "encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', :dialect," +
+                " 'is_library', :isLibrary, 'imports', CAST(:importsJson AS jsonb), 'body', :body)" +
+                "::text, 'UTF8')), 'hex')"
+
+        /** The version-detail column list, `t.name AS template_id` for the human id. */
+        private const val DETAIL_COLS_PLAIN =
+            "template_id, version, status, body_hash, created_at, created_by," +
+                " released_at, released_by, updated_by, updated_at"
+
+        private const val DETAIL_WHERE =
+            "SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by," +
+                " v.released_at, v.released_by, v.updated_by, v.updated_at" +
+                " FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                " WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE"
+
         private val INSERT_SQL =
             """
             WITH new_template AS (
@@ -379,20 +709,114 @@ class TemplateRepository(
                 RETURNING id, name, display_name, description
             ), new_version AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body, created_by)
-                SELECT id, 1, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body, :actor
+                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, released_by, released_at)
+                SELECT id, 1, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM new_template
                 RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
-                   v.created_by AS version_created_by
+                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
 
-        private val UPDATE_SQL =
+        /** versioning §5.1 — copy-on-write draft create; index metadata moves at save time.
+         *
+         * The pre-allocated number is `max(existing version) + 1` — the pointer-plus-one in
+         * §3.4's prose, made safe against any preserved-version import that landed a higher
+         * number; the CONTENT still copies from the current released version. */
+        private val CREATE_DRAFT_SQL =
+            """
+            WITH guard AS (
+                SELECT 1
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId
+                   AND v.version = t.current_version AND v.status = 'RELEASED' AND v.body_hash = :expectedHash
+            ), draft AS (
+                INSERT INTO template_versions
+                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, updated_by, updated_at)
+                SELECT v.template_id,
+                       (SELECT COALESCE(MAX(d2.version), 0) + 1 FROM template_versions d2 WHERE d2.template_id = v.template_id),
+                       :engine, :dialect, :isLibrary,
+                       CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
+                  FROM template_versions v JOIN templates t ON t.id = v.template_id
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                   AND v.version = t.current_version AND v.status = 'RELEASED'
+                   AND NOT EXISTS (SELECT 1 FROM template_versions d
+                                    WHERE d.template_id = v.template_id AND d.status = 'DRAFT')
+                RETURNING $DETAIL_COLS_PLAIN
+            ), meta AS (
+                UPDATE templates
+                   SET display_name = :displayName, description = :description, updated_at = NOW()
+                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                   AND EXISTS (SELECT 1 FROM draft)
+                RETURNING 1
+            )
+            SELECT t.name AS template_id, draft.version, draft.status, draft.body_hash,
+                   draft.created_at, draft.created_by, draft.released_at, draft.released_by,
+                   draft.updated_by, draft.updated_at
+              FROM draft, guard, meta
+              JOIN templates t ON t.name = :name
+            """.trimIndent()
+
+        /** versioning §5.2 — in-place draft write; index metadata moves at save time. */
+        private val WRITE_DRAFT_SQL =
+            """
+            WITH written AS (
+                UPDATE template_versions v
+                   SET engine = :engine, dialect = :dialect, is_library = :isLibrary,
+                       imports_json = CAST(:importsJson AS jsonb), body = :body,
+                       body_hash = $TEMPLATE_HASH_EXPR,
+                       updated_by = :actor, updated_at = NOW()
+                  FROM templates t
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                   AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
+                RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                          v.released_at, v.released_by, v.updated_by, v.updated_at
+            ), meta AS (
+                UPDATE templates
+                   SET display_name = :displayName, description = :description, updated_at = NOW()
+                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                   AND EXISTS (SELECT 1 FROM written)
+                RETURNING 1
+            )
+            SELECT t.name AS template_id, w.version, w.status, w.body_hash, w.created_at, w.created_by,
+                   w.released_at, w.released_by, w.updated_by, w.updated_at
+              FROM written w
+              JOIN templates t ON t.id = w.template_id, meta
+            """.trimIndent()
+
+        /** versioning §5.3 — release: flip + pointer bump, one statement. */
+        private val RELEASE_DRAFT_SQL =
+            """
+            WITH locked AS (
+                UPDATE template_versions v
+                   SET status = 'RELEASED', released_at = NOW(), released_by = :actor
+                  FROM templates t
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                   AND v.template_id = t.id AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
+                RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
+                          v.released_at, v.released_by, v.updated_by, v.updated_at
+            ), bumped AS (
+                UPDATE templates
+                   SET current_version = (SELECT version FROM locked), updated_at = NOW()
+                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                   AND EXISTS (SELECT 1 FROM locked)
+                RETURNING id
+            )
+            SELECT t.name AS template_id, l.version, l.status, l.body_hash, l.created_at, l.created_by,
+                   l.released_at, l.released_by, l.updated_by, l.updated_at
+              FROM locked l
+              JOIN templates t ON t.id = l.template_id, bumped b
+            """.trimIndent()
+
+        /** The version-less import path: next version appended directly as RELEASED. */
+        private val APPEND_RELEASED_SQL =
             """
             WITH bumped AS (
                 UPDATE templates
@@ -400,21 +824,78 @@ class TemplateRepository(
                        display_name = :displayName,
                        description = :description,
                        updated_at = NOW()
-                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                  WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
                 RETURNING id, name, display_name, description, current_version
             ), new_version AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body, created_by)
-                SELECT id, current_version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body, :actor
+                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, released_by, released_at)
+                SELECT id, current_version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM bumped
                 RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
-                   v.created_by AS version_created_by
+                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM bumped t
               JOIN new_version v ON v.template_id = t.id
+            """.trimIndent()
+
+        /** versioning §9.2 — new template at the source's exact version number. */
+        private val IMPORT_NEW_TEMPLATE_SQL =
+            """
+            WITH new_template AS (
+                INSERT INTO templates (name, display_name, description, current_version, workspace_id, created_by)
+                VALUES (:name, :displayName, :description, :version, :workspaceId, :actor)
+                RETURNING id, name, display_name, description, current_version
+            ), new_version AS (
+                INSERT INTO template_versions
+                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, released_by, released_at)
+                SELECT id, :version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
+                  FROM new_template
+                RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
+                          body, created_at, created_by
+            )
+            SELECT t.name AS id, t.display_name, t.description,
+                   v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.created_by AS version_created_by, 'RELEASED' AS status, :bodyHash AS body_hash
+              FROM new_template t
+              JOIN new_version v ON v.template_id = t.id
+            """.trimIndent()
+
+        /** versioning §9.2 — exact-version insert onto an existing template; metadata rides only when it is the new latest. */
+        private val INSERT_RELEASED_VERSION_SQL =
+            """
+            WITH ins AS (
+                INSERT INTO template_versions
+                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                     status, body_hash, created_by, released_by, released_at)
+                SELECT t.id, :version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
+                  FROM templates t
+                 WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
+                   AND NOT EXISTS (SELECT 1 FROM template_versions v
+                                    WHERE v.template_id = t.id AND v.version = :version)
+                RETURNING template_id, version, status, body_hash, created_at, created_by,
+                          released_at, released_by, updated_by, updated_at
+            ), bumped AS (
+                UPDATE templates
+                   SET current_version = GREATEST(current_version, :version),
+                       display_name = CASE WHEN :version > current_version THEN :displayName ELSE display_name END,
+                       description = CASE WHEN :version > current_version THEN :description ELSE description END,
+                       updated_at = NOW()
+                 WHERE name = :name AND workspace_id = :workspaceId AND is_deleted = FALSE
+                   AND EXISTS (SELECT 1 FROM ins)
+                RETURNING 1
+            )
+            SELECT t.name AS template_id, i.version, i.status, i.body_hash, i.created_at, i.created_by,
+                   i.released_at, i.released_by, i.updated_by, i.updated_at
+              FROM ins i
+              JOIN templates t ON t.id = i.template_id, bumped
             """.trimIndent()
 
         private val MAPPER =
@@ -431,6 +912,24 @@ class TemplateRepository(
                     isLibrary = rs.getBoolean("is_library"),
                     createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                     createdBy = rs.getObject("version_created_by", UUID::class.java),
+                    status = PipelineVersionStatus.fromWire(rs.getString("status")),
+                    bodyHash = rs.getString("body_hash"),
+                )
+            }
+
+        private val DETAIL_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                TemplateVersionDetail(
+                    templateId = rs.getString("template_id"),
+                    version = rs.getInt("version"),
+                    status = PipelineVersionStatus.fromWire(rs.getString("status")),
+                    bodyHash = rs.getString("body_hash"),
+                    createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
+                    createdBy = rs.getObject("created_by", UUID::class.java),
+                    releasedAt = rs.getObject("released_at", OffsetDateTime::class.java)?.toInstant(),
+                    releasedBy = rs.getObject("released_by", UUID::class.java),
+                    updatedBy = rs.getObject("updated_by", UUID::class.java),
+                    updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
                 )
             }
 

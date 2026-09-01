@@ -692,8 +692,8 @@ class WorkspaceSurfacesE2eTest {
             )
             statement.execute(
                 """
-                INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by) VALUES
-                    ('$PIPE_ACME', 1, '$PIPELINE_BODY'::jsonb, '$ALICE')
+                INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at) VALUES
+                    ('$PIPE_ACME', 1, '$PIPELINE_BODY'::jsonb, 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW())
                 """.trimIndent(),
             )
             statement.execute(
@@ -704,8 +704,8 @@ class WorkspaceSurfacesE2eTest {
             )
             statement.execute(
                 """
-                INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, created_by) VALUES
-                    ('$TPL_ACME_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', '$ALICE')
+                INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, body_hash, status, created_by, released_by, released_at) VALUES
+                    ('$TPL_ACME_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW())
                 """.trimIndent(),
             )
         }

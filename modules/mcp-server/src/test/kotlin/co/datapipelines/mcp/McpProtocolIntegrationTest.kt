@@ -114,6 +114,16 @@ class McpProtocolIntegrationTest {
     fun `a tool call reaches the tool and comes back in the §6_3 envelope`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
         every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 1,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                bodyHash = "hash-v1",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
 
         val response =
             call(

@@ -48,9 +48,13 @@ are exactly the calling pipeline's `parameters` keys (defaults applied). The bod
 the body calls macros by alias (`<@dates.date_range …/>`). Library templates
 (`is_library: true`) contain only `<#macro>`/`<#function>` definitions.
 
-**Versioning** — every save creates a new version. Pipeline nodes pin template versions
+**Versioning** — create lands v1 RELEASED and immediately executable; every later save is
+draft-first: the first save after a release opens a DRAFT (copy-on-write), later saves
+overwrite that one draft in place. Your updates are NOT published until a human releases
+the draft from the UI — **leave the draft for a human to release** (by design, D4; there is
+no release tool and that absence is deliberate). Pipeline nodes pin template versions
 immutably; updating a template does not change existing pipelines until you update the
-node reference.
+node reference. Drafts are executable — running your own draft is the expected test loop.
 
 **Parameters** — typed with the canonical logical types: `BOOLEAN`, `INTEGER`,
 `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `DATE`, `TIMESTAMP`, etc. (11 total —
@@ -105,8 +109,14 @@ dialect-specific; a node's template dialect must match what its `source` can exe
    required/defaults — remember `DECIMAL` needs `precision`), nodes referencing the
    template `{id, version}`, `depends_on` wiring, and `output` blocks for
    staging/write-back. Save-time validation dry-renders every template against the
-   declared parameters and rejects anything that would not run.
-5. **Execute.** `pipelines_execute` with parameter values.
+   declared parameters and rejects anything that would not run. Create lands v1 RELEASED —
+   the pipeline is executable immediately.
+5. **Iterate on the DRAFT.** `pipelines_update` (requires the `expected_hash` you read —
+   see Best practices) writes a DRAFT: first update opens it, later updates overwrite it,
+   so iterating never piles up versions. Execute the draft to test (`pipelines_execute`
+   runs the released version by default — but note the draft's version from your update's
+   result if you need to pin it). **Stop here**: leave the draft for a human to release.
+   Never claim your change is live — it is not until released.
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
    TTL** — afterwards the result is gone (`result.expired`).
@@ -138,6 +148,9 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
   (default 600 s) aborts it. There are no progress notifications in v1; the final result
   carries `node_stats` (per-node status, durations, row counts, errors) — the
   authoritative per-node record. A 3-minute pipeline is one 3-minute tool call.
+- **Drafts are executable, and a draft run is not a release.** Executing your own draft is
+  the expected test loop; history marks those runs (`draft_run`) and they never count as
+  validation for release — the human decides that.
 - **Cancellation:** no MCP cancel tool in v1. To stop an in-flight run, call
   `DELETE /api/v1/executions/{id}` out-of-band (REST); the blocked tool call then
   returns an `ABORTED` result.
@@ -163,6 +176,9 @@ Codes you will meet most often:
 | `pipeline.validation.*` (`cycle_detected`, `dangling_dependency`, `duplicate_node_id`, `parameter_precision_missing`, …) | Pipeline JSON is invalid | Fix the JSON — never retry as-is |
 | `template.validation.*` (`syntax_error`, `dangerous_construct`, …) | Template body rejected | Fix the Freemarker and re-render |
 | `template.not_found` / `datasource.not_found` | Reference points at nothing | Create the referenced entity or fix the id |
+| `pipeline.version.conflict` | The pipeline changed after you loaded it (stale `expected_hash`) | Re-read with `pipelines_get`, rebase your edit onto the current body/hash, retry — NEVER retry blindly |
+| `pipeline.version.not_draft` | Release/discard hit a pipeline with no draft | Nothing to act on for an agent — the draft was already released or discarded |
+| `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
 | `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
 | `pipeline.node.query_execution_failed` | A node's SQL failed | Read `node_stats` + `executions_get` for the node error, re-render its template with the failed parameters |
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
@@ -178,21 +194,26 @@ Reachability and TTL errors are the world's state — probe, then retry once.
    + credential questions immediately.
 3. **Pin versions deliberately.** Nodes pin template versions; bump via
    `pipelines_update` only after re-rendering the new version.
-4. **One caller node, or zero.** Two caller nodes fail validation; use a tempdb node +
+4. **Carry the hash you read.** `pipelines_update` requires `expected_hash` — the
+   `body_hash` from `pipelines_get` or your previous update's result. It is the protocol
+   that keeps two writers (you and a human, two sessions, two tabs) from silently
+   overwriting each other; a blind retry after a 409 is how an agent destroys a human's
+   edit. Read → edit → write with the hash you read.
+5. **One caller node, or zero.** Two caller nodes fail validation; use a tempdb node +
    a projection node instead of two outputs.
-5. **Stage with tempdb.** Multi-node pipelines chain through `output: tempdb` tables —
+6. **Stage with tempdb.** Multi-node pipelines chain through `output: tempdb` tables —
    downstream nodes read them with `source: "tempdb"`. Keep table names lower_snake_case
    (H2 lower-folds unquoted identifiers).
-6. **Declare parameters honestly.** Required flags with no default make the pipeline
+7. **Declare parameters honestly.** Required flags with no default make the pipeline
    refuse a bare execute; that is the contract working, not a bug — ask the user for
    values.
-7. **Page results immediately.** Read all pages within `ttl_seconds`; long-running
+8. **Page results immediately.** Read all pages within `ttl_seconds`; long-running
    work between pages risks `result.expired`.
-8. **Never put secrets in templates or descriptions.** Credentials live on the
+9. **Never put secrets in templates or descriptions.** Credentials live on the
    datasource entity (AES-GCM encrypted at rest). SQL bodies are visible to anyone
    with `read`.
-9. **Respect the rate limiter** — batch listing calls, don't hammer `/mcp`.
-10. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
+10. **Respect the rate limiter** — batch listing calls, don't hammer `/mcp`.
+11. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
 
@@ -226,3 +247,4 @@ endpoints; error codes are identical.
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings
+- `docs/versioning.md` — the draft/release lifecycle, the hash-precondition protocol, why agents never release

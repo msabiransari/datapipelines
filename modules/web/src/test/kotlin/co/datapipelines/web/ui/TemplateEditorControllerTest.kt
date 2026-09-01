@@ -80,6 +80,7 @@ class TemplateEditorControllerTest {
         authenticate()
         every { templates.findLatest(any(), "my_template.sql") } returns sampleTemplate
         every { templates.listVersions(any(), "my_template.sql") } returns sampleVersions
+        every { templates.findDraftDetail(any(), any()) } returns null
         every { themeResolver.resolve(any()) } returns "saas"
 
         val model: ExtendedModelMap = ExtendedModelMap()

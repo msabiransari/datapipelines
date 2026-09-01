@@ -49,6 +49,8 @@ class PipelineUiController(
             hasMore = all.size > page + size
         }
         model.addAttribute("pipelines", items)
+        // versioning §7: the pending-release badge — same source as the partial controller.
+        model.addAttribute("drafts", pipelines.findDrafts(workspaceId, items.map { it.id }))
         model.addAttribute("q", q ?: "")
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", hasMore)

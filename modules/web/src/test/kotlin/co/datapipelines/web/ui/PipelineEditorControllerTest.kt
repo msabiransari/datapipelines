@@ -90,6 +90,8 @@ class PipelineEditorControllerTest {
         authenticate()
         every { repository.findById(any(), pipelineId) } returns record
         every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns null
         every { themeResolver.resolve(any()) } returns "saas"
 
         val model = ExtendedModelMap()
@@ -110,6 +112,8 @@ class PipelineEditorControllerTest {
         authenticate()
         every { repository.findById(any(), pipelineId) } returns record
         every { repository.findVersionBody(any(), pipelineId, 1) } returns bodyJson
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns null
         every { themeResolver.resolve(any()) } returns "dark"
 
         val model = ExtendedModelMap()

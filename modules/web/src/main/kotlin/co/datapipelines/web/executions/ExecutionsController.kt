@@ -52,6 +52,7 @@ class ExecutionsController(
     private val resultStore: ResultStore,
     private val resultUrls: ResultUrlFactory,
     private val streamer: SseLogStreamer,
+    private val pipelines: co.datapipelines.pipeline.PipelineRepository,
 ) {
     /**
      * §10.1 — the listing. Filters are evaluated **in SQL** by the repository (gate C, B4): the
@@ -90,7 +91,12 @@ class ExecutionsController(
                     offset = page,
                 )
             }
-        val items = raw.take(size).map { it.toMetadata(includeResult = false) }
+        val pageItems = raw.take(size)
+        // §8's derivation, read in bulk for the page: a draft run is `started_at < released_at`
+        // or no `released_at` at all (still DRAFT, or DISCARDED). Informational only — never
+        // execution behaviour, never promotion eligibility.
+        val releasedAt = pipelines.releasedAtFor(workspaceId, pageItems.map { it.pipelineId to it.pipelineVersion })
+        val items = pageItems.map { it.toMetadata(includeResult = false, draftRun(it, releasedAt)) }
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
     }
 
@@ -104,7 +110,8 @@ class ExecutionsController(
         val record =
             executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
-        return ApiResponse.of(record.toMetadata(includeResult = true))
+        val releasedAt = pipelines.releasedAtFor(workspaceId, listOf(record.pipelineId to record.pipelineVersion))
+        return ApiResponse.of(record.toMetadata(includeResult = true, draftRun(record, releasedAt)))
     }
 
     /**
@@ -173,13 +180,28 @@ class ExecutionsController(
         return ResponseEntity.ok(ApiResponse.of(page))
     }
 
+    /** versioning §8: draft run ⇔ `started_at < released_at`, or no `released_at` at all. */
+    private fun draftRun(
+        record: ExecutionRecord,
+        releasedAt: Map<Pair<java.util.UUID, Int>, java.time.Instant?>,
+    ): Boolean {
+        val at = releasedAt[record.pipelineId to record.pipelineVersion]
+        return at == null || record.startedAt.isBefore(at)
+    }
+
     /** The §10.2 projection — metadata only, never rows. */
-    private fun ExecutionRecord.toMetadata(includeResult: Boolean): Map<String, Any?> =
+    private fun ExecutionRecord.toMetadata(
+        includeResult: Boolean,
+        draftRun: Boolean,
+    ): Map<String, Any?> =
         buildMap {
             put("execution_id", executionId.toString())
             put("pipeline_id", pipelineId.toString())
             put("pipeline_version", pipelineVersion)
             put("status", status.name)
+            // The §8 draft marker: this execution ran a version that was a draft at the time
+            // (or still is / was discarded). Informational — a label in history, nothing more.
+            put("draft_run", draftRun)
             put("parameters", ExecutorJson.mapper.readTree(parametersJson))
             put("started_at", startedAt.toString())
             put("completed_at", completedAt?.toString())

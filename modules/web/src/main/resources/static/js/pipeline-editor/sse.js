@@ -46,9 +46,13 @@
     var parameters = window.collectParameters
       ? window.collectParameters(self.editor)
       : self.editor.parameterOverrides;
-    var body = JSON.stringify({
-      parameters: parameters,
-    });
+    var body = { parameters: parameters };
+    // versioning §8: the editor pins a run to the DRAFT it is showing (PEDraft,
+    // draft.js) — running a draft is the expected review loop; without a draft no
+    // version is sent and the server's execute-default (latest RELEASED) applies.
+    if (window.PEDraft && window.PEDraft.version) {
+      body.version = window.PEDraft.version;
+    }
 
     fetch(url, {
       method: "POST",
@@ -58,7 +62,7 @@
         "DP-CSRF-Token": readCookie("dp_csrf"),
       },
       credentials: "same-origin",
-      body: body,
+      body: JSON.stringify(body),
       signal: self.abortController.signal,
     })
       .then(function (response) {
