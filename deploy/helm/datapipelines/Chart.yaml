@@ -1,0 +1,11 @@
+apiVersion: v2
+name: datapipelines
+description: >-
+  datapipelines.co — declarative SQL data pipelines, self-hosted.
+  The minimal reference chart deployment.md §6.4 points at: Deployment,
+  Service, optional HPA and PodDisruptionBudget. Postgres and Redis are
+  EXTERNAL (operator-managed, §4.1/§4.2) — this chart installs neither.
+type: application
+# Chart version — bump on every chart change. Independent of the app version.
+version: 0.1.0
+appVersion: "1.0.0"

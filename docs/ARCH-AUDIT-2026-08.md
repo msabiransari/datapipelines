@@ -135,6 +135,11 @@ the docs now, then let M1/M2 restore the claims when they ship.
 **Verification:** code-read, re-checked in review — `deploy/helm` absent, `deployment.md:226`
 and `:246` read as quoted, zero production callers for both primitives.
 
+**[resolved — 036, branch `fix/multi-instance`]** `deployment.md` v1.5: §8.3.1/§8.3.2 rewritten
+to shutdown behavior as shipped (no drain, no sweep, no readiness flip), the §6.2 sweep claim
+corrected, and `deploy/helm/` made real with a minimal chart (Deployment/Service/HPA/PDB,
+`helm template` + `helm lint` clean). The drain/sweep claims return with M1/M2 below.
+
 ## Verified safe — explicit NOT-list (do not re-flag)
 
 - **Cross-instance cancellation** — `RedisCancellationFlags`: any replica's DELETE writes `dp:cancel:{id}`; the owning instance polls per heartbeat tick and at node boundaries.

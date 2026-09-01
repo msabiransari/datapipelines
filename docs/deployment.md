@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.4
+**Status:** v1.5
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 
 ---
 
@@ -165,7 +165,7 @@ Everything else has a default and is optional.
 
 Optional keys — executor concurrency, staging memory, result TTLs and caps, SSE heartbeat and disconnect grace, rate limits, idempotency TTL, template cache, UI theme, retention windows, observability — are cataloged with their defaults in [Configuration §3](configuration.md#3-optional-configuration-with-defaults). Resolution precedence (env > profile YAML > base YAML, plus the two per-entity runtime overrides) is [Configuration §4](configuration.md#4-precedence).
 
-The keys an operator most often changes at deploy time are `datapipelines.result.max-size-bytes` (Redis sizing, §4.2.2), `datapipelines.executor.max-concurrent-executions-global` and `datapipelines.staging.h2.max-memory-mb` (heap sizing, §6.6), and `datapipelines.executor.execution-timeout-seconds` (shutdown grace, §8.3.1).
+The keys an operator most often changes at deploy time are `datapipelines.result.max-size-bytes` (Redis sizing, §4.2.2), `datapipelines.executor.max-concurrent-executions-global` and `datapipelines.staging.h2.max-memory-mb` (heap sizing, §6.6), and `datapipelines.executor.execution-timeout-seconds` (the wall clock that bounds any single execution).
 
 ### 5.3 Full config file
 
@@ -223,7 +223,7 @@ The application is **stateless** for all CRUD operations, UI, MCP, and auth. Mul
 - **Implication:** if the SSE connection drops mid-execution, there is **no reconnection or resumption path**. Instance A starts a grace timer (`datapipelines.sse.disconnect-grace-seconds`, default 30) and, if the execution has not reached a terminal event by the time it elapses, cancels it — the execution ends `ABORTED` ([REST API §6.8](rest-api.md#68-client-disconnect)). A client that loses its stream should assume the abort and re-execute. This is deliberate: an execution nobody is waiting for must not keep holding source-database connections and staging memory.
 - **Cross-instance cancel works anyway.** `DELETE /api/v1/executions/{id}` may land on Instance B, which has never heard of the execution. Instance B writes a Redis cancellation flag; Instance A honors it on its next heartbeat tick or node boundary — worst-case latency ≈ one heartbeat interval ([REST API §10.4](rest-api.md#104-cancel-execution), [DAG Executor §8.3.1](dag-executor.md#831-the-registry)). No sticky sessions are needed for cancellation to be reliable.
 - **Completed executions are not instance-local at all.** Results live in Redis for their TTL and are readable from any instance via the cursor ([REST API §7](rest-api.md#7-result-delivery)); execution metadata is in Postgres; the 1-hour event log is in Redis. Only the *running* execution is pinned to one JVM.
-- **Instance crash:** loses only that instance's in-flight executions (H2 staging is in-memory and non-recoverable). Their rows are swept to `ABORTED` by the stale-execution sweep (`datapipelines.executions.stale-timeout-minutes`). Completed results and history are unaffected.
+- **Instance crash:** loses only that instance's in-flight executions (H2 staging is in-memory and non-recoverable). Their rows stay `RUNNING` in execution history — nothing reaps them today (`datapipelines.executions.stale-timeout-minutes` is defined but no running code reads it yet). Completed results and history are unaffected; the lost work must be re-executed.
 
 #### Multi-instance checklist
 
@@ -362,40 +362,29 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 1. Review release notes for breaking changes.
 2. Backup metadata DB.
-3. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
-4. Stop the old version.
-5. Start the new version (migrations apply on startup).
-6. Verify `/health` returns UP.
-7. Restore traffic.
+3. Stop the old version. There is no drain (§8.3.1): stopping an instance aborts its in-flight executions, so prefer a quiet window.
+4. Start the new version (migrations apply on startup).
+5. Verify `/health` returns UP.
+6. Restore traffic.
 
-For k8s: rolling update via `kubectl rollout`. The Helm chart defaults to a safe rolling strategy — see §8.3.2 for the pod-lifecycle settings that make it graceful.
+For k8s: rolling update via `kubectl rollout`. Each terminated pod aborts its in-flight executions (§8.3.1) — there is no graceful drain yet, so schedule rollouts accordingly.
 
-#### 8.3.1 Graceful shutdown mechanism
+#### 8.3.1 Shutdown behavior (as shipped)
 
-Shutdown is a defined sequence, not "stop the process and hope". On `SIGTERM` the instance:
+There is **no graceful drain today**. On `SIGTERM` the instance stops with its in-flight executions mid-run:
 
-1. **Stops accepting new executions.** `/ready` starts failing immediately, so the load balancer / k8s Service stops routing new traffic to this instance. New `POST /pipelines/{id}/execute` requests that still arrive (in-flight LB decisions) are rejected — they belong on another instance. `/health` keeps reporting UP while draining, so nothing kills the pod for being unhealthy mid-drain.
-2. **Drains in-flight executions** for up to `datapipelines.executor.execution-timeout-seconds` (default 600). Executions already running are allowed to finish normally and stream their terminal SSE event; the drain window is bounded by the same timeout that already bounds any single execution, so a healthy instance drains fully.
-3. **Cancels the stragglers** at the drain deadline via the ordinary cancellation path — `CancellationRegistry.cancelAll(reason = shutdown)`: `Statement.cancel()` on every registered statement, root `Job` cancellation, `execution_aborted` (`reason: "shutdown"`) emitted to connected streams, tempdb dropped and connections released in `finally` ([DAG Executor §8.3](dag-executor.md#83-cancellation)).
-4. **Exits** after the Redis result writes and Postgres status updates for those aborts have flushed.
+- **No `Statement.cancel()` reaches the source database.** A query in flight keeps running on the source server to its own timeout.
+- **No `execution_aborted` event and no status update.** The execution's row stays `RUNNING` in execution history; nothing reaps it (the stale-execution sweep is not wired — `datapipelines.executions.stale-timeout-minutes` is defined but unread).
+- `/ready` reports readiness until the process is gone; it does not flip early to bleed traffic off.
 
-**The accepted loss, stated plainly:** an execution still running when the drain deadline expires is **cancelled, not preserved**. It ends `ABORTED` with `reason: "shutdown"`, is visible as such in execution history, and its client must re-execute. There is no execution hand-off to another instance and no resumption — in-memory H2 staging makes migration impossible, and pretending otherwise would be worse than the honest abort. Bounded, visible loss beats a silent hang.
+The accepted loss, stated plainly: an execution in flight when an instance stops is **lost, not preserved**. Its client must re-execute (§6.2). There is no execution hand-off to another instance and no resumption — in-memory H2 staging makes migration impossible, and pretending otherwise would be worse than the honest abort. The missing half today is visibility: the abort is silent in history until the sweep ships.
 
 #### 8.3.2 Kubernetes pod lifecycle
 
-```yaml
-terminationGracePeriodSeconds: 630     # execution-timeout-seconds (600) + 30
-lifecycle:
-  preStop:
-    exec:
-      command: ["sleep", "5"]
-```
+The stock pod defaults are safe **today**: with no drain to honor (§8.3.1), the default 30-second `terminationGracePeriodSeconds` suffices and no `preStop` hook is needed. Expect every pod termination — rollout, scale-down, node drain — to lose that pod's in-flight executions as §8.3.1 describes.
 
-- **`terminationGracePeriodSeconds` = `execution-timeout-seconds` + 30.** Anything shorter and the kubelet `SIGKILL`s mid-drain — executions die without their `finally` blocks, so no `execution_aborted` event, no status update, and rows left `RUNNING` until the stale-execution sweep catches them. The +30 covers step 4's flush. **If you change `datapipelines.executor.execution-timeout-seconds`, change this value with it** — they are one setting expressed in two places.
-- **`preStop: sleep 5`** closes the standard k8s race: endpoint removal and `SIGTERM` are concurrent, so without it the pod can stop accepting work microseconds before the LB stops sending it. Five seconds of overlap is enough for Endpoints propagation.
-- A `PodDisruptionBudget` (§6.4) keeps node drains from taking every replica's drain window at once.
-
-A long `execution-timeout-seconds` therefore has a real deployment cost: it is also the worst-case rolling-update step time. Instances with long-running pipelines drain slowly by design.
+- A `PodDisruptionBudget` (§6.4) still earns its place: it keeps voluntary disruptions to one pod at a time, bounding how many in-flight executions a rollout or node drain kills at once.
+- Size pods per §6.6; nothing about the lifecycle changes the heap arithmetic.
 
 ### 8.4 Rollback
 
@@ -686,6 +675,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.5 | multi-instance readiness (036) | **Honesty fix (ARCH-AUDIT M11): the doc promised three things the code does not do.** §8.3.1/§8.3.2 rewritten as shutdown behavior *as shipped* — no drain, no `server.shutdown: graceful`, no readiness flip, no sweep; the old drain-to-timeout/`cancelAll(shutdown)` sequence and the `terminationGracePeriodSeconds: 630` + `preStop` guidance described unimplemented code. §6.2 instance-crash bullet no longer claims rows are "swept to `ABORTED`" (the sweep exists but has no caller). §5.2's "shutdown grace" gloss on `execution-timeout-seconds` removed. §6.4's `deploy/helm/` reference made real: a minimal chart (Deployment, Service, optional HPA/PDB) now ships. The drain and sweep claims return with the code that implements them. |
 | 2026-08-31 | v1.4 | website + docs in-app (033) | New §6.7: the app serves the marketing site (`/`, public) and the packaged spec set (`/docs`, session-only); the dashboard moved to `/dashboard`; the standalone `website/` static deploy retires to the `websiteExport` cold-fallback procedure; public surface defended by cache headers, NOT the login rate limiter (OPEN-ITEMS T46). Header version corrected (v1.3's entry had not bumped it). |
 | 2026-08-05 | v1.0 draft | initial draft | Initial deployment spec sketch — Docker image, infra requirements, configuration, deployment patterns, upgrade/rollback, security checklist |
 | 2026-08-05 | v1.1 | horizontal scaling | Added multi-instance horizontal scaling section. Application is stateless for all CRUD/UI/MCP/auth. In-flight executions are instance-local (acceptable for short-running pipelines). No sticky sessions required. Added multi-instance checklist. Added LB idle-timeout + SSE heartbeat note. |
