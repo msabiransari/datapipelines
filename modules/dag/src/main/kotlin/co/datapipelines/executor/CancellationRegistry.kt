@@ -39,6 +39,14 @@ interface CancellationRegistry {
 
     /** Cancels every live execution — the shutdown drain (§8.3). */
     fun cancelAll(reason: AbortReason)
+
+    /**
+     * Executions currently running on this instance. The shutdown drain's flush wait polls it:
+     * an execution leaves the count only from the executor's `finally`, after its terminal
+     * status and events are written — so `0` means the flush is done, not merely that
+     * cancellation was requested.
+     */
+    val liveExecutions: Int
 }
 
 /** One execution's cancellation surface (dag-executor.md §8.3.1). */
@@ -90,7 +98,7 @@ class InMemoryCancellationRegistry : CancellationRegistry {
     private val handles = ConcurrentHashMap<UUID, ExecutionCancellationHandle>()
 
     /** Live executions this instance is running — observability and leak assertions. */
-    val liveExecutions: Int get() = handles.size
+    override val liveExecutions: Int get() = handles.size
 
     /**
      * Statements currently registered for [executionId]; 0 when it is unknown.

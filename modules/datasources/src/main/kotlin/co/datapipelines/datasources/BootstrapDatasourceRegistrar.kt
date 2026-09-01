@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DuplicateKeyException
 import java.nio.file.Path
 import java.util.UUID
 
@@ -56,14 +57,29 @@ class BootstrapDatasourceRegistrar(
                     datasource.name,
                 )
             } else {
-                registry.save(datasource, actor)
-                registered += datasource.name
-                log.info(
-                    "event=datasource.bootstrap_registered name={} dialect={} readonly={} scope=global",
-                    datasource.name,
-                    datasource.dialect.wire,
-                    datasource.isReadonly,
-                )
+                try {
+                    registry.save(datasource, actor)
+                    registered += datasource.name
+                    log.info(
+                        "event=datasource.bootstrap_registered name={} dialect={} readonly={} scope=global",
+                        datasource.name,
+                        datasource.dialect.wire,
+                        datasource.isReadonly,
+                    )
+                } catch (duplicate: DuplicateKeyException) {
+                    // Two instances bootstrapping one fresh database race here: both pass the
+                    // existence check, one wins the insert. Losing is the EXPECTED outcome on a
+                    // multi-instance first boot — the row the winner wrote is exactly what rule 1
+                    // ("never update") says to keep, so the loser behaves as if the row had
+                    // already been there. Same catch-and-reread shape as LocalPasswordService.
+                    skipped += datasource.name
+                    log.info(
+                        "event=datasource.bootstrap_skipped name={} reason=concurrent_registration " +
+                            "message=\"another instance registered this datasource first; keeping its row\"",
+                        datasource.name,
+                    )
+                    log.debug("bootstrap lost the race for {}", datasource.name, duplicate)
+                }
             }
         }
         log.info(

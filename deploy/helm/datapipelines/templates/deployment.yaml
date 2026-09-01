@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "datapipelines.fullname" . }}
+  labels:
+    {{- include "datapipelines.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "datapipelines.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "datapipelines.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        # The image runs as the non-root `datapipelines` user (deployment.md §3.1).
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: {{ include "datapipelines.name" . }}
+          image: {{ include "datapipelines.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # §8.3.2: endpoint removal and SIGTERM are concurrent — the sleep gives the
+          # endpoints controller time to stop routing BEFORE the readiness flip and drain.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: {{ required "existingSecret is required — see values.yaml (deployment.md §5.1)" .Values.existingSecret }}
+          {{- if .Values.extraEnv }}
+          env:
+            {{- range $name, $value := .Values.extraEnv }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          # /health and /ready are root-level app-port endpoints (rest-api.md §11.1).
+          # Liveness is /health only: a draining instance must NOT be killed for
+          # being unready (deployment.md §8.3.1).
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

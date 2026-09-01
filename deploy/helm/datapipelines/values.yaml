@@ -1,0 +1,52 @@
+# Values for the datapipelines reference chart (deployment.md §6.4).
+# Every non-secret knob has a default; the ONE thing an operator must supply
+# is `existingSecret`.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/datapipelines/datapipelines
+  # Defaults to the chart's appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# REQUIRED. Name of an operator-created Secret holding the §5.1 startup
+# contract as env keys:
+#   SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD
+#   DATAPIPELINES_REDIS_HOST, DATAPIPELINES_REDIS_PASSWORD
+#   DATAPIPELINES_JWT_SECRET, DATAPIPELINES_DB_ENCRYPTION_KEY
+#   plus one authentication method (§5.1 item 5) — e.g. GOOGLE_CLIENT_ID /
+#   GOOGLE_CLIENT_SECRET, or DATAPIPELINES_AUTH_LOCAL_ENABLED and its seed keys.
+# Nothing here generates these values: a chart that scaffolds a JWT secret
+# hands every `helm template` reader a signing key.
+existingSecret: ""
+
+# Optional non-secret env, merged after the Secret (same keys win here).
+# Example:
+#   DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: auto-per-user
+extraEnv: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# §6.6: heap ≥ staging max-memory-mb × this instance's share of concurrent
+# executions + ~512 MB; container limit ≈ heap × 1.5. Left empty deliberately —
+# a default that pretends to know the deployment's execution profile is worse
+# than none.
+resources: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# §8.3.1/§8.3.2: the drain cancels in-flight executions and flushes within a
+# bounded 20 seconds — 30s covers it with margin. The pod also gets the §8.3.2
+# `preStop: sleep 5` (baked into the Deployment template).
+terminationGracePeriodSeconds: 30

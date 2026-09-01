@@ -129,6 +129,18 @@ class EngineConfiguration {
         config: ExecutorConfig,
     ): ExecutionCancellationService = ExecutionCancellationService(registry, flags, config)
 
+    /**
+     * The shutdown drain (deployment.md §8.3.1): on SIGTERM, readiness flips, then every local
+     * execution is cancelled — statements first — and the flush is awaited. See
+     * [ExecutionDrainLifecycle]'s KDoc for why the phase and the step order are the contract.
+     */
+    @Bean
+    fun executionDrainLifecycle(
+        cancellationService: ExecutionCancellationService,
+        registry: CancellationRegistry,
+        publisher: org.springframework.context.ApplicationEventPublisher,
+    ): ExecutionDrainLifecycle = ExecutionDrainLifecycle(cancellationService, registry, publisher)
+
     @Bean
     fun idempotencyStore(redis: StringRedisTemplate): IdempotencyStore = RedisIdempotencyStore(redis)
 

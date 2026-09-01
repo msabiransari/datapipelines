@@ -61,11 +61,40 @@ Ranked by severity. The request path is genuinely multi-instance-ready in places
 **Proposed fix:** lifecycle bean calling `cancelAllLocal()` before `executionScope.close()`; `server.shutdown: graceful`; Spring availability probes. All primitives exist — this is wiring, not design.
 **Verification:** code-read (zero callers is a grep-level fact).
 
+**[resolved — 036, branch `fix/multi-instance`]** `ExecutionDrainLifecycle` (web/config) is the
+missing caller: on stop it publishes `ReadinessState.REFUSING_TRAFFIC` **first** (order asserted
+by `ExecutionDrainLifecycleTest`), then `cancelAllLocal()`, then a bounded flush wait on
+`liveExecutions` (added to the `CancellationRegistry` interface for exactly this). Default
+`SmartLifecycle` phase stops it before the web server's graceful-shutdown lifecycle and before
+`executionScope.close()`. `server.shutdown: graceful` set in `application.yml`. **B3 confirmed:**
+`cancelAllLocal()` → `registry.cancelAll` → per-execution `cancel()` → `cancelStatements()` →
+JDBC `Statement.cancel()` — the drain reaches the source database, it is not a status flip.
+**Verified live (two-instance harness, `tests/integration-tests/multi-instance/`):** SIGTERM
+mid-`pg_sleep(300)` → row `ABORTED` at the first poll, ordered `shutdown.readiness_refused` →
+`shutdown.drain_cancelled` → `shutdown.drain_complete` in the logs, and the query gone from
+`pg_stat_activity` (the driver reported "canceling statement due to user request").
+
 ### M2 — Crash sweep implemented but never scheduled — CRITICAL **[verified]**
 **Evidence:** `ExecutionRepository.sweepStaleRunning(olderThan)` (`modules/dag/.../executor/ExecutionRepository.kt:362`) flips stale `RUNNING` rows to `ABORTED` with `pipeline.execution.instance_lost`. **Only test code calls it.** The config key it consumes (`datapipelines.executions.stale-timeout-minutes`, `application.yml:201`) is dead.
 **Failure mode:** combined with M1, every pod-killed execution stays `RUNNING` forever — directly contradicting `deployment.md:226` (see M11) ("swept to ABORTED by the stale-execution sweep"). Secondary: `DELETE /executions/{id}` on such a row returns 204 and writes a Redis cancellation flag no live instance polls — silent no-op.
 **Proposed fix:** a `@Scheduled` sweeper (would be the first in the codebase). The `UPDATE … WHERE status='RUNNING' AND started_at < :t` is naturally idempotent — all N replicas may run it without leader election.
 **Verification:** code-read.
+
+**[resolved — 036, branch `fix/multi-instance`]** dag's `StaleExecutionSweeper` (KDoc carries the
+no-leader-election reasoning) + `web`'s `SweepSchedulingConfiguration` — the project's first and
+only `@EnableScheduling`, `@Scheduled` fixed-delay 60s, default single-thread scheduler; cadence
+deliberately a code constant, not a new config key. `datapipelines.executions.stale-timeout-minutes`
+is now bound (`ExecutionsProperties`, drift-guarded). The NOT-list entry is updated above and
+module-structure §5.6 records the new lifecycle surface. **C3 (the DELETE-on-stale-row no-op):**
+fixed **by construction** — the row reaches `ABORTED` at the next tick, after which the same
+DELETE is refused `pipeline.execution.not_running` instead of returning the lying 204; the Redis
+flag written in the window expires by TTL. **Sibling finding reported (not fixed):**
+`ExecutionEventRepository.deleteOlderThan` (the `event-retention-days` retention job) has the
+exact same zero-callers shape and the audit did not flag it — scheduling deletes was beyond this
+round's brief; see the 036 handback.
+**Verified live (two-instance harness):** SIGKILL mid-execution → row stayed `RUNNING`, then the
+SURVIVING instance's sweep flipped it to `ABORTED` with `pipeline.execution.instance_lost` ~118s
+after start (staleness 1m + 60s cadence); the victim's logs carry zero `shutdown.*` lines.
 
 ### M3 — Datasource connection pools never expire cross-instance — CRITICAL **[verified]**
 **Evidence:** `modules/datasources/.../datasources/pooling/ConnectionPoolManager.kt:60,63` (note the `pooling` subpackage — an earlier revision of this line omitted it, and a grep on the shorter path finds nothing) — `pools` ConcurrentHashMap, `poolFor` = `computeIfAbsent` keyed by datasource name only; no TTL, no version check. Eviction happens only on the writing instance (`DefaultDatasourceRegistry.kt:130` update, `:150` delete).
@@ -88,11 +117,22 @@ Ranked by severity. The request path is genuinely multi-instance-ready in places
 **Proposed fix:** catch `DuplicateKeyException` and re-read — precedent exists at `LocalPasswordService.kt:153`.
 **Verification:** code-read.
 
+**[resolved — 036, branch `fix/multi-instance`]** Both sites now catch `DuplicateKeyException`
+and take the pre-existing row's path, in the repo's established shape: `BootstrapDatasourceRegistrar`
+counts the loser as `skipped` (`reason=concurrent_registration`); `UserService.provisionBootstrapActor`
+re-reads and returns the winner's row. Tests: `BootstrapDatasourceRegistrarRaceTest`,
+`UserServiceRaceTest` (deterministic — mock returns absent-then-throws, the race's interleaving).
+
 ### M6 — First-login races (transient 500s) — MEDIUM
 **Evidence:** `UserService.findOrCreateByEmail` (`UserService.kt:32`) — find-then-insert, no duplicate catch on this path. `WorkspaceService.ensurePersonalWorkspace` (via `WorkspaceService.kt:129`) is deliberately loud on failure (`PersonalWorkspaceSeeder.kt:21`).
 **Failure mode:** a user's two concurrent first OIDC logins on different replicas → one 500; retry succeeds.
 **Proposed fix:** same catch-and-reread as M5.
 **Verification:** code-read.
+
+**[resolved — 036, branch `fix/multi-instance`]** `UserService.findOrCreateByEmail` catches
+`DuplicateKeyException` from the insert, re-reads the winner, and runs the same §4.2 identity
+link the existing-row path uses (extracted as `linkIdentity` so the two paths cannot drift).
+Test: `UserServiceRaceTest`.
 
 ### M7 — Per-JVM caps multiply by N — LOW
 - **SSE per-user stream cap** — `ExecutionStreamRegistry.kt:50,76,100`: `max-streams-per-user` is effectively ×N.
@@ -135,6 +175,11 @@ the docs now, then let M1/M2 restore the claims when they ship.
 **Verification:** code-read, re-checked in review — `deploy/helm` absent, `deployment.md:226`
 and `:246` read as quoted, zero production callers for both primitives.
 
+**[resolved — 036, branch `fix/multi-instance`]** `deployment.md` v1.5: §8.3.1/§8.3.2 rewritten
+to shutdown behavior as shipped (no drain, no sweep, no readiness flip), the §6.2 sweep claim
+corrected, and `deploy/helm/` made real with a minimal chart (Deployment/Service/HPA/PDB,
+`helm template` + `helm lint` clean). The drain/sweep claims return with M1/M2 below.
+
 ## Verified safe — explicit NOT-list (do not re-flag)
 
 - **Cross-instance cancellation** — `RedisCancellationFlags`: any replica's DELETE writes `dp:cancel:{id}`; the owning instance polls per heartbeat tick and at node boundaries.
@@ -145,7 +190,7 @@ and `:246` read as quoted, zero production callers for both primitives.
 - **MCP transport** — `HttpServletStatelessServerTransport` (`McpServerFactory.kt:67`), no session state.
 - **JWT/OAuth2 login** — stateless HS256 shared secret; encrypted-cookie OAuth2 state; instance-agnostic.
 - **Flyway** — 11.7.2 with `flyway-database-postgresql`, in-app at startup; the lock table serializes concurrent instance startups.
-- **No `@Scheduled`/Quartz/`GlobalScope`/hand-rolled cron anywhere** (the M2 sweeper would be the first). Background threads are per-instance infrastructure, all properly closed.
+- ~~**No `@Scheduled`/Quartz/`GlobalScope`/hand-rolled cron anywhere**~~ **CHANGED 2026-09-01 (036, M2):** the codebase now has exactly ONE scheduled job — the crash sweep (`web`'s `SweepSchedulingConfiguration`, `@Scheduled` fixed-delay 60s over dag's `StaleExecutionSweeper`, default single-thread scheduler). It is deliberately lock-free (idempotent `UPDATE`; every replica may run it). `GlobalScope` and hand-rolled cron remain absent; any further scheduled job is a new lifecycle surface and belongs on the module-structure record (§5.6). Other background threads remain per-instance infrastructure, all properly closed.
 - **No filesystem writes** (no `MultipartFile` anywhere); bootstrap files are read-only mounts.
 - **In-process locks** (`H2Staging` Mutex, `SecretHasher` Semaphore, `PipelineExecutor` node-parallelism Semaphore) — local resource guards, none assume fleet-wide single-writer.
 - **No hostname/pod-identity assumptions**; only loopback binding is the management port (`application.yml:71`), deliberate.
