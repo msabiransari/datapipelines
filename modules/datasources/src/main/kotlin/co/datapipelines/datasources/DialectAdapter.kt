@@ -148,7 +148,9 @@ interface DialectAdapter {
     ): String =
         when (rowLimitStyle) {
             RowLimitStyle.LIMIT -> "$selectSql LIMIT $limit"
+
             RowLimitStyle.FETCH_FIRST -> "$selectSql FETCH FIRST $limit ROWS ONLY"
+
             // `TOP`-insertion anchors on the statement's first `SELECT` keyword,
             // case-insensitively (author SQL is not involved — the statement is module-built
             // and starts with `SELECT`); every other style appends its clause.

@@ -1,8 +1,8 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.JsonEncoder
-import org.springframework.jdbc.core.StatementCreatorUtils
 import org.springframework.jdbc.core.SqlTypeValue
+import org.springframework.jdbc.core.StatementCreatorUtils
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.SQLException
