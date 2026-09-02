@@ -1,7 +1,7 @@
 # Template Hierarchy & Typed Templates — v1 Design
 
 **Status:** design (not yet normative; no code changed)
-**Revision:** v1.2 — 2026-09-01 (UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2). **One blocking open item: §9.6.**
+**Revision:** v1.3 — 2026-09-01 (§9.6 measured and resolved: dual addressing. Earlier: UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
 **Owner:** datapipelines.co core
 **Depends on:** [Templates spec](templates.md), [Pipeline Contract spec](pipeline-contract.md), [Metadata DB spec](metadata-db.md), [Enums](enums.md)
 **Date:** 2026-09-01
@@ -284,11 +284,22 @@ The create form may check §4.1 as the user types, to give an immediate message 
 - The server validates every write regardless, and its rejection is the one that counts (`TemplateValidator.kt:54`).
 - The client pattern is **derived from the server's**, not retyped beside it — rendered into the form from the same source that builds the validator, so the two cannot drift. A hand-copied regex in a `<script>` block is exactly the drift this project has been bitten by; if deriving it is not practical in this round, ship **no** client-side pattern rather than a copy.
 
-### 9.6 Blocking gate: template names are addressed as URL **path segments** (unresolved)
+### 9.6 Addressing: the name never travels in a URL path segment (normative, measured)
 
-A template name containing `/` collides with how the name is addressed over HTTP today. This is not a styling concern — it decides whether path-shaped names are reachable at all, and it is unresolved.
+A template name containing `/` cannot be addressed through the routes that exist today. This was measured, not reasoned about, against the pinned Tomcat 10.1.55 with raw sockets so no client could normalise the path first:
 
-Ten routes put the name in a path segment. Two are UI, eight are REST and are **frozen contract** (`rest-api.md:752-832`):
+```
+/nonexistentpath        -> 401     control: no %2F, unmapped path
+/nonexistent%2Fpath     -> 400     the SAME unmapped path, %2F added
+/api/v1/templates/flat  -> 401     control: real REST route, flat name
+/api/v1/templates/a%2Fb -> 400     a path-shaped name
+/templates/a%2Fb/editor -> 400     UI route
+/docs/a%2Fb             -> 400     public route with a path variable
+```
+
+The isolation probe is the finding: the same unmapped path answers 401 without `%2F` and 400 with it, and the response body is Tomcat's own error page. The rejection happens **below routing and below the security chain** — no handler, no filter, and no amount of correct `encodeURIComponent` on the client can reach past it.
+
+Ten routes address the name as a path segment. Two are UI, eight are REST and frozen contract (`rest-api.md:752-832`):
 
 ```
 GET    /templates/{id}/editor                              TemplateEditorController.kt:30
@@ -302,27 +313,51 @@ DELETE /api/v1/templates/{id}                                                 :1
 POST   /api/v1/templates/{id}/versions/{version}/render                       :210
 ```
 
-`acme/finance/report` percent-encodes to `acme%2Ffinance%2Freport`. Servlet containers reject encoded slashes in the path by default, and no override exists anywhere in this repo (`grep` for `ALLOW_ENCODED_SLASH`, `relaxedPathChars`, `UrlPathHelper`: **no matches**). The likely outcome is a 400 before any handler runs — for the UI link, for every REST client, and for the promotion/import path.
+**Decision (owner, 2026-09-01): one addressing form. The name never appears in a URL path segment, and the `/{id}` routes are removed rather than kept alongside.**
 
-**MCP is unaffected**: its tools carry the template id as a JSON argument, never as a URL path segment. This is an HTTP-addressing problem only.
+Dual addressing was considered and rejected. It breaks nothing, but it is a permanent tax: two forms to document, two for `SKILL.md` to teach agents, and a "which one do I call?" rule that some future round eventually gets wrong. The only thing arguing for it was `rest-api.md`'s own status line — **"v1.4 (frozen contract — additive-only changes after this point)"** — and the owner confirmed there are no callers outside this repo, so that promise was protecting a population of zero. This is a deliberate, documented break taken before announce, not an oversight.
 
-**This must be settled by a spike before the round is dispatched**, because each option costs a different round:
-
-| Option | Cost |
+| Removed | Replacement |
 |---|---|
-| Enable encoded slashes in the container | One config line, but it re-opens path normalization differences between container and framework — the class of thing §4.4 fail-closes against. Needs a security argument, not just a green test. |
-| `{*id}` trailing-capture for the routes where the name is last | Works for `GET /templates/{id}`; does **not** work for `/{id}/versions/{version}`, `/{id}/release`, `/{id}/draft/discard`, which is most of the surface. |
-| Move the name to a query parameter | Clean and normalization-free, but changes eight frozen REST routes — a contract break, not an additive change. |
-| Address by the surrogate `id UUID` in paths, name only in bodies and queries | Structurally correct and already available since V4. Also a contract change, and it makes hand-written API calls less pleasant. |
+| `GET /api/v1/templates/{id}` | `GET /api/v1/templates?name=<path>` |
+| `GET /api/v1/templates/{id}/versions/{version}` | `GET /api/v1/templates/versions?name=<path>&version=N` |
+| `PUT /api/v1/templates/{id}` | `PUT /api/v1/templates` — `name` in the body |
+| `POST /api/v1/templates/{id}/release` | `POST /api/v1/templates/release` — `name` in the body |
+| `POST /api/v1/templates/{id}/draft/discard` | `POST /api/v1/templates/draft/discard` — `name` in the body |
+| `DELETE /api/v1/templates/{id}` | `DELETE /api/v1/templates?name=<path>` |
+| `POST /api/v1/templates/{id}/versions/{version}/render` | `POST /api/v1/templates/render` — `name`, `version` in the body |
+| `GET /templates/{id}/editor` | `GET /templates/editor?name=<path>` |
+| `POST /partials/templates/{id}/versions/{version}/render` | `POST /partials/templates/render?name=<path>&version=N` |
 
-**Gate:** a spike against the pinned container that actually issues `GET /api/v1/templates/a%2Fb` and reports the status code and where it was rejected. Until that number exists, §4.1's `/` separator is a design intention, not a working feature.
+`POST /api/v1/templates/import` is unchanged — it never carried a name in the path.
+
+**The one wart, chosen rather than missed.** `GET /api/v1/templates` now returns two shapes: the single-resource envelope with `404 template.not_found` when `name` is present, and the paged list envelope when it is not (with `q`, `dialect`, `type`, `prefix` filters, §9.2). The alternative — an exact-match filter returning a list of 0 or 1 — reads more uniformly but silently loses `template.not_found`, and an agent that cannot distinguish "no such template" from "empty result" is worse off than one that reads two documented shapes. `rest-api.md` §8 must document both explicitly.
+
+**Scope: templates only.** Datasources (`/api/v1/datasources/{name}`) and pipelines keep path addressing, because their names cannot contain `/` and nothing here changes that. Do not "make it consistent" — a sweep of routes that have no problem is how an additive round becomes a breaking one.
+
+**MCP is untouched.** It carries the id as a JSON argument and never builds a URL.
+
+**The consumer sweep is the whole cost, and it is small — all of it in this repo:**
+
+| File | What changes |
+|---|---|
+| `modules/web/src/main/resources/templates/templates/editor.html:133-134` | release / draft-discard URLs |
+| `modules/web/src/main/resources/templates/pipelines/editor.html:187` | `'/templates/' + enc(id) + '/editor'` → `'/templates/editor?name=' + enc(id)` |
+| `modules/web/src/main/resources/templates/partials/pipeline-node-sql.html:11` | same link, server-rendered |
+| `.agents/skills/datapipelines/SKILL.md` | the API the skill teaches agents |
+| `docs/rest-api.md` §8 | routes rewritten, both GET shapes documented |
+| `docs/rest-api.md` line 3 + change log | status **v1.4 → v2.0**, with a change-log row naming the break, the measurement behind it, and the zero-caller finding |
+| `docs/ui-screens.md` §196 | cites `PUT /api/v1/templates/{id}` |
+| `docs/versioning.md` §448 | promotion's template endpoint references |
+
+**Gate:** an end-to-end test that creates, reads, renders, releases and deletes a template named `acme/finance/report` through the new routes. *Falsification:* it must go red against the removed `/{id}` shape — and the measured reason is 400, not 404, because the container rejects the encoded slash before routing. A second test asserts no route matching `/api/v1/templates/{id}` remains registered, so the removal cannot silently regress.
 
 `ui-screens.md` gets the new screen description, the tree fragment contract, and the browse-vs-search rule when implementation lands.
 
 ## 10. API & MCP surface
 
-- REST template endpoints (`rest-api.md` §8): request/response gain optional `type`; list endpoint gains `type` filter and `prefix` filter (tree backing). **The path-segment addressing question (§9.6) lands here too** — eight of these routes carry the name as a path segment and are frozen contract.
-- MCP template tools (`mcp-server.md`): authoring tools accept `type`; read tools expose it; list gains the same filters. Tool descriptions updated so agents learn the path conventions and the type/dialect rule. MCP carries the id as a JSON argument, so §9.6 does not apply to it.
+- REST template endpoints (`rest-api.md` §8): request/response gain optional `type`; list endpoint gains `type` filter and `prefix` filter (tree backing). **§9.6's dual addressing lands here** — the eight existing routes are unchanged, and the added `name`-carrying forms are documented alongside them as the way to address a path-shaped name.
+- MCP template tools (`mcp-server.md`): authoring tools accept `type`; read tools expose it; list gains the same filters. Tool descriptions updated so agents learn the path conventions and the type/dialect rule. MCP carries the id as a JSON argument and never builds a URL, so §9.6 does not apply to it at all.
 - Preview/render: the existing dry-render path (`TemplateDryRendererImpl`) is already type-agnostic mechanically; the render entry point selects the engine config by type (§6). No new endpoint is strictly required for v1 beyond making sure an `html` draft renders through the `html` config.
 
 ## 11. Compatibility & promotion
@@ -346,11 +381,12 @@ POST   /api/v1/templates/{id}/versions/{version}/render                       :2
 9. **UI — tree fragment.** Expanding a folder issues exactly one request and returns exactly that folder's direct children; a fixture with 3 folders × 200 leaves proves no request returns the whole list. *Falsification:* replace the prefix query with a full listing and this test must go red.
 10. **UI — the forbidden affordances are absent.** Render assertions: no folder-create/rename/delete control anywhere in the tree; no `type` control on the edit/draft form (create only); no rename affordance on either form. These are cheap render tests and they are the only thing standing between §9.1's constraints and a well-meaning future task.
 11. **UI — paths do not break the pipeline editor.** A node referencing `acme/finance/monthly_revenue` renders truncated with the full path in `title`, in both `pipelines/editor.html` and `partials/pipeline-node-sql.html`, including the `template-missing` state.
-12. **Hash stability (§5.2, §11)** — assert `TEMPLATE_HASH_EXPR` is unchanged by this round, and an integration test that a no-op PUT against a template released **before** V7 still returns the no-op and creates **no** draft after V7. *Falsification:* add `'type', type` to the expression and this test must go red. A gate that cannot go red on the change it forbids is not a gate.
+12. **Addressing (§9.6)** — end-to-end over the added routes only, for a name containing `/`: create, read, render, release, delete. Plus a companion asserting the ten existing routes still answer identically for a flat name. *Falsification:* point the first at the old `/{id}` route and it must return 400 — the measured behaviour, not an assumed one.
+13. **Hash stability (§5.2, §11)** — assert `TEMPLATE_HASH_EXPR` is unchanged by this round, and an integration test that a no-op PUT against a template released **before** V7 still returns the no-op and creates **no** draft after V7. *Falsification:* add `'type', type` to the expression and this test must go red. A gate that cannot go red on the change it forbids is not a gate.
 
 ## 13. Decisions log
 
-Decisions 1–8 are settled. **This doc is no longer decision-complete: §9.6 is an open blocking item** and must be closed by a spike before the round is dispatched — see "Open" below.
+All nine decisions are settled; this doc is decision-complete. Decision 9 was closed by measurement rather than argument — see §9.6.
 
 1. ~~`dialect` on `html`: reuse `dialect_invalid` vs. new code~~ → **new code `template.validation.dialect_not_allowed`** (§7, decided 2026-09-01).
 2. ~~Tree UI: server-side prefix queries vs. client-side tree~~ → **server-side prefix queries** (§9, decided 2026-09-01) — the target is companies with large shared libraries, where client-side tree-building breaks.
@@ -360,10 +396,7 @@ Decisions 1–8 are settled. **This doc is no longer decision-complete: §9.6 is
 6. ~~Legacy names the new grammar rejects: relax the grammar / grandfather in the loader / fail the deploy~~ → **fail the deploy** (§4.6, decided 2026-09-01) — one strict rule, loud at deploy time with the offenders named, rather than silent at render time where §4.5 leaves no repair.
 7. ~~`html` acceptance bar for v1~~ → **preview-only** (§2, §12.4, decided 2026-09-01) — schema, second engine configuration, and a draft-preview render proving escaping. One migration, one hash decision, taken once; the serving surface lands with dashboards.
 8. ~~Tree browse vs. text search: prune the tree to matches vs. flat result list~~ → **flat list of full paths on search, tree when browsing** (§9.2, decided 2026-09-01) — pruning requires ancestor-walking every match, which is the client-side whole-list work §9.1 forbids.
-
-**Open (blocking):**
-
-- **§9.6 — template names are addressed as URL path segments.** Ten routes (two UI, eight frozen REST) carry the name in the path; encoded slashes are rejected by default and this repo sets no override. Until a spike reports the actual status code for `GET /api/v1/templates/a%2Fb` against the pinned container, `/` in a name is a design intention rather than a working feature. Four options with their costs are enumerated in §9.6; three of the four are contract changes, so this decides the shape of the round and cannot be deferred into it.
+9. ~~How a path-shaped name is addressed over HTTP, given encoded slashes are rejected~~ → **one form: the name never travels in a path segment, and the `/{id}` routes are REMOVED** (§9.6, owner decision 2026-09-01). Measured first: `%2F` is refused with 400 below routing and below security on the pinned Tomcat 10.1.55. Chosen over dual addressing (no break, but two forms to document and teach forever), over relaxing the container (two global security defaults, and the relaxation was never demonstrated working here), over a non-slash separator (cheapest, but gives up the folder-path form), and over surrogate-UUID paths. A deliberate break of `rest-api.md`'s frozen contract, taken pre-announce with the owner confirming zero external callers; `rest-api.md` goes v1.4 → v2.0 in the same round.
 
 ---
 
