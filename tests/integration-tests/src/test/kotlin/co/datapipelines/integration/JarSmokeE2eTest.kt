@@ -142,10 +142,10 @@ class JarSmokeE2eTest {
 
     @Test
     fun `the template editor renders from the jar`() {
-        val (body, status) = get("/templates/$SEEDED_TEMPLATE/editor")
+        val (body, status) = get("/templates/editor?name=$SEEDED_TEMPLATE")
         status shouldBe 200
         body shouldContain "Smoke Template"
-        noneCarriesErrorMarkers("/templates/$SEEDED_TEMPLATE/editor")
+        noneCarriesErrorMarkers("/templates/editor?name=$SEEDED_TEMPLATE")
     }
 
     @Test

@@ -129,13 +129,16 @@
       if (action === 'discard' && !window.confirm('Discard this draft? Its version number returns to the pool.')) return;
       btn.disabled = true;
       var csrf = (document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/) || [])[1];
+      /* §9.6: the name never travels in a URL path segment (a `%2F` is refused 400 below
+         routing) — release/discard carry it in the JSON body instead. */
       var url = action === 'release'
-        ? '/api/v1/templates/' + encodeURIComponent(id) + '/release'
-        : '/api/v1/templates/' + encodeURIComponent(id) + '/draft/discard';
+        ? '/api/v1/templates/release'
+        : '/api/v1/templates/draft/discard';
       fetch(url, {
         method: 'POST',
-        headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf) : '', 'If-Match': hash },
-        credentials: 'same-origin'
+        headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf) : '', 'If-Match': hash, 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name: id })
       }).then(function (response) {
         if (response.ok) { window.location.reload(); return null; }
         return response.json().catch(function () { return {}; }).then(function (err) {
@@ -203,7 +206,7 @@
       params.append('body', body);
       params.append('context', context);
 
-      fetch('/partials/templates/' + encodeURIComponent(templateId) + '/versions/' + version + '/render', {
+      fetch('/partials/templates/render?name=' + encodeURIComponent(templateId) + '&version=' + encodeURIComponent(version), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',

@@ -60,6 +60,7 @@ class FlywayMigrationIntegrationTest {
                 "4|workspaces rekey|true",
                 "5|local password auth|true",
                 "6|version lifecycle|true",
+                "7|hierarchical template names|true",
             )
     }
 

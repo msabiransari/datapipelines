@@ -87,6 +87,9 @@ class TemplatesControllerTest {
     private val createBody =
         """{"dialect":"POSTGRES","display_name":"Fetch Orders","description":"d","body":"SELECT 1"}"""
 
+    private val updateBody =
+        """{"id":"fetch_orders.sql","dialect":"POSTGRES","display_name":"Fetch Orders","description":"d","body":"SELECT 1"}"""
+
     @Test
     fun `create validates and stores, returning version 1`() {
         authenticate()
@@ -185,7 +188,7 @@ class TemplatesControllerTest {
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
 
         // §4.2: no If-Match, no participation in the protocol at all — a 400, not a conflict.
-        val missing = shouldThrow<ApiException> { controller.update("fetch_orders.sql", null, createBody) }
+        val missing = shouldThrow<ApiException> { controller.update(null, updateBody) }
         missing.details["reason"] shouldBe "precondition_missing"
 
         val detail =
@@ -200,7 +203,7 @@ class TemplatesControllerTest {
         every { drafts.write(any(), "fetch_orders.sql", any(), "hash-v2", userId) } returns detail
         every { repository.findVersion(any(), "fetch_orders.sql", 3) } returns
             template(3).copy(status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v3")
-        val data = controller.update("fetch_orders.sql", "hash-v2", createBody).data
+        val data = controller.update("hash-v2", updateBody).data
         data.get("version").asInt() shouldBe 3
         data.get("status").asText() shouldBe "DRAFT"
         data.get("body_hash").asText() shouldBe "hash-v3"
@@ -213,16 +216,28 @@ class TemplatesControllerTest {
             )
         every { drafts.write(any(), "nope.sql", any(), any(), userId) } throws notFoundError
         val thrown =
-            shouldThrow<DatapipelinesException> { controller.update("nope.sql", "hash-v2", createBody) }
+            shouldThrow<DatapipelinesException> { controller.update("hash-v2", updateBody.replace("fetch_orders.sql", "nope.sql")) }
         thrown.code shouldBe "template.not_found"
+    }
+
+    @Test
+    fun `update without an id in the body is refused - the name never travels in the path`() {
+        // §9.6: PUT /api/v1/templates carries the name in the body's `id` field; a body
+        // without one cannot be addressed at all, so it is a 400, never a silent create.
+        authenticate()
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+
+        val thrown = shouldThrow<ApiException> { controller.update("hash-v2", createBody) }
+        thrown.code shouldBe PipelineErrorCodes.Template.ID_INVALID
+        thrown.details["reason"] shouldBe "id_missing"
     }
 
     @Test
     fun `release and discard require If-Match and delegate to the lifecycle service`() {
         authenticate()
-        val releaseMissing = shouldThrow<ApiException> { controller.release("fetch_orders.sql", null) }
+        val releaseMissing = shouldThrow<ApiException> { controller.release(null, """{"name":"fetch_orders.sql"}""") }
         releaseMissing.details["reason"] shouldBe "precondition_missing"
-        val discardMissing = shouldThrow<ApiException> { controller.discard("fetch_orders.sql", null) }
+        val discardMissing = shouldThrow<ApiException> { controller.discard(null, """{"name":"fetch_orders.sql"}""") }
         discardMissing.details["reason"] shouldBe "precondition_missing"
 
         every { releases.release(any(), "fetch_orders.sql", "hash-v3", userId) } returns
@@ -237,11 +252,22 @@ class TemplatesControllerTest {
                 ),
                 template(3),
             )
-        val released = controller.release("fetch_orders.sql", "hash-v3").data
+        val released = controller.release("hash-v3", """{"name":"fetch_orders.sql"}""").data
         released.get("status").asText() shouldBe "RELEASED"
 
         every { releases.discard(any(), "fetch_orders.sql", "hash-v3") } returns Unit
-        controller.discard("fetch_orders.sql", "hash-v3")
+        controller.discard("hash-v3", """{"name":"fetch_orders.sql"}""")
+    }
+
+    @Test
+    fun `release and discard without a name in the body are refused`() {
+        // §9.6: the name is a body field on these routes; a missing one is a 400 with the
+        // same invalid_parameter_type shape the render endpoint uses for a missing context.
+        authenticate()
+        shouldThrow<ApiException> { controller.release("hash-v3", """{}""") }
+            .details["reason"] shouldBe "name_missing"
+        shouldThrow<ApiException> { controller.discard("hash-v3", """{"name":"  "}""") }
+            .details["reason"] shouldBe "name_missing"
     }
 
     @Test
@@ -272,13 +298,27 @@ class TemplatesControllerTest {
             )
         every { engine.render(TemplateRef("fetch_orders.sql", 1), mapOf("x" to 42)) } returns "SELECT 42"
 
-        val rendered = controller.render("fetch_orders.sql", 1, """{"context":{"x":42}}""").data
+        val rendered =
+            controller.render("""{"name":"fetch_orders.sql","version":1,"context":{"x":42}}""").data
         rendered shouldBe "SELECT 42"
 
         every { repository.lookupVersion(any(), "nope.sql", 1) } returns null
         every { repository.existsId(any(), "nope.sql") } returns false
-        shouldThrow<ApiException> { controller.render("nope.sql", 1, """{"context":{}}""") }
+        shouldThrow<ApiException> { controller.render("""{"name":"nope.sql","version":1,"context":{}}""") }
             .code shouldBe "template.not_found"
+    }
+
+    @Test
+    fun `render requires name, version and context in the body`() {
+        authenticate()
+        shouldThrow<ApiException> { controller.render("""{"version":1,"context":{}}""") }
+            .details["reason"] shouldBe "name_missing"
+        shouldThrow<ApiException> { controller.render("""{"name":"t.sql","context":{}}""") }
+            .details["reason"] shouldBe "version_missing"
+        shouldThrow<ApiException> { controller.render("""{"name":"t.sql","version":1}""") }
+            .details["reason"] shouldBe "context_missing"
+        shouldThrow<ApiException> { controller.render("""not json""") }
+            .details["reason"] shouldBe "malformed_json"
     }
 
     @Test

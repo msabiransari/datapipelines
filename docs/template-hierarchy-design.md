@@ -1,7 +1,7 @@
 # Template Hierarchy & Typed Templates — v1 Design
 
 **Status:** design (not yet normative; no code changed)
-**Revision:** v1.3 — 2026-09-01 (§9.6 measured and resolved: dual addressing. Earlier: UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
+**Revision:** v1.4 — 2026-09-02 (round 043: §4 naming and §9.6 addressing implemented; §5.1's migration renamed `V8__typed_templates.sql` because naming shipped alone as `V7__hierarchical_template_names.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
 **Owner:** datapipelines.co core
 **Depends on:** [Templates spec](templates.md), [Pipeline Contract spec](pipeline-contract.md), [Metadata DB spec](metadata-db.md), [Enums](enums.md)
 **Date:** 2026-09-01
@@ -116,7 +116,7 @@ So a stored name that becomes illegal breaks **execution of already-released, al
 - §4.5 forbids rename, so there is no in-place repair after the fact.
 - `TemplateRepository.lookupVersion` is deliberately *not* filtered by `is_deleted` (`TemplateRepository.kt:102-107`, templates.md §5.1) — pinned refs to a **soft-deleted** template still resolve. Soft-deleted rows are therefore in scope for the check, not exempt from it.
 
-**Decision (2026-09-01):** keep the strict grammar and make the incompatibility loud at deploy time rather than silent at render time. `V7__typed_hierarchical_templates.sql` opens with a pre-check that aborts the migration and names every offender:
+**Decision (2026-09-01):** keep the strict grammar and make the incompatibility loud at deploy time rather than silent at render time. The migration opens with a pre-check that aborts the migration and names every offender. *(Filename amended 2026-09-02, round 043: the design was written as one round, so it says `V7__typed_hierarchical_templates.sql` — but naming and typing shipped as separate rounds. The gate below landed as **`V7__hierarchical_template_names.sql`** in 043; typing follows as `V8__typed_templates.sql` in 046, and §5.1's heading means that one.)*
 
 ```sql
 -- §4.6 legacy-name gate. Runs FIRST, before any DDL, so a violating deployment
@@ -148,7 +148,7 @@ END $$;
 
 ## 5. The `type` field
 
-### 5.1 Schema (migration `V7__typed_hierarchical_templates.sql`)
+### 5.1 Schema (migration `V8__typed_templates.sql` — renamed 2026-09-02, round 043: naming shipped alone as `V7__hierarchical_template_names.sql`; this section is **046**, not 043)
 
 ```sql
 ALTER TABLE template_versions

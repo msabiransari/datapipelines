@@ -39,7 +39,9 @@ REST API and a browser UI. Metadata lives in Postgres (Flyway); results/events i
 - `{"target": "datasource", "datasource": "...", "table": "...", "mode": "replace"|"append"}`
   — write-back to an external table (must exist, or be created by a preceding DDL node)
 
-**Template** — Freemarker SQL: `id` (e.g. `fetch_orders.sql`), `dialect` (one of
+**Template** — Freemarker SQL: `id` (e.g. `fetch_orders.sql`, or a path like
+`acme/finance/monthly_revenue` — 1–10 `/`-separated segments, each starting `[a-z0-9]`,
+≤ 64 chars per segment, ≤ 200 total), `dialect` (one of
 `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`), `display_name`,
 `description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,
 `is_library`. **There is no params_schema field** — the variables a body may reference
@@ -253,6 +255,23 @@ curl -s http://localhost:8080/api/v1/pipelines/{id}/execute -X POST # run (SSE s
 curl -s http://localhost:8080/api/v1/executions/{id}/result?offset=0&limit=100
 curl -s http://localhost:8080/api/v1/executions/{id} -X DELETE     # cancel
 ```
+
+**Template addressing (rest-api v2.0):** a template name NEVER travels in a URL path
+segment — a name may contain `/`, and an encoded `%2F` in the path is refused `400` by the
+container before routing. Address templates by query parameter or body field instead:
+
+```bash
+curl -s "http://localhost:8080/api/v1/templates?name=acme/finance/report"        # one template
+curl -s "http://localhost:8080/api/v1/templates/versions?name=acme/finance/report&version=1"
+curl -s http://localhost:8080/api/v1/templates/render -X POST \
+  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
+  -d '{"name": "acme/finance/report", "version": 1, "context": {}}'
+```
+
+`GET /api/v1/templates` answers two shapes on one route: the single-resource envelope
+(`404 template.not_found` on a miss) when `name` is present, the paged list when it is not.
+`PUT /api/v1/templates` takes the `id` in the JSON body; release/draft-discard are
+`POST /api/v1/templates/release` and `/draft/discard` with `{"name": ...}` in the body.
 
 The execution endpoint answers with an SSE stream of events
 (`execution_started`, `node_started`, `node_completed`, `pipeline_completed`,

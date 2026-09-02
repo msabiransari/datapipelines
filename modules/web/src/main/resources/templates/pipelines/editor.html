@@ -184,7 +184,7 @@
                   <label class="pe-label">Template</label>
                   <div class="pe-value">
                     <a class="pe-link"
-                       x-bind:href="'/templates/' + encodeURIComponent(selectedNode.template?.id || '') + '/editor'"
+                       x-bind:href="'/templates/editor?name=' + encodeURIComponent(selectedNode.template?.id || '')"
                        x-text="(selectedNode.template?.id || '—') + (selectedNode.template?.version ? ' @ v' + selectedNode.template.version : '')"></a>
                   </div>
                 </div>
