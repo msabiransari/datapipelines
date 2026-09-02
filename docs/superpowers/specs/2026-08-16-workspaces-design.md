@@ -173,6 +173,12 @@ write-shaped uses in the pipeline contract:
 One code, `details` carrying node id + datasource name + which of the three
 shapes — the agent needs the pointer, not three enum values.
 
+*(044, 020 F4)* Layer 1 reads the **live** registry row, past the metadata
+cache — the same row the executor's layer-2 backstop answers from — so a
+row-level flag flip (manual SQL/restore) is honored by the next save in both
+directions; a cached read refused valid saves in the un-flip direction with a
+wrong 400 no layer covered.
+
 **Layer 2 — execution-time backstop:** the executor re-checks the live
 registry entry per node (covers D10 flips between save and run) and fails the
 node with proposed runtime code `pipeline.node.datasource_readonly` (§13.4
@@ -184,6 +190,20 @@ driver, and (empirically corrected at 020: probed on the pinned HikariCP
 see datasources.md §5.7 layer 3 for the verified wording. `properties.hikari.readOnly`
 joins the server-managed refusal set (§5.6) — operator passthrough must not
 silently flip the flag either way on a readonly datasource.
+
+*(044, 020 F2/F3/F7)* The backstop is **fail-closed** (normative semantics in
+datasources.md §5.7): no live row refuses as `datasource_not_found` — the D10
+soft-delete channel must not ride a warm cache entry and a warm pool into a
+write; a metadata-DB failure during the live read refuses naming the
+**metadata** database, never the healthy target; the read itself is flag-only,
+and a readonly write-back target is refused at CONNECT, before the source
+query runs (020 F9). *(044, 020 F5)* The pool half of layer 2 has a known
+window: pools evict only on the registry save/delete boundary — a **row-level**
+flip leaves the pre-flip pool serving until the next registry save. That is
+M3 (pools never expire cross-instance,
+[ARCH-AUDIT-2026-08](../../ARCH-AUDIT-2026-08.md)) within one JVM, and its fix
+is deferred to M3's owner decision rather than a second invalidation
+mechanism; every write-shaped path still crosses the live check first.
 
 **Layer 3 — credentials (normative deployment guidance, not code):**
 datasources.md gains a sentence: the readonly flag is contract, not
