@@ -104,6 +104,10 @@ class PostgresDialectAdapter : AbstractDialectAdapter(Dialect.POSTGRES, "postgre
 }
 
 class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
+    // Datasources §7B: 12c+ `FETCH FIRST`, never `ROWNUM` (pre-sort assignment would preview
+    // the wrong rows — the applyRowLimit KDoc on [DialectAdapter] records the decision).
+    override val rowLimitStyle: RowLimitStyle = RowLimitStyle.FETCH_FIRST
+
     // The instance's administrative schemas ship as ordinary TABLE/VIEW rows in ALL_/DBA_
     // listings; the type vocabulary cannot keep them out of a user's listing. A FLOOR,
     // deliberately known-incomplete: these are the schemas every Oracle install maintains;
@@ -130,6 +134,11 @@ class OracleDialectAdapter : AbstractDialectAdapter(Dialect.ORACLE, "oracle") {
 }
 
 class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
+    // Datasources §7B: `[...]` brackets with `]]` escaping, and `TOP (n)` sits after SELECT —
+    // the two shapes that make quoting and row-limiting whole-statement concerns.
+    override val identifierQuoteStyle: IdentifierQuoteStyle = IdentifierQuoteStyle.BRACKET
+    override val rowLimitStyle: RowLimitStyle = RowLimitStyle.TOP
+
     // SQL Server hides `sys` (the resource-DB views surface under it) beside INFORMATION_SCHEMA,
     // and every database carries the built-in fixed-role/special schemas (db_owner,
     // db_accessadmin, db_securityadmin, db_ddladmin, db_backupoperator, db_datareader,
@@ -167,6 +176,10 @@ class MssqlDialectAdapter : AbstractDialectAdapter(Dialect.MSSQL, "sqlserver") {
  */
 class MysqlDialectAdapter : AbstractDialectAdapter(Dialect.MYSQL, "mysql") {
     override val schemaArrivesInCatalog: Boolean = true
+
+    // Datasources §7B: backtick quoting with `` doubling — ANSI_QUOTES is NOT assumed, since
+    // the adapter cannot know a server's sql_mode.
+    override val identifierQuoteStyle: IdentifierQuoteStyle = IdentifierQuoteStyle.BACKTICK
 
     override val introspectionSystemSchemas: Set<String> =
         setOf("information_schema", "mysql", "performance_schema", "sys")

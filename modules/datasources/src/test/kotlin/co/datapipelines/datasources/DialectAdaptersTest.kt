@@ -294,6 +294,70 @@ class DialectAdaptersTest {
         thrown.message.orEmpty() shouldContain "test_h2"
     }
 
+    @Test
+    fun `every dialect declares its identifier quote style - enum-total`() {
+        // Datasources §7B: the mapping is total over the enum (forDialect cannot return null),
+        // and the three styles are pinned to exactly the dialects that carry them — a new
+        // dialect lands in the default DOUBLE_QUOTE bucket and is forced to choose here.
+        val styles = Dialect.entries.associate { it to DialectAdapters.forDialect(it).identifierQuoteStyle }
+
+        styles.size shouldBe Dialect.entries.size
+        styles[Dialect.MYSQL] shouldBe IdentifierQuoteStyle.BACKTICK
+        styles[Dialect.MSSQL] shouldBe IdentifierQuoteStyle.BRACKET
+        styles[Dialect.ORACLE] shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        styles[Dialect.POSTGRES] shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        styles[Dialect.H2] shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        styles[Dialect.DUCKDB] shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        styles[Dialect.SQLITE] shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+    }
+
+    @Test
+    fun `quoteIdentifier doubles the dialect's own quote character`() {
+        // The doubling is the injection boundary: a caller-supplied identifier containing the
+        // quote character must not be able to close the identifier and open SQL. Each style
+        // exercises its own escape, including the bracket `]]` fold.
+        DialectAdapters.forDialect(Dialect.POSTGRES).quoteIdentifier("""we"ird""") shouldBe "\"we\"\"ird\""
+        DialectAdapters.forDialect(Dialect.ORACLE).quoteIdentifier("plain") shouldBe "\"plain\""
+        DialectAdapters.forDialect(Dialect.MYSQL).quoteIdentifier("or`der") shouldBe "`or``der`"
+        DialectAdapters.forDialect(Dialect.MSSQL).quoteIdentifier("sc]hema") shouldBe "[sc]]hema]"
+        DialectAdapters.forDialect(Dialect.H2).quoteIdentifier("t") shouldBe "\"t\""
+    }
+
+    @Test
+    fun `every dialect applies its row limit in its own syntax - enum-total`() {
+        val limits = Dialect.entries.associate { it to DialectAdapters.forDialect(it).rowLimitStyle }
+
+        limits[Dialect.POSTGRES] shouldBe RowLimitStyle.LIMIT
+        limits[Dialect.MYSQL] shouldBe RowLimitStyle.LIMIT
+        limits[Dialect.H2] shouldBe RowLimitStyle.LIMIT
+        limits[Dialect.DUCKDB] shouldBe RowLimitStyle.LIMIT
+        limits[Dialect.SQLITE] shouldBe RowLimitStyle.LIMIT
+        limits[Dialect.ORACLE] shouldBe RowLimitStyle.FETCH_FIRST
+        limits[Dialect.MSSQL] shouldBe RowLimitStyle.TOP
+    }
+
+    @Test
+    fun `applyRowLimit builds each dialect's clause from a whole statement`() {
+        val sql = "SELECT * FROM \"t\" ORDER BY \"c\""
+
+        DialectAdapters.forDialect(Dialect.POSTGRES).applyRowLimit(sql, 5) shouldBe "$sql LIMIT 5"
+        DialectAdapters.forDialect(Dialect.MYSQL).applyRowLimit(sql, 1) shouldBe "$sql LIMIT 1"
+        // Oracle 12c+: FETCH FIRST, never ROWNUM (pre-sort assignment — see the adapter KDoc).
+        DialectAdapters.forDialect(Dialect.ORACLE).applyRowLimit(sql, 10) shouldBe "$sql FETCH FIRST 10 ROWS ONLY"
+        // MSSQL's TOP sits AFTER the SELECT keyword, not at the end — the reason this is a
+        // whole-statement method rather than a suffix.
+        DialectAdapters
+            .forDialect(Dialect.MSSQL)
+            .applyRowLimit(sql, 7) shouldBe "SELECT TOP (7) * FROM \"t\" ORDER BY \"c\""
+    }
+
+    @Test
+    fun `applyRowLimit tolerates leading whitespace and lowercase select for the TOP dialect`() {
+        DialectAdapters
+            .forDialect(Dialect.MSSQL)
+            .applyRowLimit("  select a from t", 3) shouldBe "SELECT TOP (3) a from t"
+    }
+
     private fun assertMalformed(
         dialect: Dialect,
         url: String,

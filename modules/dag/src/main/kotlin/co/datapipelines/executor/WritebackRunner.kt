@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteMode

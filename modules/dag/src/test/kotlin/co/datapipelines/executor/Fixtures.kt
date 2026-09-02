@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.ValidationResult
 import co.datapipelines.datasources.pooling.ConnectionPool

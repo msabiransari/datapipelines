@@ -458,6 +458,29 @@ class EmbeddedDialectBehaviorTest {
         }
     }
 
+    @Test
+    fun `the embedded drivers' identifierQuoteString matches each adapter's declared quote style`() {
+        // Datasources §7B (037 G): the adapter-declared quote style is pinned against the
+        // pinned driver's OWN DatabaseMetaData.getIdentifierQuoteString(), per the round
+        // contract's "check the pinned driver rather than trusting the list" rule. The
+        // embedded dialects prove it live here; the server dialects (Postgres, MySQL) are
+        // proven by the round's live demo-stack evidence, and MSSQL's brackets are the one
+        // documented engine whose JDBC driver reports " " while the engine's native form is
+        // [...] — bracket-quoting is correct for engine-native SQL either way.
+        java.sql.DriverManager.getConnection("jdbc:h2:mem:quotepin;DB_CLOSE_DELAY=-1").use { conn ->
+            conn.metaData.identifierQuoteString shouldBe "\""
+            DialectAdapters.forDialect(Dialect.H2).identifierQuoteStyle shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        }
+        java.sql.DriverManager.getConnection("jdbc:duckdb::memory:").use { conn ->
+            conn.metaData.identifierQuoteString shouldBe "\""
+            DialectAdapters.forDialect(Dialect.DUCKDB).identifierQuoteStyle shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        }
+        java.sql.DriverManager.getConnection("jdbc:sqlite::memory:").use { conn ->
+            conn.metaData.identifierQuoteString shouldBe "\""
+            DialectAdapters.forDialect(Dialect.SQLITE).identifierQuoteStyle shouldBe IdentifierQuoteStyle.DOUBLE_QUOTE
+        }
+    }
+
     private fun embedded(
         dialect: Dialect,
         name: String,
