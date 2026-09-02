@@ -32,10 +32,18 @@ WINDOW_END=$(lock_field param window_end)
 MODULUS=$(lock_field param trips_sample_modulus)
 DUCKDB_VERSION=$(lock_field param duckdb_version)
 
-python3 - "$ART" "$SD_ROOT" "$SOURCES_LOCK" "$VERSION" "$WINDOW_START" "$WINDOW_END" "$MODULUS" "$DUCKDB_VERSION" <<'PY'
+# The window as inclusive DATE bounds, derived ONCE by the shared helper in
+# lib/common.sh (window_day_end, 045 §B): `window_end` names a MONTH, so its
+# bound is the last day of that month — computed, never written as a literal,
+# and the same derivation transform.sh applies; a hand-written end date is how
+# the manifest ends up describing a window the data does not have.
+DAY_START="$WINDOW_START-01"
+DAY_END=$(window_day_end "$WINDOW_END")
+
+python3 - "$ART" "$SD_ROOT" "$SOURCES_LOCK" "$VERSION" "$WINDOW_START" "$WINDOW_END" "$MODULUS" "$DUCKDB_VERSION" "$DAY_START" "$DAY_END" <<'PY'
 import hashlib, json, os, sys, datetime, collections
 
-art, sd_root, lock_path, version, w_start, w_end, modulus, duckdb_version = sys.argv[1:9]
+art, sd_root, lock_path, version, w_start, w_end, modulus, duckdb_version, day_start, day_end = sys.argv[1:11]
 
 def sha256(path):
     h = hashlib.sha256()
@@ -52,15 +60,6 @@ def lock(kind, key, col=2):
         if len(f) > col and f[0] == kind and f[1] == key:
             return f[col]
     return None
-
-# The window as inclusive DATE bounds — `window_end` names a MONTH, so its bound
-# is the last day of that month. Computed, never written as a literal, and the
-# same derivation transform.sh applies; a hand-written end date is how the
-# manifest ends up describing a window the data does not have.
-_wy, _wm = (int(x) for x in w_end.split("-"))
-_ny, _nm = (_wy + 1, 1) if _wm == 12 else (_wy, _wm + 1)
-day_start = f"{w_start}-01"
-day_end = (datetime.date(_ny, _nm, 1) - datetime.timedelta(days=1)).isoformat()
 
 
 def retrieved(raw_name):

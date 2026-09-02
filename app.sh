@@ -7,7 +7,7 @@
 #
 #   ./app.sh --start [--no-build]   build image in Docker + start the full stack
 #   ./app.sh --start --demo         ...plus the published sample databases
-#   ./app.sh --stop [--demo]        stop the stack (Postgres data volume kept)
+#   ./app.sh --stop [--demo]        stop the stack, demo profile included
 #   ./app.sh --status [--demo]      show services + app health
 #   ./app.sh --logs                 follow the app container's logs
 #
@@ -37,8 +37,9 @@ COMPOSE=(docker compose ${APP_COMPOSE_PROJECT:+-p "$APP_COMPOSE_PROJECT"} -f dep
 
 # --demo is a MODE, not a subcommand: it changes the compose invocation for every
 # verb, so it is stripped from the argument list here rather than inside start().
-# Without it on --stop/--status the demo services are invisible to compose and a
-# "stopped" stack keeps a MySQL container running.
+# Without it the demo services are invisible to compose: --status cannot show
+# them, and --stop would leave the demo MySQL running — stop() compensates for
+# that explicitly (045 §C.1), status does not.
 DEMO=0
 ARGS=()
 for arg in "$@"; do
@@ -158,9 +159,10 @@ ensure_demo_env() {
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
   add_key SAMPLE_VERSION "v1"
   add_key SAMPLE_DB_USER "dp_demo_ro"
-  # hex, NOT base64: the loader's require_sql_safe allowlist (023 F6, load.sh)
-  # rejects the +/ base64 emits — a scaffolded base64 password killed the demo
-  # loader at startup since the guard landed (found by the 027 demo E2E).
+  # hex, NOT base64: hex can never contain the one string the loader refuses
+  # in a Postgres password — its dollar-quote tag (045 §A) — and stays
+  # shell/SQL-quiet everywhere. (Before 045 the loader's charset allowlist
+  # rejected base64's +/ outright; any charset works now, hex is kept.)
   add_key SAMPLE_PG_PASSWORD "$(openssl rand -hex 24)"
   add_key SAMPLE_MYSQL_PASSWORD "$(openssl rand -hex 24)"
   add_key SAMPLE_MYSQL_ROOT_PASSWORD "$(openssl rand -hex 24)"
@@ -275,6 +277,37 @@ EOM
 stop() {
   echo "==> stopping the stack (data volumes kept; '${COMPOSE[*]} down -v' resets them)"
   "${COMPOSE[@]}" stop
+  ((DEMO)) && return 0 # --stop --demo already sees the demo services
+  # 045 §C.1 (023 review): the invocation above has no demo profile, so demo
+  # containers are invisible to it and a plain --stop used to leave this
+  # project's demo MySQL running — verified live on a scratch stack
+  # (2026-09-02): `stop` returned 0 with mysql still Up. Stop the demo services
+  # too, when they run. Detection is by compose LABEL, not by the compose
+  # model: loading the model needs the demo env files, which a machine that
+  # never ran --demo must not be forced to have.
+  local proj svc running=""
+  proj=${APP_COMPOSE_PROJECT:-deploy}
+  for svc in mysql sample-data sample-data-mysql; do
+    if [ -n "$(docker ps -q \
+        --filter "label=com.docker.compose.project=$proj" \
+        --filter "label=com.docker.compose.service=$svc" 2>/dev/null)" ]; then
+      running=$svc
+      break
+    fi
+  done
+  if [[ -n $running ]]; then
+    touch "$DEMO_ENV" # exists whenever --start --demo ever ran; belt for a manual `up`
+    local -a env_args=(--env-file "$DEMO_ENV")
+    # deploy/.env exists whenever app.sh itself started the stack (start()
+    # scaffolds it); a manually `compose up`-ed scratch stack may lack it, and
+    # refusing to stop running containers over a missing auxiliary file would
+    # recreate this finding. Required vars then come from the process env.
+    if [[ -f $DEPLOY_ENV ]]; then env_args+=(--env-file "$DEPLOY_ENV"); fi
+    docker compose ${APP_COMPOSE_PROJECT:+-p "$APP_COMPOSE_PROJECT"} \
+      -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+      "${env_args[@]}" --profile demo stop
+    echo "==> demo services stopped too (a plain --stop covers the demo profile)"
+  fi
 }
 
 status() {

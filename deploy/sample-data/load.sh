@@ -77,10 +77,42 @@ DEMO_USER="${SAMPLE_DB_USER:-dp_demo_ro}"
 # Defined BEFORE its first use: a94dc9b (025 C5) placed the calls above the
 # definition and the loader died at line 79 with "require_sql_safe: not found"
 # before this round — bash needs a function defined before it is CALLED.
-# F6 (023): operator env values are interpolated into superuser SQL below. An
-# allowlist, not escaping: the values are operator-controlled deployment facts,
-# and one conservative charset keeps both engines' quoting rules out of scope.
-# Anything else dies naming the variable and the legal characters.
+#
+# 023 F6 / 045 §A — operator env values reach superuser SQL. IDENTIFIERS and
+# LITERALS get different treatment, validated at the top of the script, before
+# anything is downloaded or created:
+#   * identifiers (DEMO_USER, the two sample DB names) are VALIDATED against
+#     one conservative charset, not escaped: MySQL has no quote_ident, and an
+#     unquoted Postgres identifier is folded to lowercase, so anything outside
+#     [a-z_][a-z0-9_]{0,62} is an operator error — mixed case would silently
+#     create a role the demo login then cannot authenticate as;
+#   * the passwords are LITERALS, properly quoted at their use site —
+#     dollar-quoted with the tag sd_pw in Postgres, ''-doubled under a
+#     NO_BACKSLASH_ESCAPES session in MySQL — so every password character is
+#     safe and a chosen (not fumbled) adversarial password simply works. The
+#     one string a dollar-quoted literal cannot survive is its own closing
+#     tag; that exact sequence is refused here, loudly, by name;
+#   * VERSION keeps a charset allowlist (require_sql_safe): it names an
+#     immutable directory, is equality-checked against the manifest, and only
+#     ever reaches SQL as the guarded marker literal.
+require_sql_identifier() { # <label> <value>
+  case "$2" in
+    '') die "$1 is empty" ;;
+    *[!a-z0-9_]*)
+      die "$1='$2' is not a legal SQL identifier here — it must match
+  [a-z_][a-z0-9_]{0,62}. It is used UNQUOTED as a Postgres role/database name
+  and as the MySQL login name, and MySQL has no quote_ident to escape it with;
+  Postgres folds unquoted identifiers to lowercase, so mixed case would create
+  a role the demo login then cannot authenticate as. Set SAMPLE_DB_USER (or the
+  SAMPLE_*_DB) to a plain lowercase name." ;;
+    [0-9]*)
+      die "$1='$2' must not start with a digit — it must match [a-z_][a-z0-9_]{0,62}" ;;
+    *) ;;
+  esac
+  [ "${#2}" -le 63 ] \
+    || die "$1 is ${#2} characters — a Postgres identifier is at most 63 (NAMEDATALEN-1)"
+}
+
 require_sql_safe() { # <label> <value> <charset-description>
   case "$2" in
     '') die "$1 is empty" ;;
@@ -92,10 +124,21 @@ require_sql_safe() { # <label> <value> <charset-description>
   esac
 }
 
-# Every value the SQL below interpolates (023 F6). VERSION is also constrained by
-# the manifest equality check, but the guard here is what the SQL itself relies on.
-require_sql_safe DEMO_USER "$DEMO_USER"
+require_sql_identifier DEMO_USER "$DEMO_USER"
 require_sql_safe VERSION "$VERSION"
+if [ -n "${SAMPLE_PG_PASSWORD:-}" ]; then
+  # shellcheck disable=SC2016
+  # Single quotes ON PURPOSE: the case pattern must match the literal
+  # dollar-quote tag, never an expansion of it.
+  case "$SAMPLE_PG_PASSWORD" in
+    *'$sd_pw$'*)
+      die "SAMPLE_PG_PASSWORD contains the dollar-quote tag this loader uses for
+  Postgres password literals (\$sd_pw\$). Any other password — quotes, backslashes,
+  dollar signs included — works; this exact sequence cannot, and is refused here,
+  before any download, rather than half-way through a restore. Pick a different
+  password." ;;
+  esac
+fi
 
 wants() { case ",$ENGINES," in *",$1,"*) return 0 ;; esac; [ -z "$ENGINES" ]; }
 
@@ -177,7 +220,16 @@ log "manifest lists $count artifact(s)"
 
 # --- 1 + 2: download and verify EVERYTHING before touching any engine --------
 step "downloading and verifying $count artifact(s) — no engine is touched until every one passes"
-artifact_list | while IFS="$(printf '\t')" read -r file want; do
+# The artifact list goes through a FILE, not a pipe. `while read` on the far
+# end of a pipeline runs in a subshell, where `die` cannot exit this script —
+# which is why this loop used to need a SECOND, full re-verification pass over
+# every artifact to make a mismatch fatal in this shell (023's fix for the
+# pipe swallowing the die). Reading from a redirect keeps the loop in the
+# CURRENT shell: die dies for real, and each artifact is hashed exactly once
+# per run (045 §C.2 — the old shape hashed every file twice).
+LIST="$WORK/.artifacts.list"
+artifact_list > "$LIST"
+while IFS="$(printf '\t')" read -r file want; do
   dest="$WORK/$file"
   if [ -f "$dest" ] && [ "$(sha_of "$dest")" = "$want" ]; then
     log "  $file  cached, checksum ok"
@@ -195,12 +247,8 @@ artifact_list | while IFS="$(printf '\t')" read -r file want; do
   the published artifact and its manifest disagree and must not be loaded."
   }
   log "  $file  checksum ok"
-done
-# `while` in a pipeline runs in a subshell, so its `die` cannot exit this
-# script. Re-verify here, in THIS shell, so a mismatch is fatal for real.
-artifact_list | while IFS="$(printf '\t')" read -r file want; do
-  [ "$(sha_of "$WORK/$file")" = "$want" ] || exit 17
-done || die "one or more artifacts failed verification (see above) — no engine was touched"
+done < "$LIST"
+rm -f "$LIST"
 log "all $count artifact(s) verified"
 
 # --- 3: engines -------------------------------------------------------------
@@ -211,8 +259,7 @@ if wants postgres && require_client postgres psql; then
   : "${PGUSER:?PGUSER must name a superuser able to CREATE DATABASE and CREATE ROLE}"
   : "${SAMPLE_PG_PASSWORD:?SAMPLE_PG_PASSWORD must be set — it is the password of the demo login}"
   SAMPLE_PG_DB="${SAMPLE_PG_DB:-dp_sample_trips}"
-  require_sql_safe SAMPLE_PG_PASSWORD "$SAMPLE_PG_PASSWORD"
-  require_sql_safe SAMPLE_PG_DB "$SAMPLE_PG_DB"
+  require_sql_identifier SAMPLE_PG_DB "$SAMPLE_PG_DB"
   LOADED_ANY=1
 
   psql_admin() { psql -v ON_ERROR_STOP=1 -qtA -d "${PGDATABASE:-postgres}" "$@"; }
@@ -242,16 +289,22 @@ if wants postgres && require_client postgres psql; then
     # existing tables, USAGE on the schema, and DEFAULT PRIVILEGES so a later
     # artifact version's tables are readable too — and nothing else. No CREATE on
     # the schema, so the login cannot make itself a table to write to.
+    #
+    # 045 §A: the password is dollar-quoted with the tag sd_pw — validated at
+    # the top of the script never to appear in the value — so quotes,
+    # backslashes, dollar signs and semicolons in an operator-chosen password
+    # are inert, and the value reaches the server over psql's stdin, never in
+    # an argv a `ps` could read. The role statement is chosen by a shell-side
+    # existence check (CREATE ROLE has no IF NOT EXISTS); DEMO_USER is
+    # identifier-validated, so the probe's literal is safe.
+    role_exists=$(psql_sample -c "SELECT 1 FROM pg_roles WHERE rolname = '$DEMO_USER'" 2>/dev/null || true)
+    if [ "$role_exists" = "1" ]; then
+      ROLE_SQL="ALTER ROLE $DEMO_USER LOGIN PASSWORD"
+    else
+      ROLE_SQL="CREATE ROLE $DEMO_USER LOGIN PASSWORD"
+    fi
     psql_sample <<EOSQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$DEMO_USER') THEN
-    CREATE ROLE $DEMO_USER LOGIN PASSWORD '$SAMPLE_PG_PASSWORD';
-  ELSE
-    ALTER ROLE $DEMO_USER LOGIN PASSWORD '$SAMPLE_PG_PASSWORD';
-  END IF;
-END
-\$\$;
+$ROLE_SQL \$sd_pw\$$SAMPLE_PG_PASSWORD\$sd_pw\$;
 REVOKE ALL ON DATABASE $SAMPLE_PG_DB FROM PUBLIC;
 GRANT CONNECT ON DATABASE $SAMPLE_PG_DB TO $DEMO_USER;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -281,8 +334,7 @@ if wants mysql && require_client mysql mysql; then
   : "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set — the loader creates a database and a role}"
   : "${SAMPLE_MYSQL_PASSWORD:?SAMPLE_MYSQL_PASSWORD must be set — it is the password of the demo login}"
   SAMPLE_MYSQL_DB="${SAMPLE_MYSQL_DB:-dp_sample_weather}"
-  require_sql_safe SAMPLE_MYSQL_PASSWORD "$SAMPLE_MYSQL_PASSWORD"
-  require_sql_safe SAMPLE_MYSQL_DB "$SAMPLE_MYSQL_DB"
+  require_sql_identifier SAMPLE_MYSQL_DB "$SAMPLE_MYSQL_DB"
   LOADED_ANY=1
 
   # MYSQL_PWD rather than -p on the command line: an argv password is visible in
@@ -299,9 +351,19 @@ if wants mysql && require_client mysql mysql; then
     gzip -dc "$WORK/mysql-weather.sql.gz" | my
 
     log "  creating SELECT-only login $DEMO_USER"
+    # 045 §A: MySQL has no dollar-quoting, so the password literal is escaped
+    # by doubling single quotes — the one form whose meaning does not depend on
+    # the server's sql_mode — under a session first pinned to
+    # NO_BACKSLASH_ESCAPES, where a backslash is an ordinary character. Quotes,
+    # backslashes, dollar signs and semicolons in the operator-chosen password
+    # are all inert, and the value travels over the client's stdin (my <<SQL),
+    # never in an argv a `ps` could read. DEMO_USER and SAMPLE_MYSQL_DB are
+    # identifier-validated above, so their literals are safe as written.
+    my_pw=$(printf '%s' "$SAMPLE_MYSQL_PASSWORD" | sed "s/'/''/g")
     my <<EOSQL
-CREATE USER IF NOT EXISTS '$DEMO_USER'@'%' IDENTIFIED BY '$SAMPLE_MYSQL_PASSWORD';
-ALTER USER '$DEMO_USER'@'%' IDENTIFIED BY '$SAMPLE_MYSQL_PASSWORD';
+SET SESSION sql_mode = CONCAT(@@session.sql_mode, ',NO_BACKSLASH_ESCAPES');
+CREATE USER IF NOT EXISTS '$DEMO_USER'@'%' IDENTIFIED BY '$my_pw';
+ALTER USER '$DEMO_USER'@'%' IDENTIFIED BY '$my_pw';
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM '$DEMO_USER'@'%';
 GRANT SELECT ON \`$SAMPLE_MYSQL_DB\`.* TO '$DEMO_USER'@'%';
 FLUSH PRIVILEGES;
