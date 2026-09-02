@@ -110,8 +110,17 @@ internal object InterpolatedParameterScanner {
             description
                 .substringAfter("#macro ")
                 .ifEmpty { description.substringAfter("#function ") }
-        val tokens = afterKeyword.replace('(', ' ').replace(')', ' ').trim().split(Regex("""[\s,]+"""))
-        return tokens.drop(1).map { it.substringBefore('=') }.filter { IDENTIFIER.matches(it) }.toSet()
+        val tokens =
+            afterKeyword
+                .replace('(', ' ')
+                .replace(')', ' ')
+                .trim()
+                .split(TOKEN_SPLIT)
+        return tokens
+            .drop(1)
+            .map { it.substringBefore('=') }
+            .filter { IDENTIFIER.matches(it) }
+            .toSet()
     }
 
     /** The loop variable of `<#list rows as x>` — prints as `#list rows as x`. */
@@ -119,6 +128,8 @@ internal object InterpolatedParameterScanner {
         LOOP_VARIABLE.find(description)?.let { setOf(it.groupValues[1]) } ?: emptySet()
 
     private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+
+    private val TOKEN_SPLIT = Regex("""[\s,]+""")
 
     private val LOOP_VARIABLE = Regex("""\bas\s+([A-Za-z_][A-Za-z0-9_]*)""")
 }
