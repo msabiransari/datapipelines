@@ -102,6 +102,11 @@ object ApiErrorCatalog {
             // §13.4 — 500 like the pipeline.node family default, wired explicitly so the code
             // owns a row rather than being absorbed by the default (the 025 A2 convention).
             PipelineErrorCodes.Node.SQL_PARAMETER_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,
+            // §13.4 / 037 — the node-run debug query's refusals, against the family's 500
+            // default: an unknown node is a 404, and a node with no standalone SQL to run
+            // (tempdb source / PIPELINE node) is a 400.
+            PipelineErrorCodes.Node.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.IN_USE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.NOT_FOUND to HttpStatus.NOT_FOUND,

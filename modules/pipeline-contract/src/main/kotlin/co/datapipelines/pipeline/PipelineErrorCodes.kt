@@ -244,6 +244,25 @@ object PipelineErrorCodes {
         const val DATASOURCE_NOT_FOUND = "pipeline.node.datasource_not_found"
 
         /**
+         * §13.4 / mcp-server §6.2.20 — a node-run debug query named a node id the resolved
+         * pipeline version does not hold (037 E2). HTTP 404. `details` carries the node id and
+         * the version that was searched — after versioning, "no such node" almost always means
+         * "you are looking at the released body while the node lives in the draft" (the tool's
+         * E5 default already prefers the draft, so this fires mostly on genuine typos).
+         */
+        const val NOT_FOUND = "pipeline.node.not_found"
+
+        /**
+         * §13.4 / mcp-server §6.2.20 — a node-run debug query refused because the node cannot
+         * run standalone (037 §A/E2): its `source` is `tempdb` (the staging database exists
+         * only inside a full execution — use `pipelines_execute`), or it is a PIPELINE node
+         * (it runs a child pipeline, not SQL). HTTP 400. `details.reason` names which
+         * (`tempdb_source` / `pipeline_node`); one code because both are the same verdict —
+         * this node has no standalone SQL to run.
+         */
+        const val STANDALONE_EXECUTION_REFUSED = "pipeline.node.standalone_execution_refused"
+
+        /**
          * §13.4 — a write-shaped node reached execution against a datasource whose live
          * registry entry is readonly (workspaces design §6 layer 2a, D10). Same HTTP class and
          * shape as [DATASOURCE_NOT_FOUND]: the datasource resolved at write-time, but the flag
