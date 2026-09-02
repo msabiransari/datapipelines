@@ -73,6 +73,27 @@
   tab-size: 2;
 }
 
+/* R5 (054) — a SELECTED version's body: the same pane the preview output uses, sized
+   where the textarea would have been (D2/D3's ~2/3). It is a <pre>, not a disabled
+   textarea: a disabled control is re-enabled in devtools in one click, and this surface
+   must not present a lock it does not own — the same reasoning §9.3 applies to `type`. */
+.te-readonly {
+  flex: 2 1 0;
+  width: 100%;
+  min-height: 280px; /* the textarea's floor, kept, so the swap does not resize the column */
+  margin: 0;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-base);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .te-preview {
   display: flex;
   flex-direction: column;

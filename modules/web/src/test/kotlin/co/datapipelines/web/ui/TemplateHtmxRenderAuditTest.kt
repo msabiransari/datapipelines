@@ -173,6 +173,10 @@ class TemplateHtmxRenderAuditTest {
                 "pipelines/list" to { c: WebContext -> c.fillPipelineList() },
                 "templates/list" to { c: WebContext -> c.fillTemplateList() },
                 "datasources/list" to { c: WebContext -> c.fillDatasourceList() },
+                // 054: the template editor is the fourth screen with an hx-target — the
+                // version select swaps #template-source and Edit answers into
+                // #tpl-edit-refusal, both of which live in a th:replace'd FRAGMENT.
+                "templates/editor" to { c: WebContext -> c.fillTemplateEditor() },
             ).flatMap { (view, fill) ->
                 // Comments are stripped first: the templates document their own contract in
                 // prose ("The ROOT carries id=..."), and an id scraped out of a COMMENT makes
@@ -273,6 +277,40 @@ class TemplateHtmxRenderAuditTest {
         setVariable("offset", 0)
         setVariable("hasMore", true)
         setVariable("total", 30)
+    }
+
+    /**
+     * TemplateEditorController's model, in its READ-ONLY presentation (054/R5) — the state
+     * that carries BOTH of the screen's hx-targets. Rendered editable, the Edit control and
+     * its refusal target do not exist and the guard would only ever see one of the two.
+     */
+    private fun WebContext.fillTemplateEditor() {
+        fillLayoutChrome()
+        setVariable("scopes", setOf("AUTHOR"))
+        setVariable(
+            "template",
+            Template(
+                id = "acme/revenue.sql",
+                version = 1,
+                dialect = Dialect.POSTGRES,
+                displayName = "Revenue",
+                description = "A test template",
+                body = "SELECT 1",
+                createdAt = Instant.parse("2026-08-10T00:00:00Z"),
+                createdBy = UUID.randomUUID(),
+            ),
+        )
+        setVariable("templateName", "acme/revenue.sql")
+        setVariable("versions", emptyList<Any>())
+        setVariable("selectedVersion", 1)
+        setVariable("workingVersion", 2)
+        setVariable("readOnly", true)
+        setVariable("selectedStatus", "RELEASED")
+        setVariable("releasedAt", Instant.parse("2026-08-11T00:00:00Z"))
+        setVariable("releasedBy", UUID.randomUUID().toString())
+        setVariable("hasDraft", false)
+        setVariable("draftVersion", null)
+        setVariable("draftHash", null)
     }
 
     /** DatasourceUiController's model — ONE row, or the pager never renders and the guard is vacuous. */

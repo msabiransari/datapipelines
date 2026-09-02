@@ -47,10 +47,17 @@
       <button th:if="${hasDraft}" class="ds-button ds-button-secondary ds-button-sm" id="tpl-discard-draft"
               th:attr="data-id=${template?.id}, data-hash=${draftHash}"
               onclick="tplLifecycle('discard')">Discard draft</button>
+      <!-- R5 (054): selecting a version LOADS it. The request swaps the source column
+           (§5's idiom — a stable target, outerHTML, the same fragment the page painted
+           first); the select's own `version` value rides along, and the name is a
+           server-rendered @{...} parameter because it is fixed for the page (§9.6: never
+           a path segment). -->
       <label for="versionSelect" style="color:var(--text-secondary);font-size:var(--text-sm)">Version:</label>
-      <select id="versionSelect" class="ds-select" style="font-size:var(--text-sm)" onchange="updateVersion()">
+      <select id="versionSelect" name="version" class="ds-select" style="font-size:var(--text-sm)"
+              th:attr="hx-get=@{/partials/templates/editor/source(name=${templateName})}"
+              hx-trigger="change" hx-target="#template-source" hx-swap="outerHTML">
         <th:block th:each="v : ${versions}">
-          <option th:value="${v.version}" th:selected="${v.version == template?.version}" th:text="'v' + ${v.version}"></option>
+          <option th:value="${v.version}" th:selected="${v.version == selectedVersion}" th:text="'v' + ${v.version}"></option>
         </th:block>
       </select>
     </div>
@@ -109,25 +116,10 @@
     </div>
 
     <!-- RIGHT: the source column — the editor (~2/3) and, below it sharing the
-         width, the preview output (~1/3). Both scroll inside their panes (D2/D3). -->
-    <div class="te-source">
-      <div class="te-panel-head">
-        <h2>Template Source</h2>
-        <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
-      </div>
-      <textarea id="templateBody" class="ds-textarea" th:text="${template?.body ?: ''}">Template body</textarea>
-
-      <div class="te-preview">
-        <div class="te-panel-head" style="margin-bottom:0">
-          <div style="display:flex;gap:var(--gap-sm);align-items:center">
-            <h2>Preview Output</h2>
-            <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
-            <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
-          </div>
-        </div>
-        <div id="previewPane" class="te-preview-pane"></div>
-      </div>
-    </div>
+         width, the preview output (~1/3). Both scroll inside their panes (D2/D3).
+         Defined ONCE in partials/template-source so the first paint and every
+         version swap render the same markup (R5). -->
+    <div th:replace="~{partials/template-source :: source}"></div>
   </div>
   </div>
 
@@ -214,7 +206,12 @@
 
       var templateId = [[${template?.id ?: ""}]];
       var version = document.getElementById('versionSelect')?.value || '1';
-      var body = document.getElementById('templateBody')?.value || '';
+      /* Whichever body is on screen: the editable textarea on the working version, the
+         read-only <pre> on a selected one. The server renders the STORED version either
+         way — this only keeps the request honest about what the author is looking at. */
+      var body = document.getElementById('templateBody')?.value
+        || document.getElementById('versionBody')?.textContent
+        || '';
       var context = buildContextJson();
 
       var params = new URLSearchParams();
@@ -237,13 +234,6 @@
         })
         .catch(function(e) { pane.innerHTML = '<div class="ds-card" style="padding:var(--gap-md);border-color:var(--accent-danger)"><p style="color:var(--accent-danger);font-size:var(--text-sm)">' + e.message + '</p></div>'; })
         .finally(function() { btn.disabled = false; spinner.style.display = 'none'; });
-    }
-
-    function updateVersion() {
-      var sel = document.getElementById('versionSelect');
-      var version = sel.value;
-      var templateId = [[${template?.id ?: ""}]];
-      window.location.search = '';
     }
   </script>
 </th:block>
