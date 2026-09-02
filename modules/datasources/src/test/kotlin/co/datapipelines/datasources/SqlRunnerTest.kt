@@ -28,7 +28,9 @@ class SqlRunnerTest {
     /** A pool that hands out fresh connections to the same named in-memory DB. */
     private val pool = JdbcUrlPool("jdbc:h2:mem:sqlrunner;DB_CLOSE_DELAY=-1", "h2-run")
 
-    private fun wireDatasource(datasource: Datasource = Fixtures.h2(name = "h2-run", jdbcUrl = "jdbc:h2:mem:sqlrunner;DB_CLOSE_DELAY=-1")): Datasource {
+    private fun wireDatasource(
+        datasource: Datasource = Fixtures.h2(name = "h2-run", jdbcUrl = "jdbc:h2:mem:sqlrunner;DB_CLOSE_DELAY=-1"),
+    ): Datasource {
         every { registry.poolFor(datasource) } returns pool
         return datasource
     }
