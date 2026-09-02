@@ -47,7 +47,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 13
+        internal const val CHECK_COUNT = 14
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -85,6 +85,7 @@ class ConfigValidator(
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
             checkLocalAuth(snapshot, violations)
+            checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkRedisAuthWarning(snapshot, warnings)
             return ValidationReport(violations, warnings)
         }
@@ -386,6 +387,48 @@ class ConfigValidator(
             }
         }
 
+        /**
+         * §7 / §3.2 — the executor concurrency key rename's one-release alias (050/R2).
+         *
+         * `max-concurrent-executions-global` is deprecated in favour of
+         * `max-concurrent-executions-per-instance` (the limit has always been per JVM; the old
+         * name was false at N replicas). Three behaviors, one place:
+         *
+         *  - **Alias alone** → one WARN naming the new key; the alias's value is what runs
+         *    (the bridge `ExecutorProperties.effectiveMaxConcurrentExecutionsPerInstance`).
+         *  - **Both set and differing** → refuse: two keys claiming different limits is an
+         *    operator error the API must not silently resolve.
+         *  - **Both set and equal** → the WARN only — no ambiguity exists.
+         *
+         * Presence honesty (and its one documented corner): the NEW key always resolves to a
+         * value because application.yml supplies its default, so "set" is detected as "differs
+         * from the documented default (100)". The corner — alias set AND the new key explicitly
+         * set to exactly the default — is indistinguishable from "alias alone"; the alias wins
+         * there and the WARN states the value in effect. Anything off the default differs
+         * detectably and is refused as specified.
+         */
+        private fun checkExecutorConcurrencyAlias(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+            warnings: MutableList<String>,
+        ) {
+            val aliasRaw = snapshot.executorMaxConcurrentGlobal?.trim() ?: return
+            val alias = aliasRaw.toIntOrNull() ?: return // a non-integer fails binding loudly
+            val canonicalRaw = snapshot.executorMaxConcurrentPerInstance?.trim()
+            val canonical = canonicalRaw?.toIntOrNull()
+            warnings +=
+                "event=config.executor_concurrency_alias_used alias_value=$alias " +
+                    "message=\"datapipelines.executor.max-concurrent-executions-global is deprecated; " +
+                    "its value ($alias) is in effect. Rename the setting to " +
+                    "datapipelines.executor.max-concurrent-executions-per-instance (removed next release)\""
+            if (canonical != null && canonical != DEFAULT_CONCURRENT_EXECUTIONS && canonical != alias) {
+                violations +=
+                    "datapipelines.executor.max-concurrent-executions-global ($alias) and " +
+                        "datapipelines.executor.max-concurrent-executions-per-instance ($canonical) are both " +
+                        "set and differ (§3.2); remove the deprecated alias or make the values agree."
+            }
+        }
+
         /** §7 — passwordless Redis off loopback is a WARNING, not a refusal. */
         private fun checkRedisAuthWarning(
             snapshot: ConfigSnapshot,
@@ -428,6 +471,9 @@ class ConfigValidator(
                     !environment.getProperty("datapipelines.auth.local.bootstrap-password-hash").isNullOrBlank(),
                 localLockoutMaxFailures = environment.getProperty("datapipelines.auth.local.lockout.max-failures"),
                 localLockoutDurationMinutes = environment.getProperty("datapipelines.auth.local.lockout.duration-minutes"),
+                // 050/R2 §7 — the executor concurrency alias pair (raw values; presence is the signal).
+                executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
+                executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -507,6 +553,14 @@ class ConfigValidator(
 
         private const val JWT_SECRET_MIN_BYTES = 32
         private const val AES_KEY_BYTES = 32
+
+        /**
+         * §3.2 — the documented default of `max-concurrent-executions-per-instance`. The
+         * presence heuristic in [checkExecutorConcurrencyAlias] treats a resolved canonical
+         * value equal to this as "operator did not set it" (the yml default masks true
+         * presence); the corner is documented on that check.
+         */
+        private const val DEFAULT_CONCURRENT_EXECUTIONS = 100
     }
 }
 
@@ -539,6 +593,9 @@ internal data class ConfigSnapshot(
     /** Raw strings so a non-numeric value becomes a NAMED violation instead of a binder crash. */
     val localLockoutMaxFailures: String? = null,
     val localLockoutDurationMinutes: String? = null,
+    /** §3.2/§7 — raw values; ALIAS presence is the deprecation signal (050/R2). */
+    val executorMaxConcurrentGlobal: String? = null,
+    val executorMaxConcurrentPerInstance: String? = null,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -566,6 +623,8 @@ internal data class ConfigSnapshot(
             "localBootstrapPasswordHashSet=$localBootstrapPasswordHashSet, " +
             "localLockoutMaxFailures=$localLockoutMaxFailures, " +
             "localLockoutDurationMinutes=$localLockoutDurationMinutes, " +
+            "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
+            "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes)"
 }

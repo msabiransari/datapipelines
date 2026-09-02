@@ -47,7 +47,17 @@ class DatasourceRow(
     val updatedAt: Instant,
     val createdBy: UUID,
 ) {
-    /** Projects to a [Datasource]; [password] is the decrypted plaintext, or null for reads. */
+    /**
+     * Projects to a [Datasource]; [password] is the decrypted plaintext, or null for reads.
+     *
+     * **Normalize-on-read (050/R3, datasources.md §3.3):** every [RefusedPropertyKeys.SERVER_MANAGED]
+     * key is stripped from `properties.hikari` HERE — the single boundary behind GET, PUT
+     * revalidation and pool build (`loadWithCredential` reads through this mapper), so a row
+     * written out of band (manual SQL, an older backup) can neither fail an unmodified
+     * GET→PUT round-trip with a 400 nor flip the real pool flag at build time. The stored key
+     * becomes inert everywhere at one point. Matching lowercases the candidate, exactly as
+     * §5.6's refusal does — case is not a smuggling path here either.
+     */
     fun toDatasource(password: String? = null): Datasource =
         Datasource(
             name = name,
@@ -58,7 +68,7 @@ class DatasourceRow(
             username = username,
             password = password,
             queryTimeoutSeconds = queryTimeoutSeconds,
-            properties = properties,
+            properties = properties.copy(hikari = properties.hikari.filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }),
             introspectionIncludeSchemas = introspectionIncludeSchemas,
             isReadonly = isReadonly,
             workspaceId = workspaceId,

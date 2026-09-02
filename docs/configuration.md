@@ -63,7 +63,8 @@ The deployment defines these env var names in `application.yml` — they're not 
 |---|---|---|
 | `datapipelines.executor.max-parallel-nodes` | `4` | Max parallel nodes within one execution |
 | `datapipelines.executor.max-concurrent-executions-per-user` | `10` | Per-user concurrent execution limit |
-| `datapipelines.executor.max-concurrent-executions-global` | `100` | Global concurrent execution limit |
+| `datapipelines.executor.max-concurrent-executions-per-instance` | `100` | Instance-wide concurrent execution limit — **per instance** (050/R2): N replicas admit N × this in total ([Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production)) |
+| `datapipelines.executor.max-concurrent-executions-global` | `unset` | **Deprecated alias** for `max-concurrent-executions-per-instance` (one release, 050/R2). Set alone → its value runs and startup logs one WARN naming the new key; set together with the new key and differing → startup refuses. The limit was always per JVM — the old name was false at N replicas |
 | `datapipelines.executor.node-query-timeout-seconds` | `60` | Per-node JDBC query timeout. A datasource's own `query_timeout_seconds`, when set, overrides this for nodes on that datasource ([Datasources §5](datasources.md#5-connection-pool-configuration)) |
 | `datapipelines.executor.execution-timeout-seconds` | `600` | Overall execution timeout |
 
@@ -77,7 +78,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.staging.h2.result-batch-size` | `10000` | Rows per fetch batch when reading staged data out |
 | `datapipelines.staging.h2.query-timeout-seconds` | `60` | H2 query timeout |
 
-> **`max-memory-mb` is a *per-execution* ceiling, not a process-wide one.** Every concurrent execution gets its own tempdb with its own budget, so the aggregate tempdb heap a node can reach is `max-memory-mb` × `datapipelines.executor.max-concurrent-executions-global` — with the defaults, 1024 MB × 100. Size the two **together** against the container's heap; setting `max-memory-mb` alone bounds one execution, not the box. A process-wide staging gate is deferred ([ROADMAP](ROADMAP.md)).
+> **`max-memory-mb` is a *per-execution* ceiling, not a process-wide one.** Every concurrent execution gets its own tempdb with its own budget, so the aggregate tempdb heap a node can reach on ONE INSTANCE is `max-memory-mb` × `datapipelines.executor.max-concurrent-executions-per-instance` — with the defaults, 1024 MB × 100 **per instance** (050/R2: the multiplier is per-instance; N replicas multiply it again — [Deployment §6.6](deployment.md#66-resource-sizing)). Size the two **together** against the container's heap; setting `max-memory-mb` alone bounds one execution, not the box. A process-wide staging gate is deferred ([ROADMAP](ROADMAP.md)).
 >
 > A pipeline's `settings.tempdb.config.max_memory_mb` override is **clamped to ≤ this value** — it may lower the operator's ceiling for that pipeline, never raise it. Save-time validation only checks `> 0`, so without the clamp an author could declare an arbitrarily large budget and disable the only ceiling the executor's `withConnection` paths have ([DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration)).
 
@@ -152,7 +153,7 @@ Limits are **per user** (an API key inherits its owner's budget — minting more
 
 | YAML path | Default | Description |
 |---|---|---|
-| `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record). The post-completion Redis event log lives for 1 hour, not configurable |
+| `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record) past their execution's completion — enforced by the hourly retention job (050/T60, safe for N replicas: one idempotent `DELETE`; `pipeline_executions` rows are never touched). The post-completion Redis event log lives for 1 hour, not configurable |
 | `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
 
 ### 3.12 Audit
@@ -338,7 +339,9 @@ datapipelines:
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
     max-concurrent-executions-per-user: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_USER:10}
-    max-concurrent-executions-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_GLOBAL:100}
+    # Per-INSTANCE ceiling (050/R2); the deprecated `max-concurrent-executions-global` alias is
+    # deliberately absent here — it binds only when an operator still sets it.
+    max-concurrent-executions-per-instance: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_INSTANCE:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
 
@@ -463,6 +466,7 @@ On startup, the app validates:
 - At least one authentication method: a fully-configured OIDC provider (non-empty `client-id`, `client-secret`, and `issuer-uri`) or `datapipelines.auth.local.enabled=true`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
 - `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
+- The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
 - `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
@@ -490,4 +494,5 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | 2026-08-28 | v1.4 | sample data, slice A | Added §3.18 Bootstrap: `datapipelines.bootstrap.datasources-file` and `datapipelines.bootstrap.examples-file` (both unset = off), the cross-key rule pairing `datasources-file` with `datapipelines.auth.bootstrap-admin-email`, and the matching §7 validation bullet and §5 template block. Backfills the §3.17 Workspaces row this log was missing (added 2026-08-26 with slice 019, keys unchanged here) |
 | 2026-08-29 | v1.5 | local password auth | Added §3.4 `datapipelines.auth.local.*`: `enabled`, `bootstrap-password-hash` / `bootstrap-password` (first-admin seed only, forced first-login change), `lockout.max-failures` / `lockout.duration-minutes` — plus the §5 template block. The §7 "at least one OIDC provider" rule becomes "at least one authentication method"; a provider entry with an empty `client-id` is now ignored with a WARN instead of counting (the stock `google` entry binds empty when its env vars are unset, so a local-accounts-only deployment starts with zero providers). `rate-limit.login-per-minute` description widened to OIDC and local |
 | 2026-09-02 | v1.7 | 048 bootstrap seeding fixes | Two §7 rules added, no new keys: (a) the `examples-file` cross-key rule pairing it with `datapipelines.workspaces.provisioning-mode` = `auto-per-user` (021/F5 — the pair validated green while the seeder was structurally unreachable, on the shipped default); (b) `bootstrap` and `local` reserved as OIDC provider names (021/F8 — the `users.provider` placeholders were squatting in an operator-configurable namespace with nothing reserving them). §3.18 gains the matching cross-key paragraph |
+| 2026-09-02 | v1.8 | 050 multi-instance round 2 | §3.2: `max-concurrent-executions-global` renamed `max-concurrent-executions-per-instance` (the limit was always per JVM — the old name false at N replicas; 050/R2), old key kept as a one-release deprecated alias (alone → WARN naming the new key; both set and differing → §7 refusal); §3.2 heap note and §5 template updated to the per-instance multiplier; §7 gains the alias rule. §3.11: `event-retention-days` now bound and scheduled (the hourly retention job, M2's sibling) |
 | 2026-09-01 | v1.6 | 039 deployment role | Added §3.19 Deployment: `datapipelines.deployment.name` (label only — logged once at boot beside the authoring state; nothing branches on it, pinned by a guard test; deliberately not on `/info`) and `datapipelines.deployment.authoring-enabled` (default `true`; `false` turns the deployment into a promotion receiver whose authoring writes refuse with `*.authoring.disabled`; startup refuses if drafts exist while disabled). The reserved `datapipelines.deployment.promotion.*` sub-block is deliberately NOT declared here — it ships with promotion (Versioning §10.6's fenced sample), per this doc's shipped-keys-only rule. Matching §7 bullets (the one-sided receiver-also-authors WARN; the refuse-on-existing-drafts rule) and §5 template block |

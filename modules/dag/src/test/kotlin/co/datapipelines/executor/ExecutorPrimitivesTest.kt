@@ -240,7 +240,7 @@ class ExecutorPrimitivesTest {
     fun `the dispatcher is bounded and never Dispatchers-IO`() {
         // §15.2: sharing the JVM-wide IO pool makes executor throughput a function of unrelated
         // load. Only reading the size can tell a bounded pool from an unbounded one.
-        val config = ExecutorConfig(maxConcurrentExecutionsGlobal = 3, maxParallelNodes = 2)
+        val config = ExecutorConfig(maxConcurrentExecutionsPerInstance = 3, maxParallelNodes = 2)
 
         ExecutorDispatcher.forConfig(config).use { it.threadCount shouldBe 6 }
         ExecutorDispatcher.forConfig(config, maxThreads = 2).use { it.threadCount shouldBe 2 }

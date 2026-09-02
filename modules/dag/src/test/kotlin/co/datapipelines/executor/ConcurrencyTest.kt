@@ -31,7 +31,7 @@ class ConcurrencyTest {
     fun `the per-user limit rejects the surplus with concurrency_limit while the global stays free`() =
         runBlocking<Unit> {
             val user = UUID.randomUUID()
-            val slots = ExecutionSlots(maxPerUser = 2, maxGlobal = 100)
+            val slots = ExecutionSlots(maxPerUser = 2, maxPerInstance = 100)
             val holding = CountDownLatch(2)
 
             val held =
@@ -62,7 +62,7 @@ class ConcurrencyTest {
     @Test
     fun `the global limit rejects even a user with slots to spare`() =
         runBlocking<Unit> {
-            val slots = ExecutionSlots(maxPerUser = 10, maxGlobal = 2)
+            val slots = ExecutionSlots(maxPerUser = 10, maxPerInstance = 2)
             val holding = CountDownLatch(2)
 
             val held =
@@ -94,7 +94,7 @@ class ConcurrencyTest {
      *    at the same instant on a different thread. (The pool must be that wide: `CyclicBarrier`
      *    blocks its thread, so on a core-count dispatcher the barrier can never fill and the test
      *    deadlocks rather than racing — which it did, once.)
-     *  - the limits were equal (`maxPerUser == maxGlobal`) and the peak sampled the **global**
+     *  - the limits were equal (`maxPerUser == maxPerInstance`) and the peak sampled the **global**
      *    counter, which made per-user over-admission arithmetically unobservable: the global cap
      *    would have hidden it. The global is now roomy and the peak samples `inFlightFor(user)`,
      *    so the per-user rule is the only thing this can fail on.
@@ -103,7 +103,7 @@ class ConcurrencyTest {
     fun `concurrent admission never oversubscribes the per-user limit`() =
         runBlocking<Unit> {
             val user = UUID.randomUUID()
-            val slots = ExecutionSlots(maxPerUser = PER_USER_LIMIT, maxGlobal = ROOMY_GLOBAL)
+            val slots = ExecutionSlots(maxPerUser = PER_USER_LIMIT, maxPerInstance = ROOMY_GLOBAL)
             val peak = AtomicInteger()
             val admitted = AtomicInteger()
             val startLine = CyclicBarrier(RACERS)

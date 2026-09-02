@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -51,8 +52,9 @@ class DatasourceRegistryIntegrationTest {
     private fun registry(
         references: DatasourceReferences = DatasourceReferences.NONE,
         auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
+        invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     ): DefaultDatasourceRegistry =
-        DefaultDatasourceRegistry(DatasourceRepository(jdbc), encryptor, references = references, auditSink = auditSink)
+        DefaultDatasourceRegistry(DatasourceRepository(jdbc), encryptor, references = references, auditSink = auditSink, invalidation = invalidation)
 
     @Test
     fun `save encrypts the password and get never returns it`() {
@@ -356,6 +358,41 @@ class DatasourceRegistryIntegrationTest {
     }
 
     @Test
+    fun `an out-of-band hikari readOnly is inert - round-trip saves, the pool keeps the entity's flag (050 R3)`() {
+        // The second instance of the normalize-at-both-boundaries rule (R5 F2's, above): a row
+        // written outside the API may carry a SERVER_MANAGED key in `properties.hikari`. Before
+        // 050 it failed an unmodified GET→PUT round-trip with 400 — while STILL flipping the
+        // real pool flag at build time. toDatasource strips the key on read, at the one
+        // boundary GET, PUT-revalidation and pool build all cross.
+        jdbc.update(
+            """
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+                                     properties_json, created_by)
+            VALUES ('oob_managed', 'Out of band', 'H2', 'jdbc:h2:mem:oob_managed', 'sa', :pw,
+                    CAST('{"hikari": {"readOnly": true, "maximumPoolSize": 5}}' AS jsonb), :owner)
+            """.trimIndent(),
+            mapOf("pw" to encryptor.encrypt("p", "oob_managed"), "owner" to owner),
+        )
+        val registry = registry()
+
+        // GET projects the row WITHOUT the server-managed key — and with the legitimate
+        // hikari keys the operator actually set.
+        val restored = registry.get("oob_managed").shouldNotBeNull()
+        restored.properties.hikari shouldBe mapOf("maximumPoolSize" to 5)
+
+        // The unmodified round-trip saves (400 before 050).
+        val resaved = registry.save(restored.copy(password = "p"), owner)
+        resaved.properties.hikari shouldBe mapOf("maximumPoolSize" to 5)
+
+        // And the pool the row builds carries the ENTITY's flag (false), never the stored key's
+        // (true) — proven on a real HikariConfig, the layer-2b test's discipline.
+        val live = registry.getLive("oob_managed").shouldNotBeNull()
+        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(password = "p"))
+        config.isReadOnly shouldBe false
+        config.maximumPoolSize shouldBe 5
+    }
+
+    @Test
     fun `an update really rebuilds the pool - the next lease reaches the new target`() {
         // §5.2. The previous coverage only asserted that save() ran; nothing proved the live pool
         // was replaced, so a registry that forgot to evict would have stayed green while every
@@ -396,6 +433,66 @@ class DatasourceRegistryIntegrationTest {
         registry.delete("cached").deleted shouldBe true
         registry.get("cached").shouldBeNull()
         registry.dialectOf("cached").shouldBeNull()
+    }
+
+    // ---------------------------------------------------------------------------------
+    // §5.7 cross-instance pool invalidation (050/R1, ARCH-AUDIT M3) — the publish contract.
+    // The two-instance propagation itself is proven by the E2E that boots two application
+    // contexts against one Redis; these pin the registry's half of the contract.
+    // ---------------------------------------------------------------------------------
+
+    /** Records every name handed to the port, in order. */
+    private class RecordingPublisher : PoolInvalidationPublisher {
+        val published = mutableListOf<String>()
+
+        override fun publish(datasourceName: String) {
+            published += datasourceName
+        }
+    }
+
+    @Test
+    fun `an update publishes the name after the row changed - the channel's only payload`() {
+        val publisher = RecordingPublisher()
+        val registry = registry(invalidation = publisher)
+        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_a", password = "pw"), owner)
+
+        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_b", password = "pw"), owner)
+
+        // Publish fires on the UPDATE — the save shape that can leave a peer's pool stale.
+        // (Create publishes nothing: no pool for the name can exist anywhere until first use,
+        // and a delete of the same name already fanned out.)
+        publisher.published shouldBe listOf("repointed")
+        // And only after the row itself is durable — the update is already visible.
+        registry.getLive("repointed").shouldNotBeNull().jdbcUrl shouldBe "jdbc:h2:mem:repoint_b"
+    }
+
+    @Test
+    fun `delete publishes - and a refused or no-op delete publishes nothing`() {
+        val publisher = RecordingPublisher()
+        val usedUp =
+            registry(invalidation = publisher, references = { name -> if (name == "guarded") listOf("p1") else emptyList() })
+        usedUp.save(Fixtures.h2(name = "guarded", password = "pw"), owner)
+        usedUp.delete("guarded")
+        publisher.published.shouldBeEmpty()
+
+        val registry = registry(invalidation = publisher)
+        registry.delete("never_existed")
+        publisher.published.shouldBeEmpty()
+
+        registry.save(Fixtures.h2(name = "dropped", password = "pw"), owner)
+        registry.delete("dropped").deleted shouldBe true
+        publisher.published shouldBe listOf("dropped")
+    }
+
+    @Test
+    fun `evictPool is the subscriber's target - drains a live pool, no-ops without one`() {
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "pooled", jdbcUrl = "jdbc:h2:mem:evict_target", password = "pw"), owner)
+        val ds = registry.get("pooled").shouldNotBeNull()
+        // Build the pool, then drain it through the interface the Redis subscriber calls.
+        registry.poolFor(ds)
+        registry.evictPool("pooled") shouldBe true
+        registry.evictPool("pooled") shouldBe false
     }
 
     @Test

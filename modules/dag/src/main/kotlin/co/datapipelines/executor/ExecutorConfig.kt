@@ -15,7 +15,9 @@ package co.datapipelines.executor
  *
  * @property maxParallelNodes `datapipelines.executor.max-parallel-nodes`.
  * @property maxConcurrentExecutionsPerUser `datapipelines.executor.max-concurrent-executions-per-user`.
- * @property maxConcurrentExecutionsGlobal `datapipelines.executor.max-concurrent-executions-global`.
+ * @property maxConcurrentExecutionsPerInstance `datapipelines.executor.max-concurrent-executions-per-instance`
+ *   — the INSTANCE-WIDE ceiling (050/R2: the counter has always been per JVM; the old
+ *   `-global` name was false at N replicas, which admit N × this in total).
  * @property nodeQueryTimeoutSeconds `datapipelines.executor.node-query-timeout-seconds`; a
  *   datasource's own `query_timeout_seconds` overrides it per [queryTimeoutSecondsFor].
  * @property executionTimeoutSeconds `datapipelines.executor.execution-timeout-seconds`.
@@ -29,7 +31,7 @@ package co.datapipelines.executor
 data class ExecutorConfig(
     val maxParallelNodes: Int = 4,
     val maxConcurrentExecutionsPerUser: Int = 10,
-    val maxConcurrentExecutionsGlobal: Int = 100,
+    val maxConcurrentExecutionsPerInstance: Int = 100,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
     val stagingMaxMemoryMb: Long = 1024,
@@ -40,7 +42,7 @@ data class ExecutorConfig(
     init {
         require(maxParallelNodes > 0) { "maxParallelNodes must be positive, was $maxParallelNodes" }
         require(maxConcurrentExecutionsPerUser > 0) { "maxConcurrentExecutionsPerUser must be positive" }
-        require(maxConcurrentExecutionsGlobal > 0) { "maxConcurrentExecutionsGlobal must be positive" }
+        require(maxConcurrentExecutionsPerInstance > 0) { "maxConcurrentExecutionsPerInstance must be positive" }
         // Strictly positive, unlike a *datasource's* own override where 0 legitimately means "no
         // limit" (F16). The executor-wide default is the backstop that bounds every node with no
         // datasource setting — and it is the only thing bounding the timeout overshoot of §5.3 —
