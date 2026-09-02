@@ -391,10 +391,12 @@ class NodeRunnerTest {
                 )
             val runner = runner(sql = "SELECT id FROM people WHERE name = :who", registry = FakeDatasourceRegistry(mapOf("b1" to source)))
 
-            runner.run(
-                ExecutableNode.from(Fixtures.node("q", source = "b1")),
-                context(values = mapOf("who" to "grace")),
-            ).rowsOut shouldBe 1
+            val result =
+                runner.run(
+                    ExecutableNode.from(Fixtures.node("q", source = "b1")),
+                    context(values = mapOf("who" to "grace")),
+                )
+            result.rowsOut shouldBe 1
         }
 
     @Test
@@ -432,10 +434,12 @@ class NodeRunnerTest {
             staging.execute("""CREATE TABLE "acc" (v INT)""")
             val runner = runner(sql = """INSERT INTO "acc" (v) VALUES (:v)""")
 
-            runner.run(
-                ExecutableNode.from(Fixtures.node("ins", type = NodeType.DML)),
-                context(values = mapOf("v" to 5)),
-            ).rowsOut shouldBe 1
+            val result =
+                runner.run(
+                    ExecutableNode.from(Fixtures.node("ins", type = NodeType.DML)),
+                    context(values = mapOf("v" to 5)),
+                )
+            result.rowsOut shouldBe 1
 
             staging.withQuery("""SELECT v FROM "acc" """) { rs ->
                 rs.next()
@@ -449,14 +453,23 @@ class NodeRunnerTest {
             val source =
                 h2Datasource(
                     "b2",
-                    listOf("CREATE TABLE people (id INT, name VARCHAR)", "INSERT INTO people VALUES (1, 'ada'), (2, 'grace')"),
+                    listOf(
+                        "CREATE TABLE people (id INT, name VARCHAR)",
+                        "INSERT INTO people VALUES (1, 'ada'), (2, 'grace')",
+                    ),
                 )
-            val runner = runner(sql = "UPDATE people SET name = 'renamed' WHERE id = :id", registry = FakeDatasourceRegistry(mapOf("b2" to source)))
+            val runner =
+                runner(
+                    sql = "UPDATE people SET name = 'renamed' WHERE id = :id",
+                    registry = FakeDatasourceRegistry(mapOf("b2" to source)),
+                )
 
-            runner.run(
-                ExecutableNode.from(Fixtures.node("upd", type = NodeType.DML, source = "b2")),
-                context(values = mapOf("id" to 1)),
-            ).rowsOut shouldBe 1
+            val result =
+                runner.run(
+                    ExecutableNode.from(Fixtures.node("upd", type = NodeType.DML, source = "b2")),
+                    context(values = mapOf("id" to 1)),
+                )
+            result.rowsOut shouldBe 1
         }
 
     @Test
@@ -470,10 +483,12 @@ class NodeRunnerTest {
             val registry = FakeDatasourceRegistry(mapOf("b3" to source))
             val runner = runner(sql = "CREATE TABLE made_b AS SELECT id FROM people WHERE id = :id", registry = registry)
 
-            runner.run(
-                ExecutableNode.from(Fixtures.node("ddl", type = NodeType.DDL, source = "b3")),
-                context(values = mapOf("id" to 2)),
-            ).rowsOut shouldBe 0
+            val result =
+                runner.run(
+                    ExecutableNode.from(Fixtures.node("ddl", type = NodeType.DDL, source = "b3")),
+                    context(values = mapOf("id" to 2)),
+                )
+            result.rowsOut shouldBe 0
 
             DriverManager.getConnection(source.jdbcUrl, "sa", "").use { connection ->
                 connection.createStatement().use { statement ->

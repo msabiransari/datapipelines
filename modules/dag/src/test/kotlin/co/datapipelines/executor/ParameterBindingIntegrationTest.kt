@@ -194,23 +194,32 @@ class ParameterBindingIntegrationTest {
         return TemplateEngine(registry, cacheSize = 16, renderTimeoutMs = 10_000, maxOutputChars = 1_000_000)
     }
 
-    private fun countOf(table: String): Int =
-        jdbc().use { connection ->
-            connection.createStatement().use { statement ->
-                val exists =
-                    statement
-                        .executeQuery("SELECT 1 FROM information_schema.tables WHERE table_name = '$table'")
-                        .use { it.next() }
-                if (!exists) {
-                    0
-                } else {
-                    statement.executeQuery("SELECT COUNT(*) FROM $table").use { rs ->
-                        rs.next()
-                        rs.getInt(1)
-                    }
-                }
+    private fun countOf(table: String): Int {
+        val connection = jdbc()
+        return connection.use {
+            val statement = connection.createStatement()
+            statement.use {
+                if (!tableExists(statement, table)) 0 else countRowsIn(statement, table)
             }
         }
+    }
+
+    private fun countRowsIn(
+        statement: java.sql.Statement,
+        table: String,
+    ): Int =
+        statement.executeQuery("SELECT COUNT(*) FROM $table").use { rs ->
+            rs.next()
+            rs.getInt(1)
+        }
+
+    private fun tableExists(
+        statement: java.sql.Statement,
+        table: String,
+    ): Boolean =
+        statement
+            .executeQuery("SELECT 1 FROM information_schema.tables WHERE table_name = '$table'")
+            .use { it.next() }
 
     private fun datasource() =
         Datasource(

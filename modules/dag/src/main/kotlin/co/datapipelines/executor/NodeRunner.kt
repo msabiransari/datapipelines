@@ -624,7 +624,8 @@ class NodeRunner(
         resultSetConcurrency: Int = ResultSet.CONCUR_READ_ONLY,
     ): Statement =
         if (bound.hasBindParameters) {
-            connection.prepareStatement(bound.sql, resultSetType, resultSetConcurrency)
+            connection
+                .prepareStatement(bound.sql, resultSetType, resultSetConcurrency)
                 .also { SqlBindTranslator.bind(it, bound.bindValues) }
         } else {
             connection.createStatement(resultSetType, resultSetConcurrency)

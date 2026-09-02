@@ -83,6 +83,7 @@ internal object SqlBindTranslator {
                         "declare — ${e.message}. A :name reference must name a declared pipeline " +
                         "parameter.",
                 details = emptyMap(),
+                cause = e,
             )
         }
     }
