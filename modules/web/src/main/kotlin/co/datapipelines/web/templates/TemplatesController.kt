@@ -73,6 +73,7 @@ class TemplatesController(
     private val drafts: TemplateDraftService,
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
+    private val usage: co.datapipelines.templates.TemplateUsageService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -219,7 +220,15 @@ class TemplatesController(
         releases.discard(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch))
     }
 
-    /** §8.6 — soft delete; pipelines referencing any version continue to work. */
+    /**
+     * §8.6 — soft delete, refused with `409 template.in_use` while any pipeline version pins
+     * any version of the template (040 D4). The refusal is retirement protection, not a
+     * semantic necessity — pipelines referencing a deleted template's versions keep resolving
+     * (templates §5.1) — so it exists to make "who still uses this?" a refusal the author
+     * cannot miss instead of a fact they never learn. `details` carries the full reverse-scan
+     * rows (pipeline, node, carrying pipeline version, pinned version) plus the distinct
+     * pipeline names, so the author can go and change exactly the pins that block.
+     */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -229,6 +238,27 @@ class TemplatesController(
         // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
         authoring.requireTemplateAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
+        val references = usage.referencedAnywhere(workspaceId, name)
+        if (references.isNotEmpty()) {
+            throw ApiException(
+                PipelineErrorCodes.Template.IN_USE,
+                "Template '$name' is referenced by ${references.map { it.pipelineId }.distinct().size} pipeline(s)." +
+                    " Remove or re-pin the referencing nodes before deleting it.",
+                mapOf(
+                    "template_id" to name,
+                    "referencing_pipelines" to references.map { it.pipelineName }.distinct(),
+                    "references" to
+                        references.map {
+                            mapOf(
+                                "pipeline" to it.pipelineName,
+                                "node_id" to it.nodeId,
+                                "pipeline_version" to it.pipelineVersion,
+                                "pinned_version" to it.pinnedVersion,
+                            )
+                        },
+                ),
+            )
+        }
         if (!templates.softDelete(workspaceId, name)) throw ApiErrors.templateNotFound(name)
     }
 

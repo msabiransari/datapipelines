@@ -363,6 +363,30 @@ class TemplateRepository(
             "type" to type?.wire,
         )
 
+    /**
+     * `current_version` for each of [ids] live in [workspaceId] — the used-by service's
+     * latest-RELEASED lookup (040 D5). By the version lifecycle's invariant `current_version`
+     * IS the latest released version (a draft never moves it), so this read needs no status
+     * filter; soft-deleted templates are absent, which the upgrade signal reads as "nothing to
+     * upgrade to". Empty [ids] short-circuits — an `IN ()` list would not even prepare.
+     */
+    fun findCurrentVersions(
+        workspaceId: UUID,
+        ids: Collection<String>,
+    ): Map<String, Int> {
+        if (ids.isEmpty()) return emptyMap()
+        return jdbc
+            .query(
+                """
+                SELECT t.name, t.current_version
+                  FROM templates t
+                 WHERE t.workspace_id = :workspaceId AND t.is_deleted = FALSE AND t.name IN (:names)
+                """.trimIndent(),
+                mapOf("workspaceId" to workspaceId, "names" to ids),
+            ) { rs, _ -> rs.getString("name") to rs.getInt("current_version") }
+            .toMap()
+    }
+
     /** Version metadata, newest first (§9 list-versions). */
     fun listVersions(
         workspaceId: UUID,

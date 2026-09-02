@@ -140,6 +140,7 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Datasource.NOT_FOUND,
                 PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED,
                 PipelineErrorCodes.Template.NOT_FOUND,
+                PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,

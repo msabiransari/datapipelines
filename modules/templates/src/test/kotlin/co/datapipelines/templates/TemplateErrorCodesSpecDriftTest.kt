@@ -50,11 +50,14 @@ class TemplateErrorCodesSpecDriftTest {
             // (versioning.md) — lifecycle codes, same deliberate exclusion.
             // §13.9 gained `template.authoring.disabled` on 2026-09-01 (039 C, versioning
             // §5.5) — the template mirror of the authoring-capability refusal.
+            // §13.9 gained `template.in_use` on 2026-09-02 (040 D4) — the used-by delete
+            // refusal (the `datasource.in_use` shape for templates).
             val nonValidationShape =
                 documented.filterNot {
                     it.startsWith("template.validation.") || it.startsWith("template.version.") ||
                         it.startsWith("template.authoring.") ||
-                        it == PipelineErrorCodes.Template.NOT_FOUND
+                        it == PipelineErrorCodes.Template.NOT_FOUND ||
+                        it == PipelineErrorCodes.Template.IN_USE
                 }
             nonValidationShape.shouldBeEmpty()
         }

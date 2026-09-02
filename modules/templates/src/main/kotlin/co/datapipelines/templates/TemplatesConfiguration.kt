@@ -30,6 +30,17 @@ class TemplatesConfiguration {
     @Bean
     fun templateRepository(jdbc: NamedParameterJdbcTemplate): TemplateRepository = TemplateRepository(jdbc)
 
+    /**
+     * The used-by reverse service (040) — consumed by the template surfaces here (the delete
+     * guard, the version list's in-use counts) and constructed inline by `mcp-server`'s tool
+     * bean (stateless over the same two repositories, so two instances cannot disagree).
+     */
+    @Bean
+    fun templateUsageService(
+        repository: TemplateRepository,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+    ): TemplateUsageService = TemplateUsageService(repository, pipelines)
+
     @Bean
     fun workspaceTemplateEngines(
         repository: TemplateRepository,
