@@ -18,6 +18,14 @@
 # reason. DB_CLOSE_DELAY is only flagged inside a JDBC URL — prose explaining
 # why the flag is absent is deliberate and allowed.
 #
+# A doc whose Status line reads `design (not yet normative` is exempt from C
+# ONLY: a design doc PROPOSES error codes, and the code lands in §13 with the
+# implementation, not with the proposal (MISTAKES.md — a catalogued code split
+# from its constant leaves main red between the two). The exemption is keyed on
+# the doc's own Status line, so it evaporates the moment the doc goes normative
+# and the audit then demands the catalog rows. Exempted docs are printed on
+# every run so the debt stays visible rather than silent.
+#
 # Born 2026-08-07 (SPEC-REVIEW-2026-08 Phase 3). Baseline: exit 0 on the
 # v1.1–v1.3 spec set; self-test: scripts/docs-audit.sh --self-test doctors a
 # temp copy and must exit 1.
@@ -55,6 +63,11 @@ def read(path):
         return f.read()
 
 texts = {p: read(p) for p in DOCS}
+
+# Docs that declare themselves not-yet-normative may propose error codes the
+# catalog does not carry yet (check C only — B and D still apply in full).
+NOT_YET_NORMATIVE = re.compile(r"^\*\*Status:\*\*\s*design \(not yet normative", re.M)
+EXEMPT_PROPOSED = {p for p, t in texts.items() if NOT_YET_NORMATIVE.search(t)}
 
 def gh_slug(heading):
     h = heading.strip().lower()
@@ -164,7 +177,7 @@ CONFIG_PREFIXES = ("auth.oidc", "auth.jwt", "auth.allowlist", "auth.api-keys",
                    "auth.rate-limit", "result.ttl", "result.max", "result.page",
                    "idempotency.ttl", "template.cache", "pipeline.settings")
 for p, t in texts.items():
-    if p in EXEMPT_HISTORY:
+    if p in EXEMPT_HISTORY or p in EXEMPT_PROPOSED:
         continue
     for i, line in body_lines(t):
         if NEGATION.search(line):
@@ -212,6 +225,9 @@ for p, t in texts.items():
                 failures.append(f"D {p}:{i}: forbidden '{pat}' — {why}")
 
 # ---- report -----------------------------------------------------------------
+for d in sorted(EXEMPT_PROPOSED):
+    print(f"docs-audit: NOTICE {d} is not-yet-normative — exempt from check C "
+          f"(proposed error codes must join docs/pipeline-contract.md \u00a713 when it lands)")
 if failures:
     print(f"docs-audit: {len(failures)} failure(s)")
     for f in failures:
