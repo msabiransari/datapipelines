@@ -63,7 +63,7 @@ Note that the body contains **no `<#import>` directive**. The engine synthesizes
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `schema_version` | integer | yes | Currently `1` — the only value v1 accepts; any other is **rejected at save time** with `template.validation.schema_version_unsupported` (§7). Independent of the entity `version` below — see [Pipeline Contract §15.4](pipeline-contract.md#154-which-version-counter-governs-what). |
-| `id` | string | yes | Stable identifier. `[a-z0-9_\.\-]+`. Auto-generated if omitted on create. |
+| `id` | string | yes | Stable identifier — a path of 1–10 `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total ([Template Hierarchy §4.1](template-hierarchy-design.md)); the full path IS the name. Auto-generated if omitted on create. |
 | `version` | integer | yes | Monotonically increasing per template id. Server-assigned. |
 | `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`; a save carrying any other value (`"pebble"`, `"handlebars"`, `"none"`) is **rejected at save time** with `template.validation.engine_unsupported` (§7) — it is never stored and silently rendered as Freemarker. Reserved values are catalogued in [Enums §6](enums.md#6-templateengine--template-language). |
 | `dialect` | string (enum) | yes | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. |
@@ -228,7 +228,7 @@ Soft-delete            → version 3 marked deleted; pipelines referencing v1/v2
 
 ### 5.3 What "update" means
 
-`PUT /templates/{id}` creates a new version. The request body contains the new `body`, `imports`, etc. The server:
+`PUT /templates` (the `id` in the body — rest-api §8's addressing rule: the name never travels in a URL path segment) creates a new version. The request body contains the new `body`, `imports`, etc. The server:
 1. Runs the full §7 validation set — Freemarker **parse only**, forbidden-construct scan, and import-graph resolution. No render is attempted: a template does not know its callers' parameters, so there is no context to render against (§7.1).
 2. Stores as a new version (current version + 1).
 3. Does NOT modify or remove previous versions.
@@ -281,7 +281,7 @@ WHERE <@dates.date_range column="order_date" start=start_date end=end_date />
 
 The render engine:
 1. Resolves each `imports` entry to a stored library version and registers it with the template loader under the key `"{id}@{version}"`.
-2. **Synthesizes** the equivalent `<#import "{id}@{version}" as {alias}>` prologue from the array — the author never writes it, so an alias can never point at an unvalidated, unpinned, or non-library template. Because `alias` and `id` are interpolated into that synthesized directive, they are validated as strict identifiers *before* synthesis: `alias` matches `[a-zA-Z_][a-zA-Z0-9_]*` and `id` matches the §7 `id` rule; `version` is a positive integer. A value that fails — an alias or id carrying Freemarker metacharacters, whitespace, or a directive fragment, or a non-positive version — is a prologue-injection attempt and is rejected with `template.validation.dangerous_construct` (§4.2/§7); the refusal message never echoes the offending value back into logs. The loader independently re-checks the key on the read path, failing closed on any row that reached storage by another route.
+2. **Synthesizes** the equivalent `<#import "/{id}@{version}" as {alias}>` prologue from the array — **root-based** (Template Hierarchy §4.4: with `/` legal in ids, a bare name would resolve relative to a hierarchical importer's directory and silently mis-resolve; the loader strips exactly the one leading `/` on the way back in) — the author never writes it, so an alias can never point at an unvalidated, unpinned, or non-library template. Because `alias` and `id` are interpolated into that synthesized directive, they are validated as strict identifiers *before* synthesis: `alias` matches `[a-zA-Z_][a-zA-Z0-9_]*` and `id` matches the §7 `id` rule; `version` is a positive integer. A value that fails — an alias or id carrying Freemarker metacharacters, whitespace, or a directive fragment, or a non-positive version — is a prologue-injection attempt and is rejected with `template.validation.dangerous_construct` (§4.2/§7); the refusal message never echoes the offending value back into logs. The loader independently re-checks the key on the read path, failing closed on any row that reached storage by another route.
 3. Resolves transitive imports the same way (a library's own `imports` array), building the full closure.
 4. Renders the main body against the pipeline's parameter map.
 
@@ -311,7 +311,7 @@ All checks below run at template create/update time, before anything is written 
 | `template.validation.dialect_invalid` | `dialect` is in the allowed enum |
 | `template.validation.engine_unsupported` | `engine` is a value v1 supports (only `"freemarker"`) |
 | `template.validation.schema_version_unsupported` | `schema_version` is a value v1 supports (only `1`) |
-| `template.validation.id_invalid` | `id` matches `[a-z0-9_\.\-]+`, length 1–100 |
+| `template.validation.id_invalid` | `id` is a path of 1–10 segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total ([Template Hierarchy §4.1](template-hierarchy-design.md)) |
 | `template.validation.syntax_error` | Freemarker parses the body without syntax errors |
 | `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` (see §4.2) |
 | `template.validation.duplicate_alias` | No two `imports` entries share an `alias` |

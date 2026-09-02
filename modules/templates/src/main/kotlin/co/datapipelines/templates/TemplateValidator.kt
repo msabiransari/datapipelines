@@ -51,11 +51,13 @@ class TemplateValidator(
     ): TemplateValidationResult {
         val failures = mutableListOf<TemplateValidationFailure>()
 
-        if (draft.id != null && !TEMPLATE_ID.matches(draft.id)) {
+        if (draft.id != null && !isValidTemplateName(draft.id)) {
             failures +=
                 TemplateValidationFailure(
                     code = PipelineErrorCodes.Template.ID_INVALID,
-                    message = "Template id '${draft.id.truncateForError()}' must match [a-z0-9_.-], length 1-100.",
+                    message =
+                        "Template id '${draft.id.truncateForError()}' must be a path of 1-10 '/'-separated segments, " +
+                            "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total.",
                     details = mapOf("id" to draft.id.truncateForError()),
                 )
         }

@@ -166,7 +166,8 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .port(port)
                 .header(API_KEY_HEADER, bobKey)
                 .`when`()
-                .delete("/api/v1/templates/globex_tpl")
+                .queryParam("name", "globex_tpl")
+                .delete("/api/v1/templates")
                 .then()
                 .statusCode(204)
         }

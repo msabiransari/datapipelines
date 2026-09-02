@@ -65,8 +65,25 @@ class TemplateValidationException(
             ),
     )
 
-/** `[a-z0-9_.\-]+`, length 1–100 — the template `id` rule (templates.md §7, §3.2). */
-internal val TEMPLATE_ID = Regex("^[a-z0-9_.\\-]{1,100}$")
+/**
+ * The template name grammar of template-hierarchy-design.md §4.1: one to ten `/`-separated
+ * segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, total length ≤ [MAX_TEMPLATE_PATH_CHARS].
+ *
+ * A regex composition, kept boring and total on purpose: the length cap rides beside the
+ * pattern because a regex cannot count across both segment shapes without unreadable
+ * arithmetic. The grammar is **narrower** than the pre-043 rule in two respects (segments must
+ * start alphanumeric; a segment caps at 64 where the flat rule allowed 100) — §4.6 is the
+ * deploy-time gate for stored names that do not survive the change, and it is why the three
+ * call sites (save: `TemplateValidator`; render: `RegistryTemplateLoader.parseKey`; prologue
+ * synthesis: [isSafeToSynthesize]) moved together.
+ */
+internal val TEMPLATE_PATH = Regex("^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){0,9}$")
+
+/** Total template-name length cap (§4.1 — raised from the flat rule's 100: paths are longer). */
+internal const val MAX_TEMPLATE_PATH_CHARS = 200
+
+/** True when [name] satisfies the full §4.1 grammar — shape and total length. */
+internal fun isValidTemplateName(name: String): Boolean = name.length <= MAX_TEMPLATE_PATH_CHARS && TEMPLATE_PATH.matches(name)
 
 /**
  * A namespace alias must be a plain identifier — `[a-zA-Z_][a-zA-Z0-9_]*`, templates.md §6.3
@@ -94,7 +111,7 @@ internal val TEMPLATE_ID = Regex("^[a-z0-9_.\\-]{1,100}$")
 internal val IMPORT_ALIAS = Regex("^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 /** True when this import entry is safe to interpolate into the synthesized §6.3 prologue. */
-internal fun TemplateImport.isSafeToSynthesize(): Boolean = TEMPLATE_ID.matches(id) && IMPORT_ALIAS.matches(alias) && version > 0
+internal fun TemplateImport.isSafeToSynthesize(): Boolean = isValidTemplateName(id) && IMPORT_ALIAS.matches(alias) && version > 0
 
 /** Longest reflected raw input allowed in an error message or `details` value (security rule). */
 internal const val MAX_REFLECTED_VALUE_LENGTH = 64

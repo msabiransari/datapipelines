@@ -35,7 +35,7 @@ class PipelineNodeSqlRenderTest {
 
         html shouldContain "class=\"ds-badge ds-badge-default\""
         html shouldContain "POSTGRES"
-        html shouldContain "href=\"/templates/trips_by_day.sql/editor\""
+        html shouldContain "href=\"/templates/editor?name=trips_by_day.sql\""
         html shouldContain "trips_by_day.sql @ v1"
         html shouldContain "pe-sql-copy"
         html shouldContain "<pre class=\"pe-sql\">"

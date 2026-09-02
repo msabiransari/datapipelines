@@ -97,7 +97,7 @@ class TemplateRepositoryIntegrationTest {
     @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
         val stored = repository.create(workspaceId, draft(id = null), actor)
-        TEMPLATE_ID.matches(stored.id) shouldBe true
+        isValidTemplateName(stored.id) shouldBe true
     }
 
     @Test

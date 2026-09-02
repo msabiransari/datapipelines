@@ -34,7 +34,7 @@
       <tbody>
         <tr th:each="t : ${templates}"
             style="cursor: pointer;"
-            th:attr="onclick='location.href=\'/templates/' + ${t.id} + '/editor\''">
+            th:attr="onclick='location.href=\'' + @{/templates/editor(name=${t.id})} + '\''">
           <td>
             <span th:text="${t.id}"></span>
             <!-- versioning §7: unreleased edits visible on the list (templates §6). -->

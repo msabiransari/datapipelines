@@ -55,7 +55,9 @@ class RegistryTemplateLoaderTest {
         val source = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main))).findTemplateSource("main.sql@1")
         val text = readerText(source)
 
-        text shouldStartWith "<#import \"lib.sql@1\" as d>"
+        // §4.4: the prologue emits root-based names so Freemarker's relative resolution can
+        // never fire for a hierarchical importer.
+        text shouldStartWith "<#import \"/lib.sql@1\" as d>"
         text shouldContain "SELECT 1"
     }
 

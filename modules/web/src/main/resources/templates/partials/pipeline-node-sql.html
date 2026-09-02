@@ -8,7 +8,7 @@
   <div th:case="'rendered'" class="pe-sql-block">
     <div class="pe-sql-meta">
       <span class="ds-badge ds-badge-default" th:text="${dialect}">POSTGRES</span>
-      <a class="pe-link" th:href="@{/templates/{id}/editor(id=${templateId})}"
+      <a class="pe-link" th:href="@{/templates/editor(name=${templateId})}"
          th:text="${templateId} + ' @ v' + ${templateVersion}">template.sql @ v1</a>
       <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-sql-copy"
               th:attr="data-sql=${sql}">Copy</button>

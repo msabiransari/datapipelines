@@ -63,8 +63,8 @@ class PipelineEditorRenderTest {
         html shouldContain "Identity"
         html shouldContain "Configuration"
         html shouldContain "Runtime"
-        // §8.2: the template field links to the route that exists, /templates/{id}/editor.
-        html shouldContain "/editor'"
+        // §8.2/§9.6: the template field links to the route that exists, /templates/editor?name=.
+        html shouldContain "/templates/editor?name='"
         html shouldNotContain "JSON.stringify(selectedNode.output)"
     }
 

@@ -54,16 +54,25 @@ class RegistryTemplateLoader(
      * Splits `"{id}@{version}"` into its two halves, **checking the shape of both** — null for
      * anything that is not a well-formed registry key, so it never becomes a registry query.
      *
-     * The `id` half is checked against the §7 `id` rule for the same fail-closed reason as the
+     * One leading `/` is stripped first: the §4.4 prologue emits root-based names
+     * (`/{name}@{version}`) so a hierarchical importer can never pull Freemarker's relative
+     * resolution into play. Exactly one slash — after the strip the name must satisfy the §4.1
+     * grammar, which rejects a leading `/`, so `//{name}@{version}` fails closed rather than
+     * being peeled repeatedly. (Measured on the pinned 2.3.34 jar: the legacy name format
+     * consumes the prologue's leading `/` itself, so the bare form arrives here; the strip
+     * covers the verbatim arrival other name formats produce. Both forms resolve one key.)
+     *
+     * The `id` half is checked against the §4.1 grammar for the same fail-closed reason as the
      * version half (§6.3): a key reaching this loader by some route other than the validated
      * `imports` array is refused on its shape, rather than on the registry happening to have no
      * such row.
      */
     private fun parseKey(name: String): Pair<String, Int>? {
-        val at = name.lastIndexOf('@')
-        if (at <= 0 || at == name.length - 1) return null
-        val id = name.substring(0, at).takeIf { TEMPLATE_ID.matches(it) } ?: return null
-        val version = name.substring(at + 1).toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val stripped = name.removePrefix("/")
+        val at = stripped.lastIndexOf('@')
+        if (at <= 0 || at == stripped.length - 1) return null
+        val id = stripped.substring(0, at).takeIf { isValidTemplateName(it) } ?: return null
+        val version = stripped.substring(at + 1).toIntOrNull()?.takeIf { it > 0 } ?: return null
         return id to version
     }
 
@@ -88,13 +97,19 @@ class RegistryTemplateLoader(
          * @throws IOException if any entry is not a plain `{id, version, alias}` triple. Freemarker
          *   surfaces a loader `IOException` as a render failure, which is the fail-closed outcome:
          *   the render is refused rather than proceeding with injected source.
+         *
+         * The emitted name is **root-based** (`/{name}@{version}`, template-hierarchy-design
+         * §4.4): with `/` legal in names, a bare `lib/dates@1` imported from
+         * `acme/finance/report` would resolve against the importer's directory and silently
+         * become `acme/finance/lib/dates@1`. The leading `/` pins every reference to the tree
+         * root, and [parseKey] strips exactly that one slash on the way back in.
          */
         fun synthesizePrologue(imports: List<TemplateImport>): String =
             imports.joinToString(separator = "") {
                 if (!it.isSafeToSynthesize()) {
                     throw IOException("Refusing to synthesize an import prologue for an unsafe imports entry.")
                 }
-                "<#import \"${it.key}\" as ${it.alias}>\n"
+                "<#import \"/${it.key}\" as ${it.alias}>\n"
             }
     }
 }

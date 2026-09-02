@@ -651,7 +651,7 @@ class TemplateRepository(
                 .replace("%", "\\%")
                 .replace("_", "\\_")
 
-        /** `[a-z0-9_.\-]+` (templates.md §3.2). A hex suffix keeps generated ids inside the rule. */
+        /** The §4.1 name grammar (templates.md §3.2). A hex suffix keeps generated ids inside the rule. */
         private fun generateId(): String =
             "template_" +
                 UUID

@@ -16,7 +16,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseBody
@@ -27,9 +26,9 @@ class TemplateEditorController(
     private val templateEngines: WorkspaceTemplateEngines,
     private val themeResolver: ThemeResolver,
 ) {
-    @GetMapping("/templates/{id}/editor")
+    @GetMapping("/templates/editor")
     fun editor(
-        @PathVariable id: String,
+        @RequestParam name: String,
         model: Model,
         request: HttpServletRequest,
     ): String {
@@ -37,10 +36,12 @@ class TemplateEditorController(
         // versioning §6/§7: the editor shows the DRAFT when one exists — the working copy a
         // human reviews — with its pending-release affordance; the list keeps showing the
         // released content until lock.
-        val draft = templates.findDraftDetail(workspaceId, id)
-        val template = draft?.let { templates.findVersion(workspaceId, id, it.version) } ?: templates.findLatest(workspaceId, id)
+        // §9.6: the name is a query parameter — it may contain `/`, which can never travel
+        // in a URL path segment (the container refuses %2F below routing).
+        val draft = templates.findDraftDetail(workspaceId, name)
+        val template = draft?.let { templates.findVersion(workspaceId, name, it.version) } ?: templates.findLatest(workspaceId, name)
         model.addAttribute("template", template)
-        model.addAttribute("versions", templates.listVersions(workspaceId, id))
+        model.addAttribute("versions", templates.listVersions(workspaceId, name))
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
@@ -48,18 +49,18 @@ class TemplateEditorController(
         return "templates/editor"
     }
 
-    @PostMapping("/partials/templates/{id}/versions/{version}/render")
+    @PostMapping("/partials/templates/render")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     @ResponseBody
     fun renderPreview(
-        @PathVariable id: String,
-        @PathVariable version: Int,
+        @RequestParam name: String,
+        @RequestParam version: Int,
         @RequestParam("body") @Suppress("UNUSED_PARAMETER") body: String,
         @RequestParam("context") contextJson: String,
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        if (templates.lookupVersion(workspaceId, id, version) == null && !templates.existsId(workspaceId, id)) {
-            return renderError("Template '$id' not found.")
+        if (templates.lookupVersion(workspaceId, name, version) == null && !templates.existsId(workspaceId, name)) {
+            return renderError("Template '$name' not found.")
         }
         val context =
             try {
@@ -73,7 +74,7 @@ class TemplateEditorController(
                 return renderError("Invalid context JSON: ${e.message}")
             }
         return try {
-            val rendered = templateEngines.engineFor(workspaceId).render(TemplateRef(id, version), context)
+            val rendered = templateEngines.engineFor(workspaceId).render(TemplateRef(name, version), context)
             if (rendered.isBlank()) {
                 RENDER_EMPTY_HTML
             } else {

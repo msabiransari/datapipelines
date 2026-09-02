@@ -24,7 +24,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -37,6 +36,19 @@ import org.springframework.web.bind.annotation.RestController
 /**
  * The template endpoints (rest-api.md §8; the draft/release lifecycle per versioning.md
  * §6/§7).
+ *
+ * ## Addressing (rest-api.md §8, template-hierarchy-design §9.6): the name NEVER travels in a
+ * URL path segment
+ *
+ * A template name may contain `/` (`acme/finance/report`), and on the pinned Tomcat an
+ * encoded `%2F` in the path is refused **400 below routing and below the security chain** —
+ * no handler can reach past it. Every route here therefore carries the name as a query
+ * parameter or a body field; the old `/{id}` forms are removed, not kept alongside (one
+ * addressing form — the owner's ruling recorded in §9.6). `GET /api/v1/templates` answers
+ * TWO shapes on one route, chosen by the presence of `name`: the single-resource envelope
+ * with `404 template.not_found` when `name` is present, and the paged list envelope when it
+ * is not. Preserving `template.not_found` is deliberate: an exact-match filter returning an
+ * empty list would make "no such template" indistinguishable from "empty result".
  *
  * Save-time validation is **parse-only** (templates.md §7.1) and runs on every write:
  * [TemplateDeserializer] binds the wire shape, [TemplateValidator] checks syntax, forbidden
@@ -82,45 +94,51 @@ class TemplatesController(
      * latest RELEASED version (versioning §7, since 039 — the mirror of §5.2). The
      * response carries the returned version's `status`/`body_hash` (on the [Template]
      * projection since V6) and the `draft` pointer when one exists.
+     *
+     * One of the two shapes on `GET /api/v1/templates` (§9.6): this one answers when `name`
+     * is present, with `404 template.not_found` on a miss — never an empty list.
      */
-    @GetMapping("/{id}")
+    @GetMapping(params = ["name"])
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun get(
-        @PathVariable id: String,
+        @RequestParam name: String,
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val draft = templates.findDraftDetail(workspaceId, id)
+        val draft = templates.findDraftDetail(workspaceId, name)
         val template =
-            draft?.let { templates.findVersion(workspaceId, id, it.version) }
-                ?: templates.findLatest(workspaceId, id)
-                ?: throw ApiErrors.templateNotFound(id)
+            draft?.let { templates.findVersion(workspaceId, name, it.version) }
+                ?: templates.findLatest(workspaceId, name)
+                ?: throw ApiErrors.templateNotFound(name)
         return ApiResponse.of(withDraftPointer(template, draft))
     }
 
     /** §8.3 — a specific version, including of a soft-deleted template (templates.md §5.1). */
-    @GetMapping("/{id}/versions/{version}")
+    @GetMapping("/versions")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun getVersion(
-        @PathVariable id: String,
-        @PathVariable version: Int,
+        @RequestParam name: String,
+        @RequestParam version: Int,
     ): ApiResponse<Template> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         return ApiResponse.of(
-            templates.findVersion(workspaceId, id, version)
+            templates.findVersion(workspaceId, name, version)
                 ?: throw if (templates.existsId(
                         workspaceId,
-                        id,
+                        name,
                     )
                 ) {
-                    ApiErrors.templateNotFound(id, version)
+                    ApiErrors.templateNotFound(name, version)
                 } else {
-                    ApiErrors.templateNotFound(id)
+                    ApiErrors.templateNotFound(name)
                 },
         )
     }
 
-    /** §8.5 — the listing; the repository paginates in SQL, `total` is the honest lower bound. */
-    @GetMapping
+    /**
+     * §8.5 — the listing; the repository paginates in SQL, `total` is the honest lower bound.
+     * The second shape on `GET /api/v1/templates` (§9.6): answers when `name` is ABSENT.
+     */
+    @GetMapping(params = ["!name"])
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         @RequestParam(required = false) dialect: String?,
@@ -141,17 +159,23 @@ class TemplatesController(
      * §8.4 — update, writing the DRAFT branch (versioning §5.1/§5.2): first write after a
      * release copies to a draft, later writes overwrite it in place. Requires the `If-Match`
      * hash precondition; the response is the draft version's projection plus its draft pointer.
+     * The template's name travels in the body's `id` field (§9.6), never in the path.
      */
-    @PutMapping("/{id}")
+    @PutMapping
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun update(
-        @PathVariable id: String,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
+        val id =
+            draft.id ?: throw ApiException(
+                PipelineErrorCodes.Template.ID_INVALID,
+                "PUT /api/v1/templates requires the template 'id' in the body (§9.6: the name never travels in the path).",
+                mapOf(ApiErrors.REASON to "id_missing"),
+            )
         val written = drafts.write(workspaceId, id, draft, IfMatchHeader.required(ifMatch), principal.userId)
         val stored =
             templates.findVersion(workspaceId, id, written.version) ?: throw ApiErrors.templateNotFound(id)
@@ -162,64 +186,74 @@ class TemplatesController(
      * §8.9 — release (lock) the template draft: `template.version.not_draft` when none
      * exists, re-validation on the draft content, `template.version.conflict` on a stale
      * hash. Templates lock before pipelines (versioning §6). UI-driven (D4).
+     * The name is the body's `name` field (§9.6).
      */
-    @PostMapping("/{id}/release")
+    @PostMapping("/release")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun release(
-        @PathVariable id: String,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
+        @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released = releases.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId)
+        val released = releases.release(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch), principal.userId)
         return ApiResponse.of(withDraftPointer(released.template, null))
     }
 
     /**
      * §8.10 — discard the template draft (always a hard delete: nothing references a
-     * template version by FK). Hash-guarded.
+     * template version by FK). Hash-guarded. The name is the body's `name` field (§9.6).
      */
-    @PostMapping("/{id}/draft/discard")
+    @PostMapping("/draft/discard")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun discard(
-        @PathVariable id: String,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
+        @RequestBody body: String,
     ) {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        releases.discard(workspaceId, id, IfMatchHeader.required(ifMatch))
+        releases.discard(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch))
     }
 
     /** §8.6 — soft delete; pipelines referencing any version continue to work. */
-    @DeleteMapping("/{id}")
+    @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun delete(
-        @PathVariable id: String,
+        @RequestParam name: String,
     ) {
         // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
         authoring.requireTemplateAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
-        if (!templates.softDelete(workspaceId, id)) throw ApiErrors.templateNotFound(id)
+        if (!templates.softDelete(workspaceId, name)) throw ApiErrors.templateNotFound(name)
     }
 
     /**
      * §8.7 — render against a sample context. The response `data` IS the rendered SQL string:
      * "Response: rendered SQL string" pins the payload, and the envelope (§4.1) wraps it.
+     * `name`, `version` and `context` are body fields (§9.6).
      */
-    @PostMapping("/{id}/versions/{version}/render")
+    @PostMapping("/render")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun render(
-        @PathVariable id: String,
-        @PathVariable version: Int,
         @RequestBody body: String,
     ): ApiResponse<String> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        if (templates.lookupVersion(workspaceId, id, version) == null) {
-            throw if (templates.existsId(workspaceId, id)) ApiErrors.templateNotFound(id, version) else ApiErrors.templateNotFound(id)
+        val request = renderRequestOf(body)
+        if (templates.lookupVersion(workspaceId, request.name, request.version) == null) {
+            throw if (templates.existsId(
+                    workspaceId,
+                    request.name,
+                )
+            ) {
+                ApiErrors.templateNotFound(request.name, request.version)
+            } else {
+                ApiErrors.templateNotFound(request.name)
+            }
         }
-        val context = contextOf(body)
-        return ApiResponse.of(templateEngines.engineFor(workspaceId).render(TemplateRef(id, version), context))
+        return ApiResponse.of(
+            templateEngines.engineFor(workspaceId).render(TemplateRef(request.name, request.version), request.context),
+        )
     }
 
     /**
@@ -238,14 +272,32 @@ class TemplatesController(
         return ApiResponse.of(mapOf("imported" to stored.size, "templates" to stored))
     }
 
-    /** The `render` request's `context` object as the engine's render map. */
-    private fun contextOf(body: String): Map<String, Any?> {
-        val tree =
-            MAPPER.readTree(body) as? ObjectNode
+    /** A parsed `POST /render` body: `name`, `version` and the sample `context` (§9.6). */
+    private data class RenderRequest(
+        val name: String,
+        val version: Int,
+        val context: Map<String, Any?>,
+    )
+
+    /** The `{"name": ...}` field of a release/discard body — the §9.6 addressing form. */
+    private fun nameOf(body: String): String = nameOf(objectOf(body))
+
+    private fun nameOf(tree: ObjectNode): String =
+        tree.get("name")?.asText()?.takeIf { it.isNotBlank() }
+            ?: throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "The request requires a 'name' field (§9.6: the name never travels in the path).",
+                mapOf(ApiErrors.REASON to "name_missing"),
+            )
+
+    private fun renderRequestOf(body: String): RenderRequest {
+        val tree = objectOf(body)
+        val version =
+            tree.get("version")?.takeIf { it.isInt }?.asInt()
                 ?: throw ApiException(
-                    PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
-                    "The render request body must be a JSON object.",
-                    mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The render request requires an integer 'version' field.",
+                    mapOf(ApiErrors.REASON to "version_missing"),
                 )
         val context =
             tree.get("context") as? ObjectNode
@@ -254,7 +306,32 @@ class TemplatesController(
                     "The render request requires a 'context' object.",
                     mapOf(ApiErrors.REASON to "context_missing"),
                 )
-        return context.properties().associate { (key, value) -> key to MAPPER.treeToValue(value, Any::class.java) }
+        return RenderRequest(
+            name = nameOf(tree),
+            version = version,
+            context = context.properties().associate { (key, value) -> key to MAPPER.treeToValue(value, Any::class.java) },
+        )
+    }
+
+    /** The request body as a JSON object, or the catalogued malformed-body refusal. */
+    private fun objectOf(body: String): ObjectNode {
+        val tree =
+            try {
+                MAPPER.readTree(body)
+            } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+                throw ApiException(
+                    PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
+                    "The request body must be a JSON object.",
+                    mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+                    e,
+                )
+            }
+        return tree as? ObjectNode
+            ?: throw ApiException(
+                PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
+                "The request body must be a JSON object.",
+                mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+            )
     }
 
     /**

@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v1.4 (frozen contract — additive-only changes after this point)
+**Status:** v2.0 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-08-11
@@ -726,6 +726,17 @@ Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result
 
 Templates are first-class entities. See [Templates spec](templates.md) for the entity model.
 
+**Addressing (v2.0 — template-hierarchy-design §9.6): the template name NEVER travels in a URL
+path segment.** Since v2.0 a name may contain `/` (`acme/finance/monthly_revenue`), and an
+encoded `%2F` in the path is refused `400` by the container below routing and below the
+security chain (measured on the pinned Tomcat — no handler can reach past it). Every route in
+this section therefore carries the name as a **query parameter or a body field**; the pre-v2.0
+`/{id}` path forms are removed, not kept alongside. `GET /templates` answers **two shapes on
+one route**, chosen by the presence of `name`: the single-resource envelope with
+`404 template.not_found` when `name` is present (§8.2), and the paged list envelope when it is
+not (§8.5) — an exact-match filter returning an empty list would make "no such template"
+indistinguishable from "empty result", so the miss keeps its code.
+
 ### 8.1 Create template
 
 ```
@@ -749,7 +760,7 @@ Response: `201 Created` with full template (including version `1`, `created_at`)
 ### 8.2 Get template (working version)
 
 ```
-GET /templates/{id}
+GET /templates?name={path}
 ```
 
 Response carries the **working version's** projection (versioning §7, since 039 — the
@@ -760,16 +771,17 @@ when a draft exists.
 ### 8.3 Get template (specific version)
 
 ```
-GET /templates/{id}/versions/{version}
+GET /templates/versions?name={path}&version={N}
 ```
 
 ### 8.4 Update template (writes the draft)
 
 ```
-PUT /templates/{id}
+PUT /templates
 If-Match: <body_hash of the version this edit is based on>
 
 {
+  "id": "fetch_orders.sql",         // REQUIRED here — the §9.6 addressing form (the name never travels in the path)
   "dialect": "POSTGRES",            // may differ from prior versions — a new version records its own dialect (existing pipelines pin a version, so they are unaffected)
   "display_name": "Fetch Orders in Date Range",   // required (templates.md §3.2)
   "description": "...",
@@ -793,8 +805,12 @@ of the hashed artifact).
 ### 8.9 Release template
 
 ```
-POST /templates/{id}/release
+POST /templates/release
 If-Match: <the draft's body_hash>
+
+{
+  "name": "fetch_orders.sql"
+}
 ```
 
 Locks the template draft (§5.10's mirror; templates lock BEFORE pipelines — versioning
@@ -805,8 +821,12 @@ content. Response: `200 OK` with the released version.
 ### 8.10 Discard template draft
 
 ```
-POST /templates/{id}/draft/discard
+POST /templates/draft/discard
 If-Match: <the draft's body_hash>
+
+{
+  "name": "fetch_orders.sql"
+}
 ```
 
 Always a hard delete (nothing references a template version by FK — versioning §6), so the
@@ -818,10 +838,12 @@ version number always returns to the pool. Response: `204 No Content`.
 GET /templates?dialect={dialect}&q={search}&offset=0&limit=50
 ```
 
+The second shape on this route: answers only when `name` is ABSENT (§8's addressing note).
+
 ### 8.6 Delete template
 
 ```
-DELETE /templates/{id}
+DELETE /templates?name={path}
 ```
 
 Soft delete. Existing pipelines referencing any version continue to work (we never hard-delete template versions). New pipelines cannot reference the deleted template.
@@ -829,9 +851,11 @@ Soft delete. Existing pipelines referencing any version continue to work (we nev
 ### 8.7 Validate template (render against sample context)
 
 ```
-POST /templates/{id}/versions/{version}/render
+POST /templates/render
 
 {
+  "name": "fetch_orders.sql",
+  "version": 1,
   "context": {
     "start_date": "2026-01-01",
     "end_date": "2026-01-31"
@@ -1305,3 +1329,4 @@ Owner or global admin. Removing a member with the `owner` role is refused with `
 | 2026-08-16 | v1.14 | pipeline composition | §10.2: `triggered_via` gains `"PIPELINE"` — a child execution spawned by a parent's PIPELINE node appears in execution history like any other row (enums §18, metadata-db §4.6 V3 lineage columns). |
 | 2026-08-17 | v1.15 | pipeline composition | §6.4.3: a PIPELINE node's `node_completed` carries `child_execution_id` (absent for all other node types); the same value appears in the terminal events' `node_stats` entries. §10.1's history surfaces render the lineage: a child row shows its `parent_execution_id` link. |
 | 2026-08-28 | v1.16 | workspaces surfaces | New **§17 workspace endpoints** (list-own/read/create per mode/update/delete with `workspace.in_use`/members sub-resource with `open-join`) — §13.12's CRUD codes go live. §9 re-grounded on the workspaces model: §9.1 binding fields (`global` admin-only, `workspace` accessible-to-caller, default = ACTIVE workspace) + `readonly`; §9.2 listing is workspace-scoped with exact totals; §9.3 gains additive `workspace`+`readonly` fields; §9.4/§9.5 D8 gates (member CUD behind `member-datasources-enabled`, global CUD admin-only) with pool-rebuilding flag writes; by-name access to another workspace's datasource is not-found. T23: template duplicate name is `409 template.validation.duplicate_name`. T31: unauthenticated HTML-accepting requests 302 to `/login`; `/api/**`+`/mcp` keep the exact 401 JSON envelope. |
+| 2026-09-02 | v2.0 | 043 template addressing | **BREAKING — one addressing form (template-hierarchy-design §9.6).** §8's eight `/{id}` path-addressed template routes are REMOVED and replaced by name-in-query/name-in-body forms (`GET /templates?name=`, `GET /templates/versions?name=&version=`, `PUT /templates` with `id` in the body, `POST /templates/release` + `POST /templates/draft/discard` with `name` in the body, `DELETE /templates?name=`, `POST /templates/render` with `name`+`version` in the body). Measured reason: on the pinned Tomcat an encoded `%2F` in the path is refused `400` below routing and below the security chain, so a hierarchical name (`acme/finance/report`, legal since this round's §4.1 grammar) cannot travel in a path segment at all. `GET /templates` now answers two shapes on one route (single-resource + `404 template.not_found` with `name`, paged list without). Sanctioned break of the v1.4 freeze: the owner confirmed zero callers outside this repo (2026-09-01), so the promise was protecting a population of zero. Datasources and pipelines keep path addressing — their names cannot contain `/`. |

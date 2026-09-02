@@ -445,13 +445,13 @@ Additive; existing routes keep their shapes. Exact wire contracts land in
 | `POST /api/v1/pipelines/{id}/release` | New. Hash-guarded (§5.3). UI-only in practice; no MCP tool is exposed for it (D4). |
 | `POST /api/v1/pipelines/{id}/draft/discard` | New. Hash-guarded (§5.4). `204`, both outcomes transparent. |
 | `GET /api/v1/pipelines/{id}` | Read shape gains the version's `status` and `body_hash`, `current_version`, and the `draft` pointer when one exists. **Since 039 the default body is the working version (§7.1): the DRAFT when one exists, else the current released version.** |
-| Templates (`/api/v1/templates/...`) | Mirror of all the above (release = §8.9, discard = §8.10 in rest-api.md). |
+| Templates (`/api/v1/templates/...`) | Mirror of all the above (release = §8.9, discard = §8.10 in rest-api.md) — addressed by name in query/body since rest-api v2.0 (§9.6: the name never travels in a path segment). |
 
 ### 7.1 Authoring reads return the working version (039)
 
 The principle: **a RELEASED version is never modified, and if a draft exists it is reused,
 no matter what.** Authoring reads — REST `GET /pipelines/{id}` and
-`GET /templates/{id}`, the MCP `pipelines_get` / `templates_get` tools, and the editors —
+`GET /templates?name=...`, the MCP `pipelines_get` / `templates_get` tools, and the editors —
 therefore return the **working version**: the draft if one exists, else `current_version`.
 They always state which `version` and which `status` they returned; the caller never
 infers it. Before 039 the REST and MCP default was the released body with a draft pointer
