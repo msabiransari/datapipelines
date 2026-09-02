@@ -63,8 +63,6 @@ class PipelinesExecuteNodeToolTest {
             password = null,
         )
 
-
-
     private fun rendered(
         nodeType: NodeType = NodeType.DQL,
         source: String = "sample-trips",
@@ -239,9 +237,7 @@ class PipelinesExecuteNodeToolTest {
             tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
         }.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Execution.NOT_FOUND
     }
-
-
 }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun payloadOf(call: Any?): Map<String, Any?> = call as Map<String, Any?>
+@Suppress("UNCHECKED_CAST")
+private fun payloadOf(call: Any?): Map<String, Any?> = call as Map<String, Any?>

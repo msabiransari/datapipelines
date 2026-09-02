@@ -3,8 +3,8 @@ package co.datapipelines.mcp
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.OrderByTerm
 import co.datapipelines.datasources.QueryRows
-import co.datapipelines.datasources.SqlRunner
 import co.datapipelines.datasources.SqlExecutionException
+import co.datapipelines.datasources.SqlRunner
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
@@ -196,5 +196,5 @@ class DatasourcesPreviewRowsToolTest {
     }
 }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun payloadOf(call: Any?): Map<String, Any?> = call as Map<String, Any?>
+@Suppress("UNCHECKED_CAST")
+private fun payloadOf(call: Any?): Map<String, Any?> = call as Map<String, Any?>

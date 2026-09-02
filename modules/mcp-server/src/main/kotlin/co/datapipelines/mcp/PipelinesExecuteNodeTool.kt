@@ -100,7 +100,7 @@ class PipelinesExecuteNodeTool(
             }
 
         return when (resolution) {
-            is NodeSqlResolution.NodeMissing ->
+            is NodeSqlResolution.NodeMissing -> {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.NOT_FOUND,
                     message = "Pipeline $pipelineId has no node '$nodeId' in version ${resolution.version.version}.",
@@ -111,10 +111,13 @@ class PipelinesExecuteNodeTool(
                             "version" to resolution.version.version,
                         ),
                 )
+            }
 
-            is NodeSqlResolution.ChildPipeline -> standaloneRefused(resolution.version, nodeId, "pipeline_node")
+            is NodeSqlResolution.ChildPipeline -> {
+                standaloneRefused(resolution.version, nodeId, "pipeline_node")
+            }
 
-            is NodeSqlResolution.ParameterRejected ->
+            is NodeSqlResolution.ParameterRejected -> {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                     message = resolution.failures.joinToString(" ") { "${it.parameter}: ${it.message}" },
@@ -125,22 +128,27 @@ class PipelinesExecuteNodeTool(
                             "failures" to resolution.failures.map { mapOf("parameter" to it.parameter, "message" to it.message) },
                         ),
                 )
+            }
 
-            is NodeSqlResolution.TemplateMissing ->
+            is NodeSqlResolution.TemplateMissing -> {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND,
                     message = "Template '${resolution.templateId}' version ${resolution.templateVersion} is missing.",
                     details = mapOf("template_id" to resolution.templateId, "template_version" to resolution.templateVersion),
                 )
+            }
 
-            is NodeSqlResolution.RenderFailed ->
+            is NodeSqlResolution.RenderFailed -> {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED,
                     message = resolution.message,
                     details = mapOf("pipeline_id" to pipelineId.toString(), "node_id" to nodeId),
                 )
+            }
 
-            is NodeSqlResolution.Rendered -> run(resolution, ctx)
+            is NodeSqlResolution.Rendered -> {
+                run(resolution, ctx)
+            }
         }
     }
 
@@ -185,7 +193,9 @@ class PipelinesExecuteNodeTool(
                     payload(resolution, datasourceName, startedAt) { put("affected_rows", affected) }
                 }
 
-                NodeType.PIPELINE -> standaloneRefused(resolution.version, node.id, "pipeline_node")
+                NodeType.PIPELINE -> {
+                    standaloneRefused(resolution.version, node.id, "pipeline_node")
+                }
             }
         }
     }
@@ -218,11 +228,14 @@ class PipelinesExecuteNodeTool(
             code = PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED,
             message =
                 when (reason) {
-                    "tempdb_source" ->
+                    "tempdb_source" -> {
                         "Node '$nodeId' reads from tempdb, which exists only inside a full execution — " +
                             "run pipelines_execute to build it."
-                    else ->
+                    }
+
+                    else -> {
                         "Node '$nodeId' is a PIPELINE node — it runs a child pipeline, not SQL."
+                    }
                 },
             details = mapOf("node_id" to nodeId, "reason" to reason, "version" to version.version),
         )

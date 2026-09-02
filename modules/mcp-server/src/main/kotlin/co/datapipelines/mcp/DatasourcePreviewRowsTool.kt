@@ -1,10 +1,10 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.OrderByTerm
 import co.datapipelines.datasources.SqlExecutionException
 import co.datapipelines.datasources.SqlRunner
-import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -104,7 +104,8 @@ class DatasourcesPreviewRowsTool(
      * `invalidParams`, the D3 blank-identifier rule.
      */
     private fun parseOrderBy(args: McpArguments): List<OrderByTerm> =
-        args.listArg("order_by")
+        args
+            .listArg("order_by")
             ?.mapIndexed { index, entry ->
                 val map =
                     entry as? Map<*, *> ?: throw McpArguments.invalidParams("order_by[$index] must be an object.")
