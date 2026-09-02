@@ -667,6 +667,34 @@ window, a different sample, a corrected lookup, even a typo — is published as
 the loader refuses a manifest whose `version` does not match the directory it
 came from.
 
+### Publish confirmation & release rehearsal — the drift guards
+
+Two guards bracket every publish and every release rehearsal. Both exist
+because of T70 (2026-09-02): the published `v1` `examples.json` still carried
+the `${}` interpolations 042 had already migrated out of the repo copy, the
+demo 500ed on every fresh first login for two days, and nothing compared the
+published bytes with the repo's.
+
+1. **Before confirming an upload** (and in every release rehearsal), run the
+   published-drift guard for the version the demo pins:
+
+   ```bash
+   ./scripts/sample-data/check-published.sh v2   # or whatever SAMPLE_VERSION pins
+   ```
+
+   It fetches the published manifest and `examples.json`, and fails unless the
+   published copy, the published manifest's declared checksum, and the repo's
+   `content/examples.json` all agree. Against an unpublished version it fails
+   on the manifest fetch — which is the upload gate itself. Set
+   `SAMPLE_BASE_URL` to check a mirror or a locally staged build
+   (`file://…/scripts/sample-data/work`, or the local-serve recipe in `app.sh`).
+   Network by nature, so it is a rehearsal step, never part of `./gradlew build`.
+2. **The repo copy is validated in `build`** — the templates module's
+   `SampleDataExamplesContentTest` runs every shipped template and pipeline
+   through the app's own save-time validators (049 C1), so content the seeder
+   would refuse cannot merge. `verify.sh` step 5 remains structural only; the
+   two checks are different jobs and each says which it does.
+
 ### Licence gate — before serving this data publicly
 
 Every `provenance` row in `manifest.json` ships `license_verified: null`. The
@@ -685,6 +713,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.8 | demo artifact v2 + guards (049) | **Appendix B gains "Publish confirmation & release rehearsal — the drift guards"**: `scripts/sample-data/check-published.sh` (published `examples.json` vs repo vs manifest, 049 C2) is now a named pre-upload / rehearsal step, and the repo copy's semantic validation is pinned in `build` (`SampleDataExamplesContentTest`, 049 C1) — the two guards T70 (published-v1 drift → first-login 500 ×2 days) proved missing. A v2 artifact is staged from unchanged pins with the licence gate re-stamped 2026-09-02; the demo pin moves to v2 in the held version-bump commit once the owner uploads (README §Publish). |
 | 2026-09-01 | v1.7 | multi-instance readiness (036) | **The stale-execution sweep now ships (ARCH-AUDIT M2), and the §6.2 crash bullet is true again.** Every replica runs the idempotent sweep on a one-minute cadence (the project's first `@Scheduled`); `RUNNING` rows older than `datapipelines.executions.stale-timeout-minutes` are marked `ABORTED` with `pipeline.execution.instance_lost`. §8.3.2's SIGKILL-mid-flush consequence restored to match. Side effect: `DELETE /executions/{id}` on a crashed instance's stale row stops being a silent no-op — once swept, the row is terminal and the cancel is refused `pipeline.execution.not_running` instead of returning 204. |
 | 2026-09-01 | v1.6 | multi-instance readiness (036) | **The drain now ships (ARCH-AUDIT M1), and §8.3.1/§8.3.2 describe it.** On SIGTERM: readiness flips to REFUSING_TRAFFIC first, every local execution is cancelled through the ordinary path (`Statement.cancel()` first, `execution_aborted` with `reason: "shutdown"`, row `ABORTED`), the flush is awaited with a 20s bound, and `server.shutdown: graceful` lets in-flight requests end. The drain CANCELS rather than draining-to-completion — the v1.2 text's "drain up to `execution-timeout-seconds`" behavior is deliberately not what shipped; `terminationGracePeriodSeconds: 30` (not 630) and `preStop: sleep 5` are the matching pod settings, and the Helm chart carries both. The §6.2 crash bullet is still honest (the sweep lands next). |
 | 2026-09-01 | v1.5 | multi-instance readiness (036) | **Honesty fix (ARCH-AUDIT M11): the doc promised three things the code does not do.** §8.3.1/§8.3.2 rewritten as shutdown behavior *as shipped* — no drain, no `server.shutdown: graceful`, no readiness flip, no sweep; the old drain-to-timeout/`cancelAll(shutdown)` sequence and the `terminationGracePeriodSeconds: 630` + `preStop` guidance described unimplemented code. §6.2 instance-crash bullet no longer claims rows are "swept to `ABORTED`" (the sweep exists but has no caller). §5.2's "shutdown grace" gloss on `execution-timeout-seconds` removed. §6.4's `deploy/helm/` reference made real: a minimal chart (Deployment, Service, optional HPA/PDB) now ships. The drain and sweep claims return with the code that implements them. |

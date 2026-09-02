@@ -138,6 +138,17 @@ curl -fsSLO https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v1/ma
 ./scripts/sample-data/verify.sh /tmp/pub
 ```
 
+Finally run the published-drift guard (049 C2) — the step whose absence let the
+published v1 drift from this repo for two days (T70):
+
+```bash
+./scripts/sample-data/check-published.sh v1   # the version just published
+```
+
+It fails unless the published `examples.json`, the published manifest's declared
+checksum, and `content/examples.json` here all agree. It is also the rehearsal
+step for every later release (deployment.md Appendix B).
+
 Finally set `SAMPLE_BASE_URL` in `deploy/.env` to
 `https://datapipelines-co.s3.amazonaws.com/sample-data/mobility` (deployment.md
 Appendix B).
@@ -161,6 +172,7 @@ scripts/sample-data/
   load-and-dump.sh    stage 3 — throwaway engines, row-count asserts, dumps
   manifest.sh         stage 4 — manifest.json
   verify.sh           the proof: re-derive everything from the artifacts
+  check-published.sh  the drift guard: published examples.json == repo copy == manifest
   checksums.spec      which tables are fingerprinted, and in what order
   ddl/                per-engine schema
   data/               pinned reference data a URL cannot give us (a PDF, an HTML page)

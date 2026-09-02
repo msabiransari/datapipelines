@@ -10,10 +10,18 @@
 #      yields the manifest's row counts and content checksums;
 #   3. mysql-weather.sql.gz likewise into a throwaway MySQL;
 #   4. nyc_reference.db likewise, opened directly;
-#   5. examples.json is structurally what the app's seeder accepts, and carries
+#   5. examples.json is STRUCTURALLY what the app's seeder accepts, and carries
 #      no pipeline ids (a pipelines.id is a GLOBAL primary key — an id-carrying
 #      seed lets the first user's login claim it and breaks every later user's
-#      provisioning).
+#      provisioning). STRUCTURAL ONLY, by design: shape, ids, references. The
+#      SEMANTIC validation — running every template and pipeline through the
+#      app's own save-time validators (TemplateValidator, ReferenceRules, 042's
+#      parameter_interpolated rule) — lives in the build, as the templates
+#      module's SampleDataExamplesContentTest (049 C1). T70 happened precisely
+#      because this step looked sufficient and was not: the v1 artifact passed
+#      it while still carrying the interpolations the app refuses at seeding.
+#      Published-vs-repo drift is check-published.sh's job (049 C2) — this
+#      script never sees the published copy.
 #
 # This is deliberately NOT a gate task. It needs Docker, several GB and minutes;
 # wiring it into `./gradlew build` would make the standard gate non-hermetic.

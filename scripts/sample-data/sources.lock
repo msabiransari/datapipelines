@@ -43,12 +43,15 @@ param window_end             2024-12
 param trips_sample_modulus   16
 param ghcn_stations          USW00094728,USW00014732,USW00094789,USW00014734,USW00094741
 param duckdb_version         v1.5.5
-param artifact_version       v1
+param artifact_version       v2
 # The design §8 go-live gate: set ONLY by the owner after checking every source's
 # CURRENT terms (evidence links above; the review dossier of record is
 # ../datapipelines-orchestration/notes/2026-08-29-license-dossier.md). Absent or
 # "null" = manifest ships license_verified: null and publishing blocks go-live.
-param license_verified       2026-08-29
+# 2026-08-29: owner verification of record (v1 publication).
+# 2026-09-02: recheck for the v2 republication — every evidence link re-fetched,
+# the operative quotes unchanged (handback 049); identical pinned sources.
+param license_verified       2026-09-02
 
 # --- derived pins (regenerate with pin.sh) ---------------------------------
 
