@@ -1,0 +1,82 @@
+<!-- The template editor's SOURCE COLUMN — the editor (or, for a version the author
+     merely SELECTED, its read-only body) with the preview output below it.
+
+     R5 (054): selecting a version in the dropdown LOADS it read-only, with its badge and
+     its release metadata. The editable textarea carries the WORKING version and nothing
+     else (039 O14: the draft when one exists, else the current release), so no selection
+     can ever make a RELEASED row the write target — the invariant "we never modify
+     RELEASED" is visible here, not merely enforced by the server.
+
+     Edit is the one way out of the read-only view, and it does NOT decide anything: it
+     posts to the editor's edit path, which applies the lifecycle rule 035/039 shipped —
+     a draft already exists ⇒ that draft opens (nothing is written); otherwise the
+     selected version is copied into a new draft through the same TemplateDraftService
+     the REST write uses.
+
+     This fragment is th:replace'd by templates/editor.html for the first paint and
+     returned alone by GET /partials/templates/editor/source for every later selection
+     (§5's idiom) — one definition, so the two paints cannot disagree. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="source" id="template-source" class="te-source">
+
+  <!-- READ-ONLY: a version other than the working one. -->
+  <th:block th:if="${readOnly}">
+    <div class="te-panel-head">
+      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+        <h2>Template Source</h2>
+        <span class="ds-badge ds-badge-default" th:text="'v' + ${selectedVersion}">v2</span>
+        <!-- One expression for both values: the badge states what the row IS, and there is
+             no branch here to go stale (the accent follows the status). -->
+        <span class="ds-badge"
+              th:classappend="${selectedStatus == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-success'"
+              th:text="${selectedStatus}">RELEASED</span>
+        <span style="color:var(--text-secondary);font-size:var(--text-sm)">read-only</span>
+      </div>
+      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+        <button class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"
+                th:attr="hx-post=@{/partials/templates/editor/edit(name=${templateName},version=${selectedVersion})}"
+                hx-target="#tpl-edit-refusal" hx-swap="innerHTML">Edit</button>
+      </div>
+    </div>
+
+    <!-- Release provenance (versioning §3.1): who published this version, and when.
+         The actor is the stored user id — this app resolves no display name for it
+         anywhere, so it renders as the id rather than as a name it would have to invent. -->
+    <p th:if="${releasedAt != null}"
+       style="margin:0;color:var(--text-secondary);font-size:var(--text-sm)">
+      <span>Released</span>
+      <span th:text="${#temporals.format(releasedAt, 'yyyy-MM-dd HH:mm')}">2026-09-01 10:00</span>
+      <th:block th:if="${releasedBy != null}">
+        <span>by</span>
+        <span style="font-family:var(--font-mono)" th:text="${releasedBy}">user-id</span>
+      </th:block>
+    </p>
+
+    <!-- The refusal target: a 4xx is never swapped by htmx, so the edit path answers 200
+         with the reason and it lands here. Empty on every successful selection. -->
+    <div id="tpl-edit-refusal"></div>
+
+    <!-- The body of the SELECTED version — the preview surface 041 built, reused: the same
+         pane, the same tokenizer treatment. Never a textarea, never a form control. -->
+    <pre id="versionBody" class="te-preview-pane te-readonly" th:text="${template?.body ?: ''}">SELECT 1</pre>
+  </th:block>
+
+  <!-- EDITABLE: the working version, which is the only edit target there is. -->
+  <th:block th:unless="${readOnly}">
+    <div class="te-panel-head">
+      <h2>Template Source</h2>
+      <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
+    </div>
+    <textarea id="templateBody" class="ds-textarea" th:text="${template?.body ?: ''}">Template body</textarea>
+  </th:block>
+
+  <div class="te-preview">
+    <div class="te-panel-head" style="margin-bottom:0">
+      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+        <h2>Preview Output</h2>
+        <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
+        <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
+      </div>
+    </div>
+    <div id="previewPane" class="te-preview-pane"></div>
+  </div>
+</div>
