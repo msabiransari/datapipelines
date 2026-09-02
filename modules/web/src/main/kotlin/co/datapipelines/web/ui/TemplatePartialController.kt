@@ -47,6 +47,7 @@ class TemplatePartialController(
     private val browse: TemplateBrowseModel,
     private val validator: TemplateValidator,
     private val authoring: AuthoringGuard,
+    private val usage: co.datapipelines.templates.TemplateUsageService,
 ) {
     @GetMapping("/partials/templates")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -86,6 +87,12 @@ class TemplatePartialController(
      * at most one DRAFT per template, so the one version the draft pointer names is the DRAFT
      * and every other version is RELEASED.
      *
+     * Each row also carries its **in-use count** — distinct pipelines pinning that version in
+     * their working version (040 D6), from the same used-by service the MCP tool and the
+     * delete guard read. A version with no working-version pin renders "—" (nothing to act
+     * on), not a zero: the count's unit is the pipeline, and "no one uses this" is the
+     * retirement-ready signal an author is looking for.
+     *
      * §9.6: the name is a query parameter. It may contain `/`, and an encoded `%2F` in a URL
      * **path segment** is refused 400 by the container below routing — no handler could reach
      * past it.
@@ -100,6 +107,7 @@ class TemplatePartialController(
         model.addAttribute("templateId", name)
         model.addAttribute("versions", templates.listVersions(workspaceId, name))
         model.addAttribute("draftVersion", templates.findDraftDetail(workspaceId, name)?.version)
+        model.addAttribute("inUse", usage.inUseCounts(workspaceId, name))
         return "partials/template-versions"
     }
 

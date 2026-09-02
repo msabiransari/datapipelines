@@ -216,7 +216,7 @@ built-in would invite the belief that interpolation is now safe.
 
 - Versions are integers, monotonically increasing per template id.
 - Each version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once stored.
-- Deleting a template (soft delete) does not affect existing versions. Pipelines referencing deleted templates' versions continue to work until those pipelines are explicitly modified.
+- Deleting a template (soft delete) does not affect existing versions. Pipelines referencing deleted templates' versions continue to work until those pipelines are explicitly modified. **The delete is refused with `409 template.in_use` while any pipeline version pins any version of the template** (§5.4) — the refusal names who blocks; it does not change delete semantics.
 - Versions never reused, never renumbered.
 
 ### 5.2 Lifecycle
@@ -236,6 +236,29 @@ Soft-delete            → version 3 marked deleted; pipelines referencing v1/v2
 3. Does NOT modify or remove previous versions.
 
 Existing pipelines are unaffected: they pin `{id, version}`, so a new version is invisible to them until a pipeline is edited to reference it — at which point that pipeline's save re-runs the dry-render check ([Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
+
+### 5.4 Used-by: the reverse arrow (v1.9, 040)
+
+A node's `template` pin has a forward direction (pipeline → template version) that the whole
+lifecycle above protects. Used-by is the arrow pointing back, and it answers **two different
+questions — never one query**:
+
+| Question | Scans | Drives |
+|---|---|---|
+| *Who is using `t@2` right now?* | each pipeline's **working version** — the draft when one exists, else the latest released (the §7 read rule, [Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) | the `templates_used_by` MCP tool, the template screen's per-version in-use count, the pipeline read's upgrade signal |
+| *Is it safe to remove `t`?* | **any pipeline version, ever** — historical versions are immutable and executable, so their pins are real references | the `409 template.in_use` delete refusal (§5.1) |
+
+The split is load-bearing in both directions: a working-version-only delete guard would let a
+still-pinned historical version be removed, and an any-version used-by listing would nag about
+pins no working pipeline carries anymore. Each answer names the **pipeline, the node id within
+it, and the pipeline version carrying the pin** — a fact an author can go and change, not just
+a count.
+
+The pipeline read carries the forward-side signal: when a node's pinned template has a **newer
+released** version, the MCP `pipelines_get` response states it (`upgrade_available`: node,
+template id, pinned version, latest released). Surfaced, never applied — moving a pin is a
+pipeline edit and stays the author's decision. A pin of a template *draft* version is not an
+upgrade signal (the author is ahead of release, which is information, not a prompt).
 
 ---
 
@@ -433,7 +456,7 @@ too). When a grouped expression carries a `:name`, prefer one of those two shape
 | Get specific version | `GET /templates/versions?name={id}&version={n}` |
 | Update (writes the draft branch) | `PUT /templates` — `id` in the body |
 | List | `GET /templates?dialect={d}&type={t}&q={search}` |
-| Delete (soft) | `DELETE /templates?name={id}` |
+| Delete (soft; `409 template.in_use` while referenced — §5.4) | `DELETE /templates?name={id}` |
 | Preview render with a caller-supplied context | `POST /templates/render` — `name`, `version`, `context` in the body |
 
 The name never travels in a URL path segment ([Template Hierarchy §9.6](template-hierarchy-design.md) — a name may contain `/`, and the container refuses an encoded `%2F` below routing). The `type` list filter is `sql`/`html` (046).
@@ -624,6 +647,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.9 | 040 template used-by | New **§5.4 Used-by**: the reverse arrow from a template version to its pinning pipelines — two questions kept apart (working-version scan for "who uses `t@2` now", any-version scan for "is it safe to remove"), the `templates_used_by` MCP tool and the per-version in-use count as surfaces, and the pipeline read's `upgrade_available` signal. §5.1/§9: template delete is refused with `409 template.in_use` (§13.9) while any pipeline version pins any version — the refusal carries the referencing pipelines, nodes and versions. |
 | 2026-09-02 | v1.8 | 046 typed templates | Template JSON gains optional `type` (`sql` \| `html`, default `sql`, chosen at create and immutable across versions — [Template Hierarchy §5](template-hierarchy-design.md)); `dialect` becomes conditional — required iff `type='sql'`, forbidden on `html` (§3.1/§3.2). §7 gains `type_invalid`, `dialect_not_allowed` and `type_immutable`; §9's routes corrected to the §9.6 name-query addressing and gain the `type` list filter; §11.2 amended to name conditional-requirement relaxations explicitly — the relaxation of `dialect` is this round's own invocation of that clause (no existing payload becomes invalid; every stored template backfills to `sql` with its dialect intact). |
 | 2026-09-01 | v1.7 | 042 implementation | New §4.5: declared parameters are values and bind as `:name` — the old §4.4 injection paragraph is replaced by the split of responsibilities it states. §7.2: pipeline save refuses a declared parameter inside `${}` with `template.validation.parameter_interpolated` (AST scan, scope-aware, no escape spelling per the 2.3.34 pin). New §8.4: execution-time binding semantics — loud `pipeline.node.sql_parameter_missing` for an undeclared `:name`, and the dialect-construct translation table pinned by `NamedParameterTranslationTest` (`::` casts survive; MySQL `#` comments, MSSQL `[a:b]`, Oracle `q'…'`, PG `$$…$$` mis-parse). §13: the "parameterized SQL output" v1.1 candidate is struck as shipped. |
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |

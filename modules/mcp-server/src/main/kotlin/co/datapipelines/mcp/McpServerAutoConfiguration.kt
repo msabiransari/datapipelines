@@ -46,7 +46,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 20 tools of §6.1, in `tools/list` order. */
+    /** The 21 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -80,9 +80,12 @@ class McpServerAutoConfiguration {
         // stateless, so inline construction adds no wiring (the 037 fence touched no `app` bean).
         val sqlRunner = co.datapipelines.datasources.SqlRunner(datasources)
         val nodeResolver = co.datapipelines.templates.NodeSqlResolver(pipelines, templates, templateEngines)
+        // 040's used-by service, same inline-construction discipline (the templates module's
+        // configuration declares the bean `web` consumes; this module builds its own).
+        val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         return listOf(
             PipelinesListTool(pipelines),
-            PipelinesGetTool(pipelines),
+            PipelinesGetTool(pipelines, usage),
             PipelineExecuteTool(
                 pipelines,
                 executor,
@@ -97,6 +100,7 @@ class McpServerAutoConfiguration {
             PipelinesUpdateTool(pipelines, PipelineDraftService(pipelines, authoring), deserializer, pipelineValidator, serializer),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
+            TemplatesUsedByTool(usage),
             TemplatesCreateTool(templates, authoring, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
             DatasourcesListTool(datasources),

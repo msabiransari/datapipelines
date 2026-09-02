@@ -5,6 +5,12 @@
      DERIVED from the draft pointer rather than re-queried per row: the version the pointer
      names is the DRAFT, every other version is RELEASED.
 
+     `inUse[v.version]` is the 040 D6 per-version in-use count — distinct pipelines pinning
+     that version in their working version, from the same used-by service the MCP
+     `templates_used_by` tool and the `template.in_use` delete guard read. A version with no
+     working-version pin renders an em dash, not a zero: "nobody uses this" is the
+     retirement-ready signal, and the dash keeps the zero-pinned rows quiet.
+
      There is no rename, move or delete affordance here, and no version is editable in place —
      a version is immutable (templates §5.1) and a name is its identity (§4.5). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tpl-versions">
@@ -13,6 +19,7 @@
       <tr>
         <th class="num">Version</th>
         <th>Status</th>
+        <th class="num">In use</th>
         <th class="num">Created</th>
         <th></th>
       </tr>
@@ -25,6 +32,11 @@
                 class="ds-badge ds-badge-warning">DRAFT</span>
           <span th:unless="${draftVersion != null and draftVersion == v.version}"
                 class="ds-badge ds-badge-success">RELEASED</span>
+        </td>
+        <td class="num">
+          <span th:if="${inUse != null and inUse[v.version] != null}"
+                th:text="${inUse[v.version] + (inUse[v.version] == 1 ? ' pipeline' : ' pipelines')}">2 pipelines</span>
+          <span th:unless="${inUse != null and inUse[v.version] != null}">—</span>
         </td>
         <td class="num" th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
         <td>

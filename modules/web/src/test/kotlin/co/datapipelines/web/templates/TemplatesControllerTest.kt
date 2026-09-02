@@ -45,13 +45,14 @@ class TemplatesControllerTest {
 
     private val drafts = mockk<TemplateDraftService>()
     private val releases = mockk<TemplateReleaseService>()
+    private val usage = mockk<co.datapipelines.templates.TemplateUsageService>()
 
     // Import moved to TemplateImportService (extracted for the D9 seeder); the real service is
     // used so the import cases still exercise the shipped parsing and per-entry semantics.
     private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
 
     private val controller =
-        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, guard)
+        TemplatesController(repository, validator, engines, TemplateImportService(repository, validator), drafts, releases, guard, usage)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -115,6 +116,7 @@ class TemplatesControllerTest {
                 drafts,
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(false),
+                usage,
             )
 
         val create =
@@ -180,7 +182,30 @@ class TemplatesControllerTest {
         error.details["version"] shouldBe 9
 
         every { repository.softDelete(any(), "nope.sql") } returns false
+        every { usage.referencedAnywhere(any(), "nope.sql") } returns emptyList()
         shouldThrow<ApiException> { controller.delete("nope.sql") }.code shouldBe "template.not_found"
+    }
+
+    @Test
+    fun `delete refuses with template_in_use naming the referencing pipelines, nodes and versions`() {
+        authenticate()
+        every { usage.referencedAnywhere(any(), "fetch_orders.sql") } returns
+            listOf(
+                co.datapipelines.pipeline.TemplatePin(UUID.randomUUID(), "p1", 7, PipelineVersionStatus.RELEASED, "fetch", 1),
+                co.datapipelines.pipeline.TemplatePin(UUID.randomUUID(), "p3", 2, PipelineVersionStatus.DRAFT, "load", 1),
+            )
+
+        val refusal = shouldThrow<ApiException> { controller.delete("fetch_orders.sql") }
+
+        refusal.code shouldBe PipelineErrorCodes.Template.IN_USE
+        refusal.details["referencing_pipelines"] shouldBe listOf("p1", "p3")
+        refusal.details["references"] shouldBe
+            listOf(
+                mapOf("pipeline" to "p1", "node_id" to "fetch", "pipeline_version" to 7, "pinned_version" to 1),
+                mapOf("pipeline" to "p3", "node_id" to "load", "pipeline_version" to 2, "pinned_version" to 1),
+            )
+        // The refusal fired BEFORE any write: nothing was soft-deleted.
+        io.mockk.verify(exactly = 0) { repository.softDelete(any(), any()) }
     }
 
     @Test
@@ -327,6 +352,7 @@ class TemplatesControllerTest {
                 TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true)),
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(true),
+                usage,
             )
 
         val thrown =

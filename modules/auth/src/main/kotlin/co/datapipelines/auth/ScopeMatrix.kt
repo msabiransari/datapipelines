@@ -116,13 +116,17 @@ object ScopeMatrix {
     }
 
     /**
-     * All 20 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 21 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
      * every other datasource tool and deliberately NOT `read`: they are the first tools that
      * return arbitrary customer ROW DATA — not metadata, not the results of a pipeline someone
      * deliberately authored — and a read-scoped key should not acquire that reach.
+     *
+     * `templates_used_by` is `read` (040 D7): it returns which pipelines reference which
+     * template version — reference structure any workspace reader may already see by reading
+     * the pipelines themselves — never customer row data.
      */
     val MCP_TOOL_MIN_SCOPE: Map<String, Scope> =
         mapOf(
@@ -130,6 +134,7 @@ object ScopeMatrix {
             "pipelines_get" to Scope.READ,
             "templates_list" to Scope.READ,
             "templates_get" to Scope.READ,
+            "templates_used_by" to Scope.READ,
             "datasources_list" to Scope.READ,
             "datasources_get" to Scope.READ,
             "executions_list" to Scope.READ,

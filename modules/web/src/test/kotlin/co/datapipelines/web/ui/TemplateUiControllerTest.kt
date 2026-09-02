@@ -5,10 +5,12 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldHaveSize
@@ -37,7 +39,13 @@ class TemplateUiControllerTest {
     private val browse = TemplateBrowseModel(repository)
     private val controller = TemplateUiController(browse, themeResolver)
     private val partialController =
-        TemplatePartialController(repository, browse, mockk<TemplateValidator>(), mockk<AuthoringGuard>())
+        TemplatePartialController(
+            repository,
+            browse,
+            mockk<TemplateValidator>(),
+            mockk<AuthoringGuard>(),
+            TemplateUsageService(repository, mockk<co.datapipelines.pipeline.PipelineRepository>()),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

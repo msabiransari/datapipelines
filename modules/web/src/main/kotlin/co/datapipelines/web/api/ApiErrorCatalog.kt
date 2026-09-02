@@ -112,6 +112,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Datasource.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
+            // §13.9 (040 D4) — the in-use delete refusal, against any template-family default:
+            // it is a conflict with live references, not a validation failure.
+            PipelineErrorCodes.Template.IN_USE to HttpStatus.CONFLICT,
             // §13.9 — 400 like the template.validation family default, wired explicitly for
             // the same 025 A2 reason.
             PipelineErrorCodes.Template.PARAMETER_INTERPOLATED to HttpStatus.BAD_REQUEST,
@@ -226,6 +229,8 @@ object ApiErrorCatalog {
                 "We couldn't reach the database this step uses. Check that it is online and reachable from this server.",
             PipelineErrorCodes.Datasource.IN_USE to
                 "This connection is still used by one or more pipelines, so it can't be deleted yet.",
+            PipelineErrorCodes.Template.IN_USE to
+                "This template is still used by one or more pipelines, so it can't be deleted yet.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to

@@ -410,6 +410,15 @@ object PipelineErrorCodes {
 
         const val NOT_FOUND = "template.not_found"
 
+        /**
+         * §13.9 (040 D4) — delete refused while any pipeline version pins any version of the
+         * template (the any-version scan; `details` names the referencing pipelines, nodes and
+         * carrying pipeline versions). The `datasource.in_use` / `workspace.in_use` shape: an
+         * in-use refusal, not a validation failure. Soft delete stays the only deletion — this
+         * code guards it, it does not harden it into hard deletion.
+         */
+        const val IN_USE = "template.in_use"
+
         /** §13.9 / versioning §4.2 — hash precondition failed on a template draft mutation. */
         const val VERSION_CONFLICT = "template.version.conflict"
 

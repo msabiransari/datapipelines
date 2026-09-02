@@ -140,6 +140,24 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `findCurrentVersions answers latest released per id, absent for deleted, empty for no ids`() {
+        // 040 D5's lookup: current_version IS the latest released version by the lifecycle's
+        // invariant, and a draft must not move the answer.
+        repository.create(workspaceId, draft(id = "a.sql", body = "SELECT 1"), actor)
+        val a = repository.findLatest(workspaceId, "a.sql")!!
+        val aDraft =
+            repository.createDraft(workspaceId, "a.sql", draft(id = "a.sql", body = "SELECT 2"), a.bodyHash, actor)!!
+        repository.create(workspaceId, draft(id = "b.sql"), actor)
+        repository.create(workspaceId, draft(id = "c.sql"), actor)
+        repository.softDelete(workspaceId, "c.sql")
+        checkNotNull(aDraft)
+
+        repository.findCurrentVersions(workspaceId, listOf("a.sql", "b.sql", "c.sql", "nope.sql")) shouldBe
+            mapOf("a.sql" to 1, "b.sql" to 1)
+        repository.findCurrentVersions(workspaceId, emptyList()) shouldBe emptyMap()
+    }
+
+    @Test
     fun `a soft-deleted template disappears from findLatest but its versions still resolve`() {
         repository.create(workspaceId, draft(), actor)
 

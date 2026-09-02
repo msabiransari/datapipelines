@@ -102,8 +102,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `template.validation.dialect_not_allowed` and `template.validation.type_immutable`
          * (typed templates), landed in the SAME commit as their constants and catalog rows.
          * Re-derived from the merged document's own parse.
+         *
+         * 106 → 107 with 040: §13.9 gains `template.in_use` (the used-by delete refusal),
+         * landed in the SAME commit as its constant and catalog row. Re-derived from the
+         * merged document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 106
+        const val SECTION_13_ROW_COUNT = 107
 
         /** §12's distinct validation codes on 2026-09-02 (046 added §12.6's template_type_mismatch). */
         const val SECTION_12_CODE_COUNT = 48
