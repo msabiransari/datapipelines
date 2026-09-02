@@ -118,22 +118,27 @@ expected to be in exactly that state.
 
 ## Publish (owner's step)
 
-The bucket is named at publication time and is not in this repo. Substitute
-The published bucket is `datapipelines-co` (us-east-1, published 2026-08-29 with the
-licence gate stamped). A re-publication is a NEW version directory (v2, …) —
-never an overwrite of v1.
+The published bucket is `datapipelines-co` (us-east-1). Publish history: **v1
+published 2026-08-29 with the licence gate stamped; v2 published 2026-09-02 with
+the licence gate re-stamped the same day** (every evidence link re-fetched, the
+operative quotes unchanged — handback 049). v2 republishes the identical data
+artifacts (byte-identical MySQL and SQLite dumps; the Postgres dump differs only
+in its 5-byte header create-date — the README's contents-not-bytes contract) with
+the corrected `examples.json` (042's parameter-interpolated migration, which v1
+predates — T70). A re-publication is a NEW version directory (v3, …) —
+never an overwrite of an existing one.
 
 ```bash
 cd scripts/sample-data/work/artifacts
-aws s3 cp . s3://datapipelines-co/sample-data/mobility/v1/ --recursive --acl public-read
-aws s3 ls s3://datapipelines-co/sample-data/mobility/v1/
+aws s3 cp . s3://datapipelines-co/sample-data/mobility/v2/ --recursive --acl public-read
+aws s3 ls s3://datapipelines-co/sample-data/mobility/v2/
 ```
 
 Then verify the published copy the way a consumer will, from a clean directory:
 
 ```bash
 mkdir -p /tmp/pub && cd /tmp/pub
-curl -fsSLO https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v1/manifest.json
+curl -fsSLO https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v2/manifest.json
 # ...and the four artifacts it lists, then:
 ./scripts/sample-data/verify.sh /tmp/pub
 ```
@@ -142,7 +147,7 @@ Finally run the published-drift guard (049 C2) — the step whose absence let th
 published v1 drift from this repo for two days (T70):
 
 ```bash
-./scripts/sample-data/check-published.sh v1   # the version just published
+./scripts/sample-data/check-published.sh v2   # the version just published
 ```
 
 It fails unless the published `examples.json`, the published manifest's declared
