@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
-import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.TemplateEngine
@@ -46,19 +45,6 @@ class PipelineNodeSqlPartialControllerTest {
 
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
-
-    private val record =
-        PipelineRecord(
-            id = pipelineId,
-            name = "fixture",
-            displayName = "Fixture",
-            description = "",
-            ownerId = UUID.randomUUID(),
-            currentVersion = 1,
-            isDeleted = false,
-            createdAt = Instant.parse("2026-08-01T00:00:00Z"),
-            updatedAt = Instant.parse("2026-08-01T00:00:00Z"),
-        )
 
     private val bodyJson =
         """
