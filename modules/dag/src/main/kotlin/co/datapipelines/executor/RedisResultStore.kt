@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.datasources.ResultSchema
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException

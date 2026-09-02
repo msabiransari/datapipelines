@@ -2,18 +2,10 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
-import co.datapipelines.pipeline.Node
-import co.datapipelines.pipeline.NodeType
-import co.datapipelines.pipeline.ParameterBinder
-import co.datapipelines.pipeline.ParameterBindingResult
-import co.datapipelines.pipeline.Pipeline
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.ValidationFailure
-import co.datapipelines.templates.TemplateRenderException
+import co.datapipelines.templates.NodeSqlResolution
+import co.datapipelines.templates.NodeSqlResolver
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.api.currentPrincipal
@@ -32,6 +24,11 @@ import java.util.UUID
  * pipeline — contract §2.3 puts it in template entities — so this resolves the node's
  * PINNED {id, version} and renders it against the pipeline's own parameter context.
  *
+ * Since 037 B the resolution itself lives in [NodeSqlResolver], shared with the
+ * `pipelines_execute_node` tool; this controller owns the human half only — the principal's
+ * workspace, the `parameters` query-string parsing, and the Thymeleaf model states. Its
+ * render tests are the proof the editor's SQL panel kept working through the extraction.
+ *
  * Read-scoped and pipeline-aware on purpose: `/partials/templates/{id}/versions/{v}/render`
  * requires MUTATE_PIPELINES_TEMPLATES and takes a free-form context, so it would both
  * refuse a viewer and bypass the pipeline's parameter declarations.
@@ -39,19 +36,22 @@ import java.util.UUID
  * `parameters` is §6.3 WIRE JSON, produced by the page's own `coerceValue` — the same
  * function the execute path uses. `ParameterCoercion` is strict (a string for INTEGER is
  * a rejection, not a conversion), so raw form strings would fail here by design.
+ *
+ * The resolver is constructed here rather than injected: it is a stateless service over the
+ * three collaborators this controller already takes, and no wiring change may accompany the
+ * 037 fence.
  */
 @Controller
 class PipelineNodeSqlPartialController(
-    private val pipelines: PipelineRepository,
-    private val templateEngines: WorkspaceTemplateEngines,
-    private val templates: TemplateRepository,
+    pipelines: PipelineRepository,
+    templateEngines: WorkspaceTemplateEngines,
+    templates: TemplateRepository,
 ) {
-    // NOT constructor parameters: Spring injects the app's servlet ObjectMapper into an
-    // ObjectMapper-typed parameter even when it has a default, and that mapper lacks
-    // NodeOutputModule — reading a stored body with it 500s on `output` (caught by the
-    // demo smoke test). The body goes through the same deserializer every production
-    // reader uses; the tree mapper (for the `parameters` query value) is the contract's.
-    private val deserializer = PipelineDeserializer()
+    private val resolver = NodeSqlResolver(pipelines, templates, templateEngines)
+
+    // The tree mapper for the `parameters` query value — the contract's own (the stored-body
+    // deserializer lives in the resolver now, through the same PipelineDeserializer every
+    // production reader uses).
     private val mapper: ObjectMapper = PipelineJson.objectMapper()
 
     @GetMapping("/partials/pipelines/{id}/nodes/{nodeId}/sql")
@@ -63,91 +63,65 @@ class PipelineNodeSqlPartialController(
         model: Model,
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val record =
-            pipelines.findById(workspaceId, id)
-                ?: throw NoSuchElementException("Pipeline $id not found")
-        val bodyJson =
-            pipelines.findVersionBody(workspaceId, record.id, record.currentVersion)
-                ?: throw NoSuchElementException("Pipeline $id version ${record.currentVersion} body not found")
-        val pipeline = deserializer.readOrThrow(bodyJson)
-        val node = pipeline.node(nodeId)
 
-        when {
-            node == null -> {
-                model.addAttribute("state", "node-missing")
-                model.addAttribute("nodeId", nodeId)
+        // The E5 version default (draft-if-exists) applies here exactly as it does for the
+        // node-run tool, so the two surfaces cannot disagree about which body the panel and
+        // the agent are each looking at.
+        when (val inputs = parseOverrides(parameters)) {
+            is Overrides.Malformed -> {
+                rejectParameters(model, "parameters", "The parameters document is not valid §6.3 wire JSON: ${inputs.reason}")
+                return VIEW
             }
 
-            // Node.template is NEVER null — Node.fromJson binds `template ?: TemplateRef()`,
-            // whose defaults are id = "", version = 0 — so a null check cannot fire and the
-            // "no template" state is PIPELINE nodes only (contract §4.6 requires template
-            // everywhere else). Branch on the type / the blank id, never on null.
-            node.type == NodeType.PIPELINE || node.template.id.isBlank() -> {
-                model.addAttribute("state", "child-pipeline")
-                model.addAttribute("childName", node.pipeline?.name ?: "")
-                model.addAttribute("childVersion", node.pipeline?.version ?: 0)
-            }
-
-            else -> {
-                renderWithContext(workspaceId, pipeline, node, parameters, model)
+            is Overrides.Parsed -> {
+                val resolution = resolver.resolve(workspaceId, id, nodeId, requestedVersion = null, parameterInputs = inputs.inputs)
+                render(resolution, model)
             }
         }
         return VIEW
     }
 
-    /** Parse the overrides, bind them, and render — the three context outcomes of §8.3. */
-    private fun renderWithContext(
-        workspaceId: UUID,
-        pipeline: Pipeline,
-        node: Node,
-        parameters: String?,
+    private fun render(
+        resolution: NodeSqlResolution,
         model: Model,
     ) {
-        val inputs =
-            when (val parsed = parseOverrides(parameters)) {
-                is Overrides.Malformed -> {
-                    rejectParameters(model, "parameters", "The parameters document is not valid §6.3 wire JSON: ${parsed.reason}")
-                    return
-                }
-
-                is Overrides.Parsed -> {
-                    parsed.inputs
-                }
+        when (resolution) {
+            is NodeSqlResolution.NodeMissing -> {
+                model.addAttribute("state", "node-missing")
+                model.addAttribute("nodeId", resolution.nodeId)
             }
 
-        val binder = ParameterBinder(pipeline.parameters)
-        when (val binding = binder.bind(inputs)) {
-            is ParameterBindingResult.Bound -> {
-                renderInto(workspaceId, node.template, binding.context.asMap(), emptyList(), model)
+            is NodeSqlResolution.ChildPipeline -> {
+                model.addAttribute("state", "child-pipeline")
+                model.addAttribute("childName", resolution.childName)
+                model.addAttribute("childVersion", resolution.childVersion)
             }
 
-            is ParameterBindingResult.Rejected -> {
-                handleRejected(workspaceId, node, binder, binding.failures, model)
+            is NodeSqlResolution.ParameterRejected -> {
+                val first = resolution.failures.first()
+                rejectParameters(model, first.parameter, first.message)
+            }
+
+            is NodeSqlResolution.TemplateMissing -> {
+                model.addAttribute("state", "template-missing")
+                model.addAttribute("templateId", resolution.templateId)
+                model.addAttribute("templateVersion", resolution.templateVersion)
+            }
+
+            is NodeSqlResolution.RenderFailed -> {
+                model.addAttribute("state", "render-failed")
+                model.addAttribute("message", resolution.message)
+            }
+
+            is NodeSqlResolution.Rendered -> {
+                model.addAttribute("state", "rendered")
+                model.addAttribute("sql", resolution.sql)
+                model.addAttribute("dialect", resolution.dialect.wire)
+                model.addAttribute("templateId", resolution.templateId)
+                model.addAttribute("templateVersion", resolution.templateVersion)
+                model.addAttribute("sampledParameters", resolution.sampledParameters)
             }
         }
-    }
-
-    private fun handleRejected(
-        workspaceId: UUID,
-        node: Node,
-        binder: ParameterBinder,
-        failures: List<ValidationFailure>,
-        model: Model,
-    ) {
-        val coercionFailures =
-            failures.filter { it.code == PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE }
-        if (coercionFailures.isNotEmpty()) {
-            // A supplied override failed §6.3 coercion: name it and render NOTHING —
-            // SQL built from a value the executor would refuse is worse than no SQL.
-            val first = coercionFailures.first()
-            rejectParameters(model, first.details["parameter"]?.toString() ?: "", first.message)
-            return
-        }
-        // Every failure is an unsupplied REQUIRED parameter: fall back to the
-        // §12.6 dry-render context (defaults where present, type-appropriate
-        // samples otherwise) and label which parameters were sampled.
-        val sampled = failures.mapNotNull { it.details["parameter"]?.toString() }
-        renderInto(workspaceId, node.template, binder.sampleContext(), sampled, model)
     }
 
     private fun rejectParameters(
@@ -180,34 +154,6 @@ class PipelineNodeSqlPartialController(
         data class Malformed(
             val reason: String,
         ) : Overrides
-    }
-
-    private fun renderInto(
-        workspaceId: UUID,
-        ref: TemplateRef,
-        context: Map<String, Any?>,
-        sampledParameters: List<String>,
-        model: Model,
-    ) {
-        val version =
-            templates.lookupVersion(workspaceId, ref.id, ref.version) ?: run {
-                model.addAttribute("state", "template-missing")
-                model.addAttribute("templateId", ref.id)
-                model.addAttribute("templateVersion", ref.version)
-                return
-            }
-        try {
-            val sql = templateEngines.engineFor(workspaceId).render(ref, context)
-            model.addAttribute("state", "rendered")
-            model.addAttribute("sql", sql)
-            model.addAttribute("dialect", version.dialect.wire)
-            model.addAttribute("templateId", ref.id)
-            model.addAttribute("templateVersion", ref.version)
-            model.addAttribute("sampledParameters", sampledParameters)
-        } catch (e: TemplateRenderException) {
-            model.addAttribute("state", "render-failed")
-            model.addAttribute("message", e.message ?: "The template could not be rendered.")
-        }
     }
 
     private companion object {

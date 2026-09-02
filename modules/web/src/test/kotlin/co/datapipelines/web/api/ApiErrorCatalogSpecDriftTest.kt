@@ -93,8 +93,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 99 → 101 with 042: §13.4 gains `pipeline.node.sql_parameter_missing` and §13.9
          * gains `template.validation.parameter_interpolated`, landed in the SAME commit as
          * their constants and catalog rows.
+         *
+         * 101 → 103 with 037: §13.4 gains the node-run debug query's refusals
+         * (`pipeline.node.not_found`, `pipeline.node.standalone_execution_refused`), landed
+         * in the SAME commit as their constants and catalog rows.
          */
-        const val SECTION_13_ROW_COUNT = 101
+        const val SECTION_13_ROW_COUNT = 103
 
         /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's datasource_readonly). */
         const val SECTION_12_CODE_COUNT = 47

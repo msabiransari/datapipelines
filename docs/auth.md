@@ -672,16 +672,16 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
 
-**MCP tools** (all 18 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 20 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
 | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
-| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` | `author` |
+| `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `pipelines_execute_node` | `author` |
 
-(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 18 tools operate inside the API key's pinned workspace, design §9.)
+(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 20 tools operate inside the API key's pinned workspace, design §9.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 

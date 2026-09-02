@@ -57,6 +57,11 @@ class McpServerWiringTest {
             PipelinesListTool(pipelines),
             PipelinesGetTool(pipelines),
             PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, deserializer),
+            PipelinesExecuteNodeTool(
+                co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
+                datasources,
+                co.datapipelines.datasources.SqlRunner(datasources),
+            ),
             PipelinesCreateTool(pipelines, authoringGuard, deserializer, validator, PipelineSerializer()),
             PipelinesUpdateTool(
                 pipelines,
@@ -75,6 +80,7 @@ class McpServerWiringTest {
             DatasourcesGetSchemasTool(introspector, datasources),
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
+            DatasourcesPreviewRowsTool(datasources, co.datapipelines.datasources.SqlRunner(datasources)),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
@@ -82,22 +88,22 @@ class McpServerWiringTest {
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 18 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 20 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist.
      */
     @Test
-    fun `the tool surface is exactly the 18 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 20 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
-            { dispatcher.toolNames().size shouldBe 18 },
+            { dispatcher.toolNames().size shouldBe 20 },
             { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys },
         )
     }
 
     @Test
-    fun `the server builds with all 18 tools and all three prompts registered`() {
+    fun `the server builds with all 20 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(
@@ -110,7 +116,7 @@ class McpServerWiringTest {
             )
 
         assertAll(
-            { server.listTools().size shouldBe 18 },
+            { server.listTools().size shouldBe 20 },
             {
                 server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder
                     listOf("analyze_pipeline", "create_pipeline_for_question", "debug_failed_execution")

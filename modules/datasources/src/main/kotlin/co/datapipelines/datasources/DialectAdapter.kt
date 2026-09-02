@@ -94,6 +94,75 @@ interface DialectAdapter {
         get() = false
 
     /**
+     * The identifier-quote vocabulary this dialect's engine accepts (the preview-rows surface,
+     * datasources §7B): the SQL-standard doubled `"` by default, MySQL's backtick, MSSQL's
+     * `[...]` brackets. Every caller-supplied identifier that reaches a preview statement goes
+     * through [quoteIdentifier] with the quote character doubled — there is no SQL-validation
+     * utility in this repo and this quoting IS the injection boundary for identifiers.
+     *
+     * Declared per-dialect on the interface (not inferred from the driver at runtime) so
+     * `DialectAdaptersTest` can assert the enum-total mapping and the embedded-dialect tests
+     * can pin each adapter against its pinned driver's
+     * `DatabaseMetaData.getIdentifierQuoteString()`.
+     */
+    val identifierQuoteStyle: IdentifierQuoteStyle
+        get() = IdentifierQuoteStyle.DOUBLE_QUOTE
+
+    /**
+     * Quotes one identifier for this dialect, doubling every embedded quote character
+     * (`"weird"name"` → `"weird""name"`). The ONLY way a caller-supplied table/schema/column
+     * name may enter a preview statement. A blank identifier is refused by the caller BEFORE
+     * quoting — this function is deliberately dumb about it.
+     */
+    fun quoteIdentifier(identifier: String): String =
+        when (identifierQuoteStyle) {
+            IdentifierQuoteStyle.DOUBLE_QUOTE -> "\"${identifier.replace("\"", "\"\"")}\""
+            IdentifierQuoteStyle.BACKTICK -> "`${identifier.replace("`", "``")}`"
+            IdentifierQuoteStyle.BRACKET -> "[${identifier.replace("]", "]]")}]"
+        }
+
+    /**
+     * How this dialect caps a SELECT's row count (datasources §7B): a trailing `LIMIT n`
+     * (POSTGRES, MYSQL, H2, DUCKDB, SQLITE), Oracle's trailing `FETCH FIRST n ROWS ONLY`
+     * (12c+), or MSSQL's `TOP (n)` — which sits AFTER `SELECT`, not at the end.
+     */
+    val rowLimitStyle: RowLimitStyle
+        get() = RowLimitStyle.LIMIT
+
+    /**
+     * Caps a SELECT to [limit] rows — a WHOLE-STATEMENT method, not a suffix, because MSSQL's
+     * `TOP (n)` sits after the `SELECT` keyword ([RowLimitStyle.TOP]).
+     *
+     * Oracle decision, stated per the round contract: `FETCH FIRST n ROWS ONLY` (12c+), NOT
+     * `ROWNUM` — `ROWNUM` is assigned BEFORE `ORDER BY` evaluates, so `WHERE ROWNUM <= n` picks
+     * n arbitrary rows and then sorts them, silently returning the wrong rows for the
+     * "both ends of the data" preview contract. 12c has been the floor since 2013; the pinned
+     * ojdbc fleet is 12c+.
+     *
+     * Only ever applied to a statement THIS MODULE built (the preview SELECT) — never to
+     * author-rendered SQL, whose row caps come from JDBC `maxRows`/`fetchSize` instead.
+     */
+    fun applyRowLimit(
+        selectSql: String,
+        limit: Int,
+    ): String =
+        when (rowLimitStyle) {
+            RowLimitStyle.LIMIT -> "$selectSql LIMIT $limit"
+
+            RowLimitStyle.FETCH_FIRST -> "$selectSql FETCH FIRST $limit ROWS ONLY"
+
+            // `TOP`-insertion anchors on the statement's first `SELECT` keyword,
+            // case-insensitively (author SQL is not involved — the statement is module-built
+            // and starts with `SELECT`); every other style appends its clause.
+            RowLimitStyle.TOP -> selectSql.replaceFirst(LEADING_SELECT, "SELECT TOP ($limit)")
+        }
+
+    /** The `TOP`-insertion anchor: the statement's first `SELECT` keyword (case-insensitive). */
+    private companion object {
+        val LEADING_SELECT = Regex("""^(\s*)SELECT\b""", RegexOption.IGNORE_CASE)
+    }
+
+    /**
      * Validates a JDBC URL for this dialect (§6.1): scheme match, basic parse, and the §5.6
      * refusal guard — the same union applied to `properties.jdbc`, refusing class-loading /
      * local-file / connect-time-SQL properties and credentials smuggled into the URL (H2
@@ -112,4 +181,28 @@ interface DialectAdapter {
      * the caller for a runtime pool; supplied directly for save-time validation).
      */
     fun buildHikariConfig(datasource: Datasource): HikariConfig
+}
+
+/** The engine's identifier-quote vocabulary — see [DialectAdapter.identifierQuoteStyle]. */
+enum class IdentifierQuoteStyle {
+    /** `"name"` with embedded `"` doubled — the SQL standard (POSTGRES, ORACLE, H2, DUCKDB, SQLITE). */
+    DOUBLE_QUOTE,
+
+    /** `` `name` `` with embedded backticks doubled (MySQL). */
+    BACKTICK,
+
+    /** `[name]` with embedded `]` doubled (MSSQL). */
+    BRACKET,
+}
+
+/** How a dialect caps a SELECT — see [DialectAdapter.applyRowLimit]. */
+enum class RowLimitStyle {
+    /** Trailing `LIMIT n` (POSTGRES, MYSQL, H2, DUCKDB, SQLITE). */
+    LIMIT,
+
+    /** Trailing `FETCH FIRST n ROWS ONLY` (ORACLE 12c+ — not `ROWNUM`; see the applyRowLimit KDoc). */
+    FETCH_FIRST,
+
+    /** `TOP (n)` inserted after the `SELECT` keyword (MSSQL). */
+    TOP,
 }

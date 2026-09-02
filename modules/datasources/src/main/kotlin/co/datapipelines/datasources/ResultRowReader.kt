@@ -1,4 +1,4 @@
-package co.datapipelines.executor
+package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
@@ -18,7 +18,13 @@ data class ResultSchema(
 )
 
 /**
- * Reads a **source** `ResultSet` for egress to the result store (dag-executor.md §6.4.2 steps 1–2).
+ * Reads a **source** `ResultSet` into canonical values — ONE decoder for every surface that
+ * decodes driver rows (dag-executor.md §6.4.2 steps 1–2, and the §7B preview/node-run reads).
+ *
+ * Born in `dag` as an `internal object` serving only the executor's egress path; moved here
+ * (037 C2) when the datasource preview surface needed the identical two read rules —
+ * duplicating them beside each other is how two decoders drift apart on the next type-system
+ * change. `dag` imports it from here (the dependency direction was already dag → datasources).
  *
  * ## Why this duplicates staging's readers
  *
@@ -36,7 +42,7 @@ data class ResultSchema(
  *    `getTimestamp`/`getDate`/`getTime`: the `java.sql` temporal types convert through the JVM
  *    default zone, and `JsonEncoder` rejects them by design.
  */
-internal object ResultRowReader {
+object ResultRowReader {
     /**
      * Derives the canonical schema from cursor metadata through [sourceDialect]'s mapper.
      *
