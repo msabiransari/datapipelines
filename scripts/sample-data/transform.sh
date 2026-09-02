@@ -49,13 +49,10 @@ STATIONS=$(lock_field param ghcn_stations)
   || die "sources.lock is missing one of the param lines this stage needs"
 
 # The window as inclusive DATE bounds. `window_end` names a MONTH, so its bound
-# is the last day of that month — computed, never hand-written.
+# is the last day of that month — computed, never hand-written (the one shared
+# derivation lives in lib/common.sh: window_day_end, 045 §B).
 DAY_START="$WINDOW_START-01"
-DAY_END=$(python3 -c "
-import sys,datetime
-y,m=map(int,'$WINDOW_END'.split('-'))
-y2,m2=(y+1,1) if m==12 else (y,m+1)
-print((datetime.date(y2,m2,1)-datetime.timedelta(days=1)).isoformat())")
+DAY_END=$(window_day_end "$WINDOW_END")
 
 DUCKDB=$(duckdb_bin)
 log "DuckDB $(basename "$DUCKDB"), window $DAY_START..$DAY_END, trips modulus $MODULUS"

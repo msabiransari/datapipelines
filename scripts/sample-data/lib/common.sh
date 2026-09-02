@@ -43,6 +43,24 @@ step() { printf '\n%s: ==> %s\n' "${SD_SCRIPT:-sample-data}" "$*" >&2; }
 # Linux images this build runs in; scripts/lib/scan-tools.sh made the same call.
 sha256_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 
+# window_day_end <YYYY-MM> — the last day of that month, ISO (2026-02-28).
+# `window_end` in sources.lock names a MONTH; the inclusive DATE bound of the
+# window is the last day of that month. COMPUTED, never hand-written: a
+# hand-written end date is how the queries and the manifest end up describing
+# a window the data does not have. One derivation, shared by transform.sh
+# (the window filters) and manifest.sh (the provenance text) — two
+# computations of the same fact drift (045 §B). python3, like every other
+# date computation in this pipeline: BSD and GNU date disagree on the
+# arithmetic flags.
+window_day_end() {
+  python3 - "$1" <<'PY'
+import datetime, sys
+y, m = (int(x) for x in sys.argv[1].split("-"))
+ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+print((datetime.date(ny, nm, 1) - datetime.timedelta(days=1)).isoformat())
+PY
+}
+
 # sha256_expect <file> <want> <what>
 # Verify and REMOVE the file on mismatch. Removing it is what makes a retry
 # meaningful: a half-written download that keeps failing its checksum would

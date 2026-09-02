@@ -91,7 +91,8 @@ pin_file "tlc-zone-lookup.csv" "https://d37ci6vzurychx.cloudfront.net/misc/taxi_
   echo "# the pin exists to prevent."
   echo "#"
   echo "# The determinism claim is kept at the level that actually matters: the"
-  # shellcheck disable=SC2016 — single quotes ON PURPOSE: backticks inside double
+  # shellcheck disable=SC2016
+  # Single quotes ON PURPOSE: backticks inside double
   # quotes are command substitution; the unquoted form executed a nonexistent
   # `window` command and ate the word from the committed lock file (023 review F7).
   echo '# `window` lines below pin the SHA-256 of the CANONICAL EXTRACT this build'
