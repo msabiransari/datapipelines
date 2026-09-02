@@ -1,7 +1,6 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.restassured.RestAssured.given
@@ -252,15 +251,6 @@ class WorkspaceIsolationIntegrationTest {
             .jsonPath()
             .getList("data.items")
 
-    private data class SeededKey(
-        val name: String,
-        val ownerId: String,
-        val scopes: Array<String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val WORKSPACE_HEADER = "DP-Workspace"
@@ -269,7 +259,6 @@ class WorkspaceIsolationIntegrationTest {
         private const val CSRF_HEADER = "DP-CSRF-Token"
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
         private const val BOB = "bbb00000-0000-0000-0000-000000000002"
@@ -293,22 +282,8 @@ class WorkspaceIsolationIntegrationTest {
         // value: the session JWTs below are signed with the same secret the app validates.
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = seededKey("alice-key", ALICE, arrayOf("read", "execute", "author"))
-        private val BOB_KEY = seededKey("bob-key", BOB, arrayOf("read", "execute", "author"))
-
-        private fun seededKey(
-            name: String,
-            ownerId: String,
-            scopes: Array<String>,
-        ): SeededKey {
-            val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            return SeededKey(name, ownerId, scopes, id, plaintext, argon2Hash(plaintext))
-        }
-
-        /** Same library and parameters (2 / 19456 / 1) as auth's Argon2SecretHasher — see TracerBulletE2eTest. */
-        private fun argon2Hash(plaintext: String): String =
-            Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id, 32, 16).hash(2, 19456, 1, plaintext.toCharArray())
+        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
+        private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
 
         /**
          * Mints the session JWT exactly as `JwtService.issue` does (HS256, `iss`, iat/exp,

@@ -3,7 +3,6 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -522,16 +521,7 @@ class PipelineCompositionE2eTest {
         val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
         response.statusCode() shouldBe 200
 
-        val events = mutableListOf<Pair<String, JsonNode>>()
-        var currentEvent: String? = null
-        for (line in response.body().lines()) {
-            if (line.startsWith("event:")) {
-                currentEvent = line.removePrefix("event:").trim()
-            } else if (line.startsWith("data:")) {
-                events += (currentEvent ?: "unknown") to mapper.readTree(line.removePrefix("data:").trim())
-            }
-        }
-        return events
+        return E2eSse.parseEvents(response.body(), mapper)
     }
 
     /** The H2 seed runs before datasource registration: first connection creates the database. */
@@ -571,21 +561,11 @@ class PipelineCompositionE2eTest {
         }
     }
 
-    /** A generated `dpk_<id>.<secret>` key and its stored Argon2id hash (auth.md §7.1/§7.2). */
-    private class SeededKey(
-        val name: String,
-        val scopes: Array<out String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
         private const val SSE_BUDGET_MINUTES = 2L
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private const val H2_DATASOURCE = "h2-comp"
         private const val H2_JDBC_URL = "jdbc:h2:mem:compdb;DB_CLOSE_DELAY=-1"
@@ -618,27 +598,7 @@ class PipelineCompositionE2eTest {
 
         private val random = SecureRandom()
 
-        // Argon2id with auth's exact parameters (SecretHasher.kt: 2 / 19 456 / 1) — see
-        // TracerBulletE2eTest for why the auth class itself is not referenced here.
-        private val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-
-        private val ADMIN_KEY = generateKey("e2e-composition-key", arrayOf("admin"))
-
-        private fun generateKey(
-            name: String,
-            scopes: Array<String>,
-        ): SeededKey {
-            val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val chars = plaintext.toCharArray()
-            val hash =
-                try {
-                    argon2.hash(2, 19_456, 1, chars)
-                } finally {
-                    argon2.wipeArray(chars)
-                }
-            return SeededKey(name = name, scopes = scopes, id = id, plaintext = plaintext, hash = hash)
-        }
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-composition-key", arrayOf("admin"))
 
         @Container
         @JvmStatic
