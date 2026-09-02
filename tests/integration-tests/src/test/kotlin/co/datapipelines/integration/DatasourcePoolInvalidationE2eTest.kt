@@ -312,7 +312,7 @@ class DatasourcePoolInvalidationE2eTest {
         private const val PROPAGATION_BUDGET = 30_000_000_000L
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
-        private val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000002"
+        private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000002"
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-key", arrayOf("admin"))
 
         @Container

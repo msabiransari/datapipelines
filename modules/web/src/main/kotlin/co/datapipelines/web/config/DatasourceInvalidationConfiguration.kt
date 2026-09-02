@@ -8,9 +8,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.dao.DataAccessException
-import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.Message
 import org.springframework.data.redis.connection.MessageListener
+import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.listener.ChannelTopic
 import org.springframework.data.redis.listener.RedisMessageListenerContainer
@@ -148,7 +148,10 @@ class DatasourceInvalidationListener(
             try {
                 mapper.readValue(String(message.body, Charsets.UTF_8), PoolInvalidationMessage::class.java)
             } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
-                LOG.warn("event=datasource.pool_invalidation_malformed reason=\"dropped\" message=\"{}\"", e.message?.take(200))
+                LOG.warn(
+                    "event=datasource.pool_invalidation_malformed reason=\"dropped\" message=\"{}\"",
+                    e.message?.take(MALFORMED_MESSAGE_HEAD_CHARS),
+                )
                 return
             }
         if (parsed.origin == instanceId) return
@@ -164,5 +167,8 @@ class DatasourceInvalidationListener(
 
     private companion object {
         val LOG = LoggerFactory.getLogger(DatasourceInvalidationListener::class.java)
+
+        /** Bounded so a hostile/garbled payload cannot spray its whole body into the log. */
+        const val MALFORMED_MESSAGE_HEAD_CHARS = 200
     }
 }

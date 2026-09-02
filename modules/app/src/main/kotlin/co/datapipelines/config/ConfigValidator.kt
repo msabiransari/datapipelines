@@ -418,14 +418,14 @@ class ConfigValidator(
             val canonical = canonicalRaw?.toIntOrNull()
             warnings +=
                 "event=config.executor_concurrency_alias_used alias_value=$alias " +
-                    "message=\"datapipelines.executor.max-concurrent-executions-global is deprecated; " +
-                    "its value ($alias) is in effect. Rename the setting to " +
-                    "datapipelines.executor.max-concurrent-executions-per-instance (removed next release)\""
+                "message=\"datapipelines.executor.max-concurrent-executions-global is deprecated; " +
+                "its value ($alias) is in effect. Rename the setting to " +
+                "datapipelines.executor.max-concurrent-executions-per-instance (removed next release)\""
             if (canonical != null && canonical != DEFAULT_CONCURRENT_EXECUTIONS && canonical != alias) {
                 violations +=
                     "datapipelines.executor.max-concurrent-executions-global ($alias) and " +
-                        "datapipelines.executor.max-concurrent-executions-per-instance ($canonical) are both " +
-                        "set and differ (§3.2); remove the deprecated alias or make the values agree."
+                    "datapipelines.executor.max-concurrent-executions-per-instance ($canonical) are both " +
+                    "set and differ (§3.2); remove the deprecated alias or make the values agree."
             }
         }
 

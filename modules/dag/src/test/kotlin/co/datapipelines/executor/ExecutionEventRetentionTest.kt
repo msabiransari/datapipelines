@@ -162,10 +162,11 @@ class ExecutionEventRetentionTest {
     }
 
     private fun remainingEventIds(): List<String> =
-        jdbc.jdbcTemplate.queryForList(
-            "SELECT payload_json::TEXT FROM execution_events ORDER BY payload_json::TEXT",
-            String::class.java,
-        ).map { it.trim('"') }
+        jdbc.jdbcTemplate
+            .queryForList(
+                "SELECT payload_json::TEXT FROM execution_events ORDER BY payload_json::TEXT",
+                String::class.java,
+            ).map { it.trim('"') }
 
     /** The blast-radius assertion surface: the durable rows, verbatim. */
     private fun executionRows(): List<Map<String, Any>> =

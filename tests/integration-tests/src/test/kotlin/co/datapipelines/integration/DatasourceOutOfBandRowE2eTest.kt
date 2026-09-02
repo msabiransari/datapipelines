@@ -66,7 +66,11 @@ class DatasourceOutOfBandRowE2eTest {
         // GET strips the server-managed key and keeps the operator's real one.
         val got: JsonNode = mapper.readTree(getBody).path("data")
         got.path("properties").path("hikari").has("readOnly") shouldBe false
-        got.path("properties").path("hikari").path("maximumPoolSize").asInt() shouldBe 5
+        got
+            .path("properties")
+            .path("hikari")
+            .path("maximumPoolSize")
+            .asInt() shouldBe 5
 
         // The unmodified round-trip: PUT exactly what GET returned (bar the write-only
         // password, which the §9.4 bind re-adds) — 200, not the pre-050 400.
@@ -160,7 +164,7 @@ class DatasourceOutOfBandRowE2eTest {
         private const val DS = "oob_e2e_ds"
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
-        private val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000003"
+        private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000003"
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-oob-key", arrayOf("admin"))
 
         @Container

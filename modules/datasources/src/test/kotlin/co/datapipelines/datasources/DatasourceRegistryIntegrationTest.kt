@@ -54,7 +54,13 @@ class DatasourceRegistryIntegrationTest {
         auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
         invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
     ): DefaultDatasourceRegistry =
-        DefaultDatasourceRegistry(DatasourceRepository(jdbc), encryptor, references = references, auditSink = auditSink, invalidation = invalidation)
+        DefaultDatasourceRegistry(
+            DatasourceRepository(jdbc),
+            encryptor,
+            references = references,
+            auditSink = auditSink,
+            invalidation = invalidation,
+        )
 
     @Test
     fun `save encrypts the password and get never returns it`() {
