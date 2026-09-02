@@ -86,6 +86,8 @@ class WebPropertiesSpecDriftTest {
     fun `executions property defaults match configuration-md section 3-11`() {
         val props = ExecutionsProperties()
         documented.getValue("datapipelines.executions.stale-timeout-minutes") shouldBe props.staleTimeoutMinutes.toString()
+        // Bound since 050/T60 — the retention job enforces it hourly.
+        documented.getValue("datapipelines.executions.event-retention-days") shouldBe props.eventRetentionDays.toString()
     }
 
     private companion object {
