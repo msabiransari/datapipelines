@@ -2,6 +2,7 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.DatapipelinesException
 import freemarker.core.InvalidReferenceException
 import freemarker.template.Configuration
@@ -70,8 +71,18 @@ class TemplateRenderException(
 /**
  * Wraps Freemarker under the templates.md §4.3 configuration and owns the two render guards.
  *
- * A single hardened [Configuration] ([FreemarkerConfigFactory]) is shared across renders — it is
- * thread-safe and caches parsed templates by their immutable `id@version` key.
+ * Since 046 (template-hierarchy-design §6) one engine holds **two** hardened
+ * [Configuration]s over the same [RegistryTemplateLoader]: the `sql` one (exactly the
+ * pre-046 configuration, no output escaping) and the `html` one (identical hardening plus
+ * `HTMLOutputFormat` and forced auto-escaping). [renderNow] selects between them by the
+ * resolved version's `type` — the single dispatch point, so no caller of `render`/`execute`
+ * can send an `html` body through the escaping-free configuration by forgetting to ask.
+ * The loader itself is type-blind (it resolves `{name}@{version}` regardless of type), and a
+ * version's key only ever loads through one of the two configurations because the type is
+ * immutable per template (§5.3) — the two caches cannot disagree about a key.
+ *
+ * Both configurations share the watchdog pool and the render budget below; nothing about the
+ * guards is per-type.
  *
  * ## The render guards, and why they are shaped this way (§4.3)
  *
@@ -91,12 +102,16 @@ class TemplateRenderException(
  * uninterruptible template into an unbounded thread leak.
  */
 class TemplateEngine(
-    registry: TemplateRegistry,
+    private val registry: TemplateRegistry,
     cacheSize: Int,
     private val renderTimeoutMs: Long,
     private val maxOutputChars: Long,
 ) : Closeable {
-    private val configuration: Configuration = FreemarkerConfigFactory.create(RegistryTemplateLoader(registry), cacheSize)
+    private val loader: RegistryTemplateLoader = RegistryTemplateLoader(registry)
+
+    private val sqlConfiguration: Configuration = FreemarkerConfigFactory.create(loader, cacheSize)
+
+    private val htmlConfiguration: Configuration = FreemarkerConfigFactory.createHtml(loader, cacheSize)
 
     private val workers =
         ThreadPoolExecutor(
@@ -202,6 +217,16 @@ class TemplateEngine(
         normalizedContext: Map<String, Any?>,
         maxOutputChars: Long,
     ): String {
+        // 046 §6: the version's type picks the configuration. The lookup rides the registry's
+        // resolved-version LRU (one map hit once warm), and a null version falls through to the
+        // sql configuration so the loader's TemplateNotFoundException — and the NotFound
+        // classification that turns it into template_not_found — is preserved exactly as it was.
+        val configuration =
+            if (registry.lookup(ref.id, ref.version)?.type == TemplateType.HTML) {
+                htmlConfiguration
+            } else {
+                sqlConfiguration
+            }
         val template = configuration.getTemplate(ref.key)
         val buffer = BoundedWriter(StringBuilder(), maxOutputChars)
         template.process(normalizedContext, buffer)

@@ -135,6 +135,20 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 
 ---
 
+## 6A. `TemplateType` — template kind
+
+**Source:** [Template Hierarchy §5](template-hierarchy-design.md)
+**Used by:** templates (engine-configuration dispatch, type/dialect consistency), pipeline-contract (reference legality).
+
+| Value | Description |
+|---|---|
+| `sql` | The template renders SQL for pipeline nodes. Requires a `dialect`. Default, and the only kind that existed before 2026-09-02 (046) — every stored template backfilled to it. |
+| `html` | The template renders HTML through a second, auto-escaping engine configuration (design §6). Declares no `dialect`; **no pipeline node may reference it** (`pipeline.validation.template_type_mismatch`). |
+
+Fixed at template **create** and identical on every version of a template (`template.validation.type_immutable`). Serialization is the lowercase wire value (`"sql"` / `"html"`), per the case convention above. There are no reserved future values — component sub-typing (kpi, aggrid, svg, form, …) belongs to the future dashboard abstraction and is deliberately absent here (design §2).
+
+---
+
 ## 7. `StagingEngine` — tempdb engine
 
 **Source:** [Pipeline Contract §5](pipeline-contract.md#5-settings)
@@ -382,6 +396,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `WriteMode` | pipeline-contract | dag-executor |
 | `Dialect` | type-system | datasources, templates, pipeline-contract, mcp-server |
 | `TemplateEngine` | templates | templates |
+| `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `Scope` | auth | every endpoint |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
@@ -413,6 +428,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.7 | 046 typed templates | New §6A `TemplateType` (`sql` \| `html`, template-hierarchy-design §5) beside `TemplateEngine` — a template's kind, chosen at create and immutable across versions; the cross-reference table gains its row. |
 | 2026-08-05 | v1.0 | initial draft | Initial enums reference: 18 enum categories cataloged, cross-reference table, validation discipline |
 | 2026-08-07 | v1.1 | consistency campaign | Case/serialization convention added; `OutputTarget` default → `caller` (D1); `ResultDelivery` removed (D9); `execution_aborted` SSE event added (D7); `AuthAuditEvent` synced to auth §10.1 (no password/lockout events); §16 reduced to domain registry pointing at the single concrete catalog (pipeline-contract §13), D5 renames applied; single authority per enum; broken source links fixed. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-11 | v1.2 | gate C review | §16: registered `template.not_found` / `datasource.not_found` as two-segment codes (read/mutate-path misses; pipeline-contract §13 v1.3); template domain row widened to `template.*`. |

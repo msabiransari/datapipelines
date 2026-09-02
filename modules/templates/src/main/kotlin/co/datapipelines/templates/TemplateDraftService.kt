@@ -31,8 +31,10 @@ class TemplateDraftService(
      * edited back to its released parent is left alone; discard stays explicit.
      *
      * @throws DatapipelinesException `template.not_found`, `template.authoring.disabled`
-     *   (receiver write path, versioning §5.5), or `template.version.conflict`
-     *   (stale [expectedHash], with the current hash/author in details).
+     *   (receiver write path, versioning §5.5), `template.version.conflict`
+     *   (stale [expectedHash], with the current hash/author in details), or
+     *   `template.validation.type_immutable` (046 §5.3: the payload carries a `type` other
+     *   than the template's established one).
      */
     fun write(
         workspaceId: UUID,
@@ -44,15 +46,21 @@ class TemplateDraftService(
         // §5.5: the template mirror of the pipeline guard — fail-closed at the write path.
         authoring.requireTemplateAuthoring()
 
-        if (templates.findLatest(workspaceId, id) == null) throw notFound(id)
+        val latest =
+            templates.findLatest(workspaceId, id) ?: throw notFound(id)
+
+        // 046 §5.3: the draft inherits the template's established type; a payload carrying a
+        // different one is refused here, and every row the write paths below store carries the
+        // resolved type so the per-version contract stays self-contained.
+        val resolved = TemplateTypeRule.forExisting(draft, latest.type)
 
         val existingDraft = templates.findDraftDetail(workspaceId, id)
         if (existingDraft != null) {
-            templates.writeDraft(workspaceId, id, draft, expectedHash, actor)?.let { return it }
+            templates.writeDraft(workspaceId, id, resolved, expectedHash, actor)?.let { return it }
             // No rows: stale hash, or the draft was discarded mid-write — fall through to
             // the create branch, whose guard decides.
         }
-        return templates.createDraft(workspaceId, id, draft, expectedHash, actor)
+        return templates.createDraft(workspaceId, id, resolved, expectedHash, actor)
             ?: throw staleBase(workspaceId, id)
     }
 

@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -18,6 +19,16 @@ import com.fasterxml.jackson.annotation.JsonProperty
  * on update the caller supplies it. [engine] defaults to `freemarker`, the only v1 value
  * (enums.md §6); the write path never omits it.
  *
+ * ## `type` and `dialect` are conditional on each other (046, §5.3/§5.4)
+ *
+ * [type] is accepted on **create only**, defaulting to [TemplateType.SQL] when absent;
+ * afterwards it is read-only, and a write payload carrying a different type is refused with
+ * `template.validation.type_immutable` ([TemplateTypeRule] resolves the established value
+ * into every draft a write path stores). A null [type] means "not stated by this payload" —
+ * never a third kind of template. [dialect] is nullable because an `html` template declares
+ * none; the type/dialect consistency rules are [TemplateValidator]'s, so every write surface
+ * (REST, MCP, import) enforces the same pair.
+ *
  * `@JsonIgnoreProperties(ignoreUnknown = true)` is what makes a payload that *does* carry
  * `version` / `created_at` / `created_by` bind cleanly **without** them — the server-assigned
  * values are dropped because they have nowhere to land, not because a filter removed them.
@@ -31,8 +42,10 @@ data class TemplateDraft(
     val id: String? = null,
     @field:JsonProperty("engine") @get:JsonProperty("engine") @param:JsonProperty("engine")
     val engine: String = Template.FREEMARKER_ENGINE,
+    @field:JsonProperty("type") @get:JsonProperty("type") @param:JsonProperty("type")
+    val type: TemplateType? = null,
     @field:JsonProperty("dialect") @get:JsonProperty("dialect") @param:JsonProperty("dialect")
-    val dialect: Dialect,
+    val dialect: Dialect? = null,
     @field:JsonProperty("display_name") @get:JsonProperty("display_name") @param:JsonProperty("display_name")
     val displayName: String,
     @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")

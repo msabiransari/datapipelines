@@ -2,6 +2,7 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -148,6 +149,7 @@ class TemplateRepository(
     fun list(
         workspaceId: UUID,
         dialect: Dialect? = null,
+        type: TemplateType? = null,
         q: String? = null,
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
@@ -163,6 +165,7 @@ class TemplateRepository(
                 // Every optional filter is CAST in the SQL: a bare `? IS NULL` gives Postgres no
                 // type to infer and the statement will not even prepare.
                 "dialect" to dialect?.wire,
+                "type" to type?.wire,
                 "pattern" to q?.let { "%${escapeLike(it)}%" },
                 "workspaceId" to workspaceId,
                 "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT),
@@ -180,6 +183,7 @@ class TemplateRepository(
     fun count(
         workspaceId: UUID,
         dialect: Dialect? = null,
+        type: TemplateType? = null,
         q: String? = null,
     ): Int =
         checkNotNull(
@@ -192,6 +196,7 @@ class TemplateRepository(
                 """.trimIndent(),
                 mapOf(
                     "dialect" to dialect?.wire,
+                    "type" to type?.wire,
                     "pattern" to q?.let { "%${escapeLike(it)}%" },
                     "workspaceId" to workspaceId,
                 ),
@@ -236,11 +241,14 @@ class TemplateRepository(
         createdBy: UUID,
     ): Template {
         val id = draft.id ?: generateId()
+        // §5.3 (046): creation is where a null payload type becomes the explicit `sql` default,
+        // so every caller of the create path stores a resolved type without knowing the rule.
+        val resolved = TemplateTypeRule.forCreate(draft)
         return mappingDuplicateName(id) {
             jdbc
                 .query(
                     INSERT_SQL,
-                    params(workspaceId, id, draft, createdBy),
+                    params(workspaceId, id, resolved, createdBy),
                     MAPPER,
                 ).single()
         }
@@ -384,10 +392,13 @@ class TemplateRepository(
      * expression every write and the V6 backfill use — what §9.2's import hash-recompute
      * guard reads. Never recomputed in Kotlin: a second implementation of the canonical
      * form is where the writer's and the reader's hashes would silently diverge.
+     *
+     * [dialect] is the wire value or null (an `html` template, since 046) — the expression
+     * hashes it as JSON `null`, deterministically, exactly as the write path does.
      */
     fun computeBodyHash(
         engine: String,
-        dialect: String,
+        dialect: String?,
         isLibrary: Boolean,
         importsJson: String,
         body: String,
@@ -554,11 +565,12 @@ class TemplateRepository(
         actor: UUID,
     ): Template {
         val id = draft.id ?: error("preserved-version import requires an id")
+        val resolved = TemplateTypeRule.forCreate(draft)
         return mappingDuplicateName(id) {
             jdbc
                 .query(
                     IMPORT_NEW_TEMPLATE_SQL,
-                    params(workspaceId, id, draft, actor) +
+                    params(workspaceId, id, resolved, actor) +
                         mapOf(
                             "version" to version,
                             "bodyHash" to bodyHash,
@@ -620,7 +632,12 @@ class TemplateRepository(
             "displayName" to draft.displayName,
             "description" to draft.description,
             "engine" to draft.engine,
-            "dialect" to draft.dialect.wire,
+            // The type every write path resolved before calling in (create's `sql` default or
+            // the template's established value, [TemplateTypeRule]); the elvis is the belt
+            // behind that — it can only fire on a path that skipped the rule, and the
+            // chk_type_dialect invariant then refuses the row rather than storing a lie.
+            "type" to (draft.type ?: TemplateType.SQL).wire,
+            "dialect" to draft.dialect?.wire,
             "isLibrary" to draft.isLibrary,
             "importsJson" to TemplateJson.writeImports(draft.imports),
             "body" to draft.body,
@@ -675,7 +692,7 @@ class TemplateRepository(
         private val SELECT_JOINED =
             """
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
                    v.body, v.created_at, v.created_by AS version_created_by, v.status, v.body_hash
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
@@ -693,6 +710,7 @@ class TemplateRepository(
               AND t.workspace_id = :workspaceId
               AND v.version = t.current_version
               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
+              AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
               AND (
                     CAST(:pattern AS TEXT) IS NULL
                     OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
@@ -703,7 +721,7 @@ class TemplateRepository(
             """.trimIndent()
 
         private const val SELECT_VERSION =
-            "SELECT t.name AS template_id, v.version, v.engine, v.dialect, v.is_library, " +
+            "SELECT t.name AS template_id, v.version, v.engine, v.type, v.dialect, v.is_library, " +
                 "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by " +
                 "FROM template_versions v JOIN templates t ON t.id = v.template_id"
 
@@ -740,16 +758,16 @@ class TemplateRepository(
                 RETURNING id, name, display_name, description
             ), new_version AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, released_by, released_at)
-                SELECT id, 1, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                SELECT id, 1, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM new_template
-                RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
+                RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
@@ -778,11 +796,11 @@ class TemplateRepository(
                    AND v.version = t.current_version AND v.status = 'RELEASED' AND v.body_hash = :expectedHash
             ), draft AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, updated_by, updated_at)
                 SELECT v.template_id,
                        (SELECT COALESCE(MAX(d2.version), 0) + 1 FROM template_versions d2 WHERE d2.template_id = v.template_id),
-                       :engine, :dialect, :isLibrary,
+                       :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary,
                        CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
@@ -828,7 +846,8 @@ class TemplateRepository(
             """
             WITH written AS (
                 UPDATE template_versions v
-                   SET engine = :engine, dialect = :dialect, is_library = :isLibrary,
+                   SET engine = :engine, type = CAST(:type AS TEXT), dialect = CAST(:dialect AS TEXT),
+                       is_library = :isLibrary,
                        imports_json = CAST(:importsJson AS jsonb), body = :body,
                        body_hash = $TEMPLATE_HASH_EXPR,
                        updated_by = :actor, updated_at = NOW()
@@ -887,16 +906,16 @@ class TemplateRepository(
                 RETURNING id, name, display_name, description, current_version
             ), new_version AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, released_by, released_at)
-                SELECT id, current_version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                SELECT id, current_version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM bumped
-                RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
+                RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM bumped t
               JOIN new_version v ON v.template_id = t.id
@@ -911,16 +930,16 @@ class TemplateRepository(
                 RETURNING id, name, display_name, description, current_version
             ), new_version AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, released_by, released_at)
-                SELECT id, :version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                SELECT id, :version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
                   FROM new_template
-                RETURNING template_id, version, engine, dialect, is_library, imports_json::TEXT AS imports_json,
+                RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
                           body, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, :bodyHash AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
@@ -931,9 +950,9 @@ class TemplateRepository(
             """
             WITH ins AS (
                 INSERT INTO template_versions
-                    (template_id, version, engine, dialect, is_library, imports_json, body,
+                    (template_id, version, engine, type, dialect, is_library, imports_json, body,
                      status, body_hash, created_by, released_by, released_at)
-                SELECT t.id, :version, :engine, :dialect, :isLibrary, CAST(:importsJson AS jsonb), :body,
+                SELECT t.id, :version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
                        'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
                   FROM templates t
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND t.is_deleted = FALSE
@@ -963,7 +982,8 @@ class TemplateRepository(
                     id = rs.getString("id"),
                     version = rs.getInt("version"),
                     engine = rs.getString("engine"),
-                    dialect = Dialect.fromWire(rs.getString("dialect")),
+                    type = TemplateType.fromWire(rs.getString("type")) ?: TemplateType.SQL,
+                    dialect = rs.getString("dialect")?.let(Dialect::fromWire),
                     displayName = rs.getString("display_name"),
                     description = rs.getString("description"),
                     imports = TemplateJson.readImports(rs.getString("imports_json")),
@@ -998,7 +1018,8 @@ class TemplateRepository(
                     id = rs.getString("template_id"),
                     version = rs.getInt("version"),
                     engine = rs.getString("engine"),
-                    dialect = Dialect.fromWire(rs.getString("dialect")),
+                    type = TemplateType.fromWire(rs.getString("type")) ?: TemplateType.SQL,
+                    dialect = rs.getString("dialect")?.let(Dialect::fromWire),
                     isLibrary = rs.getBoolean("is_library"),
                     imports = TemplateJson.readImports(rs.getString("imports_json")),
                     body = rs.getString("body"),

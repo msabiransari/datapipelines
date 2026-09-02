@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import java.io.File
 import java.time.Instant
@@ -17,16 +18,18 @@ internal object TemplateFixtures {
 
     fun draft(
         id: String? = "fetch_orders.sql",
-        dialect: Dialect = Dialect.POSTGRES,
+        dialect: Dialect? = Dialect.POSTGRES,
         body: String = "SELECT 1",
         imports: List<TemplateImport> = emptyList(),
         isLibrary: Boolean = false,
         engine: String = Template.FREEMARKER_ENGINE,
+        type: TemplateType? = null,
         schemaVersion: Int = Template.SUPPORTED_SCHEMA_VERSION,
     ): TemplateDraft =
         TemplateDraft(
             schemaVersion = schemaVersion,
             id = id,
+            type = type,
             dialect = dialect,
             displayName = "Fetch Orders",
             description = "Pulls orders in a date range.",
@@ -39,14 +42,16 @@ internal object TemplateFixtures {
     fun version(
         id: String,
         version: Int = 1,
-        dialect: Dialect = Dialect.POSTGRES,
+        dialect: Dialect? = Dialect.POSTGRES,
         isLibrary: Boolean = false,
         imports: List<TemplateImport> = emptyList(),
         body: String = "SELECT 1",
+        type: TemplateType = TemplateType.SQL,
     ): TemplateVersion =
         TemplateVersion(
             id = id,
             version = version,
+            type = type,
             dialect = dialect,
             isLibrary = isLibrary,
             imports = imports,

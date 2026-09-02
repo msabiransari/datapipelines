@@ -1,6 +1,8 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.typesystem.Dialect
 import freemarker.core.TemplateElement
 
 /**
@@ -64,6 +66,7 @@ class TemplateValidator(
 
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
+        addTypeDialectFailures(draft, failures)
         addBodyFailures(draft, failures)
         libraryResolver.validate(workspaceId, draft.imports, failures)
 
@@ -131,6 +134,45 @@ class TemplateValidator(
                         "supported" to listOf(Template.SUPPORTED_SCHEMA_VERSION),
                     ),
             )
+    }
+
+    /**
+     * The type/dialect consistency rules of 046 (template-hierarchy-design §5.1/§7) — the
+     * application-level twin of the `chk_type_dialect` database invariant, so every write
+     * surface (REST, MCP, import) enforces the same pair through this one validator.
+     *
+     * A null [TemplateDraft.type] means "not stated", which is only legal as the create-time
+     * default of `sql` ([TemplateTypeRule] resolves it before any write); it is therefore
+     * checked exactly like an explicit `sql`.
+     *
+     * `dialect_not_allowed` is deliberately a different code from `dialect_invalid` (§7): a
+     * present dialect on an html template and an unknown dialect value are different failures
+     * an author fixes differently, and each gets its own greppable code.
+     */
+    private fun addTypeDialectFailures(
+        draft: TemplateDraft,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        if (draft.type == TemplateType.HTML) {
+            if (draft.dialect != null) {
+                failures +=
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
+                        message =
+                            "A template of type 'html' declares no dialect, but the payload carries " +
+                                "'${draft.dialect.wire}'.",
+                        details = mapOf("type" to TemplateType.HTML.wire, "dialect" to draft.dialect.wire),
+                    )
+            }
+        } else if (draft.dialect == null) {
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.DIALECT_INVALID,
+                    message =
+                        "Dialect is required unless the template's type is 'html'.",
+                    details = mapOf("dialect" to null, "supported" to Dialect.entries.map { it.wire }),
+                )
+        }
     }
 
     /**

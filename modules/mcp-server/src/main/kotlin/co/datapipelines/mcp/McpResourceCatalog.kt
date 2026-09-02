@@ -143,7 +143,9 @@ class McpResourceCatalog(
                 descriptor(
                     uri = McpResourceUri.template(it.id),
                     name = it.id,
-                    description = "${it.displayName} — ${it.dialect.wire} template, version ${it.version}.",
+                    description =
+                        "${it.displayName} — ${it.type.wire} template" +
+                            it.dialect?.let { dialect -> " (${dialect.wire})" }.orEmpty() + ", version ${it.version}.",
                     mimeType = MIME_FREEMARKER_SQL,
                 )
             }

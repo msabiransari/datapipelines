@@ -61,6 +61,7 @@ class FlywayMigrationIntegrationTest {
                 "5|local password auth|true",
                 "6|version lifecycle|true",
                 "7|hierarchical template names|true",
+                "8|typed templates|true",
             )
     }
 
@@ -89,6 +90,32 @@ class FlywayMigrationIntegrationTest {
                 "must_change_password|NO|false",
                 "password_changed_at|YES|NONE",
                 "password_hash|YES|NONE",
+            )
+    }
+
+    @Test
+    fun `V8 adds the typed-template column and relaxes dialect to nullable`() {
+        // template-hierarchy-design §5.1 (046): `type` is NOT NULL backfilled 'sql' — every
+        // pre-V8 template is SQL by construction, so the default IS the truthful value — and
+        // `dialect` becomes nullable, because an `html` template declares none. The pairing
+        // (sql ⇔ dialect present, html ⇔ dialect null) is enforced by chk_type_dialect,
+        // asserted by name in the CHECK-constraint set above and by shape in the templates
+        // module's TypedTemplatesMigrationTest.
+        val columns =
+            query(
+                """
+                SELECT column_name || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'template_versions'
+                   AND column_name IN ('type', 'dialect')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "dialect|YES|NONE",
+                "type|NO|'sql'::text",
             )
     }
 
@@ -213,8 +240,10 @@ class FlywayMigrationIntegrationTest {
                 "chk_dialect",
                 "chk_pipeline_versions_status",
                 "chk_status",
+                "chk_template_type",
                 "chk_template_versions_status",
                 "chk_triggered_via",
+                "chk_type_dialect",
                 "chk_workspace_member_role",
             )
     }

@@ -3,7 +3,7 @@
 **Status:** v1.4 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-08-17
+**Last updated:** 2026-09-02
 
 ---
 
@@ -677,7 +677,8 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 |---|---|
 | `pipeline.validation.template_not_found` | Every `template.id` exists in the template registry |
 | `pipeline.validation.template_version_not_found` | Every `template.version` exists for that template id |
-| `pipeline.validation.template_dialect_mismatch` | Template's `dialect` matches the node's `source` dialect (for `source != "tempdb"`). For `source: "tempdb"`, template `dialect` must match the dialect of the engine declared in `settings.tempdb.engine` (H2 in v1; DuckDB templates become valid when that engine lands). |
+| `pipeline.validation.template_dialect_mismatch` | Template's `dialect` matches the node's `source` dialect (for `source != "tempdb"`). For `source: "tempdb"`, template `dialect` must match the dialect of the engine declared in `settings.tempdb.engine` (H2 in v1; DuckDB templates become valid when that engine lands). Applies only to `type='sql'` templates — the only kind a node can legally reference — each of which carries a non-null dialect by the schema ([Templates](templates.md); template-hierarchy-design §7, 046) |
+| `pipeline.validation.template_type_mismatch` | A DQL/DML/DDL node references a `type='html'` template — refused at pipeline save. Every template a node can legally reference is `sql`; `details` carries `template_type` (template-hierarchy-design §7, 046) |
 | `pipeline.validation.template_parameter_undeclared` | Dry-render check: every referenced template renders successfully against the pipeline's declared `parameters` (defaults where present, type-appropriate sample values otherwise). An undefined variable fails here, at save time (§7.4). |
 | `pipeline.validation.template_render_failed` | Dry-render failed for a reason OTHER than an undeclared variable — a type-mismatched built-in, an unresolvable imported macro, an expression error (added 2026-08-08: a render failure at save time is a validation outcome, never an exception escaping the validator, and never mislabeled as `template_parameter_undeclared`) |
 
@@ -845,7 +846,10 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.syntax_error` | 400 | Freemarker parse failure |
 | `template.validation.dangerous_construct` | 400 | Forbidden Freemarker construct (SSTI hardening, Templates §4.2) |
 | `template.validation.id_invalid` | 400 | Template `id` fails the identifier rules |
-| `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum |
+| `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum — or absent on a template whose type is not `html` (046: a dialect is required unless the type is `html`) |
+| `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html` (046, template-hierarchy-design §5.4) |
+| `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a `type='html'` template — an html template declares no dialect (046, template-hierarchy-design §7). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
+| `template.validation.type_immutable` | 400 | A payload attempted to change a template's `type`, which is chosen at create and identical on every version (046, template-hierarchy-design §5.3) |
 | `template.validation.engine_unsupported` | 400 | `engine` not a value v1 supports (only `freemarker`) |
 | `template.validation.schema_version_unsupported` | 400 | `schema_version` not a value v1 supports (only `1`) |
 | `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |
@@ -1154,6 +1158,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.8 | 046 typed templates | §12.6 gains `pipeline.validation.template_type_mismatch` — a DQL/DML/DDL node referencing a `type='html'` template is refused at pipeline save (template-hierarchy-design §7). §13.9 gains `template.validation.type_invalid` (unknown `type` wire value), `template.validation.dialect_not_allowed` (a `dialect` present on an `html` template) and `template.validation.type_immutable` (a payload attempting to change a template's type). Additive per §15.2. |
 | 2026-09-01 | v1.7 | 037 agent data visibility | §13.4 gains `pipeline.node.not_found` (404) and `pipeline.node.standalone_execution_refused` (400) — the refusals of the `pipelines_execute_node` node-run debug query (MCP §6.2.20): an unknown node id, a `tempdb` source (staging exists only inside a full execution), or a PIPELINE node (it runs a child pipeline, not SQL). Node runs are agent debug queries, not executions — no history rows, no SSE, no idempotency (ratified, 037 §A). Additive per §15.2. |
 | 2026-09-01 | v1.6 | 042 bound parameters | §7.4's example and prose move declared parameters to the `:name` bind form (Templates §4.5 — a declared parameter is a value; `${}` is for structure). §12.6 gains the interpolation refusal: a declared name inside `${}` fails save with `template.validation.parameter_interpolated` (§13.9). §13.4 gains `pipeline.node.sql_parameter_missing` — a `:name` the execution context does not declare fails loudly before anything executes. Additive per §15.2. |
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline contract: schema, nodes, parameters, validation, error codes, lifecycle |

@@ -69,10 +69,15 @@ sealed interface TemplateLookup {
 
     /**
      * Resolved. [dialect] is the template's declared target dialect, checked against the
-     * node's source dialect by §12.6 `template_dialect_mismatch`.
+     * node's source dialect by §12.6 `template_dialect_mismatch` — non-null exactly when
+     * [type] is [TemplateType.SQL], per the `chk_type_dialect` invariant (046,
+     * template-hierarchy-design §5.1): an `html` template declares no dialect, and §12.6
+     * refuses the reference itself with `template_type_mismatch` before any dialect could
+     * be compared.
      */
     data class Found(
-        val dialect: Dialect,
+        val dialect: Dialect?,
+        val type: TemplateType = TemplateType.SQL,
     ) : TemplateLookup
 }
 

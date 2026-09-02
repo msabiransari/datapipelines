@@ -97,10 +97,15 @@ class ApiErrorCatalogSpecDriftTest {
          * 101 → 103 with 037: §13.4 gains the node-run debug query's refusals
          * (`pipeline.node.not_found`, `pipeline.node.standalone_execution_refused`), landed
          * in the SAME commit as their constants and catalog rows.
+         *
+         * 103 → 106 with 046: §13.9 gains `template.validation.type_invalid`,
+         * `template.validation.dialect_not_allowed` and `template.validation.type_immutable`
+         * (typed templates), landed in the SAME commit as their constants and catalog rows.
+         * Re-derived from the merged document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 103
+        const val SECTION_13_ROW_COUNT = 106
 
-        /** §12's distinct validation codes on 2026-08-27 (workspaces readonly added §12.5's datasource_readonly). */
-        const val SECTION_12_CODE_COUNT = 47
+        /** §12's distinct validation codes on 2026-09-02 (046 added §12.6's template_type_mismatch). */
+        const val SECTION_12_CODE_COUNT = 48
     }
 }

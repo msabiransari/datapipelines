@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateImport
@@ -34,13 +35,23 @@ private const val RENDER_CONTEXT_DESC =
     "Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the " +
         "wire conventions of the Type System (BIGINTEGER/BIGDECIMAL as strings, TIMESTAMP with Z or offset)."
 
+/** §6.2.8 — the `type` field's description, kept off the schema line for length. */
+private const val TYPE_FIELD_DESC =
+    "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
+        "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."
+
+/** §6.2.8 — the `dialect` description, stating the type/dialect rule (046 §10). */
+private const val DIALECT_FIELD_DESC =
+    "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html " +
+        "template declares no dialect."
+
 /**
  * `templates_create` (mcp-server.md §6.2.8). Scope: `author`.
  *
  * Save-time validation is **parse-only** (templates.md §7.1): syntax, forbidden constructs,
- * import resolution. A template is never rendered against a sample context at save time because
- * it does not know its callers' parameters — which is why an authoring agent is told to call
- * `templates_render` next.
+ * import resolution, and the type/dialect consistency rules. A template is never rendered
+ * against a sample context at save time because it does not know its callers' parameters —
+ * which is why an authoring agent is told to call `templates_render` next.
  */
 class TemplatesCreateTool(
     private val templates: TemplateRepository,
@@ -51,12 +62,14 @@ class TemplatesCreateTool(
         McpTools.tool(
             name = "templates_create",
             description =
-                "Create a new SQL template. Templates use Freemarker syntax. A template declares NO parameters of its " +
+                "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its " +
                     "own: the variables its body may reference are exactly the parameters declared by the pipeline that " +
                     "calls it, with defaults applied. Describe the variables you expect in 'description' — that free " +
                     "text is how humans and agents discover them. Macros from library templates are made available by " +
                     "listing them in 'imports'; the body must NOT contain import or include directives, they are " +
-                    "synthesized from the imports array.",
+                    "synthesized from the imports array. The 'type' is chosen here and never changes afterwards: " +
+                    "'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect " +
+                    "and renders through an auto-escaping engine.",
             schema = SCHEMA,
         )
 
@@ -67,11 +80,19 @@ class TemplatesCreateTool(
         // versioning §5.5: creation is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
         val workspaceId = ctx.principal.requireWorkspace().id
+        val type =
+            args
+                .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
+                ?.let { TemplateType.fromWire(it)!! }
         val draft =
             TemplateDraft(
                 id = args.string("id"),
                 engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
-                dialect = args.dialect("dialect") ?: throw McpArguments.invalidParams("Missing required argument 'dialect'."),
+                type = type,
+                // Null is legal only for html — the validator's type/dialect consistency pair
+                // refuses a missing dialect on sql and a present one on html, with the same
+                // catalogued codes the REST surface raises.
+                dialect = args.dialect("dialect"),
                 displayName = args.requiredString("display_name"),
                 description = args.requiredString("description"),
                 imports = imports(args),
@@ -99,14 +120,15 @@ class TemplatesCreateTool(
             """
             {
               "type": "object",
-              "required": ["dialect", "display_name", "description", "body"],
+              "required": ["display_name", "description", "body"],
               "properties": {
                 "id": {"type": "string", "description": "Optional; auto-generated if omitted. Pattern [a-z0-9_.-]+."},
                 "engine": {
                   "type": "string", "enum": ["freemarker"], "default": "freemarker",
                   "description": "Template engine. v1 supports freemarker only."
                 },
-                "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON},
+                "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "$TYPE_FIELD_DESC"},
+                "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$DIALECT_FIELD_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},
                 "imports": {

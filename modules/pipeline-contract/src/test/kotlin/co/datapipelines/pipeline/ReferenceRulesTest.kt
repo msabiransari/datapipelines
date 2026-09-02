@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotContain
@@ -63,6 +64,32 @@ class ReferenceRulesTest {
 
         validate(Fixtures.pipeline(), templates = templates).codes shouldContainExactly
             listOf(Validation.TEMPLATE_VERSION_NOT_FOUND)
+    }
+
+    @Test
+    fun `an html template reference is rejected with template_type_mismatch - and nothing else`() {
+        // 046 §7: reference legality runs before the dialect/dry-render checks, so the refusal
+        // is exactly one failure with its own code — not the type verdict plus the noise of
+        // dialect and render checks that presuppose a sql template.
+        val templates =
+            StubTemplates(defaultLookup = TemplateLookup.Found(dialect = null, type = TemplateType.HTML))
+
+        val failure =
+            validate(Fixtures.pipeline(), templates = templates)
+                .withCode(Validation.TEMPLATE_TYPE_MISMATCH)
+                .single()
+
+        failure.details["template_type"] shouldBe "html"
+        failure.path shouldBe "nodes[0].template"
+    }
+
+    @Test
+    fun `a sql template with a null dialect fails closed rather than dereferencing`() {
+        // Unreachable through the schema (chk_type_dialect) for a sql row; the backstop still
+        // refuses cleanly instead of raising — the corrupted-row shape.
+        val templates = StubTemplates(defaultLookup = TemplateLookup.Found(dialect = null, type = TemplateType.SQL))
+
+        validate(Fixtures.pipeline(), templates = templates).codes.shouldBeEmpty()
     }
 
     @Test

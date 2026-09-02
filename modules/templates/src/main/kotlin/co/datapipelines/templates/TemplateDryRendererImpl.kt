@@ -34,7 +34,7 @@ class TemplateDryRendererImpl(
         val registry = engines.registryFor(workspaceId)
         val version = registry.lookup(ref.id, ref.version)
         return when {
-            version != null -> TemplateLookup.Found(version.dialect)
+            version != null -> TemplateLookup.Found(version.dialect, version.type)
             registry.existsId(ref.id) -> TemplateLookup.VersionNotFound
             else -> TemplateLookup.TemplateNotFound
         }

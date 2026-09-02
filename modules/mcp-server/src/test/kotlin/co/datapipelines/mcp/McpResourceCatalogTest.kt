@@ -38,7 +38,7 @@ class McpResourceCatalogTest {
 
     private fun emptyWorld() {
         every { pipelines.findAll(any(), null) } returns emptyList()
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
     }
@@ -50,7 +50,7 @@ class McpResourceCatalogTest {
                 McpFixtures.pipelineRecord(id = UUID.fromString("11111111-0000-0000-0000-%012d".format(it)), name = "p$it")
             }
         every { pipelines.findAll(any(), null) } returns many
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
@@ -76,7 +76,7 @@ class McpResourceCatalogTest {
     @Test
     fun `enumeration order is pipelines, then templates, then datasources, then executions`() {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
-        every { templates.list(any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
         every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.executionRecord(startedAt = now.minusSeconds(60)))
@@ -96,7 +96,7 @@ class McpResourceCatalogTest {
     @Test
     fun `only executions from the last 24 hours are enumerated`() {
         every { pipelines.findAll(any(), null) } returns emptyList()
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(
@@ -114,7 +114,7 @@ class McpResourceCatalogTest {
     @Test
     fun `the listing is scoped to the caller's own executions`() {
         every { pipelines.findAll(any(), null) } returns emptyList()
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), McpFixtures.OTHER_USER, any(), any(), any(), any(), any(), any()) } returns emptyList()
 
@@ -126,7 +126,7 @@ class McpResourceCatalogTest {
     @Test
     fun `descriptors carry a name, description and mime type`() {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
-        every { templates.list(any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
@@ -193,7 +193,7 @@ class McpResourceCatalogTest {
             (1..McpResourceCatalog.PAGE_SIZE).map {
                 McpFixtures.pipelineRecord(id = UUID.fromString("11111111-0000-0000-0000-%012d".format(it)), name = "p$it")
             }
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
@@ -206,8 +206,8 @@ class McpResourceCatalogTest {
     @Test
     fun `a cursor can land in the middle of the templates kind`() {
         every { pipelines.findAll(any(), null) } returns emptyList()
-        every { templates.list(any(), any(), any(), 5, any()) } returns listOf(McpFixtures.template(id = "t6"))
-        every { templates.list(any(), any(), any(), 0, any()) } returns listOf(McpFixtures.template(id = "t1"))
+        every { templates.list(any(), any(), any(), any(), 5, any()) } returns listOf(McpFixtures.template(id = "t6"))
+        every { templates.list(any(), any(), any(), any(), 0, any()) } returns listOf(McpFixtures.template(id = "t1"))
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 

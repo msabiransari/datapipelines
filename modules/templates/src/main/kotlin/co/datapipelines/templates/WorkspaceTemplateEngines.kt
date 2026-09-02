@@ -6,6 +6,12 @@ import java.util.UUID
 /**
  * Vends the per-workspace [TemplateEngine] + [TemplateRegistry] pair (design §5, T24).
  *
+ * Since 046 each vendored engine internally carries the **pair of Freemarker
+ * configurations** (template-hierarchy-design §6 — `sql` and auto-escaping `html`, over one
+ * shared loader) and picks per render by the resolved version's `type`; the workspace-bound
+ * identity below is what makes BOTH caches sound, so the pair lives inside the engine rather
+ * than beside it.
+ *
  * Template names are unique only per workspace (metadata-db §4.8), so the render path's two
  * cache tiers — this registry's resolved-version LRU and Freemarker's parsed-template cache
  * (keyed by the loader's `"{id}@{version}"` name, see [InterruptibleConfiguration]) — are
