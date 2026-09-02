@@ -86,7 +86,14 @@ tasks.named<ProcessResources>("processResources") {
         // record, and audit findings records pending review. An operator running this
         // deployment is not the audience, and shipping "pending review" findings in the
         // product jar would read as product docs.
-        exclude("semantic-layer-research.md", "SPEC-REVIEW-2026-08.md", "ARCH-AUDIT-2026-08.md")
+        exclude(
+            "semantic-layer-research.md",
+            "SPEC-REVIEW-2026-08.md",
+            "ARCH-AUDIT-2026-08.md",
+            // Not-yet-normative design docs: they propose schema and contract that does not
+            // exist yet, so shipping them in-product would describe a version nobody runs.
+            "template-hierarchy-design.md",
+        )
     }
 }
 
