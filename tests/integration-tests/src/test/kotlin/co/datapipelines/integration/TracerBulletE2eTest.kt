@@ -3,7 +3,6 @@ package co.datapipelines.integration
 import co.datapipelines.DatapipelinesApplication
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -385,16 +384,7 @@ class TracerBulletE2eTest {
         val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
         response.statusCode() shouldBe 200
 
-        val events = mutableListOf<Pair<String, JsonNode>>()
-        var currentEvent: String? = null
-        for (line in response.body().lines()) {
-            if (line.startsWith("event:")) {
-                currentEvent = line.removePrefix("event:").trim()
-            } else if (line.startsWith("data:")) {
-                events += (currentEvent ?: "unknown") to mapper.readTree(line.removePrefix("data:").trim())
-            }
-        }
-        return events
+        return E2eSse.parseEvents(response.body(), mapper)
     }
 
     /**
@@ -454,15 +444,6 @@ class TracerBulletE2eTest {
         }
     }
 
-    /** A generated `dpk_<id>.<secret>` key and its stored Argon2id hash (auth.md §7.1/§7.2). */
-    private class SeededKey(
-        val name: String,
-        val scopes: Array<out String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         private const val REDIS_PORT = 6379
         private const val POSTGRES_PORT = 5432
@@ -470,7 +451,6 @@ class TracerBulletE2eTest {
         private const val REQUESTED_TTL_SECONDS = 120L
         private const val SSE_BUDGET_MINUTES = 2L
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
@@ -482,31 +462,8 @@ class TracerBulletE2eTest {
 
         private val random = SecureRandom()
 
-        // Argon2id with auth's exact parameters (SecretHasher.kt: 2 / 19 456 / 1) on the
-        // same pinned library; the encoded hash is self-describing, so the bounded bean
-        // verifies it unchanged. The char[] wipe mirrors auth's AUTH-SEC-13 handling.
-        private val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-
-        private fun argon2Hash(raw: String): String {
-            val chars = raw.toCharArray()
-            return try {
-                argon2.hash(2, 19_456, 1, chars)
-            } finally {
-                argon2.wipeArray(chars)
-            }
-        }
-
-        private val ADMIN_KEY = generateKey("e2e-admin-key", arrayOf("admin"))
-        private val READ_ONLY_KEY = generateKey("e2e-read-key", arrayOf("read"))
-
-        private fun generateKey(
-            name: String,
-            scopes: Array<String>,
-        ): SeededKey {
-            val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            return SeededKey(name = name, scopes = scopes, id = id, plaintext = plaintext, hash = argon2Hash(plaintext))
-        }
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("admin"))
+        private val READ_ONLY_KEY = E2eAuth.generateKey("e2e-read-key", arrayOf("read"))
 
         @Container
         @JvmStatic

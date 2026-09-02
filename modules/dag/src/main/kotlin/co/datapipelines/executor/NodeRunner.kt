@@ -414,10 +414,22 @@ class NodeRunner(
         // visibility-scoped: `name` is the datasource PK, so the row the gate resolved one
         // line above is the same row this reads — scoping here would duplicate the read for
         // no new decision.
+        //
+        // Fail-closed (044 F2/F3): null from the live read (the row was soft-deleted out of
+        // band — the D10 channel) refuses as datasource_not_found, never "no signal"; a
+        // metadata-DB failure during the read refuses naming the METADATA db (carried code
+        // `pipeline.execution.aborted`), never the healthy target. See [ReadonlyBackstop].
         if (node.type == NodeType.DML || node.type == NodeType.DDL) {
-            phase(NodePhase.CONNECT, node.id) {
-                if (datasourceRegistry.getLive(name)?.isReadonly == true) throw datasourceReadonly(name, node.type)
-            }
+            phase(NodePhase.CONNECT, node.id) { enforceSourceReadonly(name, node) }
+        }
+        // A DQL node whose output is a datasource target is a write too (the third §5.7 shape),
+        // and its refusal must not wait for the SOURCE query to finish (020 F9): during a flip
+        // window the old shape ran the full — possibly long — SELECT and only then refused in
+        // the write-back shell. The same fail-closed backstop, applied to the TARGET at the
+        // same CONNECT phase, mirrors the DML/DDL check; the write-back shell re-checks at
+        // write time (that check is authoritative — this one is the cheap early refusal).
+        (node.output as? NodeOutput.Datasource)?.takeIf { node.type == NodeType.DQL }?.let { target ->
+            phase(NodePhase.CONNECT, node.id) { enforceWritebackTargetReadonly(target) }
         }
         val timeout = config.queryTimeoutSecondsFor(datasource.queryTimeoutSeconds)
         val connection =
@@ -440,6 +452,27 @@ class NodeRunner(
                 NodeType.DDL -> datasourceDdl(node, conn, bound, ctx, startedAt, timeout)
                 NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
             }
+        }
+    }
+
+    /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */
+    private fun enforceSourceReadonly(
+        name: String,
+        node: ExecutableNode,
+    ) {
+        when (ReadonlyBackstop.signal(datasourceRegistry, name)) {
+            ReadonlySignal.READONLY -> throw datasourceReadonly(name, node.type)
+            ReadonlySignal.ABSENT -> throw datasourceNotFound(name)
+            ReadonlySignal.WRITABLE -> Unit
+        }
+    }
+
+    /** The write-back TARGET leg (020 F9): same backstop, at CONNECT, before the source query. */
+    private fun enforceWritebackTargetReadonly(target: NodeOutput.Datasource) {
+        when (ReadonlyBackstop.signal(datasourceRegistry, target.datasource)) {
+            ReadonlySignal.READONLY -> throw writebackTargetReadonly(target)
+            ReadonlySignal.ABSENT -> throw datasourceNotFound(target.datasource)
+            ReadonlySignal.WRITABLE -> Unit
         }
     }
 
@@ -691,6 +724,21 @@ class NodeRunner(
                 "(the flag was set after this pipeline version was saved, or the version predates it).",
         details = mapOf("datasource" to name, "node_type" to type.wire),
     )
+
+    /**
+     * The write-back shape of [datasourceReadonly] (§13.4, 020 F9): raised at the CONNECT-phase
+     * pre-check of a DQL node's `output.target: "datasource"`, with the same message the
+     * write-back shell's own authoritative check raises — the author gets the identical error
+     * either side of the source query.
+     */
+    private fun writebackTargetReadonly(target: NodeOutput.Datasource) =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Node.DATASOURCE_READONLY,
+            message =
+                "Write-back target datasource '${target.datasource}' is readonly — writing '${target.table}' to it is forbidden " +
+                    "(the flag was set after this pipeline version was saved, or the version predates it).",
+            details = mapOf("datasource" to target.datasource, "table" to target.table),
+        )
 
     /** Runs [body], converting any failure into a [NodeFailedSignal] with this phase's §8.2 code. */
     private suspend fun <T> phase(

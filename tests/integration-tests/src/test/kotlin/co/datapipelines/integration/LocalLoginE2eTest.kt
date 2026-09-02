@@ -3,7 +3,6 @@ package co.datapipelines.integration
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -277,19 +276,6 @@ class LocalLoginE2eTest {
         private const val LOCKOUT_EMAIL = "lockout-user@datapipelines.test"
         private val LOCKOUT_PASSWORD = "e2e-lockout-" + (1..24).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
 
-        // Argon2id with auth's exact parameters (SecretHasher.kt: 2 / 19 456 / 1) on the
-        // same pinned library; the encoded hash is self-describing (TracerBullet precedent).
-        private val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-
-        private fun argon2Hash(raw: String): String {
-            val chars = raw.toCharArray()
-            return try {
-                argon2.hash(2, 19_456, 1, chars)
-            } finally {
-                argon2.wipeArray(chars)
-            }
-        }
-
         @Container
         @JvmStatic
         private val postgres =
@@ -328,9 +314,9 @@ class LocalLoginE2eTest {
                         """
                         INSERT INTO users (email, display_name, provider, provider_subject, is_active, password_hash)
                         VALUES
-                          ('$LOCAL_EMAIL', 'Local User', 'local', '$LOCAL_EMAIL', TRUE, '${argon2Hash(LOCAL_PASSWORD)}'),
-                          ('$INACTIVE_EMAIL', 'Inactive Local', 'local', '$INACTIVE_EMAIL', FALSE, '${argon2Hash(LOCAL_PASSWORD)}'),
-                          ('$LOCKOUT_EMAIL', 'Lockout User', 'local', '$LOCKOUT_EMAIL', TRUE, '${argon2Hash(LOCKOUT_PASSWORD)}'),
+                          ('$LOCAL_EMAIL', 'Local User', 'local', '$LOCAL_EMAIL', TRUE, '${E2eAuth.argon2Hash(LOCAL_PASSWORD)}'),
+                          ('$INACTIVE_EMAIL', 'Inactive Local', 'local', '$INACTIVE_EMAIL', FALSE, '${E2eAuth.argon2Hash(LOCAL_PASSWORD)}'),
+                          ('$LOCKOUT_EMAIL', 'Lockout User', 'local', '$LOCKOUT_EMAIL', TRUE, '${E2eAuth.argon2Hash(LOCKOUT_PASSWORD)}'),
                           ('$OIDC_ONLY_EMAIL', 'Oidc Only', 'google', 'sub-oidc-only', TRUE, NULL)
                         """.trimIndent(),
                     )

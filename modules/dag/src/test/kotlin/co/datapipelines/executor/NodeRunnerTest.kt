@@ -15,6 +15,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -282,6 +283,76 @@ class NodeRunnerTest {
                 .rowsOut shouldBe 1
         }
 
+    // ------------ fail-closed semantics (044 F2/F3): the backstop's null/throw cases are REFUSALS
+
+    @Test
+    fun `a datasource soft-deleted out of band after the save refuses the DML - fail-closed (044 F2)`() =
+        runBlocking<Unit> {
+            // `is_deleted = TRUE` by manual SQL — the exact D10 channel the backstop exists for.
+            // The cached view ([FakeDatasourceRegistry]'s `datasources`) still serves the row the
+            // save validated against; the LIVE view (`liveEntries`) is empty. "I could not read
+            // the row" must never read as "there is no restriction" — the fail-open shape 020
+            // shipped, where a warm cache entry plus a warm pool silently executed the write.
+            val writable = h2Datasource("gone", listOf("CREATE TABLE t (n INT)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    datasources = mapOf("gone" to writable),
+                    liveEntries = emptyMap(),
+                )
+            val runner = runner(sql = "INSERT INTO t VALUES (1)", registry = registry)
+
+            failureOf(runner, Fixtures.node("dml", type = NodeType.DML, source = "gone")).code shouldBe
+                PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
+        }
+
+    @Test
+    fun `a write-back target soft-deleted out of band is refused, not written (044 F2)`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("wsrc2", listOf("CREATE TABLE s (n INT)", "INSERT INTO s VALUES (1)"))
+            val target = h2Datasource("goneT", listOf("CREATE TABLE tgt (n INT)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    datasources = mapOf("wsrc2" to source, "goneT" to target),
+                    liveEntries = mapOf("wsrc2" to source),
+                )
+            val runner = runner(sql = "SELECT n FROM s", registry = registry)
+
+            failureOf(
+                runner,
+                Fixtures.node("wb_gone", source = "wsrc2", output = NodeOutput.Datasource("goneT", "tgt", WriteMode.APPEND)),
+            ).code shouldBe PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
+
+            // And nothing landed while refusing: the target table is still empty.
+            DriverManager.getConnection(target.jdbcUrl, target.username, "").use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT COUNT(*) FROM tgt").use { rs ->
+                        rs.next()
+                        rs.getInt(1) shouldBe 0
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun `a metadata-db failure during the live readonly read refuses the write - naming the metadata db, not the target (044 F3)`() =
+        runBlocking<Unit> {
+            // The TARGET datasource is healthy; the METADATA database is down. The refusal must
+            // say so — 020's shape surfaced this as `datasource_connection_failed` blaming the
+            // healthy target (write-back path: `writeback_failed`), sending the operator to the
+            // wrong database.
+            val writable = h2Datasource("healthy", listOf("CREATE TABLE t (n INT)"))
+            val registry =
+                FakeDatasourceRegistry(
+                    datasources = mapOf("healthy" to writable),
+                    liveReadFailure = IllegalStateException("connection refused"),
+                )
+            val runner = runner(sql = "INSERT INTO t VALUES (1)", registry = registry)
+
+            val error = failureOf(runner, Fixtures.node("dml", type = NodeType.DML, source = "healthy"))
+            error.code shouldBe PipelineErrorCodes.Execution.ABORTED
+            error.message shouldContain "metadata"
+        }
+
     @Test
     fun `a write-back naming a readonly datasource fails datasource_readonly`() =
         runBlocking<Unit> {
@@ -292,6 +363,30 @@ class NodeRunnerTest {
             val node = Fixtures.node("wb", source = "wsrc", output = NodeOutput.Datasource("wtgt", "tgt", WriteMode.APPEND))
 
             failureOf(runner, node).code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+        }
+
+    @Test
+    fun `a readonly write-back target is refused at CONNECT - before the source query runs (044 F9)`() =
+        runBlocking<Unit> {
+            // The pre-check mirrors the DML/DDL check's placement: during a flip window the old
+            // shape ran the full source SELECT and only then refused in the write-back shell —
+            // a wasted long query per attempt. Observable as: no connection is ever leased from
+            // the SOURCE pool.
+            val source = h2Datasource("wsrc3", listOf("CREATE TABLE s (n INT)", "INSERT INTO s VALUES (1)"))
+            val target = h2Datasource("wtgt3", listOf("CREATE TABLE tgt (n INT)")).copy(isReadonly = true)
+            val registry = FakeDatasourceRegistry(mapOf("wsrc3" to source, "wtgt3" to target))
+            val runner = runner(sql = "SELECT n FROM s", registry = registry)
+
+            val error =
+                failureOf(
+                    runner,
+                    Fixtures.node("wb_early", source = "wsrc3", output = NodeOutput.Datasource("wtgt3", "tgt", WriteMode.APPEND)),
+                )
+
+            error.code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+            error.details["datasource"] shouldBe "wtgt3"
+            error.details["table"] shouldBe "tgt"
+            registry.leased.get() shouldBe 0
         }
 
     @Test

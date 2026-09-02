@@ -73,13 +73,32 @@ class DefaultDatasourceRegistry(
     ): Datasource? = cache.getVisible(workspaceId, name) { repository.findVisibleByName(it, workspaceId)?.toDatasource() }
 
     /**
-     * The D10 flip window made structural (workspaces §6 layer 2a): one direct indexed PK read
-     * per write-shaped node execution, deliberately past the §6.3 cache — the pool-build path
-     * bypasses it for the same reason (a state the cache may not have seen yet is the state
-     * this question is asking about). Password stays null: this entry is read for its flag,
-     * never for a pool.
+     * The D10 channel made structural: one direct indexed PK read past the §6.3 cache — the
+     * pool-build path bypasses it for the same reason (a state the cache may not have seen
+     * yet is the state this question is asking about). Save-time validation's principal-less
+     * fallback path reads this (044 F4). Password stays null: no live read ever carries the
+     * credential — the flag-only [isReadonlyLive] is the hot-path twin that doesn't even
+     * fetch it.
      */
     override fun getLive(name: String): Datasource? = repository.findByName(name)?.toDatasource()
+
+    /**
+     * Save-time validation's principal read (044 F4): the live twin of [getVisible] — same
+     * repository predicate, no cache in front of it, so a row-level flag flip (either
+     * direction) is honored by the next save instead of by the next cache expiry.
+     */
+    override fun getVisibleLive(
+        name: String,
+        workspaceId: UUID,
+    ): Datasource? = repository.findVisibleByName(name, workspaceId)?.toDatasource()
+
+    /**
+     * The executor backstop's read (workspaces §6 layer 2a, 020 F7): one flag-only indexed PK
+     * read per write-shaped node — the full-row fetch this replaces decrypted nothing but did
+     * carry the credential ciphertext and two `properties_json` parses across the wire per
+     * node. The `null`-means-absent mapping is the repository's ([DatasourceRepository.isReadonly]).
+     */
+    override fun isReadonlyLive(name: String): Boolean? = repository.isReadonly(name)
 
     override fun exists(name: String): Boolean = repository.exists(name)
 

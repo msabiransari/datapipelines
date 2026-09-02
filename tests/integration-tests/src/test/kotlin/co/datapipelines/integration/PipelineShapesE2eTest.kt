@@ -519,16 +519,7 @@ class PipelineShapesE2eTest {
         val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
         response.statusCode() shouldBe 200
 
-        val events = mutableListOf<Pair<String, JsonNode>>()
-        var currentEvent: String? = null
-        for (line in response.body().lines()) {
-            if (line.startsWith("event:")) {
-                currentEvent = line.removePrefix("event:").trim()
-            } else if (line.startsWith("data:")) {
-                events += (currentEvent ?: "unknown") to mapper.readTree(line.removePrefix("data:").trim())
-            }
-        }
-        return events
+        return E2eSse.parseEvents(response.body(), mapper)
     }
 
     /**
@@ -614,20 +605,11 @@ class PipelineShapesE2eTest {
 
     // ---------------------------------------------------------------- companion
 
-    private class SeededKey(
-        val name: String,
-        val scopes: Array<out String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         private const val REDIS_PORT = 6379
         private const val POSTGRES_PORT = 5432
         private const val SECRET_BYTES = 32
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private const val CANCEL_SLEEP_SECONDS = 15
 
         /**
@@ -644,29 +626,10 @@ class PipelineShapesE2eTest {
         private val ACTIVE_EMAILS = listOf("newer@datapipelines.test", "older@datapipelines.test")
 
         private val random = SecureRandom()
-        private val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
 
-        private fun argon2Hash(raw: String): String {
-            val chars = raw.toCharArray()
-            return try {
-                argon2.hash(2, 19_456, 1, chars)
-            } finally {
-                argon2.wipeArray(chars)
-            }
-        }
-
-        private val ADMIN_KEY = generateKey("e2e-admin-key", arrayOf("admin"))
-        private val EXECUTOR_KEY = generateKey("e2e-executor-key", arrayOf("execute"))
-        private val READER_ONLY_KEY = generateKey("e2e-reader-key", arrayOf("read"))
-
-        private fun generateKey(
-            name: String,
-            scopes: Array<String>,
-        ): SeededKey {
-            val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            return SeededKey(name = name, scopes = scopes, id = id, plaintext = plaintext, hash = argon2Hash(plaintext))
-        }
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("admin"))
+        private val EXECUTOR_KEY = E2eAuth.generateKey("e2e-executor-key", arrayOf("execute"))
+        private val READER_ONLY_KEY = E2eAuth.generateKey("e2e-reader-key", arrayOf("read"))
 
         private var authSeeded = false
         private val authLock = Any()

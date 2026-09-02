@@ -84,6 +84,21 @@ class DatasourceRepository(
     fun findByName(name: String): DatasourceRow? =
         jdbc.query("$SELECT_COLUMNS WHERE d.name = :name AND d.is_deleted = FALSE", mapOf("name" to name), mapper()).singleOrNull()
 
+    /**
+     * The live (non-deleted) `is_readonly` flag under [name], or **null when no live row exists**
+     * (020 F7). The executor's readonly backstop asks this question once per write-shaped node
+     * execution, so it reads the flag and nothing else: no credential ciphertext crosses the
+     * wire, and the two `properties_json` parses a full-row fetch would do never run. `null` is
+     * unambiguous — `is_readonly` is `NOT NULL` (V4), so an absent row is the only null there is.
+     */
+    fun isReadonly(name: String): Boolean? =
+        jdbc
+            .queryForList(
+                "SELECT d.is_readonly FROM datasources d WHERE d.name = :name AND d.is_deleted = FALSE",
+                mapOf("name" to name),
+                Boolean::class.java,
+            ).singleOrNull()
+
     /** Whether a live datasource exists under [name]. */
     fun exists(name: String): Boolean =
         jdbc

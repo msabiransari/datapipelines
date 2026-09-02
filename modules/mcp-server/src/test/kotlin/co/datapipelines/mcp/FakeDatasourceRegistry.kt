@@ -36,6 +36,12 @@ class FakeDatasourceRegistry(
         workspaceId: UUID,
     ): Datasource? = get(name)?.takeIf { it.workspaceId == null || it.workspaceId == workspaceId }
 
+    // The live reads (044 F6 made them abstract — a missing override is a compile error, not a
+    // silent cache-through hole). An in-memory fake IS live-through: the same map serves both.
+    override fun getLive(name: String): Datasource? = get(name)
+
+    override fun isReadonlyLive(name: String): Boolean? = get(name)?.isReadonly
+
     override fun exists(name: String): Boolean = get(name) != null
 
     override fun testConnection(name: String): TestResult? {

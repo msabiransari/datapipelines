@@ -129,6 +129,11 @@ class AuditCauseIntegrationTest {
 
         override fun get(name: String): Datasource? = datasource.takeIf { it.name == name }
 
+        // Live-through like every in-memory fake (044 F6: the overrides are mandatory now).
+        override fun getLive(name: String): Datasource? = get(name)
+
+        override fun isReadonlyLive(name: String): Boolean? = get(name)?.isReadonly
+
         override fun exists(name: String): Boolean = get(name) != null
 
         override fun save(

@@ -1,7 +1,6 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -320,15 +319,6 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .statusCode(201)
     }
 
-    private data class SeededKey(
-        val name: String,
-        val ownerId: String,
-        val scopes: Array<String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         private var datasourcesRegistered = false
 
@@ -338,7 +328,6 @@ class WorkspaceSurfacesFixRoundE2eTest {
         private const val CSRF_HEADER = "DP-CSRF-Token"
         private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
         private const val BOB = "bbb00000-0000-0000-0000-000000000002"
@@ -360,23 +349,10 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = seededKey("alice-key", ALICE, arrayOf("read", "execute", "author"))
-        private val BOB_KEY = seededKey("bob-key", BOB, arrayOf("read", "execute", "author"))
-        private val ADMIN_KEY = seededKey("admin-key", ROOT, arrayOf("read", "execute", "author", "admin"))
-        private val READONLY_KEY = seededKey("readonly-key", ALICE, arrayOf("read"))
-
-        private fun seededKey(
-            name: String,
-            ownerId: String,
-            scopes: Array<String>,
-        ): SeededKey {
-            val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-            return SeededKey(name, ownerId, scopes, id, plaintext, argon2Hash(plaintext))
-        }
-
-        private fun argon2Hash(plaintext: String): String =
-            Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id, 32, 16).hash(2, 19456, 1, plaintext.toCharArray())
+        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
+        private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
+        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author", "admin"), ownerId = ROOT)
+        private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = ALICE)
 
         private fun sessionJwt(
             userId: String,

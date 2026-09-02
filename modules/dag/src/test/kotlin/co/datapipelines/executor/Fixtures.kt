@@ -301,10 +301,11 @@ class InMemoryCancellationFlags : CancellationFlags {
  * Real driver, real pool semantics, real `Statement.cancel()` — the parts a mocked `Connection`
  * would quietly fake.
  *
- * [liveEntries] is what [getLive] serves — by default the same map, which is the
- * "cache-through" shape. A workspaces-D10 test passes a DIFFERENT map so the cached view
- * ([get]) and the live view ([getLive]) disagree exactly the way a readonly flag flipped in
- * the DB after a pipeline was saved makes them disagree.
+ * [liveEntries] is what the live reads serve — by default the same map, which is the
+ * "cache-through" shape. A workspaces-D10 test passes a DIFFERENT map (or omits a name
+ * entirely — the out-of-band soft-delete shape) so the cached view ([get]) and the live view
+ * ([getLive] / [isReadonlyLive]) disagree exactly the way a readonly flag flipped — or a row
+ * soft-deleted — in the DB after a pipeline was saved makes them disagree.
  */
 class FakeDatasourceRegistry(
     private val datasources: Map<String, Datasource>,
@@ -316,6 +317,11 @@ class FakeDatasourceRegistry(
      * so every other test keeps the pre-workspaces semantics without a workspace model.
      */
     private val visibleTo: Map<String, Set<UUID>> = emptyMap(),
+    /**
+     * What the LIVE read throws when set — the metadata-DB-down shape (044 F3): the
+     * repository read behind the backstop fails while the target datasource is healthy.
+     */
+    private val liveReadFailure: RuntimeException? = null,
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -335,7 +341,15 @@ class FakeDatasourceRegistry(
             datasources[name]?.takeIf { workspaceId in (visibleTo[name] ?: emptySet()) }
         }
 
-    override fun getLive(name: String): Datasource? = liveEntries[name]
+    override fun getLive(name: String): Datasource? {
+        liveReadFailure?.let { throw it }
+        return liveEntries[name]
+    }
+
+    override fun isReadonlyLive(name: String): Boolean? {
+        liveReadFailure?.let { throw it }
+        return liveEntries[name]?.isReadonly
+    }
 
     override fun exists(name: String): Boolean = name in datasources
 
