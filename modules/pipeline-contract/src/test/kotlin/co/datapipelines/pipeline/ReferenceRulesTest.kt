@@ -299,6 +299,49 @@ class ReferenceRulesTest {
         context["min_total"].toString() shouldBe "12.50"
     }
 
+    @Test
+    fun `a template interpolating a declared parameter is refused with the bind form in the message`() {
+        val pipeline =
+            Fixtures.pipeline(
+                nodes = listOf(Fixtures.node()),
+                parameters = mapOf("customer_id" to Parameter(type = LogicalType.STRING)),
+            )
+        val templates = StubTemplates(interpolated = mapOf("fetch_orders.sql" to setOf("customer_id")))
+
+        val failure =
+            validate(pipeline, templates = templates)
+                .withCode(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+                .single()
+
+        failure.details["parameter"] shouldBe "customer_id"
+        failure.details["bind_form"] shouldBe ":customer_id"
+        failure.message shouldContain "\${customer_id}"
+        failure.message shouldContain ":customer_id"
+    }
+
+    @Test
+    fun `a template that references a declared parameter only as a bind name is not refused`() {
+        // The stub reports nothing interpolated; the pipeline declares the parameter the template
+        // would reference as :customer_id.
+        val pipeline =
+            Fixtures.pipeline(
+                nodes = listOf(Fixtures.node()),
+                parameters = mapOf("customer_id" to Parameter(type = LogicalType.STRING)),
+            )
+
+        validate(pipeline).codes shouldNotContain PipelineErrorCodes.Template.PARAMETER_INTERPOLATED
+    }
+
+    @Test
+    fun `an interpolated name that is not declared is not reported by the bind rule`() {
+        // The dry-render's own undeclared-variable rule owns that case; the bind rule only
+        // refuses DECLARED parameters, so a stub reporting an undeclared name is ignored.
+        val templates = StubTemplates(interpolated = mapOf("fetch_orders.sql" to setOf("undeclared")))
+
+        validate(Fixtures.pipeline(), templates = templates).codes shouldNotContain
+            PipelineErrorCodes.Template.PARAMETER_INTERPOLATED
+    }
+
     private fun validate(
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),

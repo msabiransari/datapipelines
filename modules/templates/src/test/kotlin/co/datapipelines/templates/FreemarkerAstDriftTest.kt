@@ -41,8 +41,53 @@ class FreemarkerAstDriftTest {
             FreemarkerAst.TEXT_BLOCK to "SELECT 1",
             FreemarkerAst.MACRO to "<#macro m>x</#macro>",
             FreemarkerAst.MIXED_CONTENT to "SELECT \${a} FROM t",
+            FreemarkerAst.DOLLAR_VARIABLE to "\${x}",
+            FreemarkerAst.ITERATOR_BLOCK to "<#list rows as x></#list>",
         ).forEach { (expected, body) ->
             withClue("$body must still parse to $expected") { rootTypeOf(body) shouldBe expected }
+        }
+    }
+
+    @Test
+    fun `the binding descriptions the 042 scan parses still print in their pinned shapes`() {
+        // InterpolatedParameterScanner extracts names from these description spellings. A jar
+        // bump that re-renders any of them would silently disarm the scope tracking and start
+        // refusing templates that shadow a declared name legitimately.
+        val cases =
+            mapOf(
+                "<#list rows as x></#list>" to "#list rows as x",
+                "<#macro m customer_id x=1></#macro>" to "#macro m customer_id x=1",
+                "<#function f customer_id></#function>" to "#function f(customer_id)",
+            )
+        cases.forEach { (body, expectedDescription) ->
+            withClue("$body must still print '$expectedDescription'") {
+                FreemarkerAst.ownText(parse(body).rootTreeNode) shouldBe expectedDescription
+            }
+        }
+
+        // The DollarVariable shape itself: the scan reads the expression out of this text.
+        val interpolated = parse("SELECT \${x} FROM t").rootTreeNode
+        var saw = false
+        FreemarkerAst.visitExcludingComments(interpolated) { element ->
+            if (FreemarkerAst.typeOf(element) == FreemarkerAst.DOLLAR_VARIABLE) {
+                FreemarkerAst.ownText(element) shouldBe "\${x}"
+                saw = true
+            }
+        }
+        saw shouldBe true
+    }
+
+    @Test
+    fun `a backslash does not escape an interpolation - the escape is literal text`() {
+        // Pinned 2.3.34 reality the 042 scan's completeness rests on: `\${x}` parses as literal
+        // backslash text PLUS a live DollarVariable — there is no spelling that hides a live
+        // interpolation from the tree, so the scan cannot be bypassed with an "escape".
+        val root = parse("SELECT \\\${x} FROM t").rootTreeNode
+
+        FreemarkerAst.visitExcludingComments(root) { element ->
+            if (FreemarkerAst.typeOf(element) == FreemarkerAst.DOLLAR_VARIABLE) {
+                FreemarkerAst.ownText(element) shouldBe "\${x}"
+            }
         }
     }
 
