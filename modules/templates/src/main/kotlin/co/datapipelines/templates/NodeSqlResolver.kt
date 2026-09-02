@@ -158,7 +158,6 @@ class NodeSqlResolver(
         val binder = ParameterBinder(pipeline.parameters)
         return when (val binding = binder.bind(parameterInputs ?: emptyMap())) {
             is ParameterBindingResult.Bound -> render(workspaceId, detail, node, binding.context.asMap(), sampled = emptyList())
-
             is ParameterBindingResult.Rejected -> rejected(workspaceId, detail, node, binder, binding.failures)
         }
     }
