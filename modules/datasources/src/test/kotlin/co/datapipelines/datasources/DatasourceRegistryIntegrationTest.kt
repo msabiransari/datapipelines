@@ -136,6 +136,47 @@ class DatasourceRegistryIntegrationTest {
     }
 
     @Test
+    fun `isReadonlyLive is the flag-only live read - sees a row-level flip, and null for an out-of-band soft-delete (044 F2 F7)`() {
+        val registry = registry()
+        registry.save(Fixtures.h2(name = "flagged_live", password = "pw"), owner)
+        registry.get("flagged_live") // warm the cache with the writable entry
+
+        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'flagged_live'", emptyMap<String, Any>())
+
+        // The executor backstop's actual read: flag-only, live, three-valued.
+        registry.isReadonlyLive("flagged_live") shouldBe true
+        // The un-flip direction reads live too — F4's both-directions rule at the primitive level.
+        jdbc.update("UPDATE datasources SET is_readonly = FALSE WHERE name = 'flagged_live'", emptyMap<String, Any>())
+        registry.isReadonlyLive("flagged_live") shouldBe false
+
+        // The D10 channel's other half: a row-level soft-delete makes the live read NULL while
+        // the cached entry survives — the backstop's "absent ⇒ refuse" case is fed by exactly this.
+        jdbc.update("UPDATE datasources SET is_deleted = TRUE WHERE name = 'flagged_live'", emptyMap<String, Any>())
+        registry.isReadonlyLive("flagged_live") shouldBe null
+        registry.get("flagged_live").shouldNotBeNull() // the cached view still serves it
+    }
+
+    @Test
+    fun `getVisibleLive sees a row-level flip immediately while getVisible serves the cache (044 F4)`() {
+        val registry = registry()
+        val workspace = insertWorkspace("live_ws")
+        registry.save(Fixtures.h2(name = "bound_live", password = "pw").copy(workspaceId = workspace), owner)
+        // Warm the visibility cache with the writable entry — what a save validated against.
+        registry.getVisible("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe false
+
+        jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'bound_live'", emptyMap<String, Any>())
+
+        // Save-time validation reads the LIVE visible row, so the next save honors the flip in
+        // BOTH directions — the cached getVisible keeps serving the stale flag until TTL, but
+        // nothing reads it for validation anymore.
+        registry.getVisible("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe false
+        registry.getVisibleLive("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe true
+
+        // Same visibility predicate as the cached twin: another workspace's bound row is null.
+        registry.getVisibleLive("bound_live", UUID.randomUUID()) shouldBe null
+    }
+
+    @Test
     fun `a readonly row builds a read-only pool - real HikariConfig and pool build (layer 2b)`() {
         val registry = registry()
         registry.save(Fixtures.h2(name = "ro_pool", password = "pw"), owner)
@@ -498,6 +539,19 @@ class DatasourceRegistryIntegrationTest {
                 RETURNING id
                 """.trimIndent(),
                 emptyMap<String, Any>(),
+                UUID::class.java,
+            ),
+        )
+
+    private fun insertWorkspace(name: String): UUID =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                INSERT INTO workspaces (name, display_name, is_personal, created_by)
+                VALUES ('$name', '$name', FALSE, :owner)
+                RETURNING id
+                """.trimIndent(),
+                mapOf("owner" to owner),
                 UUID::class.java,
             ),
         )

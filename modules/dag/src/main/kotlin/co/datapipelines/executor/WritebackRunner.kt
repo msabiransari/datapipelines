@@ -141,10 +141,17 @@ class JdbcWritebackRunner(
      * [writebackRows] path — so every `output.target: "datasource"` write is behind the
      * backstop regardless of who produced the rows. Reads the LIVE registry entry (past the
      * metadata cache), so a flip between save and execution fails here.
+     *
+     * Fail-closed (044 F2/F3): a null live read (the row was soft-deleted out of band — the
+     * D10 channel) refuses as `datasource_not_found`, never "no signal"; a metadata-DB
+     * failure during the read refuses naming the METADATA db — see [ReadonlyBackstop].
      */
     private fun refuseIfReadonly(output: NodeOutput.Datasource) {
-        val live = registry.getLive(output.datasource) ?: return
-        if (live.isReadonly) throw datasourceReadonly(output.datasource, output.table)
+        when (ReadonlyBackstop.signal(registry, output.datasource)) {
+            ReadonlySignal.READONLY -> throw datasourceReadonly(output.datasource, output.table)
+            ReadonlySignal.ABSENT -> throw datasourceNotFound(output.datasource)
+            ReadonlySignal.WRITABLE -> Unit
+        }
     }
 
     /**

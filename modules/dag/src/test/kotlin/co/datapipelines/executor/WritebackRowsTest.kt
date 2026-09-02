@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
@@ -121,6 +122,55 @@ class WritebackRowsTest {
         thrown.code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
         thrown.details["datasource"] shouldBe "wb"
         thrown.details["table"] shouldBe "tgt"
+    }
+
+    @Test
+    fun `a target soft-deleted out of band is refused on the composition path too - fail-closed (044 F2)`() {
+        // `is_deleted = TRUE` by manual SQL (the D10 channel): the cached view still resolves
+        // the row the pipeline validated against, the live view is gone. The shared writeAll
+        // shell must REFUSE — the fail-open shape returned early and shipped the write.
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+        val runner = JdbcWritebackRunner(FakeDatasourceRegistry(datasources = mapOf("wb" to datasource), liveEntries = emptyMap()))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                runner.writebackRows(
+                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                    sequenceOf(listOf(1)),
+                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    workspaceId,
+                )
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
+    }
+
+    @Test
+    fun `a metadata-db failure during the live readonly read refuses the composition write - naming the metadata db (044 F3)`() {
+        // The target is healthy; the METADATA database the live read goes to is down. The
+        // refusal must name the metadata db — 020's shape let the raw read failure escape as a
+        // bare driver-flavored exception (or `writeback_failed`) blaming the healthy target.
+        val datasource = h2Datasource("wb", listOf("CREATE TABLE tgt (id INT)"))
+        val runner =
+            JdbcWritebackRunner(
+                FakeDatasourceRegistry(
+                    datasources = mapOf("wb" to datasource),
+                    liveReadFailure = IllegalStateException("connection refused"),
+                ),
+            )
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                runner.writebackRows(
+                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                    sequenceOf(listOf(1)),
+                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    workspaceId,
+                )
+            }
+
+        thrown.code shouldBe PipelineErrorCodes.Execution.ABORTED
+        thrown.message shouldContain "metadata"
     }
 
     @Test
