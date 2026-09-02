@@ -4,7 +4,10 @@ import co.datapipelines.events.ExecutionAborted
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.LogicalType
+import com.fasterxml.jackson.databind.node.IntNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -238,6 +241,54 @@ class CancellationTest {
 
             statement.cancels.get() shouldBe 0
             handle.registeredStatements shouldBe 0
+        }
+
+    /**
+     * 042 C3: bind-parameter SQL runs on a **prepared** statement — and that prepared statement
+     * must be registered with the same handle as every other, or this test would wait out the
+     * query's full ~57s. `Statement.cancel()` reaching the source database is the same contract
+     * for a prepared statement as for a plain one; the prepared path must not regress it.
+     */
+    @Test
+    fun `a prepared bound-parameter statement is cancellable mid-flight`() =
+        runBlocking<Unit> {
+            // SLOW_SQL plus one bound predicate whose value (0) leaves the row set unchanged, so
+            // the query stays slow while carrying a real `:mod` bind.
+            val slowBound = Fixtures.SLOW_SQL + " AND :mod = 0"
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("slow" to slowBound)),
+                registry = FakeDatasourceRegistry(mapOf(SLOW_DS to slowDatasource())),
+                config = ExecutorConfig(executionTimeoutSeconds = TIMEOUT_SECONDS),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("slow", source = SLOW_DS))
+                val parameters =
+                    mapOf(
+                        "mod" to Parameter(type = LogicalType.INTEGER, required = false, default = IntNode(0)),
+                    )
+
+                val elapsed =
+                    kotlin.system.measureTimeMillis {
+                        withTimeout(HARNESS_BUDGET_MS) {
+                            val run =
+                                async {
+                                    shouldThrow<ExecutionAbortedException> {
+                                        h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes, parameters = parameters)))
+                                    }
+                                }
+                            val executionId = awaitNodeStarted(h, nodeId = "slow")
+                            delay(SETTLE_MS)
+                            (h.cancellations.registeredFor(executionId) >= 1).shouldBeTrue()
+                            h.cancellations.cancel(executionId, AbortReason.CANCELLED)
+                            run.await()
+                        }
+                    }
+
+                (elapsed < INTERRUPT_BUDGET_MS).shouldBeTrue()
+                h.emitter
+                    .allOf<ExecutionAborted>()
+                    .single()
+                    .reason shouldBe AbortReason.CANCELLED
+            }
         }
 
     /**

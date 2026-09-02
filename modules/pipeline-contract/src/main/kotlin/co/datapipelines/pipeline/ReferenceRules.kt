@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
 
@@ -159,6 +160,7 @@ internal object ReferenceRules {
             is TemplateLookup.Found -> {
                 checkDialect(path, node, lookup.dialect, sourceDialect, into)
                 dryRender(path, node, templates, workspaceId, sampleContext, into)
+                checkInterpolatedParameters(path, node, templates, workspaceId, sampleContext, into)
             }
         }
     }
@@ -180,6 +182,37 @@ internal object ReferenceRules {
                 "but node '${node.id.truncateForError()}' runs against a ${sourceDialect.wire} source.",
             mapOf("template_dialect" to templateDialect.wire, "source_dialect" to sourceDialect.wire),
         )
+    }
+
+    /**
+     * 042 B2 — the bind-instead-of-interpolate rule. A declared parameter interpolated inside
+     * `${}` puts a caller-supplied value into the SQL string; the bind form `:name` is the only
+     * value path the round admits. The message names both forms so an author fixes it without
+     * reading a spec (042 B3).
+     */
+    private fun checkInterpolatedParameters(
+        path: String,
+        node: Node,
+        templates: TemplateDryRenderer,
+        workspaceId: java.util.UUID,
+        sampleContext: Map<String, Any?>,
+        into: FailureCollector,
+    ) {
+        templates.interpolatedParameters(workspaceId, node.template, sampleContext.keys).forEach { name ->
+            into.add(
+                PipelineErrorCodes.Template.PARAMETER_INTERPOLATED,
+                path,
+                "Template '${node.template.key.truncateForError()}' interpolates declared parameter " +
+                    "'${name.truncateForError()}' into the SQL as \${$name} — reference it as :$name " +
+                    "instead. Declared parameters bind as SQL parameters; \${} interpolation is for " +
+                    "structure only.",
+                mapOf(
+                    "template" to node.template.key.truncateForError(),
+                    "parameter" to name.truncateForError(),
+                    "bind_form" to ":$name",
+                ),
+            )
+        }
     }
 
     private fun dryRender(

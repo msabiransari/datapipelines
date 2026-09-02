@@ -43,8 +43,9 @@ REST API and a browser UI. Metadata lives in Postgres (Flyway); results/events i
 `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`), `display_name`,
 `description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,
 `is_library`. **There is no params_schema field** — the variables a body may reference
-are exactly the calling pipeline's `parameters` keys (defaults applied). The body must
-**never** contain `<#import>` / `<#include>` — imports come from the `imports` array and
+are exactly the calling pipeline's `parameters` keys (defaults applied). A declared
+parameter is referenced in the SQL as a **bind parameter**: `WHERE id = :customer_id`.
+The body must **never** contain `<#import>` / `<#include>` — imports come from the `imports` array and
 the body calls macros by alias (`<@dates.date_range …/>`). Library templates
 (`is_library: true`) contain only `<#macro>`/`<#function>` definitions.
 
@@ -65,6 +66,14 @@ see type-system.md §3). Each declares `type`, `required`, optional `default`,
 `description`. **`DECIMAL` parameters must also declare `precision`** — omitting it
 fails the save with `pipeline.validation.parameter_precision_missing`; `BIGDECIMAL`
 precision is optional (omitted = unbounded).
+
+**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
+never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the
+statement, while the interpolated form puts it inside the SQL string. Pipeline save
+refuses the old form with `template.validation.parameter_interpolated`. `${}` stays for
+**structure** — table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep
+safe yourself (never interpolate a caller-supplied value there). Bound values need no
+quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
 
 **Dialects** — seven: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE. Templates are
 dialect-specific; a node's template dialect must match what its `source` can execute.
@@ -185,6 +194,8 @@ Codes you will meet most often:
 | `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
 | `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
 | `pipeline.node.query_execution_failed` | A node's SQL failed | Read `node_stats` + `executions_get` for the node error, re-render its template with the failed parameters |
+| `pipeline.node.sql_parameter_missing` | The rendered SQL references a `:name` no pipeline parameter declares | Name a declared parameter — or interpolate structure instead |
+| `template.validation.parameter_interpolated` | A declared parameter appears inside `${}` | Write `:name` for it — bound values are never parsed as SQL |
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
 
 Rule of thumb: validation errors are your bug — fix the document, don't retry.
@@ -214,13 +225,18 @@ Reachability and TTL errors are the world's state — probe, then retry once.
 7. **Declare parameters honestly.** Required flags with no default make the pipeline
    refuse a bare execute; that is the contract working, not a bug — ask the user for
    values.
-8. **Page results immediately.** Read all pages within `ttl_seconds`; long-running
+8. **Bind values, never interpolate them.** A declared parameter appears in SQL as
+   `:name` (bound, never parsed as SQL); `${}` is for structural SQL only. A `:name`
+   with no declared parameter fails at execution with
+   `pipeline.node.sql_parameter_missing` — name a declared parameter or interpolate
+   structure.
+9. **Page results immediately.** Read all pages within `ttl_seconds`; long-running
    work between pages risks `result.expired`.
-9. **Never put secrets in templates or descriptions.** Credentials live on the
+10. **Never put secrets in templates or descriptions.** Credentials live on the
    datasource entity (AES-GCM encrypted at rest). SQL bodies are visible to anyone
    with `read`.
-10. **Respect the rate limiter** — batch listing calls, don't hammer `/mcp`.
-11. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
+11. **Respect the rate limiter** — batch listing calls, don't hammer `/mcp`.
+12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
 

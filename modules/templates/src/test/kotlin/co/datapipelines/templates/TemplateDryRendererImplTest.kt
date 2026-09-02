@@ -67,6 +67,28 @@ class TemplateDryRendererImplTest {
     }
 
     @Test
+    fun `interpolatedParameters reports a declared name the body interpolates`() {
+        registry.put(TemplateFixtures.version("bind.sql", body = "SELECT \${customer_id} WHERE id = :customer_id"))
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("bind.sql", 1), setOf("customer_id")) shouldBe
+            listOf("customer_id")
+    }
+
+    @Test
+    fun `interpolatedParameters is empty when the body interpolates nothing declared`() {
+        dryRenderer
+            .interpolatedParameters(workspaceId, TemplateRef("fetch.sql", 1), setOf("customer_id"))
+            .shouldBe(emptyList())
+    }
+
+    @Test
+    fun `interpolatedParameters is empty when the reference resolves to no stored version`() {
+        dryRenderer
+            .interpolatedParameters(workspaceId, TemplateRef("absent.sql", 1), setOf("customer_id"))
+            .shouldBe(emptyList())
+    }
+
+    @Test
     fun `dryRender does not throw even for a template the registry cannot resolve`() {
         dryRenderer
             .dryRender(workspaceId, TemplateRef("does_not_exist.sql", 9), emptyMap())

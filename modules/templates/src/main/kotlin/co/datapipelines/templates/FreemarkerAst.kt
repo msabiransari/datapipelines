@@ -78,6 +78,12 @@ internal object FreemarkerAst {
     /** `<#macro>` **and** `<#function>` — one node type; `Macro.isFunction()` separates them. */
     const val MACRO = "freemarker.core.Macro"
 
+    /** `${expr}` — the interpolation node; its [TemplateElement.getDescription] prints `${expr}`. */
+    const val DOLLAR_VARIABLE = "freemarker.core.DollarVariable"
+
+    /** `<#list … as x>` — the loop node that binds a loop variable (042 B2 scope tracking). */
+    const val ITERATOR_BLOCK = "freemarker.core.IteratorBlock"
+
     /** [element]'s own class name — the node-identity check every caller uses. */
     fun typeOf(element: TemplateElement): String = element.javaClass.name
 

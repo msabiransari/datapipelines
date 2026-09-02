@@ -37,6 +37,11 @@ import java.util.Locale
  * strings ([RenderContextNormalizer]), so `<#if amount gt 100>` and template arithmetic keep
  * working; this format governs only how one is written out.
  *
+ * **On bound parameters (042):** a declared parameter referenced as `:name` never passes
+ * through this format — the driver receives the typed object and formats it itself, which is
+ * half the point of binding. This format now governs only *interpolated* numbers (structure,
+ * and templates stored before the 042 migration), which is why it stays in place.
+ *
  * **On templates.md Appendix A (settled, no action):** the worked example writes
  * `${min_total?c}` and shows `1000.00`. The `?c` built-in bypasses `numberFormat` entirely and
  * uses the `CFormat`, which drops trailing zeros in every published implementation, and `?c`

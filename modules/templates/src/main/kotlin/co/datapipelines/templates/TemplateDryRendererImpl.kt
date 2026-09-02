@@ -57,4 +57,13 @@ class TemplateDryRendererImpl(
 
             is RenderOutcome.Failed -> DryRenderOutcome.RenderFailed(outcome.detail)
         }
+
+    override fun interpolatedParameters(
+        workspaceId: java.util.UUID,
+        ref: TemplateRef,
+        declared: Set<String>,
+    ): List<String> {
+        val version = engines.registryFor(workspaceId).lookup(ref.id, ref.version) ?: return emptyList()
+        return InterpolatedParameterScanner.scan(version.body, declared)
+    }
 }

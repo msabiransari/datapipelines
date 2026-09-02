@@ -415,13 +415,17 @@ The Context is a **runtime in-memory map** — never serialized in the Pipeline 
 
 ### 7.4 Template variable resolution
 
-Templates use Freemarker syntax to reference Context keys:
+Templates use Freemarker syntax to reference Context keys. A key declared in `parameters` is
+a **value** and is referenced as a bind parameter — `:name` — which the executor binds on a
+prepared statement, so a caller-supplied `STRING` is never parsed as SQL (Templates §4.5).
+`${}` interpolation is for **structure** (table names, dynamic fragments) and is refused for
+declared parameter names at save time (`template.validation.parameter_interpolated`, §12.6):
 
 ```ftl
 SELECT order_id, customer_id, total_amount
 FROM orders
-WHERE order_date BETWEEN '${start_date}' AND '${end_date}'
-  AND total_amount >= ${min_total?c}
+WHERE order_date BETWEEN :start_date AND :end_date
+  AND total_amount >= :min_total
 ```
 
 The template engine enforces that all referenced variables exist in the Context — referencing an undefined variable is a render failure (`pipeline.node.template_render_failed`).
@@ -677,6 +681,14 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 | `pipeline.validation.template_parameter_undeclared` | Dry-render check: every referenced template renders successfully against the pipeline's declared `parameters` (defaults where present, type-appropriate sample values otherwise). An undefined variable fails here, at save time (§7.4). |
 | `pipeline.validation.template_render_failed` | Dry-render failed for a reason OTHER than an undeclared variable — a type-mismatched built-in, an unresolvable imported macro, an expression error (added 2026-08-08: a render failure at save time is a validation outcome, never an exception escaping the validator, and never mislabeled as `template_parameter_undeclared`) |
 
+042 B2, not a `pipeline.validation.*` row: beside the dry render, save also scans each resolved
+template's parse tree, and a **declared** parameter name found inside a `${}` interpolation is
+refused with `template.validation.parameter_interpolated` (§13.9, HTTP 400) — declared
+parameters are values and bind as `:name` (Templates §4.5); the message names both forms. The
+scan is AST-based (Templates §4.2 reasoning), honours macro-parameter and loop-variable
+shadowing, and no spelling hides a live interpolation from it (pinned against Freemarker
+2.3.34).
+
 ### 12.7 Parameter validations
 
 | Code | Check |
@@ -760,6 +772,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
 | `pipeline.node.child_execution_failed` | 500 | A PIPELINE node's child execution failed; the detail carries the child's error code and execution id |
 | `pipeline.node.composition_depth_exceeded` | 500 | Runtime composition-depth backstop hit; indicates a save-time validation gap, since static depth (§12.9) should catch it first |
+| `pipeline.node.sql_parameter_missing` | 500 | The rendered SQL references a `:name` bind parameter the execution context does not declare. Raised before anything executes (042: a missing value bound as null would return wrong data instead of an error); the message names the parameter |
 
 ### 13.5 Staging
 
@@ -839,6 +852,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
+| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The message names the parameter and shows the `:name` form |
 | `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 | `template.version.conflict` | 409 | Content-hash precondition failed on a template draft write/release/discard — another writer changed it after the caller loaded it ([Versioning §4](versioning.md#4-content-hash-body_hash)) |
@@ -1138,6 +1152,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.6 | 042 bound parameters | §7.4's example and prose move declared parameters to the `:name` bind form (Templates §4.5 — a declared parameter is a value; `${}` is for structure). §12.6 gains the interpolation refusal: a declared name inside `${}` fails save with `template.validation.parameter_interpolated` (§13.9). §13.4 gains `pipeline.node.sql_parameter_missing` — a `:name` the execution context does not declare fails loudly before anything executes. Additive per §15.2. |
 | 2026-08-05 | v1.0 | initial draft | Initial pipeline contract: schema, nodes, parameters, validation, error codes, lifecycle |
 | 2026-08-05 | v1.1 | review feedback | Replaced `terminal_node_id` with auto-detection (§9). Added `type` enum (DQL/DML/DDL) — §4.6, §8. Added `output` block with `target` (tempdb/caller/datasource) — §4.7, §8.1. Added `settings.tempdb` — §5. Renamed `__staging__` → `tempdb` throughout. Removed `datasources_used` (redundant with node sources). Added `engine` field placeholder for templates. **Rejected `parallel_id`** — `depends_on` is mathematically complete for DAG parallelism (two nodes run in parallel iff neither is reachable from the other); a second parallelism source-of-truth would create reconciliation bugs. |
 | 2026-08-07 | v1.2 | consistency campaign | **D1:** omitted `output` defaults to `caller` (was `tempdb`); topology-based terminal auto-detection replaced by caller-node resolution (§9); any DQL target combination legal — deleted `dql_sink_missing_caller_target`, `no_dql_sink`, `disconnected_terminal`, `dql_missing_output`; `multiple_caller_targets` → `multiple_caller_nodes`; zero caller nodes legal. **D3:** template variables validated by save-time dry-render (§7.4, §12.6); pipeline `parameters` is the single declaration point. **D5:** §13 expanded with §13.7–13.11 (auth normalized to 3-segment codes, datasource, template, result, rate-limit/idempotency) — the single concrete code catalog. §6.3 strict coercion rules; §10.1 per-namespace table uniqueness; §11.4 scan fields + heuristics specified; §15.4 version-counter disambiguation; §17.3 defers DDL to metadata-db. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

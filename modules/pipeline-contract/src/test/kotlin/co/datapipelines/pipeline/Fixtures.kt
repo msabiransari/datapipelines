@@ -183,6 +183,8 @@ internal class StubTemplates(
     private val lookups: Map<String, TemplateLookup> = emptyMap(),
     private val defaultLookup: TemplateLookup = TemplateLookup.Found(Dialect.POSTGRES),
     private val renders: Map<String, DryRenderOutcome> = emptyMap(),
+    /** Per-template id, the declared names the stub reports as interpolated (042 B2). */
+    private val interpolated: Map<String, Set<String>> = emptyMap(),
 ) : TemplateDryRenderer {
     /** Contexts the validator passed in, keyed by template id — the §7.4 sample-context evidence. */
     val renderedContexts = mutableMapOf<String, Map<String, Any?>>()
@@ -200,4 +202,10 @@ internal class StubTemplates(
         renderedContexts[ref.id] = context
         return renders[ref.id] ?: DryRenderOutcome.Success
     }
+
+    override fun interpolatedParameters(
+        workspaceId: UUID,
+        ref: TemplateRef,
+        declared: Set<String>,
+    ): List<String> = interpolated[ref.id]?.filter(declared::contains)?.toList() ?: emptyList()
 }

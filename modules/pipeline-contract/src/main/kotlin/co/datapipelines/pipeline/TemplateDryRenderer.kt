@@ -42,6 +42,21 @@ interface TemplateDryRenderer {
         ref: TemplateRef,
         context: Map<String, Any?>,
     ): DryRenderOutcome
+
+    /**
+     * 042 B2 — which of [declared] does the referenced template body reference inside `${}`
+     * interpolations. A declared parameter is a VALUE and must be referenced as `:name`, bound
+     * as a SQL parameter; interpolation is for structure only. Every name returned here fails
+     * validation with `template.validation.parameter_interpolated`.
+     *
+     * Empty when the body interpolates none of [declared] — including when the reference
+     * resolves to no stored version, which [lookup] reports with its own outcome.
+     */
+    fun interpolatedParameters(
+        workspaceId: UUID,
+        ref: TemplateRef,
+        declared: Set<String>,
+    ): List<String>
 }
 
 /** What the registry knows about a `{id, version}` reference. */
