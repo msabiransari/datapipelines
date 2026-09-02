@@ -332,10 +332,167 @@ class ConfigValidatorTest {
         ConfigValidator.validate(validSnapshot().copy(bootstrapDatasourcesFile = "  ")).violations.shouldBeEmpty()
 
         // examples-file seeds at first login, under that user's identity — it needs no admin.
+        // It DOES need the mode that seeds (below): this pair was asserted clean at
+        // `self-serve` until 048/F5, which is precisely the gap that assertion was hiding.
         ConfigValidator
-            .validate(validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", bootstrapAdminEmail = null))
-            .violations
+            .validate(
+                validSnapshot().copy(
+                    bootstrapExamplesFile = "/etc/dp/examples.json",
+                    bootstrapAdminEmail = null,
+                    workspacesProvisioningMode = "auto-per-user",
+                ),
+            ).violations
             .shouldBeEmpty()
+    }
+
+    // ------------------------------------------------------------------ §3.18 / §3.17 (048 F5)
+
+    @Test
+    fun `an examples file under a mode that never seeds names BOTH keys`() {
+        // The silent-config class the sibling cross-key rule exists to prevent: the seeder bean
+        // is built, the file is read and structurally checked — and `seed` is never called,
+        // because only `auto-per-user` provisions the personal workspace that triggers it.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "self-serve"),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.bootstrap.examples-file")
+        report.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
+        report.violations.single().shouldContain("auto-per-user")
+    }
+
+    @Test
+    fun `an unset provisioning mode is the shipped default, and is refused the same way`() {
+        // application.yml ships `${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}`, so
+        // "the operator set no mode" IS self-serve — the seeder is just as unreachable.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = null),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
+    }
+
+    @Test
+    fun `closed mode with an examples file is refused too, and auto-per-user is clean`() {
+        ConfigValidator
+            .validate(validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "CLOSED"))
+            .violations
+            .shouldHaveSize(1)
+
+        ConfigValidator
+            .validate(
+                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = " auto-per-user "),
+            ).violations
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `an empty examples file path is the feature off, not a misconfigured pair`() {
+        // Unset = off (§3.18), and application.yml's default binds the empty string.
+        ConfigValidator.validate(validSnapshot().copy(bootstrapExamplesFile = "  ")).violations.shouldBeEmpty()
+        ConfigValidator.validate(validSnapshot().copy(bootstrapExamplesFile = null)).violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `an unknown mode beside an examples file reports the mode itself, not the pair`() {
+        // One cause, one violation: a typo'd mode is already named by its own check, and
+        // adding a second line about seeding would send the operator down the wrong key.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(bootstrapExamplesFile = "/etc/dp/examples.json", workspacesProvisioningMode = "atuo-per-user"),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("is not one of")
+    }
+
+    // ------------------------------------------------------------------ §7 (048 F8) reserved names
+
+    @Test
+    fun `an OIDC provider named bootstrap is refused - the name is a system placeholder`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    oidcProviders =
+                        listOf(
+                            OidcProviderSnapshot(
+                                name = "bootstrap",
+                                clientId = "id",
+                                clientSecret = "secret",
+                                issuerUri = "https://idp.example.com",
+                            ),
+                        ),
+                ),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("bootstrap")
+        report.violations.single().shouldContain("reserved")
+    }
+
+    @Test
+    fun `local is reserved on the same grounds, and the reservation ignores case and padding`() {
+        listOf("local", "  Bootstrap ", "LOCAL").forEach { name ->
+            val report =
+                ConfigValidator.validate(
+                    validSnapshot().copy(
+                        oidcProviders =
+                            listOf(
+                                OidcProviderSnapshot(
+                                    name = name,
+                                    clientId = "id",
+                                    clientSecret = "secret",
+                                    issuerUri = "https://idp.example.com",
+                                ),
+                            ),
+                    ),
+                )
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("reserved")
+        }
+    }
+
+    @Test
+    fun `an unconfigured entry named bootstrap is refused too - the squat is the name, not the wiring`() {
+        // A blank client-id is otherwise IGNORED (it is how the stock `google` entry binds when
+        // its env vars are unset). The reservation is not: the name lands in `users.provider`
+        // the moment somebody fills the credentials in.
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    localEnabled = true,
+                    oidcProviders = listOf(OidcProviderSnapshot(name = "bootstrap", clientId = "", clientSecret = "", issuerUri = "")),
+                ),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("reserved")
+    }
+
+    @Test
+    fun `the stock provider names are untouched`() {
+        listOf("google", "microsoft", "okta", "bootstrap-idp").forEach { name ->
+            ConfigValidator
+                .validate(
+                    validSnapshot().copy(
+                        oidcProviders =
+                            listOf(
+                                OidcProviderSnapshot(
+                                    name = name,
+                                    clientId = "id",
+                                    clientSecret = "secret",
+                                    issuerUri = "https://idp.example.com",
+                                ),
+                            ),
+                    ),
+                ).violations
+                .shouldBeEmpty()
+        }
     }
 
     // ------------------------------------------------------------------ §3.4 local auth
