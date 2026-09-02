@@ -1,5 +1,9 @@
 package co.datapipelines.web.bootstrap
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -12,6 +16,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.writeText
@@ -123,5 +128,82 @@ class ExampleContentSeederTest {
 
         error.message shouldBe "template.validation.body_invalid"
         verify(exactly = 0) { pipelines.import(any(), any(), any()) }
+    }
+
+    // ---------------------------------------------------------------- F7: declared-but-empty
+
+    @Test
+    fun `declared-but-empty arrays are valid input, not a malformed file`() {
+        // Both arrays are optional (class KDoc), so an explicitly empty one is a deployment
+        // saying "seed nothing of this kind" — never the "declares neither" refusal, which
+        // exists for a file that mentions neither array at all.
+        seeder(file("""{"templates":[],"pipelines":[]}""")).seed(workspaceId, userId)
+
+        verify(exactly = 0) { templates.import(any(), any(), any()) }
+        verify(exactly = 0) { pipelines.import(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an empty array beside a populated one seeds the populated one`() {
+        every { pipelines.import(any(), any(), any()) } returns mockk()
+
+        seeder(
+            file("""{"templates":[],"pipelines":[{"schema_version":1,"name":"only_one","display_name":"One","nodes":[]}]}"""),
+        ).seed(workspaceId, userId)
+
+        verify(exactly = 0) { templates.import(any(), any(), any()) }
+        verify(exactly = 1) { pipelines.import(any(), workspaceId, userId) }
+    }
+
+    // ---------------------------------------------------------------- A: the failure is legible
+
+    @Test
+    fun `a failing fixture is logged structured with its id and error code before the failure travels`() {
+        // The shape T63 reported: seeding fails, the login 500s, and nothing in the logs says
+        // which fixture or why. The refusal stands; only its legibility is under test.
+        every { templates.import(any(), any(), any()) } returns emptyList()
+        every { pipelines.import(any(), any(), any()) } throws
+            ApiException(
+                PipelineErrorCodes.Import.MISSING_DATASOURCE,
+                "Imported pipeline 'revenue_by_borough' has unmet dependencies in this environment.",
+                mapOf("missing_datasources" to listOf("nyc-open-data")),
+            )
+
+        val lines = capturingLogs { shouldThrow<ApiException> { seeder(file(examples)).seed(workspaceId, userId) } }
+
+        val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
+        failure.shouldContain("workspace_id=$workspaceId")
+        failure.shouldContain("user_id=$userId")
+        failure.shouldContain("fixture_kind=pipeline")
+        failure.shouldContain("fixture=revenue_by_borough")
+        failure.shouldContain("error_code=${PipelineErrorCodes.Import.MISSING_DATASOURCE}")
+        // The success line must NOT be emitted for a seeding that failed.
+        lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
+    }
+
+    @Test
+    fun `a failing template import names the templates envelope it was importing`() {
+        every { templates.import(any(), any(), any()) } throws
+            ApiException(PipelineErrorCodes.Template.SYNTAX_ERROR, "broken", emptyMap())
+
+        val lines = capturingLogs { shouldThrow<ApiException> { seeder(file(examples)).seed(workspaceId, userId) } }
+
+        val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
+        failure.shouldContain("fixture_kind=templates")
+        failure.shouldContain("fixture=nyc_revenue.sql")
+        failure.shouldContain("error_code=${PipelineErrorCodes.Template.SYNTAX_ERROR}")
+    }
+
+    private fun capturingLogs(block: () -> Unit): List<String> {
+        val logger = LoggerFactory.getLogger(ExampleContentSeeder::class.java) as ch.qos.logback.classic.Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list.map { it.formattedMessage }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
     }
 }

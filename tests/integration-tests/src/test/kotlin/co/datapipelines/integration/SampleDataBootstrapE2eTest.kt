@@ -165,12 +165,24 @@ class SampleDataBootstrapE2eTest {
         bootAppAnd(mapOf("datapipelines.bootstrap.examples-file" to broken.toString())) { context ->
             val email = "broken-${UUID.randomUUID().toString().take(8)}@example.com"
 
-            val error = assertThrows<Exception> { firstLogin(email, context) }
+            lateinit var error: Throwable
+            val lines = capturingLogs { error = assertThrows<Exception> { firstLogin(email, context) } }
 
             // §13.2 `pipeline.import.missing_datasource` — the missing name travels in `details`,
             // so the message is what a caller of this suite can assert on.
             rootCauseMessage(error).shouldContain("has unmet dependencies in this environment")
             rootCauseMessage(error).shouldContain(EXAMPLE_PIPELINE)
+
+            // 048/§A — and the operator can find it. The refusal is deliberate; what it lacked
+            // was an event: "I can't log in" against a 500 with nothing structured behind it was
+            // an unanswerable support report (reported by 042 as T63). The line names the
+            // fixture that failed and the catalogued code, beside the workspace and the user.
+            val failure = lines.single { it.contains("event=workspace.examples_seed_failed") }
+            failure.shouldContain("fixture_kind=pipeline")
+            failure.shouldContain("fixture=$EXAMPLE_PIPELINE")
+            failure.shouldContain("error_code=pipeline.import.missing_datasource")
+            failure.shouldContain("user_id=")
+            lines.none { it.contains("event=workspace.examples_seeded") } shouldBe true
             // And the workspace it was seeding is not left behind as a usable empty one: the
             // login failed, so nothing downstream of provisioning ran.
             scalar<Long>(

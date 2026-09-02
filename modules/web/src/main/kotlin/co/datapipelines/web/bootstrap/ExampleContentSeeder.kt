@@ -1,6 +1,7 @@
 package co.datapipelines.web.bootstrap
 
 import co.datapipelines.auth.PersonalWorkspaceSeeder
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
@@ -61,15 +62,69 @@ class ExampleContentSeeder(
         userId: UUID,
     ) {
         val examples = content ?: return
-        examples.templatesBody?.let { templateImportService.import(it, workspaceId, userId) }
-        examples.pipelineBodies.forEach { pipelineImportService.import(it, workspaceId, userId) }
+        examples.templatesBody?.let { body ->
+            reporting(workspaceId, userId, kind = "templates", fixture = examples.templateIds.joinToString(",")) {
+                templateImportService.import(body, workspaceId, userId)
+            }
+        }
+        examples.pipelines.forEach { fixture ->
+            reporting(workspaceId, userId, kind = "pipeline", fixture = fixture.name) {
+                pipelineImportService.import(fixture.body, workspaceId, userId)
+            }
+        }
         log.info(
             "event=workspace.examples_seeded workspace_id={} templates={} pipelines={}",
             workspaceId,
-            examples.templateCount,
-            examples.pipelineBodies.size,
+            examples.templateIds.size,
+            examples.pipelines.size,
         )
     }
+
+    /**
+     * Makes the refusal legible without softening it (021/F1 residual, reported by 042 as T63).
+     *
+     * A fixture the deployment cannot import fails workspace provisioning and the login with it —
+     * deliberately (see [PersonalWorkspaceSeeder]). What the operator saw was a bare 500 with
+     * nothing to grep: the support report "I can't log in" had no event behind it. So every
+     * import this seeder performs is bracketed with the structured counterpart of the success
+     * line, carrying the workspace, the user, the fixture and the catalogued code, and then
+     * **rethrows unchanged** — this adds a log line, not a recovery.
+     *
+     * [fixture] is one pipeline's name, or — because templates travel as the single §8.8
+     * `{"templates":[...]}` body a REST caller would send, and that call is atomic from here —
+     * the ids of the envelope the failure came from.
+     *
+     * `TooGenericExceptionCaught` is suppressed deliberately: the point is that EVERY way an
+     * import can fail becomes greppable. Narrowing the catch would silently return the
+     * unlogged 500 for whichever failure the list forgot, which is the defect being fixed.
+     */
+    @Suppress("TooGenericExceptionCaught") // the log line must not narrow what the refusal reports — see KDoc
+    private fun <T> reporting(
+        workspaceId: UUID,
+        userId: UUID,
+        kind: String,
+        fixture: String,
+        importing: () -> T,
+    ): T =
+        try {
+            importing()
+        } catch (e: Exception) {
+            log.error(
+                "event=workspace.examples_seed_failed workspace_id={} user_id={} fixture_kind={} fixture={} " +
+                    "error_code={} message=\"{}\"",
+                workspaceId,
+                userId,
+                kind,
+                fixture,
+                errorCode(e),
+                e.message,
+                e,
+            )
+            throw e
+        }
+
+    /** The §13 code when the failure carries one, else the type — never "unknown". */
+    private fun errorCode(e: Exception): String = (e as? DatapipelinesException)?.code ?: e.javaClass.simpleName
 
     /**
      * Reads and structurally checks the file. `ThrowsCount` is suppressed for the reason the
@@ -103,12 +158,24 @@ class ExampleContentSeeder(
             )
         }
         return Content(
-            templatesBody = templates?.let { mapper.writeValueAsString(mapper.createObjectNode().set<ObjectNode>("templates", it)) },
-            templateCount = templates?.size() ?: 0,
-            pipelineBodies = pipelines?.map(mapper::writeValueAsString).orEmpty(),
+            // PRESENT-but-empty is a deployment saying "seed no templates", and is why the
+            // refusal above tests presence, not size (021/F7: an explicitly empty array was
+            // normalized to absent and then reported as a file declaring neither array — a
+            // factually wrong diagnosis of valid input). Empty means no import call, not a
+            // call with an empty body: the import services own their own emptiness rules.
+            templatesBody =
+                templates
+                    ?.takeIf { !it.isEmpty }
+                    ?.let { mapper.writeValueAsString(mapper.createObjectNode().set<ObjectNode>("templates", it)) },
+            templateIds = templates?.map { it.get("id")?.asText() ?: UNNAMED }.orEmpty(),
+            pipelines =
+                pipelines?.mapIndexed { index, node ->
+                    Fixture(name = node.get("name")?.asText() ?: "pipelines[$index]", body = mapper.writeValueAsString(node))
+                } ?: emptyList(),
         )
     }
 
+    /** The field as an array node when it is DECLARED (empty or not), null when absent. */
     private fun arrayAt(
         tree: ObjectNode,
         field: String,
@@ -116,13 +183,24 @@ class ExampleContentSeeder(
     ): JsonNode? {
         val node = tree.get(field) ?: return null
         if (!node.isArray) throw ExampleContentFileException("Bootstrap examples file '$path' field '$field' must be an array.")
-        return node.takeIf { !it.isEmpty }
+        return node
     }
+
+    /** One pipeline fixture: the body handed to the import service, and the name a failure names. */
+    private class Fixture(
+        val name: String,
+        val body: String,
+    )
 
     /** The import request bodies, derived once at startup so seeding is pure string handoff. */
     private class Content(
         val templatesBody: String?,
-        val templateCount: Int,
-        val pipelineBodies: List<String>,
+        val templateIds: List<String>,
+        val pipelines: List<Fixture>,
     )
+
+    private companion object {
+        /** A fixture that names itself nothing still has to be nameable in a failure line. */
+        const val UNNAMED = "<unnamed>"
+    }
 }

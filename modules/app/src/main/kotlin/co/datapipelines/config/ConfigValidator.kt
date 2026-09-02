@@ -41,10 +41,29 @@ class ConfigValidator(
     }
 
     companion object {
-        private const val CHECK_COUNT = 11
+        /**
+         * The number the startup line quotes. Hand-maintained — and therefore pinned by
+         * `ConfigValidatorCheckCountTest`, which counts the `check*` functions below and
+         * fails the build when the two disagree (021/F10: the literal had already drifted
+         * once, and a number in a log line has no other reader to notice).
+         */
+        internal const val CHECK_COUNT = 13
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
+
+        /** §3.17 — the one mode that provisions the personal workspace D9 seeds into. */
+        private const val SEEDING_MODE = "auto-per-user"
+
+        /** How an absent mode reads in a violation: application.yml always supplies the default. */
+        private const val SHIPPED_DEFAULT_MODE_NOTE = "unset, i.e. the shipped default self-serve"
+
+        /**
+         * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
+         * `LOCAL_PROVIDER`). An OIDC provider may not be NAMED one of these — see
+         * [checkReservedProviderNames].
+         */
+        private val RESERVED_PROVIDER_NAMES = setOf("bootstrap", "local")
 
         /** §3.10 — the directory the UI theme is validated against, on the classpath. */
         internal const val THEME_ROOT = "static/vendor/design-system"
@@ -62,7 +81,9 @@ class ConfigValidator(
             checkResultTtlOrdering(snapshot, violations)
             checkDevProfileGuard(snapshot, violations)
             checkWorkspacesProvisioningMode(snapshot, violations)
+            checkExamplesSeederReachable(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
+            checkReservedProviderNames(snapshot, violations)
             checkLocalAuth(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             return ValidationReport(violations, warnings)
@@ -278,6 +299,37 @@ class ConfigValidator(
         }
 
         /**
+         * §7 / §3.18 — an examples file the seeder can never reach.
+         *
+         * `ExampleContentSeeder` runs from `WorkspaceService.ensurePersonalWorkspace`, and only
+         * `auto-per-user` provisioning ever calls it (design §7). Under any other mode the bean
+         * is still built and the file still read and structurally checked at startup — so a
+         * deployment that sets `examples-file` and leaves the mode at its SHIPPED DEFAULT
+         * (`self-serve`, §3.17) validates green, boots clean, and seeds nothing, with no line
+         * anywhere saying why. That is the silent-config class [checkBootstrapActorConfigured]
+         * exists to prevent, so it is refused the same way: name both keys, set both or neither.
+         *
+         * A mode that is unset is the shipped default, i.e. NOT the seeding mode; a mode that is
+         * misspelled is left to [checkWorkspacesProvisioningMode], which already names it — two
+         * violations for one typo would point the operator at the wrong key.
+         */
+        private fun checkExamplesSeederReachable(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (snapshot.bootstrapExamplesFile.isNullOrBlank()) return
+            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase()
+            if (mode != null && mode !in PROVISIONING_MODES) return
+            if (mode == SEEDING_MODE) return
+            violations +=
+                "datapipelines.bootstrap.examples-file is set but datapipelines.workspaces.provisioning-mode " +
+                "is '${mode ?: SHIPPED_DEFAULT_MODE_NOTE}' (§3.17): example seeding runs only when " +
+                "'$SEEDING_MODE' provisions a personal workspace at first login, so the configured " +
+                "examples would never be seeded and nothing would say so. Set the mode to " +
+                "'$SEEDING_MODE', or unset the examples file."
+        }
+
+        /**
          * §7 / §3.18 — bootstrap datasource registration needs an actor.
          *
          * `datasources.created_by` is `NOT NULL REFERENCES users(id)` and registration runs
@@ -299,6 +351,38 @@ class ConfigValidator(
                     "datapipelines.auth.bootstrap-admin-email is not (§3.18): bootstrap-registered " +
                     "datasources are created_by that user, and the row is pre-provisioned from that " +
                     "address before any login. Set both keys, or neither."
+            }
+        }
+
+        /**
+         * §7 / auth.md §4.4 — an OIDC provider may not be named after a system placeholder.
+         *
+         * `OidcSuccessHandler` writes the provider's configured NAME (the Spring registration
+         * id) verbatim into `users.provider`, and the system writes two placeholder values of
+         * its own there: `bootstrap` for the pre-provisioned admin (§6.1) and `local` for an
+         * admin-created password account (§5A). A provider named either one makes external
+         * identities land on rows the system labels system-created — the two become
+         * indistinguishable in `users`, in the audit trail and in the `(provider,
+         * provider_subject)` uniqueness the schema enforces. Nothing else reserves the names
+         * (021/F8), so startup does, at the loudest point available.
+         *
+         * The reservation is on the NAME alone: an entry with a blank `client-id` is ignored
+         * everywhere else, but it is one env var away from being the provider that writes those
+         * rows, and renaming it costs nothing today. Matched case-insensitively and trimmed, so
+         * a near-miss spelling cannot be argued into the same namespace.
+         */
+        private fun checkReservedProviderNames(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            snapshot.oidcProviders.forEach { provider ->
+                val name = provider.name.trim().lowercase()
+                if (name in RESERVED_PROVIDER_NAMES) {
+                    violations +=
+                        "OIDC provider '${provider.name}': the name '$name' is reserved for the identities the " +
+                        "system creates itself (users.provider = '$name'); an external provider under that name " +
+                        "would be indistinguishable from them. Rename the provider."
+                }
             }
         }
 

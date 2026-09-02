@@ -15,6 +15,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -149,6 +150,28 @@ class PipelineTransferControllerTest {
 
         val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
         shouldThrow<ApiException> { controller.import(withId) }.code shouldBe PipelineErrorCodes.Import.VERSION_CONFLICT
+    }
+
+    @Test
+    fun `the same id imported into a SECOND workspace is that 409, and the message says why`() {
+        // 021/F3: `pipelines.id` is a global PK and this read is workspace-scoped, so an id
+        // living in another workspace is invisible to `findById` and surfaces as the insert
+        // colliding. The catalogued code was already right; the message blamed a deleted
+        // pipeline, which sends the operator (or the D9 seeder's owner) looking in the wrong
+        // place. Both causes are named, with the remedy.
+        authenticate()
+        every { validator.validate(any(), any()) } returns ValidationResult.VALID
+        every { pipelines.findById(any(), pipelineId) } returns null
+        every { pipelines.create(any(), any<NewPipeline>(), any(), userId) } throws DuplicateKeyException("pipelines_pkey")
+
+        val withId = body.replace("\"nodes\":[]", "\"nodes\":[],\"id\":\"$pipelineId\"")
+        val error = shouldThrow<ApiException> { controller.import(withId) }
+
+        error.code shouldBe PipelineErrorCodes.Import.VERSION_CONFLICT
+        error.message!!.shouldContain("globally unique")
+        error.message!!.shouldContain("another workspace")
+        error.message!!.shouldContain("without")
+        error.details["pipeline_id"] shouldBe pipelineId.toString()
     }
 
     @Test
