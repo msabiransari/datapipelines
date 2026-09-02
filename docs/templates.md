@@ -184,7 +184,27 @@ val freemarkerConfig = Configuration(fmVersion).apply {
 
 For SQL contexts requiring quoted values, the template author wraps the interpolation in the dialect's quoting: `'${start_date}'` (single quotes for date literals in standard SQL).
 
-**SQL injection prevention is the template author's responsibility, not the engine's.** Freemarker's `${}` does NOT escape SQL; if a parameter is user-controlled and used in a context where SQL injection is possible, the author must use parameterized queries via the source's prepared statement mechanism — but currently, templates emit raw SQL strings. This is a known trade-off for the template-driven model; pipeline authors are trusted with template authoring, and runtime context values come from the API caller (auth'd). Future v1.1 may add `?sql_escape` built-in for paranoid mode.
+### 4.5 Binding declared parameters (v1.6, 042)
+
+**A parameter DECLARED in the pipeline's `parameters` block is a value, and is referenced in
+SQL as a bind parameter: `:start_date`.** The executor translates every `:name` into a
+positional parameter on a prepared statement (spring-jdbc's `NamedParameterUtils`, pinned) and
+binds the coerced value — `DATE` as `LocalDate`, `BIGDECIMAL` as `BigDecimal`, and so on, with
+no quoting syntax around it. A `STRING` value is therefore never parsed as SQL: a payload of
+`x' OR '1'='1` matches no row, and a `; DROP TABLE …` payload is one inert scalar. The
+execution semantics — including the loud failure for a `:name` no parameter declares — are in
+§8.4.
+
+Pipeline save enforces the form: a template that interpolates a declared parameter inside
+`${}` is refused with `template.validation.parameter_interpolated` (Pipeline Contract §13.9),
+and the message names both the `${name}` written and the `:name` form to write (§7.2).
+
+**What stays the author's responsibility.** `${}` interpolation is for **structure** — table
+names, dynamic `IN` lists, `ORDER BY` fragments — and remains exactly as trusting as it always
+was: interpolate only what the author controls, never a declared parameter (which the save-time
+rule now refuses). Freemarker's `${}` does NOT escape SQL, and there is deliberately **no
+`?sql_escape` built-in**: for values binding made it unnecessary, and for structure an escape
+built-in would invite the belief that interpolation is now safe.
 
 ---
 
@@ -315,6 +335,14 @@ The rule that catches template/pipeline drift lives on the **pipeline** side, be
 
 Normative definition: [Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution) and [§12.6](pipeline-contract.md#126-template-validations). This catches typos and template-pipeline drift at write time, not at execution time.
 
+**A declared parameter referenced inside `${}` is refused (042 B2).** Pipeline save also scans
+each referenced template's parse tree: a declared parameter name found inside a `${}`
+interpolation fails with `template.validation.parameter_interpolated` (HTTP 400, Pipeline
+Contract §13.9) — a declared parameter is a value and must be referenced as `:name` (§4.5),
+and the message names both forms. The scan is AST-based for the same evasion-proofing reason
+as §4.2's construct scan, and honours macro-parameter and loop-variable shadowing; a backslash
+"escape" is pinned to be a live interpolation in 2.3.34, so no spelling hides one.
+
 A consequence worth stating plainly: a template that is perfectly valid on its own can still be un-referenceable by a given pipeline. That is intended — the template is reusable, and each pipeline proves for itself that it supplies what the template needs.
 
 ---
@@ -351,6 +379,36 @@ There is no per-template type-check step: the context is the pipeline's paramete
 - Cache key: `{template_id, version, resolved import closure versions}`.
 - Cache invalidated on template update by construction: a new version is a new cache key; the old entry remains valid for in-flight executions, which is exactly the immutability guarantee (§5.1).
 - Render itself is fast (<10ms typical for templates up to ~5KB body). The `render-timeout-ms` guard (§4.3) exists for pathological bodies, not for the normal path.
+
+### 8.4 Named-parameter binding at execution (v1.6, 042)
+
+The rendered SQL may carry `:name` references. The executor translates them **before the
+driver sees anything** — spring-jdbc 6.2.19's `NamedParameterUtils`, pinned and standalone, not
+a hand-rolled SQL scanner — and binds the coerced context values on a prepared statement. Two
+properties define the contract:
+
+- **Missing names fail loudly.** A `:name` the execution context does not declare fails with
+  `pipeline.node.sql_parameter_missing` (HTTP 500, Pipeline Contract §13.4) **before anything
+  executes** — never a silently-null predicate, which would return wrong data instead of an
+  error.
+- **Values bind as values.** `DATE` binds as `LocalDate`, `BIGDECIMAL` as `BigDecimal`, and so
+  on — no quoting syntax is used around a bound reference. `DATE ':start_date'` is wrong in
+  the same way `'${start_date}'` now is.
+
+**What the translator does with dialect syntax** (pinned by `NamedParameterTranslationTest`
+against the pinned jar, cited rather than re-derived):
+
+- Postgres/H2/DuckDB/SQLite `::` casts survive untouched — `col::text` and `:param` coexist
+  in one statement. The house habit of writing `CAST(:x AS …)` is belt-and-braces, not a
+  requirement.
+- `'…'` literals, `"…"` identifiers, MySQL `` `…` `` backtick identifiers, and `--` /
+  `/* … */` comments are skipped correctly.
+- Four constructs are **not** understood, and a colon inside them is mis-read as a parameter:
+  MySQL `#` comments, MSSQL `[a:b]` identifiers, Oracle `q'[…]'` strings, and PostgreSQL
+  `$$…$$` dollar-quoting. Such a template fails loudly (`sql_parameter_missing`, naming the
+  mis-read name) when that name has no value, and is visibly mangled in `templates_render`
+  when it does. The fix is the author's: rephrase the construct. Values themselves never
+  re-enter the parser, so the injection property §4.5 exists for is unaffected by these.
 
 ---
 
@@ -450,7 +508,7 @@ What metadata-db must express for this spec to hold:
 Out of scope for v1:
 
 - **Alternative engines**: support Pebble, Handlebars, or Thymeleaf for SQL alongside Freemarker. New `engine` value on templates. Not v1.
-- **Parameterized SQL output**: instead of rendering to a single SQL string, render to `{sql, params}` for prepared-statement execution. Closes the SQL-injection gap. v1.1 candidate.
+- ~~**Parameterized SQL output**: instead of rendering to a single SQL string, render to `{sql, params}` for prepared-statement execution. Closes the SQL-injection gap. v1.1 candidate.~~ **Shipped as bound `:name` parameters (2026-09-01, 042)** — see §4.5: the render stays a single SQL string, but declared parameters are written as `:name` and the executor binds them on prepared statements, so the `{sql, params}` framing was never needed.
 - **Multi-dialect templates**: a single template with dialect-conditional sections (`<#if dialect == "ORACLE">...<#else>...</#if>`). v2 candidate.
 - **Template testing framework**: declarative test cases per template (`given this context, render should match this expected SQL`). Useful for regression testing.
 - **Template composition visualizer**: UI to show how imports resolve into the final rendered SQL.
@@ -553,6 +611,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-01 | v1.7 | 042 implementation | New §4.5: declared parameters are values and bind as `:name` — the old §4.4 injection paragraph is replaced by the split of responsibilities it states. §7.2: pipeline save refuses a declared parameter inside `${}` with `template.validation.parameter_interpolated` (AST scan, scope-aware, no escape spelling per the 2.3.34 pin). New §8.4: execution-time binding semantics — loud `pipeline.node.sql_parameter_missing` for an undeclared `:name`, and the dialect-construct translation table pinned by `NamedParameterTranslationTest` (`::` casts survive; MySQL `#` comments, MSSQL `[a:b]`, Oracle `q'…'`, PG `$$…$$` mis-parse). §13: the "parameterized SQL output" v1.1 candidate is struck as shipped. |
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |
 | 2026-08-05 | v1.1 | propagation | Added `engine` field to Template entity (default `"freemarker"`; future-proofing for Pebble/Handlebars/raw-SQL). Updated `body` and `imports` field descriptions to be engine-aware. Renamed `__staging__` → `tempdb` in UI editor section. |
 | 2026-08-07 | v1.2 | consistency campaign | Per [SPEC-REVIEW-2026-08 §2.8](SPEC-REVIEW-2026-08.md#28-templatesmd): removed `params_schema` entirely (D3 — pipeline `parameters` is the single declaration point; template save is parse-only, dry-render moved to pipeline save); `imports` entries become `{id, version, alias}` with engine-synthesized `<#import>` and body-never-imports (D12); `is_library` corrected to "no output outside macro definitions", `body` required (D12); `template.import.cycle_detected` → `template.validation.import_cycle`, `body_malformed` → `syntax_error`, added `duplicate_alias` / `import_not_library` (D5); §4.3 Freemarker hardening rewritten against the verified 2.3.x API (invented `externalsCatchAll` / `builtin_classes` deleted; `ALLOWS_NOTHING_RESOLVER` replaces `SAFER_RESOLVER`) with an implementation-gate checklist; render guards reference [Configuration §3.9](configuration.md#39-templates) (D8); §12.2 DDL replaced by a pointer to [Metadata DB](metadata-db.md) (D4); §10 tempdb dialect derived from `settings.tempdb.engine`; fixed the §3.2 link to [Pipeline Contract §6](pipeline-contract.md#6-parameters-input-map-declaration). |
