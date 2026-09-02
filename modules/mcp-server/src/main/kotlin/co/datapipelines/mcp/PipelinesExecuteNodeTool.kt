@@ -17,6 +17,9 @@ import java.util.UUID
 /** §6.2.20 — the decoded-row cap for a node run, the D2 shape (50, fixed: no limit argument). */
 private const val NODE_RUN_ROW_CAP = 50
 
+/** The `elapsed_ms` conversion divisor. */
+private const val NANOS_PER_MILLI = 1_000_000L
+
 /**
  * `pipelines_execute_node` (mcp-server.md §6.2.20 — 037 E). Scope: `author`.
  *
@@ -202,7 +205,7 @@ class PipelinesExecuteNodeTool(
             put("sql", resolution.sql)
             if (resolution.sampledParameters.isNotEmpty()) put("sampled_parameters", resolution.sampledParameters)
             extra()
-            put("elapsed_ms", (System.nanoTime() - startedAt) / 1_000_000)
+            put("elapsed_ms", (System.nanoTime() - startedAt) / NANOS_PER_MILLI)
         }
 
     /** The §A/E2 catalogued refusal — one code, the reason names which shape fired. */
