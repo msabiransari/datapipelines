@@ -2,7 +2,20 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-lg)">
+  <link th:href="@{/css/template-editor.css}" rel="stylesheet">
+
+  <!-- D4: the shared, dependency-free SQL tokenizer (032) — consumed, not modified.
+       It highlights the read-only PREVIEW OUTPUT only; the editable textarea stays
+       plain (D5). preview.js wraps the pass this page's renderPreview calls. -->
+  <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
+  <script th:src="@{/js/template-editor/preview.js}"></script>
+
+  <!-- 041 layout: the page is a two-row grid — this header, then a row that fills
+       the viewport below the nav. Inside that row: context rail LEFT (the
+       --app-detail-width token), SQL source RIGHT taking the remainder, preview
+       output below the editor sharing its width (template-editor.css). -->
+  <div class="te-page">
+  <div style="display:flex;align-items:center;justify-content:space-between">
     <div>
       <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
       <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0" th:text="'ID: ' + ${template?.id ?: '—'}">Template ID</p>
@@ -28,71 +41,82 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--gap-lg)">
-    <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-sm)">
-        <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0">Template Source</h2>
-        <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
-      </div>
-      <textarea id="templateBody" class="ds-textarea" style="width:100%;min-height:280px;font-family:var(--font-mono);font-size:var(--text-sm);tab-size:2;resize:vertical" th:text="${template?.body ?: ''}">Template body</textarea>
-    </div>
-
-    <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-sm)">
-        <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0">Render Context</h2>
-        <div style="display:flex;gap:var(--gap-xs)">
-          <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('kv')" id="tab-kv-btn" style="font-weight:var(--weight-semibold);border-bottom:2px solid var(--accent-primary)">Key/Value</button>
-          <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('json')" id="tab-json-btn" style="border-bottom:2px solid transparent">JSON</button>
-        </div>
-      </div>
-      <div id="context-kv" style="margin-bottom:var(--gap-sm)">
-        <div id="context-rows">
-          <div class="context-row" style="display:flex;gap:var(--gap-xs);margin-bottom:var(--gap-xs)">
-            <input type="text" placeholder="key" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">
-            <input type="text" placeholder="value" style="flex:2;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">
-            <button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)" style="color:var(--accent-danger)">&times;</button>
+  <div class="te-body">
+    <!-- LEFT: the render-context rail. Keyboard/focus order is context → source →
+         Preview (041 gate 4) — this rail precedes the source column in the DOM. -->
+    <div class="te-rail">
+      <div>
+        <div class="te-panel-head">
+          <h2>Render Context</h2>
+          <div style="display:flex;gap:var(--gap-xs)">
+            <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('kv')" id="tab-kv-btn" style="font-weight:var(--weight-semibold);border-bottom:2px solid var(--accent-primary)">Key/Value</button>
+            <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('json')" id="tab-json-btn" style="border-bottom:2px solid transparent">JSON</button>
           </div>
         </div>
-        <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()">+ Add Row</button>
+        <div id="context-kv" style="margin-bottom:var(--gap-sm)">
+          <!-- The row markup addContextRow() clones — styled once, in template-editor.css. -->
+          <div id="context-rows" class="te-context-rows">
+            <div class="context-row">
+              <input type="text" placeholder="key">
+              <input type="text" placeholder="value">
+              <button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)">&times;</button>
+            </div>
+          </div>
+          <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()">+ Add Row</button>
+        </div>
+        <div id="context-json" style="display:none">
+          <textarea id="contextJsonTextarea" class="ds-textarea" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
+        </div>
       </div>
-      <div id="context-json" style="display:none">
-        <textarea id="contextJsonTextarea" class="ds-textarea" style="width:100%;min-height:200px;font-family:var(--font-mono);font-size:var(--text-sm);tab-size:2" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
+
+      <th:block th:if="${template?.imports != null && !template.imports.isEmpty()}">
+        <div>
+          <div class="te-panel-head">
+            <h2>Imports</h2>
+          </div>
+          <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
+          <table class="ds-table">
+            <thead>
+              <tr>
+                <th>Template ID</th>
+                <th class="num">Version</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="imp : ${template.imports}">
+                <td th:text="${imp.id}">import_id</td>
+                <td class="num" th:text="${imp.version}">1</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </th:block>
+    </div>
+
+    <!-- RIGHT: the source column — the editor (~2/3) and, below it sharing the
+         width, the preview output (~1/3). Both scroll inside their panes (D2/D3). -->
+    <div class="te-source">
+      <div class="te-panel-head">
+        <h2>Template Source</h2>
+        <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
+      </div>
+      <textarea id="templateBody" class="ds-textarea" th:text="${template?.body ?: ''}">Template body</textarea>
+
+      <div class="te-preview">
+        <div class="te-panel-head" style="margin-bottom:0">
+          <div style="display:flex;gap:var(--gap-sm);align-items:center">
+            <h2>Preview Output</h2>
+            <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
+            <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
+          </div>
+        </div>
+        <div id="previewPane" class="te-preview-pane"></div>
       </div>
     </div>
   </div>
-
-  <div style="display:flex;gap:var(--gap-sm);margin:var(--gap-md) 0;align-items:center">
-    <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
-    <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
   </div>
 
-  <div style="margin-bottom:var(--gap-lg)">
-    <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-sm) 0">Preview Output</h2>
-    <div id="previewPane"></div>
-  </div>
-
-  <th:block th:if="${template?.imports != null && !template.imports.isEmpty()}">
-    <div style="margin-bottom:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-sm) 0">Imports</h2>
-      <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
-      <table class="ds-table">
-        <thead>
-          <tr>
-            <th>Template ID</th>
-            <th class="num">Version</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr th:each="imp : ${template.imports}">
-            <td th:text="${imp.id}">import_id</td>
-            <td class="num" th:text="${imp.version}">1</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </th:block>
-
-  <script>
+  <script th:inline="javascript">
     let selectedTab = 'kv';
 
     /* versioning §5.3/§5.4: the draft lifecycle actions — hash-guarded through the same
@@ -136,12 +160,9 @@
     function addContextRow() {
       var row = document.createElement('div');
       row.className = 'context-row';
-      row.style.display = 'flex';
-      row.style.gap = 'var(--gap-xs)';
-      row.style.marginBottom = 'var(--gap-xs)';
-      row.innerHTML = '<input type="text" placeholder="key" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">' +
-        '<input type="text" placeholder="value" style="flex:2;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--border-default);border-radius:var(--radius-base);background:var(--surface-secondary)">' +
-        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)" style="color:var(--accent-danger)">&times;</button>';
+      row.innerHTML = '<input type="text" placeholder="key">' +
+        '<input type="text" placeholder="value">' +
+        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)">&times;</button>';
       document.getElementById('context-rows').appendChild(row);
     }
 
@@ -173,7 +194,7 @@
       spinner.style.display = 'inline';
       var pane = document.getElementById('previewPane');
 
-      var templateId = [[${template?.id ?: "''"}]];
+      var templateId = [[${template?.id ?: ""}]];
       var version = document.getElementById('versionSelect')?.value || '1';
       var body = document.getElementById('templateBody')?.value || '';
       var context = buildContextJson();
@@ -190,7 +211,12 @@
         },
         body: params
       }).then(function(r) { return r.text(); })
-        .then(function(html) { pane.innerHTML = html; })
+        .then(function(html) {
+          pane.innerHTML = html;
+          /* 041 D4 — rendered SQL gets the shared tokenizer's treatment; the
+             pass is a no-op on shapes without a <pre> (the error card). */
+          if (window.TplPreviewHighlight) window.TplPreviewHighlight.highlightPreview(pane);
+        })
         .catch(function(e) { pane.innerHTML = '<div class="ds-card" style="padding:var(--gap-md);border-color:var(--accent-danger)"><p style="color:var(--accent-danger);font-size:var(--text-sm)">' + e.message + '</p></div>'; })
         .finally(function() { btn.disabled = false; spinner.style.display = 'none'; });
     }
@@ -198,7 +224,7 @@
     function updateVersion() {
       var sel = document.getElementById('versionSelect');
       var version = sel.value;
-      var templateId = [[${template?.id ?: "''"}]];
+      var templateId = [[${template?.id ?: ""}]];
       window.location.search = '';
     }
   </script>

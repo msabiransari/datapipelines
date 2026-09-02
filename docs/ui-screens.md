@@ -179,19 +179,19 @@ Content: table of templates (id, display name, dialect badge, description, versi
 | URL | `GET /templates/{id}/editor` (and `/versions/{version}/editor`) |
 | Auth required | Yes (`read` to view; `author` to save or render a preview) |
 | Purpose | Edit template body (Freemarker SQL), preview rendered SQL, manage versions |
-| Design primitives | `.ds-card`, `.ds-button`, `.ds-code-block`, `.ds-form` |
-| JS | Light — tab switching (edit / preview), add/remove context rows, key-value ⇄ JSON toggle |
+| Design primitives | `.ds-card`, `.ds-button`, `.ds-code-block`, `.ds-form` + the 041 layout in `static/css/template-editor.css` — render context in a left rail (`--app-detail-width`), source column filling the viewport below the header (`--header-height` math), preview output below the editor at ~2/3 · 1/3 |
+| JS | Light — tab switching (edit / preview), add/remove context rows, key-value ⇄ JSON toggle; the preview output is highlighted with the shared dependency-free SQL tokenizer (`js/pipeline-editor/sql-highlight.js`, 032) via `js/template-editor/preview.js` — the editable textarea is deliberately plain (highlighting an editing surface needs an overlay/contenteditable round of its own) |
 | htmx | Yes — "Render Preview" button (`hx-post="/partials/templates/{id}/versions/{v}/render" hx-target="#preview-output"`) |
 
 Content:
-- **Editor pane**: textarea with the Freemarker body (syntax-highlighted if feasible without build step; otherwise monospace `.ds-code-block`).
+- **Editor pane**: textarea with the Freemarker body — plain monospace by decision (041 D5: highlighting an editing surface means an overlay or contenteditable; not this round), sized to fill the viewport below the header and scroll inside itself rather than growing the page.
 - **Description panel** (read-only in the preview column): the template's free-text `description`. Since a template declares no variables, this is the only in-app hint about what context it expects ([Templates §2.5](templates.md#2-design-principles)).
 - **Render context input** — **free-form**. Templates do not declare their variables; the calling *pipeline's* `parameters` block is the single declaration point ([Templates §3.2](templates.md#32-field-reference)), so the editor has nothing to enumerate and MUST NOT try. Two equivalent input modes over the same underlying value, toggled by a tab:
   - **Key/value rows** (default): an "Add variable" button appends a `name` + `value` row pair; rows are collected into a JSON object.
   - **JSON textarea**: the same object, edited directly. Useful for nested/array values and for pasting a pipeline's parameter map.
 
   Whatever the active mode produces is posted verbatim as the `context` object of the render call ([REST §8.7](rest-api.md#87-validate-template-render-against-sample-context)). It is a scratch context for preview only — it is never stored on the template and has no effect on validation.
-- **Preview pane**: rendered SQL output, swapped in by htmx on "Render Preview". A reference to a variable the supplied context does not contain fails the render; the error envelope is rendered inline into `#preview-output` per §5.1 (this is a *preview* failure, not a save failure — save-time render checking lives on the **pipeline**, [Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
+- **Preview pane**: rendered SQL output, below the editor in the source column sharing its width (041 D3), highlighted as SQL by the shared tokenizer (041 D4) and scrolling inside its pane. A reference to a variable the supplied context does not contain fails the render; the error envelope is rendered inline into `#preview-output` per §5.1 (this is a *preview* failure, not a save failure — save-time render checking lives on the **pipeline**, [Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
 - **Version selector**: dropdown to view previous versions. Versions are immutable; "restore" means opening an old version and saving it as a new one.
 - **Save button** (`author` scope): creates a new version via the partials endpoint backed by `PUT /api/v1/templates/{id}`. Save runs parse-level validation only ([Templates §7.1](templates.md#7-validation-rules)).
 - **Imports panel**: the `imports` array as `{id, version, alias}` rows with links to each library template. The body never contains `<#import>` — the alias shown here is what the body calls ([Templates §6](templates.md#6-library-templates)).

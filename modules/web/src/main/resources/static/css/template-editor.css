@@ -1,0 +1,166 @@
+/* 041 — Template editor layout: context LEFT in a narrow detail rail, SQL source
+   RIGHT and wide, preview output BELOW the editor in the same column.
+
+   The screen's job is reading and writing SQL; before 041 the editor had half
+   the width and a 280px-tall textarea while the page's lower two thirds sat
+   empty. Every dimension comes from the app's own tokens — --app-detail-width
+   for the rail (D1), --header-height for the viewport math (D2) — no invented
+   widths, no hard-coded colours. */
+
+.te-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--gap-lg);
+  /* D2 — fill the viewport below the sticky nav. layouts/default.html gives
+     <main> padding-block: var(--gap-lg), hence twice that; the nav's 1px
+     border-bottom (app.css) is chrome too, so --space-px covers it — without
+     that the page scrolls one pixel. The floor keeps short screens usable:
+     below it the page scrolls instead of crushing the editor. */
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  min-height: 640px;
+}
+
+/* D1 — context rail LEFT and narrow (the app's detail-rail token), source
+   RIGHT taking the remainder. */
+.te-body {
+  display: grid;
+  grid-template-columns: var(--app-detail-width) minmax(0, 1fr);
+  gap: var(--gap-lg);
+  min-height: 0;
+}
+
+.te-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-height: 0;
+  /* Many context rows / imports scroll inside the rail, not the page. */
+  overflow-y: auto;
+}
+
+.te-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-height: 0;
+}
+
+/* The per-panel heading rows (Template Source, Render Context, Preview Output). */
+.te-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
+}
+
+.te-panel-head h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  margin: 0;
+}
+
+/* D2/D3 — the editor is the tall surface (~2/3 of the column), the preview
+   shares its width below (~1/3). Both panes scroll inside themselves; the
+   min-heights are floors, not targets. */
+#templateBody {
+  flex: 2 1 0;
+  width: 100%;
+  min-height: 280px; /* the pre-041 floor, kept */
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  tab-size: 2;
+}
+
+.te-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 160px;
+}
+
+.te-preview-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Render-context rows — the same markup addContextRow() clones in editor.html;
+   styled here so the static row and every cloned row share one definition. */
+.te-context-rows .context-row {
+  display: flex;
+  gap: var(--gap-xs);
+  margin-bottom: var(--gap-xs);
+}
+
+.te-context-rows .context-row input {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-base);
+  background: var(--surface-secondary);
+}
+
+.te-context-rows .context-row input:first-of-type {
+  flex: 1;
+}
+
+.te-context-rows .context-row input:last-of-type {
+  flex: 2;
+}
+
+.te-context-rows .context-row .ds-button {
+  color: var(--accent-danger);
+}
+
+#contextJsonTextarea {
+  width: 100%;
+  min-height: 200px; /* the pre-041 floor, kept */
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  tab-size: 2;
+}
+
+/* D4 — the preview output IS rendered SQL, so it gets the shared dependency-free
+   tokenizer (js/pipeline-editor/sql-highlight.js, 032). The kind→accent mapping
+   mirrors pipeline-editor.css exactly so both screens read alike; it is scoped
+   here because that sheet loads only on the pipeline editor. The EDITABLE
+   textarea above is deliberately NOT highlighted (041 D5 — an overlay or
+   contenteditable surface is its own round). */
+.te-preview-pane {
+  --te-sql-keyword: var(--accent-primary, #2563eb);
+  --te-sql-string: var(--accent-success, #16a34a);
+  --te-sql-comment: var(--text-muted, #9ca3af);
+  --te-sql-number: var(--accent-warning, #92400e);
+  --te-sql-parameter: var(--accent-info, #1e40af);
+  --te-sql-punct: var(--text-secondary, #6b7280);
+}
+
+.te-preview-pane .pe-sql-tok-keyword {
+  color: var(--te-sql-keyword);
+  font-weight: var(--weight-semibold, 600);
+}
+
+.te-preview-pane .pe-sql-tok-string {
+  color: var(--te-sql-string);
+}
+
+.te-preview-pane .pe-sql-tok-comment {
+  color: var(--te-sql-comment);
+  font-style: italic;
+}
+
+.te-preview-pane .pe-sql-tok-number {
+  color: var(--te-sql-number);
+}
+
+.te-preview-pane .pe-sql-tok-parameter {
+  color: var(--te-sql-parameter);
+  font-weight: var(--weight-medium, 500);
+}
+
+.te-preview-pane .pe-sql-tok-punct {
+  color: var(--te-sql-punct);
+}
