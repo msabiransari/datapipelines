@@ -8,6 +8,7 @@ import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateTypeRule
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.web.api.ApiErrors
@@ -119,7 +120,10 @@ class TemplateImportService(
     ): Template {
         val id = draft.id
         return if (id != null && templates.existsId(workspaceId, id)) {
-            templates.appendReleasedVersion(workspaceId, id, draft, actorId) ?: throw ApiErrors.templateNotFound(id)
+            // 046 §5.3: importing onto an existing template inherits its established type; a
+            // differing payload type is the same refusal a PUT would get.
+            val resolved = resolvedAgainstExisting(workspaceId, id, draft)
+            templates.appendReleasedVersion(workspaceId, id, resolved, actorId) ?: throw ApiErrors.templateNotFound(id)
         } else {
             templates.create(workspaceId, draft, actorId)
         }
@@ -143,7 +147,7 @@ class TemplateImportService(
         val recomputed =
             templates.computeBodyHash(
                 engine = draft.engine,
-                dialect = draft.dialect.wire,
+                dialect = draft.dialect?.wire,
                 isLibrary = draft.isLibrary,
                 importsJson = TemplateJson.writeImports(draft.imports),
                 body = draft.body,
@@ -176,7 +180,11 @@ class TemplateImportService(
         val target = templates.findVersionDetail(workspaceId, id, preserved.version)
         return when {
             target == null -> {
-                templates.insertReleasedVersion(workspaceId, id, draft, preserved.version, declared, preserved.releasedAt, actorId)
+                // 046 §5.3: an exact-version import onto an existing template inherits its
+                // established type — the promotion copy of the immutability rule (a promoted
+                // html template re-importing onto its sql namesake is refused, not coerced).
+                val resolved = resolvedAgainstExisting(workspaceId, id, draft)
+                templates.insertReleasedVersion(workspaceId, id, resolved, preserved.version, declared, preserved.releasedAt, actorId)
                 templates.findVersion(workspaceId, id, preserved.version) ?: throw ApiErrors.templateNotFound(id)
             }
 
@@ -189,6 +197,22 @@ class TemplateImportService(
                 throw versionConflict(id, target, preserved)
             }
         }
+    }
+
+    /**
+     * The §5.3 (046) existing-template resolution for imports: the payload inherits the
+     * template's established type or is refused. Reads the working version's type — identical
+     * across every version of the template by rule, so "latest" is as authoritative as any.
+     */
+    private fun resolvedAgainstExisting(
+        workspaceId: UUID,
+        id: String,
+        draft: TemplateDraft,
+    ): TemplateDraft {
+        val established =
+            templates.findLatest(workspaceId, id)?.type
+                ?: throw ApiErrors.templateNotFound(id)
+        return TemplateTypeRule.forExisting(draft, established)
     }
 
     private fun versionConflict(

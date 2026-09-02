@@ -220,12 +220,23 @@ class NodeSqlResolver(
         return try {
             val sql = engines.engineFor(workspaceId).render(ref, context)
             val (positionalSql, bindValues) = translateBinds(sql, context, ref)
+            // A node-referenced template is 'sql' (reference legality, 046 §7), so its version
+            // carries a dialect by the chk_type_dialect invariant; the null branch is the
+            // fail-closed read of a row that invariant says cannot exist — refused, never
+            // rendered as if it targeted some guessed dialect.
+            val dialect =
+                templateVersion.dialect
+                    ?: return NodeSqlResolution.RenderFailed(
+                        detail,
+                        "Template '${ref.key.truncateForError()}' has type '${templateVersion.type.wire}' " +
+                            "and no dialect; only type 'sql' templates can render node SQL.",
+                    )
             NodeSqlResolution.Rendered(
                 version = detail,
                 node = node,
                 templateId = ref.id,
                 templateVersion = ref.version,
-                dialect = templateVersion.dialect,
+                dialect = dialect,
                 sql = sql,
                 positionalSql = positionalSql,
                 bindValues = bindValues,

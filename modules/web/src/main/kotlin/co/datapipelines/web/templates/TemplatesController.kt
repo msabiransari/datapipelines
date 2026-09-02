@@ -4,6 +4,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraftService
@@ -142,6 +143,7 @@ class TemplatesController(
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         @RequestParam(required = false) dialect: String?,
+        @RequestParam(required = false) type: String?,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
@@ -150,7 +152,9 @@ class TemplatesController(
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val filter = dialect?.let { parseDialect(it) }
-        val raw = templates.list(workspaceId, dialect = filter, q = q, offset = page, limit = size + 1)
+        val typeFilter = type?.let { parseType(it) }
+        val raw =
+            templates.list(workspaceId, dialect = filter, type = typeFilter, q = q, offset = page, limit = size + 1)
         val items = raw.take(size)
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
     }
@@ -361,6 +365,15 @@ class TemplatesController(
                 PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                 "Unknown dialect '$raw'.",
                 mapOf("dialect" to raw.take(MAX_ECHOED_VALUE_CHARS), "supported" to Dialect.entries.map { it.wire }),
+            )
+
+    /** The `type` list filter (046 §10) — the `parseDialect` shape, for the type enum. */
+    private fun parseType(raw: String): TemplateType =
+        TemplateType.fromWire(raw.trim().lowercase())
+            ?: throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "Unknown template type '$raw'.",
+                mapOf("type" to raw.take(MAX_ECHOED_VALUE_CHARS), "supported" to TemplateType.WIRE_VALUES),
             )
 
     private companion object {

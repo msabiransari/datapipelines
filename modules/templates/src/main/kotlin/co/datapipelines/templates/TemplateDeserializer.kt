@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -8,13 +9,18 @@ import com.fasterxml.jackson.databind.ObjectMapper
 /**
  * Reads an inbound create/update payload into a [TemplateDraft] (templates.md §9).
  *
- * ## Why a pre-scan for `dialect`
+ * ## Why a pre-scan for `type` and `dialect`
  *
- * `dialect_invalid` (§7) is a verdict on a **wire value** — a `dialect` of `"DB2"` has no typed
- * representation to validate once bound. Like [PipelineDeserializer][co.datapipelines.pipeline]'s
- * pre-scan of `type` / `output.target`, this reads the raw `dialect` string and raises the
- * catalog code *before* binding, rather than letting Jackson surface a raw enum-coercion
- * failure as a 500 for what is a 400 the author can fix.
+ * `type_invalid` / `dialect_invalid` (§7) are verdicts on **wire values** — a `type` of
+ * `"csv"` or a `dialect` of `"DB2"` has no typed representation to validate once bound. Like
+ * [PipelineDeserializer][co.datapipelines.pipeline]'s pre-scan of `type` / `output.target`,
+ * this reads the raw strings and raises the catalog code *before* binding, rather than
+ * letting Jackson surface a raw enum-coercion failure as a 500 for what is a 400 the author
+ * can fix.
+ *
+ * Since 046 the two pre-scans are conditional on each other: a `type` of `"html"` takes no
+ * `dialect` at all, and a `dialect` present beside it is refused with
+ * `dialect_not_allowed` — presence is the offense, so its value is never even examined.
  *
  * Server-assigned fields (`version`, `created_at`, `created_by`) are simply not on
  * [TemplateDraft] (the DTO rule), so a payload that carries them binds without them — they are
@@ -43,14 +49,50 @@ class TemplateDeserializer(
 
     /** As [read], for a document already parsed into a tree. */
     fun fromTree(tree: JsonNode): TemplateDeserializationOutcome {
+        val type = tree.get("type")?.let { node -> node.takeIf { it.isTextual }?.asText() ?: node.asText() }
+        if (type != null && TemplateType.fromWire(type) == null) {
+            return TemplateDeserializationOutcome.Rejected(
+                TemplateValidationResult(
+                    listOf(
+                        TemplateValidationFailure(
+                            code = PipelineErrorCodes.Template.TYPE_INVALID,
+                            message =
+                                "Type '${type.truncateForError()}' is not one of ${TemplateType.WIRE_VALUES}.",
+                            details = mapOf("type" to type.truncateForError(), "supported" to TemplateType.WIRE_VALUES),
+                        ),
+                    ),
+                ),
+            )
+        }
         val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
-        if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
+        if (type == TemplateType.HTML.wire) {
+            // An html template declares NO dialect; presence is the offense (046 §7), so the
+            // value is irrelevant — including an invalid one, which could not make it "more
+            // present".
+            if (tree.has("dialect")) {
+                return TemplateDeserializationOutcome.Rejected(
+                    TemplateValidationResult(
+                        listOf(
+                            TemplateValidationFailure(
+                                code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
+                                message =
+                                    "A template of type 'html' declares no dialect, but the payload carries " +
+                                        "'${dialect.truncateForError()}'.",
+                                details = mapOf("type" to TemplateType.HTML.wire, "dialect" to dialect.truncateForError()),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        } else if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
             return TemplateDeserializationOutcome.Rejected(
                 TemplateValidationResult(
                     listOf(
                         TemplateValidationFailure(
                             code = PipelineErrorCodes.Template.DIALECT_INVALID,
-                            message = "Dialect '${dialect.truncateForError()}' is not one of ${Dialect.entries.map { it.wire }}.",
+                            message =
+                                "Dialect '${dialect.truncateForError()}' is not one of ${Dialect.entries.map { it.wire }}." +
+                                    " A dialect is required unless the template's type is 'html'.",
                             details = mapOf("dialect" to dialect.truncateForError()),
                         ),
                     ),

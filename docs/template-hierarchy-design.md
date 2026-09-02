@@ -1,7 +1,7 @@
 # Template Hierarchy & Typed Templates — v1 Design
 
 **Status:** design (not yet normative; no code changed)
-**Revision:** v1.4 — 2026-09-02 (round 043: §4 naming and §9.6 addressing implemented; §5.1's migration renamed `V8__typed_templates.sql` because naming shipped alone as `V7__hierarchical_template_names.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
+**Revision:** v1.5 — 2026-09-02 (round 046 implemented §5–§7 and §10; the typing migration's stray V7 references corrected to V8 — naming shipped alone as V7 in 043. Earlier v1.4: round 043 implemented §4 naming and §9.6 addressing; §5.1's migration renamed `V8__typed_templates.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
 **Owner:** datapipelines.co core
 **Depends on:** [Templates spec](templates.md), [Pipeline Contract spec](pipeline-contract.md), [Metadata DB spec](metadata-db.md), [Enums](enums.md)
 **Date:** 2026-09-01
@@ -171,7 +171,7 @@ ALTER TABLE template_versions
 
 ### 5.2 Content contract — and why `type` is **not** a hash input (normative)
 
-`type` is a version-owned contract field: it lives on the version row, is frozen with the version, and rides along in promotion copies. It is **not** added to the `body_hash` inputs. Those stay exactly `{engine, dialect, is_library, imports, body}`, and `TemplateRepository.TEMPLATE_HASH_EXPR` (`TemplateRepository.kt:719-722` — the same expression V6's backfill used) is **unchanged by V7**.
+`type` is a version-owned contract field: it lives on the version row, is frozen with the version, and rides along in promotion copies. It is **not** added to the `body_hash` inputs. Those stay exactly `{engine, dialect, is_library, imports, body}`, and `TemplateRepository.TEMPLATE_HASH_EXPR` (`TemplateRepository.kt:719-722` — the same expression V6's backfill used) is **unchanged by V8**.
 
 Two reasons, either sufficient on its own:
 
@@ -184,7 +184,7 @@ AND $TEMPLATE_HASH_EXPR <> v.body_hash    -- create a draft   (TemplateRepositor
 AND $TEMPLATE_HASH_EXPR  = v.body_hash    -- no-op, return the release  (:801)
 ```
 
-Every pre-V7 row's stored hash was computed **without** `type`. Add `type` to the expression and leave history alone, and both branches misfire permanently for all existing content: the `<>` branch is always true, so a byte-identical PUT creates a draft on every save; the `=` branch never matches, so the no-op path is dead. Recompute history instead, and promotion breaks between two environments sitting at different migration levels — which §11's own gate exists to forbid.
+Every pre-V8 row's stored hash was computed **without** `type`. Add `type` to the expression and leave history alone, and both branches misfire permanently for all existing content: the `<>` branch is always true, so a byte-identical PUT creates a draft on every save; the `=` branch never matches, so the no-op path is dead. Recompute history instead, and promotion breaks between two environments sitting at different migration levels — which §11's own gate exists to forbid.
 
 Pinned references are unaffected either way: they resolve to a frozen version row whose hash is already recorded.
 
@@ -365,7 +365,7 @@ Dual addressing was considered and rejected. It breaks nothing, but it is a perm
 - **Stored pipelines, `type` dimension** — unaffected; every referenced template backfills to `sql`, and reference legality (§7) can only reject something that does not exist yet.
 - **Stored pipelines, name dimension** — **not** unconditionally unaffected. The grammar is narrower than today's in two respects and the loader re-validates at render time, so a stored illegal name breaks execution rather than the next save. This is handled by the §4.6 pre-check aborting the deploy with the offenders named — a mechanical gate, not a compatibility claim.
 - **Existing clients** — additive wire change per §5.4.
-- **Promotion** — the natural-key copy story is unchanged: `(workspace, name, version)` rows copy verbatim, `type` rides along as an ordinary column, `body_hash` idempotency still detects already-promoted content. Because §5.2 leaves the hash inputs alone there is nothing to recompute and no cross-environment skew: a V6 receiver and a V7 sender compute identical hashes for identical content. **Gate:** assert `TEMPLATE_HASH_EXPR` is byte-identical before and after V7, and that a template released pre-V7 still promotes idempotently post-V7 (no spurious version conflict).
+- **Promotion** — the natural-key copy story is unchanged: `(workspace, name, version)` rows copy verbatim, `type` rides along as an ordinary column, `body_hash` idempotency still detects already-promoted content. Because §5.2 leaves the hash inputs alone there is nothing to recompute and no cross-environment skew: a V7 receiver and a V8 sender compute identical hashes for identical content. **Gate:** assert `TEMPLATE_HASH_EXPR` is byte-identical before and after V8, and that a template released pre-V8 still promotes idempotently post-V8 (no spurious version conflict).
 - **Backups** — still just `pg_dump`; this design adds zero out-of-band state.
 
 ## 12. Testing & implementation gates
@@ -382,7 +382,7 @@ Dual addressing was considered and rejected. It breaks nothing, but it is a perm
 10. **UI — the forbidden affordances are absent.** Render assertions: no folder-create/rename/delete control anywhere in the tree; no `type` control on the edit/draft form (create only); no rename affordance on either form. These are cheap render tests and they are the only thing standing between §9.1's constraints and a well-meaning future task.
 11. **UI — paths do not break the pipeline editor.** A node referencing `acme/finance/monthly_revenue` renders truncated with the full path in `title`, in both `pipelines/editor.html` and `partials/pipeline-node-sql.html`, including the `template-missing` state.
 12. **Addressing (§9.6)** — end-to-end over the added routes only, for a name containing `/`: create, read, render, release, delete. Plus a companion asserting the ten existing routes still answer identically for a flat name. *Falsification:* point the first at the old `/{id}` route and it must return 400 — the measured behaviour, not an assumed one.
-13. **Hash stability (§5.2, §11)** — assert `TEMPLATE_HASH_EXPR` is unchanged by this round, and an integration test that a no-op PUT against a template released **before** V7 still returns the no-op and creates **no** draft after V7. *Falsification:* add `'type', type` to the expression and this test must go red. A gate that cannot go red on the change it forbids is not a gate.
+13. **Hash stability (§5.2, §11)** — assert `TEMPLATE_HASH_EXPR` is unchanged by this round, and an integration test that a no-op PUT against a template released **before** V8 still returns the no-op and creates **no** draft after V8. *Falsification:* add `'type', type` to the expression and this test must go red. A gate that cannot go red on the change it forbids is not a gate.
 
 ## 13. Decisions log
 
@@ -392,7 +392,7 @@ All nine decisions are settled; this doc is decision-complete. Decision 9 was cl
 2. ~~Tree UI: server-side prefix queries vs. client-side tree~~ → **server-side prefix queries** (§9, decided 2026-09-01) — the target is companies with large shared libraries, where client-side tree-building breaks.
 3. ~~Type per-draft vs. fixed at creation~~ → **fixed at creation, immutable across versions** (§5.3, decided 2026-09-01).
 4. ~~Relative path support~~ → **prohibited; all references are absolute from the tree root** (§4.4, decided 2026-09-01).
-5. ~~`type` as a `body_hash` input~~ → **not a hash input; `TEMPLATE_HASH_EXPR` unchanged** (§5.2, decided 2026-09-01) — immutable per §5.3 so it carries no information, and changing the expression would break 039's draft-on-change guard for every pre-V7 row.
+5. ~~`type` as a `body_hash` input~~ → **not a hash input; `TEMPLATE_HASH_EXPR` unchanged** (§5.2, decided 2026-09-01) — immutable per §5.3 so it carries no information, and changing the expression would break 039's draft-on-change guard for every pre-V8 row.
 6. ~~Legacy names the new grammar rejects: relax the grammar / grandfather in the loader / fail the deploy~~ → **fail the deploy** (§4.6, decided 2026-09-01) — one strict rule, loud at deploy time with the offenders named, rather than silent at render time where §4.5 leaves no repair.
 7. ~~`html` acceptance bar for v1~~ → **preview-only** (§2, §12.4, decided 2026-09-01) — schema, second engine configuration, and a draft-preview render proving escaping. One migration, one hash decision, taken once; the serving surface lands with dashboards.
 8. ~~Tree browse vs. text search: prune the tree to matches vs. flat result list~~ → **flat list of full paths on search, tree when browsing** (§9.2, decided 2026-09-01) — pruning requires ancestor-walking every match, which is the client-side whole-list work §9.1 forbids.

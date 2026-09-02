@@ -148,7 +148,7 @@ class McpProtocolIntegrationTest {
     @Test
     fun `resources list is served by this module, not by the SDK's empty registry`() {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
-        every { templates.list(any(), any(), any(), any(), any()) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.list(null) } returns emptyList()
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 

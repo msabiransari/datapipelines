@@ -333,11 +333,12 @@ List templates.
 ```json
 {
   "name": "templates_list",
-  "description": "List SQL templates registered on this instance. Templates are reusable SQL generators authored in Freemarker; pipelines reference them by id+version.",
+  "description": "List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]},
+      "type": {"type": "string", "enum": ["sql", "html"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."},
       "q": {"type": "string"},
       "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
@@ -346,7 +347,7 @@ List templates.
 }
 ```
 
-Returns: array of template metadata (`id`, `version`, `dialect`, `display_name`, `description`, `is_library`). A template's `description` is the only place it can hint at the parameters it expects — templates declare none ([Templates §3.2](templates.md#32-field-reference)).
+Returns: array of template metadata (`id`, `version`, `type`, `dialect`, `display_name`, `description`, `is_library`; `dialect` is null for `html` templates, since 046). A template's `description` is the only place it can hint at the parameters it expects — templates declare none ([Templates §3.2](templates.md#32-field-reference)).
 
 **Scope:** `read`.
 
@@ -378,14 +379,15 @@ Create a new template.
 ```json
 {
   "name": "templates_create",
-  "description": "Create a new SQL template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain <#import> or <#include> directives, they are synthesized from the imports array.",
+  "description": "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine.",
   "inputSchema": {
     "type": "object",
-    "required": ["dialect", "display_name", "description", "body"],
+    "required": ["display_name", "description", "body"],
     "properties": {
       "id": {"type": "string", "description": "Optional; auto-generated if omitted. Pattern [a-z0-9_.-]+."},
       "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
-      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]},
+      "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
       "imports": {
@@ -410,7 +412,7 @@ Create a new template.
 }
 ```
 
-Save-time validation is **parse-only** — syntax, forbidden constructs, import resolution ([Templates §7.1](templates.md#71-save-time-validation-is-parse-only)). A template is never rendered against a sample context at save time, because it does not know its callers' parameters; the dry-render check happens when a *pipeline* referencing it is saved ([Templates §7.2](templates.md#72-the-dry-render-rule-owned-by-pipeline-validation)). An agent authoring a template should therefore call `templates_render` (§6.2.9) with a representative context to confirm the SQL it produces.
+Save-time validation is **parse-only** — syntax, forbidden constructs, import resolution, and the type/dialect consistency rules (`sql` requires `dialect`, `html` forbids it; a payload trying to change an existing template's `type` is refused — [Templates §7.1](templates.md#71-save-time-validation-is-parse-only)). A template is never rendered against a sample context at save time, because it does not know its callers' parameters; the dry-render check happens when a *pipeline* referencing it is saved ([Templates §7.2](templates.md#72-the-dry-render-rule-owned-by-pipeline-validation)). An agent authoring a template should therefore call `templates_render` (§6.2.9) with a representative context to confirm the output it produces.
 
 **Scope:** `author`.
 

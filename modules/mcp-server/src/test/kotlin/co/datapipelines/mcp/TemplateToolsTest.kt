@@ -36,7 +36,7 @@ class TemplateToolsTest {
 
     @Test
     fun `list projects the documented metadata and filters libraries`() {
-        every { templates.list(any(), any(), any(), any(), any()) } returns
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.template(), McpFixtures.template(id = "dates.ftl", isLibrary = true))
 
         val all = TemplatesListTool(templates).call(McpArguments(emptyMap()), readCtx) as List<*>
@@ -45,7 +45,7 @@ class TemplateToolsTest {
         assertAll(
             {
                 (all.first() as Map<*, *>).keys shouldContainExactly
-                    setOf("id", "version", "dialect", "display_name", "description", "is_library")
+                    setOf("id", "version", "type", "dialect", "display_name", "description", "is_library")
             },
             { libraries.map { (it as Map<*, *>)["id"] } shouldContainExactly listOf("dates.ftl") },
         )
@@ -55,7 +55,7 @@ class TemplateToolsTest {
     fun `list pushes dialect and q down to the repository`() {
         val dialect = slot<Dialect>()
         val q = slot<String>()
-        every { templates.list(any(), capture(dialect), capture(q), any(), any()) } returns emptyList()
+        every { templates.list(any(), capture(dialect), any(), capture(q), any(), any()) } returns emptyList()
 
         TemplatesListTool(templates).call(McpArguments(mapOf("dialect" to "MYSQL", "q" to "revenue")), readCtx)
 
@@ -266,7 +266,7 @@ class TemplateToolsTest {
     @Test
     fun `list clamps limit into the repository's page bounds`() {
         val limit = slot<Int>()
-        every { templates.list(any(), any(), any(), any(), capture(limit)) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), capture(limit)) } returns emptyList()
 
         TemplatesListTool(templates).call(McpArguments(mapOf("limit" to 10_000)), readCtx)
 

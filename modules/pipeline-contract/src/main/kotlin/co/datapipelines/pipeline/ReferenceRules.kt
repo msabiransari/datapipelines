@@ -158,6 +158,25 @@ internal object ReferenceRules {
             }
 
             is TemplateLookup.Found -> {
+                // 046 §7: reference legality runs BEFORE the dialect check. Every template a
+                // node can legally reference is `sql` (hence has a dialect, per the schema);
+                // an `html` template is refused outright, and the per-version checks below it
+                // (dialect match, dry render, interpolation scan) are SQL-node concerns that
+                // would only add noise failures under the verdict that already rejects the node.
+                if (lookup.type != TemplateType.SQL) {
+                    into.add(
+                        Validation.TEMPLATE_TYPE_MISMATCH,
+                        path,
+                        "Template '${node.template.key.truncateForError()}' has type " +
+                            "'${lookup.type.wire}', but node '${node.id.truncateForError()}' is a " +
+                            "${node.type.wire} node and may reference only type 'sql' templates.",
+                        mapOf(
+                            "template" to node.template.key.truncateForError(),
+                            "template_type" to lookup.type.wire,
+                        ),
+                    )
+                    return
+                }
                 checkDialect(path, node, lookup.dialect, sourceDialect, into)
                 dryRender(path, node, templates, workspaceId, sampleContext, into)
                 checkInterpolatedParameters(path, node, templates, workspaceId, sampleContext, into)
@@ -168,13 +187,15 @@ internal object ReferenceRules {
     private fun checkDialect(
         path: String,
         node: Node,
-        templateDialect: Dialect,
+        templateDialect: Dialect?,
         sourceDialect: Dialect?,
         into: FailureCollector,
     ) {
         // A null source dialect means the datasource is unknown — already reported by §12.5.
         // Guessing a dialect to compare against would invent a second, misleading failure.
-        if (sourceDialect == null || templateDialect == sourceDialect) return
+        // A null template dialect is unreachable for a type='sql' template (chk_type_dialect,
+        // 046 §5.1) but fails closed here rather than dereferencing on a corrupted row.
+        if (templateDialect == null || sourceDialect == null || templateDialect == sourceDialect) return
         into.add(
             Validation.TEMPLATE_DIALECT_MISMATCH,
             path,

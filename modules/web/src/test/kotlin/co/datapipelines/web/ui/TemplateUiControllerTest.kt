@@ -60,7 +60,7 @@ class TemplateUiControllerTest {
     fun `list page returns templates view with theme and templates`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(any(), null, null, 0, 26) } returns
+        every { repository.list(any(), null, null, null, 0, 26) } returns
             listOf(
                 template(),
                 template("orders_v2.sql"),
@@ -84,8 +84,8 @@ class TemplateUiControllerTest {
     fun `list page passes filters to repository`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(any(), Dialect.POSTGRES, "orders", 0, 26) } returns listOf(template())
-        every { repository.count(any(), Dialect.POSTGRES, "orders") } returns 1
+        every { repository.list(any(), Dialect.POSTGRES, null, "orders", 0, 26) } returns listOf(template())
+        every { repository.count(any(), Dialect.POSTGRES, null, "orders") } returns 1
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -101,7 +101,7 @@ class TemplateUiControllerTest {
     @Test
     fun `partial returns fragment view`() {
         authenticate()
-        every { repository.list(any(), null, null, 0, 26) } returns listOf(template())
+        every { repository.list(any(), null, null, null, 0, 26) } returns listOf(template())
         every { repository.count(any(), null, null) } returns 100
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
@@ -118,7 +118,7 @@ class TemplateUiControllerTest {
     fun `partial handles pagination hasMore detection`() {
         authenticate()
         val many = (1..26).map { template("t$it.sql") }
-        every { repository.list(any(), null, null, 0, 26) } returns many
+        every { repository.list(any(), null, null, null, 0, 26) } returns many
         every { repository.count(any(), null, null) } returns 100
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
@@ -139,7 +139,7 @@ class TemplateUiControllerTest {
         authenticate()
 
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(any(), null, null, 0, 26) } returns emptyList()
+        every { repository.list(any(), null, null, null, 0, 26) } returns emptyList()
         every { repository.count(any(), null, null) } returns 0
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
@@ -155,7 +155,7 @@ class TemplateUiControllerTest {
     fun `empty list renders correctly`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        every { repository.list(any(), null, null, 0, 26) } returns emptyList()
+        every { repository.list(any(), null, null, null, 0, 26) } returns emptyList()
         every { repository.count(any(), null, null) } returns 0
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 

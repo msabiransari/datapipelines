@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.6 (frozen contract — additive-only changes after this point)
+**Status:** v1.8 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-08-09
+**Last updated:** 2026-09-02
 
 ---
 
@@ -43,6 +43,7 @@ This spec defines:
   "id": "fetch_orders.sql",
   "version": 2,
   "engine": "freemarker",
+  "type": "sql",
   "dialect": "POSTGRES",
   "display_name": "Fetch Orders in Date Range",
   "description": "Pulls orders between start_date and end_date (DATE), with an include_cancelled (BOOLEAN) switch. Intended for pipelines that declare those three parameters.",
@@ -66,7 +67,8 @@ Note that the body contains **no `<#import>` directive**. The engine synthesizes
 | `id` | string | yes | Stable identifier — a path of 1–10 `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total ([Template Hierarchy §4.1](template-hierarchy-design.md)); the full path IS the name. Auto-generated if omitted on create. |
 | `version` | integer | yes | Monotonically increasing per template id. Server-assigned. |
 | `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`; a save carrying any other value (`"pebble"`, `"handlebars"`, `"none"`) is **rejected at save time** with `template.validation.engine_unsupported` (§7) — it is never stored and silently rendered as Freemarker. Reserved values are catalogued in [Enums §6](enums.md#6-templateengine--template-language). |
-| `dialect` | string (enum) | yes | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. |
+| `type` | string (enum) | optional (default `"sql"`) | The template's kind: `sql` or `html` ([Enums §6A](enums.md#6a-templatetype--template-kind), [Template Hierarchy §5](template-hierarchy-design.md)). Accepted on **create only** — defaulting to `sql` when absent — and identical on every version of the template; a write payload carrying a different type is refused with `template.validation.type_immutable` (§7). `sql` renders SQL through the escaping-free configuration and is the only kind a pipeline node may reference; `html` renders through a second, auto-escaping configuration ([Template Hierarchy §6](template-hierarchy-design.md)) and takes **no** `dialect`. An unknown value is refused with `template.validation.type_invalid`. |
+| `dialect` | string (enum) | yes — **iff `type` is `sql`** | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. Required unless the template's type is `html` (absence on a non-html payload is `template.validation.dialect_invalid`); a `dialect` present on an `html` template is refused with `template.validation.dialect_not_allowed` (§7). |
 | `display_name` | string | yes | Human-readable name. |
 | `description` | string | yes | Free-text, for human and agent discoverability. Not machine-validated: it is the only place a template can hint at the parameters it expects, since it declares none (§2.5). |
 | `imports` | array of `{id, version, alias}` | yes (may be empty) | Library templates whose macros this template calls, and the namespace alias each is bound to. See §6. Only meaningful when `engine` is `"freemarker"`. |
@@ -308,7 +310,10 @@ All checks below run at template create/update time, before anything is written 
 
 | Code | Check |
 |---|---|
-| `template.validation.dialect_invalid` | `dialect` is in the allowed enum |
+| `template.validation.dialect_invalid` | `dialect` is in the allowed enum — and is present whenever the type is not `html` |
+| `template.validation.type_invalid` | `type` is one of `sql`, `html` (046, [Template Hierarchy §5.4](template-hierarchy-design.md)) |
+| `template.validation.dialect_not_allowed` | No `dialect` on a `type='html'` template — an html template declares none (046, [Template Hierarchy §7](template-hierarchy-design.md)) |
+| `template.validation.type_immutable` | A write payload carries a `type` other than the template's established one — the type is chosen at create and identical on every version (046, [Template Hierarchy §5.3](template-hierarchy-design.md)) |
 | `template.validation.engine_unsupported` | `engine` is a value v1 supports (only `"freemarker"`) |
 | `template.validation.schema_version_unsupported` | `schema_version` is a value v1 supports (only `1`) |
 | `template.validation.id_invalid` | `id` is a path of 1–10 segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total ([Template Hierarchy §4.1](template-hierarchy-design.md)) |
@@ -424,14 +429,14 @@ too). When a grouped expression carries a `:name`, prefer one of those two shape
 | Operation | Method & Path |
 |---|---|
 | Create template | `POST /templates` |
-| Get latest version | `GET /templates/{id}` |
-| Get specific version | `GET /templates/{id}/versions/{version}` |
-| Update (creates new version) | `PUT /templates/{id}` |
-| List | `GET /templates?dialect={d}&q={search}` |
-| Delete (soft) | `DELETE /templates/{id}` |
-| List versions | `GET /templates/{id}/versions` |
-| Preview render with a caller-supplied context | `POST /templates/{id}/versions/{version}/render` |
-| Import library bundle | `POST /templates/import` |
+| Get working version | `GET /templates?name={id}` |
+| Get specific version | `GET /templates/versions?name={id}&version={n}` |
+| Update (writes the draft branch) | `PUT /templates` — `id` in the body |
+| List | `GET /templates?dialect={d}&type={t}&q={search}` |
+| Delete (soft) | `DELETE /templates?name={id}` |
+| Preview render with a caller-supplied context | `POST /templates/render` — `name`, `version`, `context` in the body |
+
+The name never travels in a URL path segment ([Template Hierarchy §9.6](template-hierarchy-design.md) — a name may contain `/`, and the container refuses an encoded `%2F` below routing). The `type` list filter is `sql`/`html` (046).
 
 The `/render` endpoint is an **editor preview affordance only** — the caller explicitly supplies the variable map to render against. It is not a validation step and it never runs implicitly: template save is parse-only (§7.1), and the authoritative render check is the pipeline dry-render (§7.2).
 
@@ -466,6 +471,7 @@ The Template entity is **versioned, additive-only**.
 ### 11.2 Not frozen
 
 - New optional fields (`tags`, `metadata`, etc.) may be added non-breakingly.
+- **Conditional-requirement relaxations are named explicitly** (amended 2026-09-02, 046): making a previously required field conditional on another — as 046 did to `dialect`, required iff `type='sql'` — is *not* covered by "new optional fields" above, because §11.1 froze the field's presence as part of the shape. Such a relaxation is compatible in practice when no existing payload becomes invalid and every stored row already satisfies the new rule (every pre-046 template backfills to `type='sql'` with its dialect intact), but the claim must be written down in the change log of the round that takes it, not assumed under §11.2's first bullet.
 - The render cache and timeout configuration are deployment-specific ([Configuration §3.9](configuration.md#39-templates)).
 - Future template languages beyond Freemarker are out of scope but possible (would be a new `engine` value).
 
@@ -618,6 +624,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.8 | 046 typed templates | Template JSON gains optional `type` (`sql` \| `html`, default `sql`, chosen at create and immutable across versions — [Template Hierarchy §5](template-hierarchy-design.md)); `dialect` becomes conditional — required iff `type='sql'`, forbidden on `html` (§3.1/§3.2). §7 gains `type_invalid`, `dialect_not_allowed` and `type_immutable`; §9's routes corrected to the §9.6 name-query addressing and gain the `type` list filter; §11.2 amended to name conditional-requirement relaxations explicitly — the relaxation of `dialect` is this round's own invocation of that clause (no existing payload becomes invalid; every stored template backfills to `sql` with its dialect intact). |
 | 2026-09-01 | v1.7 | 042 implementation | New §4.5: declared parameters are values and bind as `:name` — the old §4.4 injection paragraph is replaced by the split of responsibilities it states. §7.2: pipeline save refuses a declared parameter inside `${}` with `template.validation.parameter_interpolated` (AST scan, scope-aware, no escape spelling per the 2.3.34 pin). New §8.4: execution-time binding semantics — loud `pipeline.node.sql_parameter_missing` for an undeclared `:name`, and the dialect-construct translation table pinned by `NamedParameterTranslationTest` (`::` casts survive; MySQL `#` comments, MSSQL `[a:b]`, Oracle `q'…'`, PG `$$…$$` mis-parse). §13: the "parameterized SQL output" v1.1 candidate is struck as shipped. |
 | 2026-08-05 | v1.0 | initial draft | Initial templates spec: entity, Freemarker config (security-hardened), library macros, versioning, validation |
 | 2026-08-05 | v1.1 | propagation | Added `engine` field to Template entity (default `"freemarker"`; future-proofing for Pebble/Handlebars/raw-SQL). Updated `body` and `imports` field descriptions to be engine-aware. Renamed `__staging__` → `tempdb` in UI editor section. |

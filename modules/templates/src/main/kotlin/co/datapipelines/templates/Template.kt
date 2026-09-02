@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -43,8 +44,17 @@ data class Template(
     val version: Int,
     @field:JsonProperty("engine") @get:JsonProperty("engine") @param:JsonProperty("engine")
     val engine: String = FREEMARKER_ENGINE,
+    /**
+     * The template's kind (046, template-hierarchy-design §5.4; enums.md §6A) — `sql` or
+     * `html`, fixed at creation and identical on every version (§5.3). Defaulted so the
+     * pre-046 constructors keep compiling and a read that does not select the column still
+     * renders the value every pre-V8 row carries. `dialect` below is non-null exactly when
+     * this is [TemplateType.SQL].
+     */
+    @field:JsonProperty("type") @get:JsonProperty("type") @param:JsonProperty("type")
+    val type: TemplateType = TemplateType.SQL,
     @field:JsonProperty("dialect") @get:JsonProperty("dialect") @param:JsonProperty("dialect")
-    val dialect: Dialect,
+    val dialect: Dialect?,
     @field:JsonProperty("display_name") @get:JsonProperty("display_name") @param:JsonProperty("display_name")
     val displayName: String,
     @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")
@@ -86,12 +96,16 @@ data class Template(
  * this shape: it carries the [body], the [imports] array, and the [isLibrary] flag that
  * import validation checks, all pinned to one version. A version is never updated in place
  * (templates.md §5.1), so a [TemplateVersion] is safe to cache indefinitely by its [key].
+ *
+ * [type] (046) selects which of the engine's two Freemarker configurations the version
+ * renders through ([TemplateEngine]); [dialect] is null exactly when the type is `html`.
  */
 data class TemplateVersion(
     val id: String,
     val version: Int,
     val engine: String = Template.FREEMARKER_ENGINE,
-    val dialect: Dialect,
+    val type: TemplateType = TemplateType.SQL,
+    val dialect: Dialect? = null,
     val isLibrary: Boolean,
     val imports: List<TemplateImport>,
     val body: String,

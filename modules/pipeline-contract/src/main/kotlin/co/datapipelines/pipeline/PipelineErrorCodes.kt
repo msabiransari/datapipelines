@@ -126,6 +126,13 @@ object PipelineErrorCodes {
         /** §12.6 — the template's dialect matches the node's source dialect. */
         const val TEMPLATE_DIALECT_MISMATCH = "pipeline.validation.template_dialect_mismatch"
 
+        /**
+         * §12.6 (046, template-hierarchy-design §7) — a DQL/DML/DDL node references a
+         * `type='html'` template. Every template a node can legally reference is `sql`;
+         * `details` carries `template_type`.
+         */
+        const val TEMPLATE_TYPE_MISMATCH = "pipeline.validation.template_type_mismatch"
+
         /** §12.6 — save-time dry-render found a Freemarker variable no parameter declares (D3). */
         const val TEMPLATE_PARAMETER_UNDECLARED = "pipeline.validation.template_parameter_undeclared"
 
@@ -358,6 +365,26 @@ object PipelineErrorCodes {
         const val DANGEROUS_CONSTRUCT = "template.validation.dangerous_construct"
         const val ID_INVALID = "template.validation.id_invalid"
         const val DIALECT_INVALID = "template.validation.dialect_invalid"
+
+        /**
+         * §13.9 (046, template-hierarchy-design §5.2/§7) — `dialect` is present on a
+         * `type='html'` template. Deliberately distinct from [DIALECT_INVALID] (unknown
+         * dialect value): a different failure gets a different, greppable code.
+         */
+        const val DIALECT_NOT_ALLOWED = "template.validation.dialect_not_allowed"
+
+        /**
+         * §13.9 (046, template-hierarchy-design §5.4) — `type` is not `sql` or `html`. The
+         * wire-value refusal for the new optional field, exactly the [DIALECT_INVALID] pattern;
+         * without it an unknown value would surface as a raw Jackson enum-coercion failure.
+         */
+        const val TYPE_INVALID = "template.validation.type_invalid"
+
+        /**
+         * §13.9 (046, template-hierarchy-design §5.3) — a payload attempted to change a
+         * template's `type`, which is fixed at creation and identical across every version.
+         */
+        const val TYPE_IMMUTABLE = "template.validation.type_immutable"
         const val ENGINE_UNSUPPORTED = "template.validation.engine_unsupported"
         const val SCHEMA_VERSION_UNSUPPORTED = "template.validation.schema_version_unsupported"
         const val IS_LIBRARY_WITHOUT_MACROS = "template.validation.is_library_without_macros"

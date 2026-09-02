@@ -115,6 +115,14 @@ object ApiErrorCatalog {
             // §13.9 — 400 like the template.validation family default, wired explicitly for
             // the same 025 A2 reason.
             PipelineErrorCodes.Template.PARAMETER_INTERPOLATED to HttpStatus.BAD_REQUEST,
+            // §13.9 (046, typed templates) — 400 like the family default, wired explicitly so
+            // each code owns a row rather than being absorbed by the default (025 A2).
+            PipelineErrorCodes.Template.TYPE_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.TYPE_IMMUTABLE to HttpStatus.BAD_REQUEST,
+            // §12.6 (046) — the html-reference refusal at pipeline save; 400 like the
+            // pipeline.validation family default, wired explicitly for the same A2 reason.
+            PipelineErrorCodes.Validation.TEMPLATE_TYPE_MISMATCH to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Result.EXECUTION_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Result.EXECUTION_INCOMPLETE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Result.EXECUTION_FAILED to HttpStatus.GONE,

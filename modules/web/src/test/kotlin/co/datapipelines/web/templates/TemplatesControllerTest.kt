@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateEngine
@@ -273,13 +274,70 @@ class TemplatesControllerTest {
     @Test
     fun `list paginates and filters by dialect`() {
         authenticate()
-        every { repository.list(any(), Dialect.POSTGRES, null, 0, 3) } returns listOf(template(), template(2))
-        val data = controller.list(dialect = "POSTGRES", q = null, offset = 0, limit = 2).data
+        every { repository.list(any(), Dialect.POSTGRES, null, null, 0, 3) } returns listOf(template(), template(2))
+        val data = controller.list(dialect = "POSTGRES", type = null, q = null, offset = 0, limit = 2).data
         data.items.size shouldBe 2
         data.pagination.hasMore shouldBe false
 
-        shouldThrow<ApiException> { controller.list(dialect = "DB2", q = null, offset = null, limit = null) }
+        shouldThrow<ApiException> { controller.list(dialect = "DB2", type = null, q = null, offset = null, limit = null) }
             .code shouldBe "pipeline.execution.invalid_parameter_type"
+    }
+
+    @Test
+    fun `list filters by type and refuses an unknown type value`() {
+        authenticate()
+        every { repository.list(any(), null, TemplateType.HTML, null, 0, 3) } returns listOf(template())
+        val data = controller.list(dialect = null, type = "html", q = null, offset = 0, limit = 2).data
+        data.items.size shouldBe 1
+
+        shouldThrow<ApiException> { controller.list(dialect = null, type = "csv", q = null, offset = null, limit = null) }
+            .code shouldBe "pipeline.execution.invalid_parameter_type"
+    }
+
+    @Test
+    fun `create accepts an html payload without a dialect and echoes the type`() {
+        authenticate()
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        every { repository.create(any(), any(), userId) } returns
+            template().copy(type = TemplateType.HTML, dialect = null)
+
+        val stored =
+            controller
+                .create(
+                    """{"id":"report.html","type":"html","display_name":"R","description":"d","body":"<p>${'$'}{x}</p>"}""",
+                ).data
+        stored.type shouldBe TemplateType.HTML
+        stored.dialect shouldBe null
+    }
+
+    @Test
+    fun `update refuses a payload that changes the template's type`() {
+        authenticate()
+        val latest = template()
+        every { repository.findLatest(any(), "fetch_orders.sql") } returns latest
+        every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
+        // The refusal lives in the REAL draft service (TemplateTypeRule.forExisting), so this
+        // one test wires it instead of the mocked `drafts` the other update tests use.
+        val controllerWithRealDrafts =
+            TemplatesController(
+                repository,
+                validator,
+                engines,
+                TemplateImportService(repository, validator),
+                TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true)),
+                releases,
+                co.datapipelines.pipeline.AuthoringGuard(true),
+            )
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                controllerWithRealDrafts.update(
+                    ifMatch = "hash-v1",
+                    body =
+                        """{"id":"fetch_orders.sql","type":"html","display_name":"F","description":"d","body":"SELECT 1"}""",
+                )
+            }
+        thrown.code shouldBe PipelineErrorCodes.Template.TYPE_IMMUTABLE
     }
 
     @Test
@@ -326,6 +384,7 @@ class TemplatesControllerTest {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
         every { repository.existsId(any(), "fetch_orders.sql") } returns true
+        every { repository.findLatest(any(), "fetch_orders.sql") } returns template(2)
         every { repository.appendReleasedVersion(any(), "fetch_orders.sql", any(), userId) } returns template(2)
         every { repository.existsId(any(), "new.sql") } returns false
         every { repository.create(any(), any(), userId) } returns template().copy(id = "new.sql")

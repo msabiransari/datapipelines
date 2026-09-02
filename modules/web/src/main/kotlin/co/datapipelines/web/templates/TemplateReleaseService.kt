@@ -59,6 +59,7 @@ class TemplateReleaseService(
             TemplateDraft(
                 id = stored.id,
                 engine = stored.engine,
+                type = stored.type,
                 dialect = stored.dialect,
                 displayName = stored.displayName,
                 description = stored.description,

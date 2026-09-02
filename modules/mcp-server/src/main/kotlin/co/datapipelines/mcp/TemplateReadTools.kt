@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
@@ -15,6 +16,9 @@ internal fun McpArguments.dialect(name: String): Dialect? =
 /** §6.2.6 — the `is_library` filter description, kept off the schema line for length. */
 private const val IS_LIBRARY_FILTER_DESC = "Filter to library templates (macro collections) or executable templates."
 
+/** §6.2.6 — the `type` filter description (046 §10). */
+private const val TYPE_FILTER_DESC = "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."
+
 /** `templates_list` (mcp-server.md §6.2.6). Scope: `read`. */
 class TemplatesListTool(
     private val templates: TemplateRepository,
@@ -23,15 +27,17 @@ class TemplatesListTool(
         McpTools.tool(
             name = "templates_list",
             description =
-                "List the SQL templates of the key's pinned workspace. Templates are reusable SQL generators authored in " +
-                    "Freemarker; pipelines reference them by id+version. Template ids are unique per workspace — " +
-                    "another workspace's template resolves as not-found.",
+                "List the templates of the key's pinned workspace. Templates are reusable generators authored in " +
+                    "Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline " +
+                    "nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are " +
+                    "unique per workspace — another workspace's template resolves as not-found.",
             schema =
                 """
                 {
                   "type": "object",
                   "properties": {
                     "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON},
+                    "type": {"type": "string", "enum": ["sql", "html"], "description": "$TYPE_FILTER_DESC"},
                     "q": {"type": "string"},
                     "is_library": {"type": "boolean", "description": "$IS_LIBRARY_FILTER_DESC"},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
@@ -51,8 +57,13 @@ class TemplatesListTool(
         // is applied here. It narrows a page rather than paging past it — same visible-set rule the
         // REST listing has, and the alternative would be an unbounded scan.
         return templates
-            .list(workspaceId, dialect = args.dialect("dialect"), q = args.string("q"), limit = limit)
-            .filter { isLibrary == null || it.isLibrary == isLibrary }
+            .list(
+                workspaceId,
+                dialect = args.dialect("dialect"),
+                type = args.string("type")?.let { TemplateType.fromWire(it) },
+                q = args.string("q"),
+                limit = limit,
+            ).filter { isLibrary == null || it.isLibrary == isLibrary }
             .map { it.toMetadata() }
     }
 
@@ -64,7 +75,8 @@ class TemplatesListTool(
         mapOf(
             "id" to id,
             "version" to version,
-            "dialect" to dialect.wire,
+            "type" to type.wire,
+            "dialect" to dialect?.wire,
             "display_name" to displayName,
             "description" to description,
             "is_library" to isLibrary,
