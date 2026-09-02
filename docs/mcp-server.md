@@ -1030,6 +1030,32 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] `/mcp` is CSRF-exempt *because* it accepts no cookies — assert both halves; exemption without the cookie ban is a CSRF hole.
 - [ ] All MCP traffic over TLS (enforced by deployment, not just recommended).
 - [ ] Audit log records every tool call (tool name, caller, target entity, timestamp, success/failure) with the `correlation_id`.
+- [ ] Every call to a catalog-declared **mutating** tool writes exactly one `mcp.tool.write` audit event — a node run that altered customer data must never be untraceable (§14).
+
+---
+
+## 14. Audit
+
+> **Status:** normative (052, ruling R4 on T65). The same `audit_log` sink the [`auth.*` events](auth.md#101-events) use — no separate table, no execution rows, no UI history.
+
+**Two events, both emitted at `McpToolDispatcher`** — the single dispatch choke point, so no tool can forget its own trace:
+
+| Event | When | 
+|---|---|
+| `mcp.tool.called` | Every tool call, every outcome (success, domain error, invalid params, internal error, scope refusal) |
+| `mcp.tool.write` | Exactly one per call to a tool the catalog declares **mutating**, emitted after the tool returns — on success and on failure alike. A §7.6 scope refusal never invoked the tool, so it writes no write event: the refusal is recorded by `mcp.tool.called` alone |
+
+**Fields** (identical for both events): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`.
+
+**Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
+
+**Node runs are covered** (the point of 052): `pipelines_execute_node` runs real DML/DDL with no execution row, no SSE, no idempotency record — §6.2.20's ratification covers "no execution history", not "no trace". The `mcp.tool.write` row naming pipeline, node and version IS the trace that the write happened and by whom.
+
+**Deliberately NOT recorded:** SQL text, row data, parameter values. Those are customer data; the event records THAT a write happened and by whom, never what it contained. Only identifier-shaped arguments are read from the request — the `parameters` map is never touched.
+
+**Failure discipline:** emission happens after the tool returns and cannot change the tool's result or its error; an audit-sink failure is logged server-side (WARN + correlation id) and swallowed — the customer's call does not fail because bookkeeping did.
+
+The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events); the shared sink and its shape are [Auth §10](auth.md#10-audit-log).
 
 ---
 
@@ -1053,3 +1079,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-17 | v1.13 | pipeline composition | §6.2.4/§6.2.5: the `nodes` inputSchema description now covers the PIPELINE node type (pipeline ref pinning, parameter literals and `${parent_param}` references, output legality). Runtime behavior is unchanged — composition executes through the internal execution service, not a new tool. |
 | 2026-08-28 | v1.14 | workspaces surfaces slice | §2 principle 6 + §5.1 `instructions`: the workspace context statement (key-pinned scope; other workspaces absent, not hidden). §6.2.10/§6.2.11 descriptions + Returns gain `workspace`/`readonly`; datasource listings/by-name reads are workspace-scoped (bound + global — the REST §9.2/§9.3 predicate). §7.2.3/§7.3: the same scoping for datasource resources and `resources/list`. No new tools, no inputSchema changes. |
 | 2026-09-01 | v1.15 | agent data visibility (037) | Tool surface 18 → **20**: new §6.2.19 `datasources_preview_rows` (≤50 wire-encoded rows of one table, `order_by` as `{column, direction}` objects, service-built + dialect-quoted statements, readonly datasources valid) and §6.2.20 `pipelines_execute_node` (ONE node's rendered SQL on its own datasource — a debug query, not an execution: no history/SSE/idempotency, DML/DDL for real, tempdb-source and PIPELINE nodes refused with `pipeline.node.standalone_execution_refused`, unknown node `pipeline.node.not_found`, E5 draft-if-exists version default with status always stated). §6.1, §5.1, §8 admission-rule counts updated. Both `author`: the first tools returning arbitrary customer row data (037 F). |
+| 2026-09-02 | v1.16 | MCP audit (052) | New **§14 Audit** (normative, ruling R4): `mcp.tool.called` (every call, since the original build) registered + `mcp.tool.write` (NEW — exactly one per catalog-declared mutating call, node runs included, after the tool returns on success and failure; scope refusals excluded because the tool never ran). Emitted at the dispatcher, not per-tool. Mutating is a declared catalog-entry property guarded by `McpToolCatalogBindingTest`. Never SQL/row data/parameter values. §13 gains the mutating-call checklist line. Both events registered in Enums §15 the same commit (docs-audit check C). No tool surface change. |
