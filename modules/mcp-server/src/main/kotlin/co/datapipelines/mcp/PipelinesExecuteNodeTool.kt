@@ -99,7 +99,17 @@ class PipelinesExecuteNodeTool(
                 )
             }
 
-        return when (resolution) {
+        return route(resolution, ctx, pipelineId, nodeId)
+    }
+
+    /** The E2 refusal ladder: every non-rendered state maps to its catalogued outcome before anything runs. */
+    private fun route(
+        resolution: NodeSqlResolution,
+        ctx: McpToolContext,
+        pipelineId: UUID,
+        nodeId: String,
+    ): Any =
+        when (resolution) {
             is NodeSqlResolution.NodeMissing -> {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.NOT_FOUND,
@@ -150,7 +160,6 @@ class PipelinesExecuteNodeTool(
                 run(resolution, ctx)
             }
         }
-    }
 
     /** Step 3 — execute the rendered SQL on the datasource the node points to. */
     private fun run(
