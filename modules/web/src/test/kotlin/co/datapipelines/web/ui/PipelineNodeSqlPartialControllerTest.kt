@@ -111,7 +111,10 @@ class PipelineNodeSqlPartialControllerTest {
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
-        every { pipelines.findById(any(), pipelineId) } returns record
+        // No draft: the panel's E5 default (draft-if-exists) falls to the released current
+        // version, which is what every state test below exercises.
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns null
+        every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns versionDetail(1)
         every { pipelines.findVersionBody(any(), pipelineId, 1) } returns bodyJson
         every { templateEngines.engineFor(workspaceId) } returns engine
         every { templates.lookupVersion(workspaceId, "trips_by_day.sql", 1) } returns version("trips_by_day.sql", 1)
@@ -234,12 +237,43 @@ class PipelineNodeSqlPartialControllerTest {
 
     @Test
     fun `a pipeline outside the caller's workspace is a 404, not a partial`() {
-        every { pipelines.findById(any(), pipelineId) } returns null
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns null
+        every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns null
 
         assertThrows<NoSuchElementException> {
             controller.nodeSql(pipelineId, "trips_by_day", null, ExtendedModelMap())
         }
     }
+
+    @Test
+    fun `the E5 default - when a DRAFT exists the panel renders the DRAFT body`() {
+        // 037 E5: the resolver's version rule (draft-if-exists) is THE panel's rule too — the
+        // editor authors the draft (035 D4), so showing the released body under it would have
+        // a human debug stale SQL. v2's body renames the node, so the pinned template's render
+        // proves which body the panel read.
+        val draftBody = bodyJson.replace("\"id\": \"trips_by_day\"", "\"id\": \"trips_draft\"")
+        every { pipelines.findDraftDetail(any(), pipelineId) } returns versionDetail(2)
+        every { pipelines.findVersionBody(any(), pipelineId, 2) } returns draftBody
+        val model = ExtendedModelMap()
+
+        controller.nodeSql(pipelineId, "trips_by_day", null, model)
+
+        // v2's body has no trips_by_day node — the draft was read, hence node-missing (not a
+        // v1 render), and a version-1 body lookup never happened.
+        model.getAttribute("state") shouldBe "node-missing"
+        io.mockk.verify(exactly = 0) { pipelines.findVersionBody(any(), pipelineId, 1) }
+    }
+
+    private fun versionDetail(v: Int) =
+        co.datapipelines.pipeline.PipelineVersionDetail(
+            pipelineId = pipelineId,
+            version = v,
+            status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+            bodyHash = "hash-$v",
+            createdAt = Instant.parse("2026-08-01T00:00:00Z"),
+            createdBy = UUID.randomUUID(),
+            releasedAt = Instant.parse("2026-08-01T00:00:00Z"),
+        )
 
     private fun version(
         id: String,
