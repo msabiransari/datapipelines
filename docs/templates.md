@@ -410,6 +410,13 @@ against the pinned jar, cited rather than re-derived):
   when it does. The fix is the author's: rephrase the construct. Values themselves never
   re-enter the parser, so the injection property §4.5 exists for is unaffected by these.
 
+**H2 and a bound parameter inside a grouped expression.** A parameter inside a `CASE` (or any
+expression) that is repeated verbatim in `GROUP BY` can fail H2's "must be in the GROUP BY
+list" validation at execution — the shipped `sample_rain_vs_dry.sql` hit exactly this after
+its 042 migration and was fixed by grouping on ordinals (`GROUP BY 1, 2`; the derived-table
+spelling — computing the expression once in a subquery and grouping by the column — works
+too). When a grouped expression carries a `:name`, prefer one of those two shapes.
+
 ---
 
 ## 9. CRUD Operations (Brief — full HTTP in REST API spec)
