@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 18 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 20 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -168,6 +168,7 @@ Tools are named `{domain}_{action}`:
 - `pipelines_list`
 - `pipelines_get`
 - `pipelines_execute`
+- `pipelines_execute_node`
 - `pipelines_create`
 - `pipelines_update`
 - `templates_list`
@@ -180,6 +181,7 @@ Tools are named `{domain}_{action}`:
 - `datasources_get_schemas`
 - `datasources_get_tables`
 - `datasources_get_columns`
+- `datasources_preview_rows`
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
@@ -659,6 +661,74 @@ Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_ty
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
+#### 6.2.19 `datasources_preview_rows`
+
+Preview up to `limit` rows of one table's data — the counterpart to `datasources_get_columns`.
+
+```json
+{
+  "name": "datasources_preview_rows",
+  "description": "Preview up to `limit` rows of one table's data, read live from the datasource. The counterpart to datasources_get_columns: this shows the DATA, that shows the shape. Without order_by the top-N is engine-arbitrary; pass order_by to see a chosen end of the data, e.g. direction DESC for the newest or largest rows. Read-only (SELECT); readonly datasources are valid targets. Values arrive wire-encoded: BIGINTEGER and BIGDECIMAL as strings, temporal as fixed-width ISO forms.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name", "table"],
+    "properties": {
+      "name": {"type": "string", "description": "Datasource name."},
+      "table": {"type": "string", "description": "Table name exactly as datasources_get_tables returned it."},
+      "schema": {"type": "string", "description": "Optional schema qualifier. Omitted means the connection's current schema."},
+      "order_by": {
+        "type": "array",
+        "description": "Sort terms applied in order. Each is an object with a column and a direction, never a free SQL string.",
+        "items": {
+          "type": "object",
+          "required": ["column"],
+          "properties": {
+            "column": {"type": "string", "description": "Column name exactly as datasources_get_columns returned it."},
+            "direction": {"type": "string", "enum": ["ASC", "DESC"], "default": "ASC"}
+          }
+        }
+      },
+      "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 50}
+    }
+  }
+}
+```
+
+Returns: `{"datasource", "table", "schema"?, "columns": [{"name", "type"}], "rows": [{column: value, ...}], "row_count", "truncated"}` — values wire-encoded per the result-cursor rules (`BIGINTEGER`/`BIGDECIMAL` as strings, temporal fixed-width ISO, `BINARY` base64). The server builds the ENTIRE statement and quotes every identifier with the dialect's quote character (backtick on MySQL, `[...]` on MSSQL, doubled `"` elsewhere) — the agent supplies identifiers only, and a blank identifier is `-32602`. `order_by` entries are `{column, direction}` objects; a free `"col DESC"` string is refused, not parsed. Without `order_by` the top-N is engine-arbitrary. The cap is applied in the dialect's own syntax (`LIMIT`, Oracle `FETCH FIRST n ROWS ONLY`, MSSQL `TOP (n)`) AND as JDBC `maxRows`/`fetchSize`. Readonly datasources are valid targets — the readonly refusal covers write-shaped node uses, and this is a SELECT. `tempdb` can never be a target: a datasource of that name cannot be registered (contract §4.8). A connection failure is the catalogued `pipeline.execution.datasource_unreachable`; a refused statement is the catalogued `pipeline.node.query_execution_failed` carrying the bounded driver message.
+
+**Scope:** `author` — this returns arbitrary customer ROW DATA, not metadata; a read-scoped key does not acquire that reach (037 F).
+
+#### 6.2.20 `pipelines_execute_node`
+
+Runs ONE pipeline node's rendered SQL against its own datasource — a debug query, not an execution.
+
+```json
+{
+  "name": "pipelines_execute_node",
+  "description": "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused. Parameters bind through the pipeline's declarations; unsupplied required parameters fall back to sample values and the response names them in sampled_parameters. Absent version runs the DRAFT if one exists, else the current released version; the response states which version and status ran.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["pipeline_id", "node_id"],
+    "properties": {
+      "pipeline_id": {"type": "string", "format": "uuid"},
+      "node_id": {"type": "string", "description": "Node id within the pipeline body."},
+      "version": {"type": "integer", "minimum": 1, "description": "Pipeline version to read. Omitted: the DRAFT if one exists, else the current released version."},
+      "parameters": {
+        "type": "object",
+        "description": "Values for the pipeline's declared parameters, keyed by name. Types follow the declarations (BIGINTEGER and BIGDECIMAL as strings).",
+        "additionalProperties": true
+      }
+    }
+  }
+}
+```
+
+Returns: `{"node_id", "node_type", "datasource", "version", "status", "sql", "sampled_parameters"?, "elapsed_ms"}` plus, for DQL nodes, `{"columns": [{"name", "type"}], "rows": [{column: value, ...}], "row_count", "truncated"}` (capped at 50 rows like `datasources_preview_rows`), or for DML/DDL nodes `{"affected_rows"}` — **DML/DDL execute for real**, with no execution row, no SSE and no idempotency record (ratified, 037 §A). `sql` is the rendered template output in its `:name` form; execution binds those names as statement parameters. `status` is the run version's lifecycle status (`DRAFT`/`RELEASED`), so the agent never infers which body it ran.
+
+Refusals, all before anything runs: an unknown node id → `pipeline.node.not_found` (404 semantics); a node whose `source` is `tempdb` → `pipeline.node.standalone_execution_refused` with `details.reason = tempdb_source` (the staging database exists only inside a full execution — use `pipelines_execute`); a PIPELINE node → the same code with `details.reason = pipeline_node` (it runs a child pipeline, not SQL); a missing pinned template → `pipeline.node.template_not_found`; a render failure → `pipeline.node.template_render_failed`; a supplied parameter failing §6.3 coercion → `pipeline.execution.invalid_parameter_type` naming every failure; a rendered `:name` the pipeline does not declare → `pipeline.node.sql_parameter_missing` (042). A DML/DDL node against a readonly datasource is refused with `pipeline.node.datasource_readonly`; a datasource invisible to the key's workspace resolves as `datasource.not_found`, and an unreachable datasource as `pipeline.execution.datasource_unreachable`; a refused statement is `pipeline.node.query_execution_failed`.
+
+**Scope:** `author` — this runs real SQL and returns arbitrary customer row data; the same 037 F reasoning as `datasources_preview_rows`.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -763,7 +833,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 18 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 20 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -980,3 +1050,4 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | 2026-08-16 | v1.12 | hardening round 4 (007 review fix-cycle) | §6.2.17: `datasources_get_tables` no longer fails on a datasource reporting no current schema — the parameter_required guard is scoped to `datasources_get_columns` (6.2.18), the only operation with a merge hazard; tool description updated (inputSchema unchanged). |
 | 2026-08-17 | v1.13 | pipeline composition | §6.2.4/§6.2.5: the `nodes` inputSchema description now covers the PIPELINE node type (pipeline ref pinning, parameter literals and `${parent_param}` references, output legality). Runtime behavior is unchanged — composition executes through the internal execution service, not a new tool. |
 | 2026-08-28 | v1.14 | workspaces surfaces slice | §2 principle 6 + §5.1 `instructions`: the workspace context statement (key-pinned scope; other workspaces absent, not hidden). §6.2.10/§6.2.11 descriptions + Returns gain `workspace`/`readonly`; datasource listings/by-name reads are workspace-scoped (bound + global — the REST §9.2/§9.3 predicate). §7.2.3/§7.3: the same scoping for datasource resources and `resources/list`. No new tools, no inputSchema changes. |
+| 2026-09-01 | v1.15 | agent data visibility (037) | Tool surface 18 → **20**: new §6.2.19 `datasources_preview_rows` (≤50 wire-encoded rows of one table, `order_by` as `{column, direction}` objects, service-built + dialect-quoted statements, readonly datasources valid) and §6.2.20 `pipelines_execute_node` (ONE node's rendered SQL on its own datasource — a debug query, not an execution: no history/SSE/idempotency, DML/DDL for real, tempdb-source and PIPELINE nodes refused with `pipeline.node.standalone_execution_refused`, unknown node `pipeline.node.not_found`, E5 draft-if-exists version default with status always stated). §6.1, §5.1, §8 admission-rule counts updated. Both `author`: the first tools returning arbitrary customer row data (037 F). |
