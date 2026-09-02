@@ -75,8 +75,9 @@ class SqlRunner(
     private val registry: DatasourceRegistry,
 ) {
     /**
-     * The `datasources_preview_rows` engine: `SELECT * FROM [schema.]table [ORDER BY …]`,
-     * row-capped in the dialect's own syntax.
+     * The `datasources_preview_rows` engine: a `SELECT * FROM` an optionally schema-qualified,
+     * dialect-quoted table plus the caller's ORDER BY terms, row-capped in the dialect's own
+     * syntax.
      *
      * `schema` qualifies the table (`schema.table` — on MySQL catalog routing the qualifier is
      * the database, exactly the position the §7A catalog argument selects); when omitted the
