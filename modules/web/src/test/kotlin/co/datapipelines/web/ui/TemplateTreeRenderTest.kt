@@ -152,6 +152,20 @@ class TemplateTreeRenderTest {
         listOf("Rename", "Delete", "hx-delete", "hx-put").forEach { html shouldNotContain it }
     }
 
+    @Test
+    fun `each version row states its in-use count, and an unused version stays quiet`() {
+        // fillVersions: v2 (the draft) is pinned by one pipeline, v1 by two, and any version
+        // with no working-version pin renders the em dash — "nobody uses this" is the
+        // retirement-ready signal, not a zero to squint past.
+        val html = render("partials/template-versions") { fillVersions() }
+
+        html shouldContain "1 pipeline"
+        html shouldContain "2 pipelines"
+        html shouldContain "In use"
+        // The singular/plural fork is honest: exactly one occurrence of the singular row.
+        html.windowed("1 pipeline".length).count { it == "1 pipeline" } shouldBe 1
+    }
+
     // ------------------------------------------------------------- create form
 
     @Test
@@ -305,6 +319,7 @@ class TemplateTreeRenderTest {
             ),
         )
         setVariable("draftVersion", 2)
+        setVariable("inUse", mapOf(2 to 1, 1 to 2))
     }
 
     private fun WebContext.fillPage() {

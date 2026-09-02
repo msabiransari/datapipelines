@@ -5,10 +5,12 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidationFailure
 import co.datapipelines.templates.TemplateValidationResult
@@ -43,9 +45,17 @@ import java.util.UUID
  */
 class TemplateCreatePartialTest {
     private val repository = mockk<TemplateRepository>()
+    private val pipelines = mockk<PipelineRepository>()
     private val validator = mockk<TemplateValidator>()
     private val authoring = mockk<AuthoringGuard>(relaxed = true)
-    private val controller = TemplatePartialController(repository, TemplateBrowseModel(repository), validator, authoring)
+    private val controller =
+        TemplatePartialController(
+            repository,
+            TemplateBrowseModel(repository),
+            validator,
+            authoring,
+            TemplateUsageService(repository, pipelines),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -174,6 +184,7 @@ class TemplateCreatePartialTest {
         authenticate()
         every { repository.listVersions(any(), "acme/x") } returns emptyList()
         every { repository.findDraftDetail(any(), "acme/x") } returns null
+        every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), "acme/x") } returns emptyMap()
 
         val model = ExtendedModelMap()
         controller.versions(model, "acme/x") shouldBe "partials/template-versions"
@@ -181,5 +192,8 @@ class TemplateCreatePartialTest {
         model["templateId"] shouldBe "acme/x"
         model["draftVersion"] shouldBe null
         model["versions"].shouldNotBeNull()
+        // 040 D6: the same service's in-use counts ride the model — the empty map renders
+        // every row's em dash, never a missing-variable error.
+        model["inUse"] shouldBe emptyMap<Int, Int>()
     }
 }
