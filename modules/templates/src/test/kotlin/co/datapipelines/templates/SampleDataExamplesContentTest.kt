@@ -147,7 +147,9 @@ class SampleDataExamplesContentTest {
         registry: InMemoryTemplateRegistry,
     ): List<String> =
         when (val outcome = templateDeserializer.fromTree(entry)) {
-            is TemplateDeserializationOutcome.Rejected -> listOf("templates[$index]: ${outcome.result.codes.joinToString()}")
+            is TemplateDeserializationOutcome.Rejected -> {
+                listOf("templates[$index]: ${outcome.result.codes.joinToString()}")
+            }
 
             is TemplateDeserializationOutcome.Parsed -> {
                 val draft = outcome.draft
@@ -205,7 +207,10 @@ class SampleDataExamplesContentTest {
             .lineSequence()
             .filterNot { it.trimStart().startsWith("#") }
             .forEach { line ->
-                NAME_LINE.find(line)?.let { flush(); name = it.groupValues[1] }
+                NAME_LINE.find(line)?.let {
+                    flush()
+                    name = it.groupValues[1]
+                }
                 DIALECT_LINE.find(line)?.let { dialect = it.groupValues[1] }
                 READONLY_LINE.find(line)?.let { readonly = it.groupValues[1] }
             }
@@ -222,7 +227,7 @@ class SampleDataExamplesContentTest {
         private const val POISONED_TEMPLATE_ID = "sample_trips_monthly.sql"
         private const val BIND_FORM = ":start_date"
 
-        /** Escaped at the USE SITE (a dollar in a Kotlin string literal); spelled out here for the KDoc reader: interpolation of start_date. */
+        /** Escaped at the use site (a dollar in a Kotlin string literal): the interpolation form of start_date. */
         private const val INTERPOLATION_FORM = "\${start_date}"
 
         /** The version a fresh import lands at — every shipped pipeline node pins version 1. */
