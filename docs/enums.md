@@ -313,6 +313,13 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `datasource.connection_test` | Explicit connection test (`POST .../test`) |
 | `datasource.key_rotation` | Master-key rotation re-encryption pass |
 
+**MCP audit events** (same `audit_log` table, defined in [MCP §14](mcp-server.md#14-audit)):
+
+| Value | Trigger |
+|---|---|
+| `mcp.tool.called` | Every MCP tool call, success or failure — tool, actor (key id + owner), target, outcome, `elapsed_ms`, correlation id. Emitted by the dispatcher for every outcome including the §7.6 scope refusal ([MCP §14](mcp-server.md#14-audit)) |
+| `mcp.tool.write` | Every call to a tool the MCP catalog declares **mutating** — a write to stored definitions or to customer data, `pipelines_execute_node` node runs included — one event after the tool returns, on success and on failure (the failure carries the error code). The trace that an `author`-scoped key exercised a write path ([MCP §14](mcp-server.md#14-audit)) |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -404,7 +411,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `SseEventType` | rest-api | dag-executor, mcp-server |
 | `ResultFormat` | rest-api | mcp-server |
 | `SslMode` | datasources | datasources |
-| `AuthAuditEvent` | auth | observability |
+| `AuthAuditEvent` | auth (+ datasource/mcp event tables in §15) | observability |
 | `ExecutionTrigger` | rest-api | mcp-server, persistence |
 
 ---
@@ -436,3 +443,4 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-08-17 | v1.4 | pipeline composition | §2 `NodeType` gains `PIPELINE` — a node that executes a version-pinned pipeline as a child execution (pipeline-contract §4.9/§8.5; guarded by the new `NodeTypeSpecDriftTest` in pipeline-contract). |
 | 2026-08-31 | v1.6 | 026 post-merge follow-up | §15 registers `auth.password.change_failed` / `auth.password.change_locked` — the self-service change path's failure and lockout events added by the session-only credential fix (22be7b2) after the v1.5 sync. Unregistered, docs-audit check C flagged them at auth.md:487; they are audit events, not pipeline-contract error codes. |
 | 2026-08-30 | v1.5 | local password auth | §15 `AuthAuditEvent` gains the local-account events: `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` re-described as shared OIDC/local. The "no password or lockout events" note is replaced — they exist for the optional local accounts only (auth.md §5A). |
+| 2026-09-02 | v1.7 | MCP audit (052) | §15 gains the **MCP audit events** table: `mcp.tool.called` (registered here for the first time — the dispatcher has emitted it since the original mcp-server build) and `mcp.tool.write` (new, 052/R4: one event per mutating tool call, node runs included). Authority for both: MCP §14; same `audit_log` sink as the auth/datasource events. Cross-reference row widened to name the §15 sub-tables. |

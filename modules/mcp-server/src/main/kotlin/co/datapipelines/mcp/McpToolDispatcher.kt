@@ -1,6 +1,6 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.AuditLogger
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -26,11 +26,19 @@ import org.slf4j.LoggerFactory
  *    `isError: true`; only protocol faults ([McpError]) travel as JSON-RPC errors (§9.1).
  *
  * Every call is written to the audit log — tool name, caller, target entity, outcome, correlation
- * id (§13 security checklist).
+ * id (§13 security checklist) — as `mcp.tool.called`. On top of that (052, ruling R4): every call
+ * to a tool the catalog declares [mutating][McpToolCatalog.isMutating] writes ONE
+ * `mcp.tool.write` event, node runs included — the trace that an `author`-scoped key altered
+ * stored definitions or customer data, which a node run otherwise leaves nowhere (§6.2.20's
+ * no-history ratification covered executions, not traces). The write event is emitted HERE, at
+ * the single dispatch choke point, after the tool returns on success and failure alike — a tool
+ * that forgets is the failure mode, and a choke point cannot forget. A refused call (the §7.6
+ * gate) never invoked the tool, so it writes the refusal into `mcp.tool.called` and no write
+ * event: nothing happened to trace.
  */
 class McpToolDispatcher(
     tools: List<McpTool>,
-    private val auditLogger: AuditLogger,
+    private val auditSink: AuditEventSink,
 ) {
     private val log = LoggerFactory.getLogger(McpToolDispatcher::class.java)
     private val byName: Map<String, McpTool> = tools.associateBy { it.name }
@@ -55,12 +63,13 @@ class McpToolDispatcher(
         ctx: McpToolContext,
     ): McpSchema.CallToolResult {
         val tool = byName[request.name()] ?: throw McpArguments.invalidParams("Unknown tool '${request.name()}'.")
+        val startedAt = System.nanoTime()
         val refusal = scopeRefusal(tool.name, ctx)
         if (refusal != null) {
-            audit(tool.name, request, ctx, outcome = "scope_refused", code = refusal.code)
+            audit(tool.name, request, ctx, outcome = "scope_refused", code = refusal.code, startedAt = startedAt, invoked = false)
             return McpToolResults.error(refusal, ctx.correlationId)
         }
-        return runTool(tool, request, ctx)
+        return runTool(tool, request, ctx, startedAt)
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -68,21 +77,22 @@ class McpToolDispatcher(
         tool: McpTool,
         request: McpSchema.CallToolRequest,
         ctx: McpToolContext,
+        startedAt: Long,
     ): McpSchema.CallToolResult =
         try {
             val payload = tool.call(McpArguments(request.arguments() ?: emptyMap()), ctx)
-            audit(tool.name, request, ctx, outcome = "success")
+            audit(tool.name, request, ctx, outcome = "success", startedAt = startedAt, invoked = true)
             McpToolResults.success(payload, ctx.correlationId)
         } catch (e: DatapipelinesException) {
             // A catalogued domain failure is CONTENT, not a protocol error (§9.2).
-            audit(tool.name, request, ctx, outcome = "error", code = e.code)
+            audit(tool.name, request, ctx, outcome = "error", code = e.code, startedAt = startedAt, invoked = true)
             log.info("MCP tool {} failed code={} correlation_id={}", tool.name, e.code, ctx.correlationId)
             McpToolResults.error(McpErrorPayload.of(e), ctx.correlationId)
         } catch (e: McpError) {
-            audit(tool.name, request, ctx, outcome = "invalid_params")
+            audit(tool.name, request, ctx, outcome = "invalid_params", startedAt = startedAt, invoked = true)
             throw e
         } catch (e: Exception) {
-            throw internalError(tool.name, request, ctx, e)
+            throw internalError(tool.name, request, ctx, e, startedAt)
         }
 
     /**
@@ -106,8 +116,9 @@ class McpToolDispatcher(
         request: McpSchema.CallToolRequest,
         ctx: McpToolContext,
         cause: Exception,
+        startedAt: Long,
     ): McpError {
-        audit(toolName, request, ctx, outcome = "internal_error")
+        audit(toolName, request, ctx, outcome = "internal_error", startedAt = startedAt, invoked = true)
         log.error("MCP tool {} failed with an uncatalogued fault correlation_id={}", toolName, ctx.correlationId, cause)
         return McpError
             .builder(McpArguments.INTERNAL_ERROR)
@@ -151,26 +162,58 @@ class McpToolDispatcher(
         )
     }
 
+    /**
+     * The single audit choke point. Every call site flows through here, so no outcome can
+     * dodge its row — and the `mcp.tool.write` emission rides the same choke point, which
+     * is what makes "a tool that forgets" impossible (052/A).
+     *
+     * Emission is AFTER the tool returned, on success and failure alike, and a sink
+     * failure is logged and swallowed: the customer's call must not change outcome because
+     * bookkeeping did. The [AuditEventSink]'s own boundary already swallows DB failures;
+     * this catch is the belt for anything else the sink might throw.
+     *
+     * [invoked] distinguishes "the tool ran and this is its verdict" from the §7.6
+     * refusal, which never touched the tool: the write event records exercised write
+     * paths, and a refusal exercised none.
+     */
+    @Suppress("TooGenericExceptionCaught")
     private fun audit(
         toolName: String,
         request: McpSchema.CallToolRequest,
         ctx: McpToolContext,
         outcome: String,
         code: String? = null,
+        startedAt: Long,
+        invoked: Boolean,
     ) {
-        auditLogger.log(
-            event = AUDIT_EVENT,
-            userId = ctx.principal.userId,
-            keyId = ctx.principal.keyId,
-            details =
-                buildMap {
-                    put("tool", toolName)
-                    put("outcome", outcome)
-                    put("correlation_id", ctx.correlationId.toString())
-                    targetOf(request)?.let { put("target", it) }
-                    code?.let { put("code", it) }
-                },
-        )
+        val details =
+            buildMap {
+                put("tool", toolName)
+                put("outcome", outcome)
+                put("correlation_id", ctx.correlationId.toString())
+                targetOf(request)?.let { put("target", it) }
+                identifierExtras(request)
+                code?.let { put("code", it) }
+                put("elapsed_ms", (System.nanoTime() - startedAt) / NANOS_PER_MILLI)
+            }
+        try {
+            auditSink.log(
+                event = AUDIT_EVENT,
+                userId = ctx.principal.userId,
+                keyId = ctx.principal.keyId,
+                details = details,
+            )
+            if (invoked && McpToolCatalog.isMutating(toolName)) {
+                auditSink.log(
+                    event = WRITE_EVENT,
+                    userId = ctx.principal.userId,
+                    keyId = ctx.principal.keyId,
+                    details = details,
+                )
+            }
+        } catch (e: Exception) {
+            log.warn("MCP audit emission failed tool={} correlation_id={}", toolName, ctx.correlationId, e)
+        }
     }
 
     /**
@@ -183,8 +226,21 @@ class McpToolDispatcher(
         return TARGET_KEYS.firstNotNullOfOrNull { key -> (args[key] as? String)?.takeIf { it.isNotBlank() } }
     }
 
+    /**
+     * The rest of the ruling's target discipline (052): the version a version-aware tool
+     * was pointed at, and the node id for node runs — identifiers, never values. The
+     * `parameters` map is deliberately NOT read: parameter values are customer data.
+     */
+    private fun MutableMap<String, Any?>.identifierExtras(request: McpSchema.CallToolRequest) {
+        val args = request.arguments() ?: return
+        (args["node_id"] as? String)?.takeIf { it.isNotBlank() }?.let { put("node_id", it) }
+        (args["version"] as? Number)?.toInt()?.let { put("version", it) }
+    }
+
     private companion object {
         const val AUDIT_EVENT = "mcp.tool.called"
+        const val WRITE_EVENT = "mcp.tool.write"
+        const val NANOS_PER_MILLI = 1_000_000L
         val TARGET_KEYS = listOf("execution_id", "pipeline_id", "id", "name")
     }
 }

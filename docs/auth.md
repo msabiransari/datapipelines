@@ -852,6 +852,8 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request (§5.6) |
 
+The same `audit_log` table also carries the **datasource decryption events** ([Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)) and the **MCP tool events** — `mcp.tool.called` for every tool call, `mcp.tool.write` for every mutating one — emitted by the MCP dispatcher through the same sink ([MCP §14](mcp-server.md#14-audit); both registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)).
+
 ### 10.2 Log shape
 
 ```json
@@ -1068,3 +1070,4 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-09 | v2.4 | P3 build (Gate C security + API reviews) | **CSRF re-ruled (supersedes v2.3):** exemption follows the CREDENTIAL, not the path — only API-key-carrying requests skip CSRF; cookie-authenticated state-changing requests require the `dp_csrf` double-submit everywhere, `SameSite=Strict` demoted to defense-in-depth (same-site subdomain gap, flagged independently by two Gate C seats); §8.1 sketch updated. **§5.2:** OIDC redirect URI built absolutely from new `datapipelines.auth.base-url` (Configuration §3.4), never request-derived (`Host`/`X-Forwarded-Host` attack); startup fails when unset with providers configured. **§4.2:** emails lowercase-normalized at every lookup/store; login rejected when `email_verified: false` (unverified-account takeover via email-keyed linking). **§4.4:** bootstrap admin grant fires only at row creation — never re-grants after a deliberate revoke. |
 | 2026-08-14 | v2.6 | v1.1 introspection build | §7.6 REST table: new "Introspect a datasource schema" row (`GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{t}/columns`) at `author` — the §8.1 connection-test precedent (live connection against a production datasource; consumer is authoring). Sourced from datasources §7A. MCP rows follow with the mcp-server amendment. |
 | 2026-08-15 | v2.7 | surface restructure (part 1) | §7.6: `datasources_get_schema` row removed from the MCP table and `GET /api/v1/datasources/{name}/schema` from the introspection REST row (the bundled whole-schema snapshot is gone — table listings stay lightweight); MCP count 18 → 17 pending the schemas listing. |
+| 2026-09-02 | v2.8 | MCP audit (052) | §10.1: cross-link added — the shared `audit_log` also carries the MCP tool events (`mcp.tool.called` per call, `mcp.tool.write` per mutating call, node runs included), authored by MCP §14 and registered in Enums §15. No auth events changed. |

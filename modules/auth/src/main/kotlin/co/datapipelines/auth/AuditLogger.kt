@@ -13,20 +13,24 @@ import java.util.UUID
  * Failure to write an audit row must not break the request path, but it must never
  * pass silently: it is logged as a structured WARN at a defined boundary (rules/02),
  * not swallowed.
+ *
+ * Implements [AuditEventSink] (052) so cross-module emitters — the MCP dispatcher's
+ * `mcp.tool.*` events — depend on the sink contract, not on this JDBC writer; the
+ * default argument values live on the interface now and are inherited here unchanged.
  */
 class AuditLogger(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper,
-) {
+) : AuditEventSink {
     private val log = org.slf4j.LoggerFactory.getLogger(AuditLogger::class.java)
 
-    fun log(
+    override fun log(
         event: String,
-        userId: UUID? = null,
-        keyId: String? = null,
-        sourceIp: String? = null,
-        userAgent: String? = null,
-        details: Map<String, Any?> = emptyMap(),
+        userId: UUID?,
+        keyId: String?,
+        sourceIp: String?,
+        userAgent: String?,
+        details: Map<String, Any?>,
     ) {
         try {
             jdbc.update(

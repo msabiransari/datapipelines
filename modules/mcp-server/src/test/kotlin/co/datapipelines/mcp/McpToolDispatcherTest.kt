@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -8,6 +9,8 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -20,13 +23,49 @@ import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.util.UUID
 
 /**
  * The dispatcher is where the §7.6 authorization gate, the §6.3 envelope and the §9.2 error
  * mapping live, so this is where they are proven.
+ *
+ * 052 proves the audit contract here too: `mcp.tool.called` for every call, plus exactly one
+ * `mcp.tool.write` per invoked MUTATING call. The assertions read a REAL in-memory sink
+ * ([RecordingAuditSink]) — a strict mock would make a MISSING emission unobservable
+ * (MISTAKES.md), so the recorded rows are asserted, never the interaction.
  */
 class McpToolDispatcherTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
+
+    /**
+     * A real in-memory [AuditEventSink]: appends what production would hand the sink, in
+     * order. `writes()`/`calls()` are the greps an operator would run on `audit_log`.
+     */
+    private class RecordingAuditSink : AuditEventSink {
+        data class Row(
+            val event: String,
+            val userId: UUID?,
+            val keyId: String?,
+            val details: Map<String, Any?>,
+        )
+
+        val rows = mutableListOf<Row>()
+
+        override fun log(
+            event: String,
+            userId: UUID?,
+            keyId: String?,
+            sourceIp: String?,
+            userAgent: String?,
+            details: Map<String, Any?>,
+        ) {
+            rows += Row(event, userId, keyId, details)
+        }
+
+        fun writes() = rows.filter { it.event == "mcp.tool.write" }
+
+        fun calls() = rows.filter { it.event == "mcp.tool.called" }
+    }
 
     /** A tool that records whether it ran — the only way to prove a refusal did not execute. */
     private class SpyTool(
@@ -200,6 +239,150 @@ class McpToolDispatcherTest {
             { details.captured["outcome"] shouldBe "internal_error" },
             { details.captured["tool"] shouldBe "pipelines_list" },
             { details.captured["correlation_id"] shouldBe McpFixtures.CORRELATION_ID.toString() },
+        )
+    }
+
+    /**
+     * 052 gate 3, case 1 — a mutating tool call produces exactly ONE `mcp.tool.write` event
+     * carrying the documented fields: actor (key id and owner), tool, target, outcome,
+     * elapsed, correlation id. Falsify by removing the dispatcher's write emission: this
+     * goes red because the recording sink is empty, not because a mock was not called.
+     */
+    @Test
+    fun `a mutating tool call writes exactly one mcp tool write event with the documented fields`() {
+        val sink = RecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_create")), sink)
+
+        dispatcher.call(
+            McpFixtures.request("pipelines_create", mapOf("name" to "nightly_etl")),
+            McpFixtures.ctx(Scope.AUTHOR),
+        )
+
+        sink.writes() shouldHaveSize 1
+        val row = sink.writes().single()
+        assertAll(
+            { row.userId shouldBe McpFixtures.USER },
+            { row.keyId shouldBe "dpk_ABCDEFGHIJKL" },
+            { row.details["tool"] shouldBe "pipelines_create" },
+            { row.details["outcome"] shouldBe "success" },
+            { row.details["target"] shouldBe "nightly_etl" },
+            { row.details["correlation_id"] shouldBe McpFixtures.CORRELATION_ID.toString() },
+            { (row.details["elapsed_ms"] as Long) shouldBeGreaterThanOrEqual 0L },
+            // The per-call event still exists — the write event is additive, not a replacement.
+            { sink.calls() shouldHaveSize 1 },
+        )
+    }
+
+    /** 052 gate 3, case 2 — a read tool produces no write event. */
+    @Test
+    fun `a read tool call writes no mcp tool write event`() {
+        val sink = RecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_list")), sink)
+
+        dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+
+        assertAll(
+            { sink.writes() shouldHaveSize 0 },
+            { sink.calls() shouldHaveSize 1 },
+        )
+    }
+
+    /** 052 gate 3, case 3 — a failing mutating call writes one event WITH the error code, and the tool's error is unchanged. */
+    @Test
+    fun `a failing mutating call writes one write event with the error code and the tool's error is unchanged`() {
+        val sink = RecordingAuditSink()
+        val tool =
+            SpyTool("pipelines_execute") {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Execution.NOT_FOUND,
+                    message = "Pipeline gone.",
+                )
+            }
+        val dispatcher = McpToolDispatcher(listOf(tool), sink)
+
+        val result =
+            dispatcher.call(
+                McpFixtures.request("pipelines_execute", mapOf("id" to McpFixtures.PIPELINE_ID.toString())),
+                McpFixtures.ctx(Scope.EXECUTE),
+            )
+
+        sink.writes() shouldHaveSize 1
+        val row = sink.writes().single()
+        assertAll(
+            { result.isError() shouldBe true },
+            { McpFixtures.payloadOf(result)["error"]["code"].asText() shouldBe PipelineErrorCodes.Execution.NOT_FOUND },
+            { row.details["outcome"] shouldBe "error" },
+            { row.details["code"] shouldBe PipelineErrorCodes.Execution.NOT_FOUND },
+        )
+    }
+
+    /**
+     * The ruling's target discipline for node runs: pipeline id, the node id, and the version
+     * the call named — identifiers only, never parameters. This is the row that makes a
+     * `pipelines_execute_node` DML run greppable despite §6.2.20's no-execution-row ratification.
+     */
+    @Test
+    fun `a node run's write event carries the node id and the version it was pointed at`() {
+        val sink = RecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_execute_node")), sink)
+
+        dispatcher.call(
+            McpFixtures.request(
+                "pipelines_execute_node",
+                mapOf(
+                    "pipeline_id" to McpFixtures.PIPELINE_ID.toString(),
+                    "node_id" to "fetch",
+                    "version" to 3,
+                ),
+            ),
+            McpFixtures.ctx(Scope.AUTHOR),
+        )
+
+        val row = sink.writes().single()
+        assertAll(
+            { row.details["target"] shouldBe McpFixtures.PIPELINE_ID.toString() },
+            { row.details["node_id"] shouldBe "fetch" },
+            { row.details["version"] shouldBe 3 },
+        )
+    }
+
+    /** The §7.6 refusal never invoked the tool, so it exercised no write path — the refusal rides `mcp.tool.called` alone. */
+    @Test
+    fun `a scope-refused mutating call records the refusal but writes no write event`() {
+        val sink = RecordingAuditSink()
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_create")), sink)
+
+        dispatcher.call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(Scope.READ))
+
+        assertAll(
+            { sink.writes() shouldHaveSize 0 },
+            { sink.calls().single().details["outcome"] shouldBe "scope_refused" },
+        )
+    }
+
+    /** 052/A — bookkeeping must never change the customer's call: a throwing sink is swallowed, the result stands. */
+    @Test
+    fun `an audit sink failure is swallowed and the tool result is unchanged`() {
+        val sink =
+            object : AuditEventSink {
+                override fun log(
+                    event: String,
+                    userId: UUID?,
+                    keyId: String?,
+                    sourceIp: String?,
+                    userAgent: String?,
+                    details: Map<String, Any?>,
+                ) {
+                    error("audit_log unavailable")
+                }
+            }
+        val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_list") { mapOf("ok" to true) }), sink)
+
+        val result = dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+
+        assertAll(
+            { result.isError() shouldBe false },
+            { McpFixtures.payloadOf(result)["ok"].asText() shouldBe "true" },
         )
     }
 
