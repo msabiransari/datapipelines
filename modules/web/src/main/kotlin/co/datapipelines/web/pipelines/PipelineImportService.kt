@@ -140,12 +140,7 @@ class PipelineImportService(
                         actorId,
                     )
                 } catch (e: DuplicateKeyException) {
-                    throw ApiException(
-                        PipelineErrorCodes.Import.VERSION_CONFLICT,
-                        "Pipeline id '$requestedId' collides with a deleted pipeline's retained id.",
-                        mapOf("pipeline_id" to requestedId.toString()),
-                        e,
-                    )
+                    throw idAlreadyTaken(requestedId, e)
                 }
             }
         return Imported(record = record, canonical = canonical, created = existing == null)
@@ -204,12 +199,7 @@ class PipelineImportService(
                     )
                 return Imported(record, canonical, created = true)
             } catch (e: DuplicateKeyException) {
-                throw ApiException(
-                    PipelineErrorCodes.Import.VERSION_CONFLICT,
-                    "Pipeline id '$requestedId' collides with a deleted pipeline's retained id.",
-                    mapOf("pipeline_id" to requestedId.toString()),
-                    e,
-                )
+                throw idAlreadyTaken(requestedId, e)
             }
         }
 
@@ -270,6 +260,34 @@ class PipelineImportService(
             // The row appeared between the read and the insert — classify by what is there now.
             throw versionConflict(pipelines.findVersionDetail(workspaceId, pipelineId, preserved.version), preserved, e)
         }
+
+    /**
+     * The catalogued answer to "that id is taken" (021/F3).
+     *
+     * `pipelines.id` is a **global** primary key while every read on this path is
+     * workspace-scoped (`findById(workspaceId, id)`), so the insert can collide on a row this
+     * workspace cannot see: another workspace's pipeline, or a deleted pipeline whose id is
+     * retained. The two are indistinguishable from here and the remedy is the same, so the
+     * message names both rather than asserting the one this seam cannot know. A NAME collision
+     * never arrives here — `PipelineRepository.create` matches `uq_pipelines_workspace_name`
+     * first and raises `pipeline.validation.duplicate_name`, rethrowing anything else — so this
+     * really is about the id. It matters most
+     * on the D9 seeding path: an examples file carrying pipeline ids imports into the FIRST
+     * personal workspace and then fails every subsequent user's first login — which is why the
+     * shipped `examples.json` carries none.
+     */
+    private fun idAlreadyTaken(
+        requestedId: UUID?,
+        cause: DuplicateKeyException,
+    ): ApiException =
+        ApiException(
+            PipelineErrorCodes.Import.VERSION_CONFLICT,
+            "Pipeline id '$requestedId' is already taken. Pipeline ids are globally unique, so it belongs either " +
+                "to another workspace or to a deleted pipeline whose id is retained; import the payload without " +
+                "its 'id' to create this workspace's own copy.",
+            mapOf("pipeline_id" to requestedId.toString()),
+            cause,
+        )
 
     private fun versionConflict(
         target: co.datapipelines.pipeline.PipelineVersionDetail?,
