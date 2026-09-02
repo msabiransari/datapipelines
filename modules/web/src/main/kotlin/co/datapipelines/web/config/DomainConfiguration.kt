@@ -163,12 +163,22 @@ class DomainConfiguration {
      * ## Workspace-scoped since the surfaces slice (design §5.3)
      *
      * Save-time validation resolves the datasource through the CALLER'S ACTIVE WORKSPACE:
-     * `getVisible(name, activeWorkspace)` — a pipeline in workspace A cannot silently
+     * `getVisibleLive(name, activeWorkspace)` — a pipeline in workspace A cannot silently
      * reference a datasource bound to workspace B. The D9 example seeder runs at login on a
      * thread whose principal is not yet [AuthenticatedPrincipal]; for that principal-less
      * path the resolver falls back to GLOBAL-ONLY visibility, which is exactly the seeder's
      * world (D9: seeded example datasources are global). A future bound-datasource example
      * would fail loudly at seeding rather than pass validation invisibly.
+     *
+     * ## Live reads, not cached (044 F4)
+     *
+     * Both resolution paths read the LIVE row, past the §6.3 metadata cache — the same row
+     * the executor's live backstop answers from. A row-level flag flip (manual SQL or a
+     * restore, the D10 channel) never crosses the registry save boundary that invalidates the
+     * cache, so a cached read here opened a window where saves validated against a stale flag
+     * in BOTH directions — the un-flip direction refused VALID saves with a wrong 400 that no
+     * layer covered. Live reads cost one indexed PK read per referenced datasource per save;
+     * the REST GET hot path keeps the cache.
      */
     @Bean
     fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
@@ -177,8 +187,8 @@ class DomainConfiguration {
                 runCatching { currentPrincipal() }.getOrNull()
             val facts =
                 when (val workspaceId = principal?.workspace?.id) {
-                    null -> registry.get(name)?.takeIf { it.workspaceId == null }
-                    else -> registry.getVisible(name, workspaceId)
+                    null -> registry.getLive(name)?.takeIf { it.workspaceId == null }
+                    else -> registry.getVisibleLive(name, workspaceId)
                 }
             facts?.let { DatasourceFacts(it.dialect, it.isReadonly) }
         }
