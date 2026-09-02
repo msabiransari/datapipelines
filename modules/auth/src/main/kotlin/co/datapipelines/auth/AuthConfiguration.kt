@@ -110,14 +110,29 @@ class AuthConfiguration {
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)
 
+    /**
+     * The single client-address resolver (R8/T46): constructed here so an invalid
+     * `datapipelines.auth.trusted-proxies` entry — anything that does not parse as a CIDR —
+     * refuses STARTUP at bean construction, whatever binding form carried it. Empty default:
+     * the resolver then returns `remoteAddr` and `X-Forwarded-For` is ignored everywhere.
+     */
+    @Bean
+    fun clientAddressResolver(authProperties: AuthProperties): ClientAddressResolver = ClientAddressResolver(authProperties.trustedProxies)
+
     @Bean
     fun authEntryPoint(authErrorWriter: AuthErrorWriter): AuthEntryPoint = AuthEntryPoint(authErrorWriter)
 
     @Bean
-    fun authAccessDeniedHandler(authErrorWriter: AuthErrorWriter): AuthAccessDeniedHandler = AuthAccessDeniedHandler(authErrorWriter)
+    fun authAccessDeniedHandler(
+        authErrorWriter: AuthErrorWriter,
+        clientAddressResolver: ClientAddressResolver,
+    ): AuthAccessDeniedHandler = AuthAccessDeniedHandler(authErrorWriter, clientAddressResolver)
 
     @Bean
-    fun auditLogoutHandler(auditLogger: AuditLogger): AuditLogoutHandler = AuditLogoutHandler(auditLogger)
+    fun auditLogoutHandler(
+        auditLogger: AuditLogger,
+        clientAddressResolver: ClientAddressResolver,
+    ): AuditLogoutHandler = AuditLogoutHandler(auditLogger, clientAddressResolver)
 
     @Bean
     fun oidcSuccessHandler(
@@ -126,7 +141,9 @@ class AuthConfiguration {
         auditLogger: AuditLogger,
         authProperties: AuthProperties,
         workspaceService: WorkspaceService,
-    ): OidcSuccessHandler = OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService)
+        clientAddressResolver: ClientAddressResolver,
+    ): OidcSuccessHandler =
+        OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService, clientAddressResolver)
 
     @Bean
     fun scopeInterceptor(
@@ -168,12 +185,19 @@ class AuthConfiguration {
         authErrorWriter: AuthErrorWriter,
         workspaceService: WorkspaceService,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
+        clientAddressResolver: ClientAddressResolver,
     ): AuthFilters =
         AuthFilters(
-            apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger),
-            jwt = JwtAuthenticationFilter(jwtService, userService),
-            loginRateLimit = LoginRateLimitFilter(authProperties, authErrorWriter),
+            apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
+            jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver),
+            loginRateLimit = LoginRateLimitFilter(clientAddressResolver, authProperties, authErrorWriter),
             workspaceResolution =
-                WorkspaceResolutionFilter(workspaceService, lastUsedWorkspaceStore.getIfAvailable(), authErrorWriter, auditLogger),
+                WorkspaceResolutionFilter(
+                    workspaceService,
+                    lastUsedWorkspaceStore.getIfAvailable(),
+                    authErrorWriter,
+                    auditLogger,
+                    clientAddressResolver,
+                ),
         )
 }

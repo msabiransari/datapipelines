@@ -11,6 +11,11 @@ import org.springframework.mock.web.MockHttpServletResponse
  * AUTH-SEC-5 / AU-API-8: per-IP login rate limit over the `/oauth2` and `/login`
  * prefixes, honoring `datapipelines.auth.rate-limit.login-per-minute`, answering
  * `429 rate_limit.exceeded` in the [Pipeline Contract §13.11] envelope.
+ *
+ * The key is the CLIENT address from [ClientAddressResolver] (R8/T46): behind a
+ * trusted proxy each forwarded client gets its OWN bucket. With the trusted list
+ * empty (the shipped default) the header is ignored and the peer is the client —
+ * the two `default` tests pin exactly that.
  */
 class LoginRateLimitFilterTest {
     private val mapper = ObjectMapper()
@@ -18,6 +23,7 @@ class LoginRateLimitFilterTest {
     private val limit = 3
     private val filter =
         LoginRateLimitFilter(
+            ClientAddressResolver(emptyList()),
             AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = limit)),
             AuthErrorWriter(mapper),
         ) { nowMillis }
@@ -25,9 +31,11 @@ class LoginRateLimitFilterTest {
     private fun call(
         path: String,
         ip: String = "10.0.0.1",
+        xff: String? = null,
     ): MockHttpServletResponse {
         val request = MockHttpServletRequest("GET", path)
         request.remoteAddr = ip
+        xff?.let { request.addHeader("X-Forwarded-For", it) }
         val response = MockHttpServletResponse()
         filter.doFilter(request, response, MockFilterChain())
         return response
@@ -66,6 +74,63 @@ class LoginRateLimitFilterTest {
         call("/oauth2/authorization/keycloak", ip = "10.0.0.2").status shouldBe 200
     }
 
+    /**
+     * R8/T46, the finding itself: behind the documented load balancer every peer is the
+     * LB, so keying on `remoteAddr` made the per-IP budget ONE deployment-wide bucket —
+     * any client could 429 the entire login surface. With the LB's range trusted, two
+     * clients arriving through the same peer must get TWO buckets. Falsification target:
+     * re-key the filter on the raw peer and this test goes red.
+     */
+    @Test
+    fun `two clients behind one trusted proxy get two buckets`() {
+        val behindLb =
+            LoginRateLimitFilter(
+                ClientAddressResolver(listOf("10.0.0.0/8")),
+                AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = limit)),
+                AuthErrorWriter(mapper),
+            ) { nowMillis }
+        val path = "/oauth2/authorization/keycloak"
+
+        fun throughProxy(client: String): MockHttpServletResponse {
+            val response = MockHttpServletResponse()
+            behindLb.doFilter(request(path, "10.0.0.5", "$client, 10.0.0.5"), response, MockFilterChain())
+            return response
+        }
+
+        // Client A exhausts ITS bucket through the shared peer...
+        repeat(limit) { throughProxy("198.51.100.7").status shouldBe 200 }
+        throughProxy("198.51.100.7").status shouldBe 429
+
+        // ...and client B, arriving through the SAME peer, still has its own budget.
+        repeat(limit) { throughProxy("203.0.113.9").status shouldBe 200 }
+        throughProxy("203.0.113.9").status shouldBe 429
+    }
+
+    /**
+     * The shipped default: the trusted list is EMPTY, so `X-Forwarded-For` is ignored
+     * entirely — two requests through one peer with different claimed clients share the
+     * peer's single bucket. A bare deployment behaves exactly as before the key existed.
+     */
+    @Test
+    fun `with no trusted proxies the header is ignored and the peer is the bucket`() {
+        val path = "/oauth2/authorization/keycloak"
+
+        repeat(limit) { call(path, ip = "10.0.0.5", xff = "198.51.100.7, 10.0.0.5") }
+
+        // A different claimed client through the SAME peer: same bucket, already full.
+        call(path, ip = "10.0.0.5", xff = "203.0.113.9, 10.0.0.5").status shouldBe 429
+    }
+
+    private fun request(
+        path: String,
+        remote: String,
+        xff: String,
+    ): MockHttpServletRequest =
+        MockHttpServletRequest("GET", path).apply {
+            remoteAddr = remote
+            addHeader("X-Forwarded-For", xff)
+        }
+
     @Test
     fun `non-login paths are not metered at all`() {
         repeat(limit * 5) { call("/api/v1/pipelines").status shouldBe 200 }
@@ -93,6 +158,7 @@ class LoginRateLimitFilterTest {
     fun `a zero or negative configured limit disables the filter`() {
         val disabled =
             LoginRateLimitFilter(
+                ClientAddressResolver(emptyList()),
                 AuthProperties(rateLimit = AuthProperties.RateLimit(loginPerMinute = 0)),
                 AuthErrorWriter(mapper),
             ) { nowMillis }

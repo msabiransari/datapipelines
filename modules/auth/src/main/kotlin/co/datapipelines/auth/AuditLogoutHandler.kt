@@ -16,6 +16,7 @@ import org.springframework.security.web.authentication.logout.LogoutHandler
  */
 class AuditLogoutHandler(
     private val auditLogger: AuditLogger,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : LogoutHandler {
     override fun logout(
         request: HttpServletRequest,
@@ -27,7 +28,7 @@ class AuditLogoutHandler(
             event = "auth.logout",
             userId = principal?.userId,
             keyId = principal?.keyId,
-            sourceIp = request.remoteAddr,
+            sourceIp = clientAddressResolver.clientAddressOf(request),
             userAgent = request.getHeader("User-Agent"),
         )
     }

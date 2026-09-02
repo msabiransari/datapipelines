@@ -37,11 +37,17 @@ if [[ "${1:-}" == "--self-test" ]]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   cp -R docs DEVELOPMENT.md scripts "$tmp/"
-  # Introduce one defect per check class:
+  # Introduce one defect per check class. The heading first CLOSES staging.md's Change
+  # Log section (the doc's last section): checks C and D exempt Change Log lines, so
+  # defects appended bare at EOF were placebo — the self-test passed on A and B alone
+  # while a dead C or D check would have gone unnoticed (found 2026-09-02, 051 T28:
+  # the newly-added workspace defect didn't fail until this heading existed).
   {
+    echo '## Self-test probe section (never shipped)'
     echo '[bad link](pipeline-contract.md#no-such-section)'
     echo 'Uses `datapipelines.no.such-key` here.'
     echo 'Raises `pipeline.validation.nonexistent_code` here.'
+    echo 'Raises `workspace.nonexistent_code` here.'
     echo 'Legacy `terminal_node_id` mention.'
   } >> "$tmp/docs/staging.md"
   if (cd "$tmp" && bash scripts/docs-audit.sh >/dev/null 2>&1); then
@@ -150,8 +156,11 @@ for p, t in texts.items():
 # `mcp` joined the alternation in 052 so the mcp.tool.* audit events are checked
 # against Enums §15 exactly like auth.*/datasource.* events — before that the
 # prefix was invisible to check C and a doc could name an unregistered mcp.*
-# event freely.
-CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|result|rate_limit|"
+# event freely. `workspace` joined in 051 (T28) for the same reason: the §13.12
+# CRUD codes (workspace.in_use, workspace.creation_forbidden, ...) are a real
+# catalog domain, and without the prefix a misspelt workspace.* code in any doc
+# passed the mechanical audit — only the drift tests would have caught it.
+CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
            r"idempotency|type_mapping|mcp)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9

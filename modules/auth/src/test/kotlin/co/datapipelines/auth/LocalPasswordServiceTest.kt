@@ -249,10 +249,23 @@ class LocalPasswordServiceTest {
     fun `unlock clears the lockout without touching the credential`() {
         val user = localUser("a@company.com", OLD_PASSWORD)
         users.recordLocalLoginFailure(user.id, 1, 15)
+        // Prime the 60s snapshot cache with the LOCKED row (the admin table's indicator
+        // reads `users.locked_until` through it) — the unlock must evict, not wait out.
+        userService
+            .snapshot(user.id)
+            .shouldNotBeNull()
+            .lockedUntil
+            .shouldNotBeNull()
 
         service.unlock(user.id, ACTOR).shouldBeTrue()
         service.unlock(user.id, ACTOR).shouldBeFalse()
 
+        // No TTL wait: the mutation evicted the entry on this instance (T48a).
+        userService
+            .snapshot(user.id)
+            .shouldNotBeNull()
+            .lockedUntil
+            .shouldBeNull()
         users
             .findLocalCredential("a@company.com")
             .shouldNotBeNull()

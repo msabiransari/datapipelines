@@ -33,6 +33,7 @@ class OidcSuccessHandler(
     private val auditLogger: AuditLogger,
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : SimpleUrlAuthenticationSuccessHandler() {
     override fun onAuthenticationSuccess(
         request: HttpServletRequest,
@@ -59,7 +60,11 @@ class OidcSuccessHandler(
         val providerSubject = claims["sub"] as String
 
         if (!authProperties.isDomainAllowed(email)) {
-            auditLogger.log("auth.login.domain_not_allowed", sourceIp = request.remoteAddr, details = mapOf("email" to email))
+            auditLogger.log(
+                "auth.login.domain_not_allowed",
+                sourceIp = clientAddressResolver.clientAddressOf(request),
+                details = mapOf("email" to email),
+            )
             redirectStrategy.sendRedirect(request, response, "/login?error=domain_not_allowed")
             return
         }
@@ -74,7 +79,7 @@ class OidcSuccessHandler(
             )
 
         if (!user.isActive) {
-            auditLogger.log("auth.login.user_inactive", userId = user.id, sourceIp = request.remoteAddr)
+            auditLogger.log("auth.login.user_inactive", userId = user.id, sourceIp = clientAddressResolver.clientAddressOf(request))
             redirectStrategy.sendRedirect(request, response, "/login?error=inactive")
             return
         }
@@ -89,7 +94,7 @@ class OidcSuccessHandler(
         auditLogger.log(
             event = "auth.login.success",
             userId = user.id,
-            sourceIp = request.remoteAddr,
+            sourceIp = clientAddressResolver.clientAddressOf(request),
             userAgent = request.getHeader("User-Agent"),
             details =
                 mapOf(
@@ -124,7 +129,7 @@ class OidcSuccessHandler(
     ) {
         auditLogger.log(
             event = "auth.login.oidc_error",
-            sourceIp = request.remoteAddr,
+            sourceIp = clientAddressResolver.clientAddressOf(request),
             details = mapOf("reason" to reason, "provider" to registrationId, "email" to email),
         )
         redirectStrategy.sendRedirect(request, response, "/login?error=oidc_error")

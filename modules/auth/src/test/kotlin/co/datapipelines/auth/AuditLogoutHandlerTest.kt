@@ -15,7 +15,7 @@ import java.util.UUID
  */
 class AuditLogoutHandlerTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
-    private val handler = AuditLogoutHandler(auditLogger)
+    private val handler = AuditLogoutHandler(auditLogger, ClientAddressResolver(emptyList()))
 
     private val userId = UUID.randomUUID()
 

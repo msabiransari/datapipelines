@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.ClientAddressResolver
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LocalAuthService
 import co.datapipelines.auth.UserService
@@ -37,6 +38,7 @@ class LocalLoginController(
     private val auditLogger: AuditLogger,
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
+    private val clientAddressResolver: ClientAddressResolver,
 ) {
     @PostMapping("/login")
     fun login(
@@ -54,7 +56,7 @@ class LocalLoginController(
                 localAuthService.authenticate(
                     email = email,
                     password = password,
-                    sourceIp = request.remoteAddr,
+                    sourceIp = clientAddressResolver.clientAddressOf(request),
                     userAgent = request.getHeader("User-Agent"),
                 )
         ) {
@@ -65,7 +67,7 @@ class LocalLoginController(
                 auditLogger.log(
                     event = "auth.login.success",
                     userId = result.user.id,
-                    sourceIp = request.remoteAddr,
+                    sourceIp = clientAddressResolver.clientAddressOf(request),
                     userAgent = request.getHeader("User-Agent"),
                     details =
                         mapOf(

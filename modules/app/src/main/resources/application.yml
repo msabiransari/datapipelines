@@ -136,6 +136,12 @@ datapipelines:
       default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
     rate-limit:
       login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
+    # §3.4 / deployment.md §6.2 — CIDRs of proxies whose X-Forwarded-For names the real
+    # client (the login limiter and every audit source_ip key on it). EMPTY DEFAULT:
+    # the header is ignored entirely and the direct peer is the client, exactly as
+    # before the key existed. Each entry must parse as a CIDR (a bare IP is a host
+    # CIDR) or startup is refused (ClientAddressResolver construction).
+    trusted-proxies: ${DATAPIPELINES_AUTH_TRUSTED_PROXIES:}
     # §3.4 — optional local password accounts (auth.md §5A), disabled by default.
     # The seed keys configure the FIRST ADMIN's initial credential ONLY (the
     # bootstrap-admin-email account) and force a first-login change; the hash form

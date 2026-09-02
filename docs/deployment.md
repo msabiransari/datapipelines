@@ -208,6 +208,27 @@ The application is **stateless** for all CRUD operations, UI, MCP, and auth. Mul
 
 **No sticky sessions required.** Each request is independent.
 
+**Client addresses behind the load balancer (`datapipelines.auth.trusted-proxies`).**
+Every instance sees the LB's address as `remoteAddr`, so anything keyed or recorded on
+it — the per-IP login rate limiter, every audit `source_ip` — collapses to one
+deployment-wide value: without configuration, the login budget (default 10/min) is a
+single shared bucket any client can exhaust for everyone. Set the key to the CIDRs of
+proxies you control (a bare IP is a host CIDR):
+
+```yaml
+datapipelines:
+  auth:
+    trusted-proxies: 10.0.0.0/8   # the LB's network
+```
+
+The resolution is spoof-safe: when the direct peer is NOT in the list, the
+`X-Forwarded-For` header is ignored entirely — an untrusted peer cannot forge its way
+past the limiter by setting it. When the peer IS trusted, the client is the rightmost
+header entry that is not itself trusted. Each entry must parse as a CIDR or startup is
+refused ([Configuration §3.4/§7](configuration.md#34-auth)) — a typo'd range must not
+silently widen proxy trust. The shipped default is EMPTY: a deployment with no proxy
+in front behaves exactly as before, and the header stays ignored.
+
 #### What's stateless (any instance serves any request)
 
 - REST API (all CRUD, list, detail, execute endpoints)
@@ -241,6 +262,13 @@ The application is **stateless** for all CRUD operations, UI, MCP, and auth. Mul
 ### 6.3 Docker Compose (dev / evaluation)
 
 Reference `docker-compose.yml` provided in `deploy/docker-compose.yml`. Single instance + Postgres + Redis.
+
+The app service passes **every** `DATAPIPELINES_*` variable the app binds, each with
+the same default `application.yml` ships — so a key that works against a host-run app
+(by exporting the variable) reaches the container too, and leaving it unset yields the
+shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
+`application.yml`'s placeholders and fails on a missing pass-through or a diverged
+default.
 
 ### 6.4 Kubernetes (recommended for production)
 
@@ -302,7 +330,7 @@ Since v1.4 the app serves the marketing site and the documentation itself — th
 - **`GET /`** — the marketing site (public). Template `templates/site/index.html`, assets under `static/site/**`, referencing the app's vendored design system at `/vendor/design-system/**` (the retired `website/` directory carried a second vendored copy — the app copy is now the single sync target of `scripts/sync-design-system.sh`). The only dynamic fact (the MCP tool count) is a compile-time constant baked at render time; public routes touch no database.
 - **`GET /dashboard`** — the signed-in dashboard, moved off `/`. There is no auto-redirect: signed-in users hitting `/` get the marketing page.
 - **`GET /docs`** — the packaged spec set (`docs/*.md` minus the contributor/research exclusions, packaged by `processResources` in `modules/web/build.gradle.kts`), session-authenticated. Public doc access remains the GitHub repo.
-- **Public-surface defence is cache headers, not a rate limiter.** `/` is `Cache-Control: public, max-age=300`; `/site/**` is public with a 1-hour TTL plus `Last-Modified` revalidation. The login rate limiter is deliberately NOT applied here: it keys on `remoteAddr`, which behind the LB patterns of §6.2/§6.4 is the load balancer's address — one client could 429 the whole anonymous surface (OPEN-ITEMS T46, awaiting its owner decision on forwarded-header trust).
+- **Public-surface defence is cache headers, not a rate limiter.** `/` is `Cache-Control: public, max-age=300`; `/site/**` is public with a 1-hour TTL plus `Last-Modified` revalidation. The login rate limiter is deliberately NOT applied here (033/D1): the content is constant between deploys, so a shared-cache TTL costs nothing per request — and the T46 remoteAddr-keying concern is closed regardless: the limiter now resolves the CLIENT address through `datapipelines.auth.trusted-proxies` (§6.2), so pointing it at `/` would no longer create an LB-address-wide bucket.
 - **Allowlist.** `/` and `/site/**` join the `permitAll` list in `SecurityConfig` with their reasons inline; nothing else was widened.
 
 **S3/CloudFront cold fallback (kept, drop if it rots unused).** If the app is down but marketing must stay up, the same template renders to static files with facts baked:
@@ -589,11 +617,17 @@ for you.
 ### Point an agent at it — three steps
 
 1. **Log in** at `http://localhost:8080` with the **local account**
-   `demo-admin@demo.local` / `demo-admin` — the demo needs **no OIDC client at
-   all** ([Auth §5A](auth.md#5a-local-password-accounts-optional)); the app asks
+   `demo-admin@demo.local` — the demo needs **no OIDC client at all**
+   ([Auth §5A](auth.md#5a-local-password-accounts-optional)); the app asks
    you to set a new password on first sign-in. (An OIDC provider configured in
-   `deploy/.env` works too.) The first login provisions your personal workspace
-   and seeds the example pipelines into it.
+   `deploy/.env` works too.) The **password depends on what your first
+   `./app.sh --start` scaffolded**: with Google creds already in `.env.local`
+   it is the demo seed `demo-admin`; on a clean checkout `app.sh` scaffolds
+   local accounts FIRST (a no-OIDC machine cannot start without them) with a
+   GENERATED one-time password, which beats the demo file's seed — read it
+   back with `grep DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD deploy/.env`
+   (it was also printed once when `deploy/.env` was written). The first login
+   provisions your personal workspace and seeds the example pipelines into it.
 2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
    is shown exactly once.
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
@@ -605,15 +639,21 @@ for you.
 
 The profile adds a `mysql` service and two one-shot loaders, and points the app
 at the files they place on a read-only volume. It enables **local password
-accounts** with a documented one-time seed (`demo-admin@demo.local` /
-`demo-admin`, forced to change at first login — [Auth §5A.2](auth.md#5a2-seeding-the-first-admin)),
-so the demo needs no OIDC client. It also sets the §7 demo posture:
-`auto-per-user` provisioning (every visitor gets their own workspace) and
-`member-datasources-enabled=false` (an open datasource form on a public server is
-an SSRF and port-scan primitive — demo users get the seeded datasources only).
-Without `--profile demo` none of it exists: both `datapipelines.bootstrap.*` keys
-are paths and empty means off, so the non-demo stack is configured exactly as it
-was.
+accounts** with a one-time seed (`demo-admin@demo.local`, forced to change at
+first login — [Auth §5A.2](auth.md#5a2-seeding-the-first-admin)), so the demo
+needs no OIDC client. The seed value is `demo-admin` **when the demo env file
+supplies it** — i.e. when your first `./app.sh --start` found Google creds and
+did not scaffold a generated password into `deploy/.env`. On a clean checkout
+`app.sh` enables local accounts itself at first scaffold (a machine with no
+OIDC client cannot start otherwise) with a GENERATED bootstrap password, and
+`deploy/.env` takes precedence over the demo file — that generated password,
+not `demo-admin`, is what logs you in (see the three steps above for reading it
+back). It also sets the §7 demo posture: `auto-per-user` provisioning (every
+visitor gets their own workspace) and `member-datasources-enabled=false` (an
+open datasource form on a public server is an SSRF and port-scan primitive —
+demo users get the seeded datasources only). Without `--profile demo` none of
+it exists: both `datapipelines.bootstrap.*` keys are paths and empty means
+off, so the non-demo stack is configured exactly as it was.
 
 The demo datasources are protected in three independent layers: workspace-scoped
 access, the `is_readonly` flag on the datasource row
@@ -714,6 +754,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.7 | 051 auth/config sweep | §6.2 gains `datapipelines.auth.trusted-proxies` (R8/T46): behind the LB the login limiter and every audit `source_ip` must resolve the client through the trusted-proxy list — empty default keeps bare deployments on `remoteAddr`, header ignored. §6.7's homepage note updated (T46 closed; no-limiter decision stands on its own grounds). §6.3 documents the compose env contract with its `scripts/compose-env-audit.sh` guard (T32). Appendix B tells the truth about the demo password (T47/T73): on a clean checkout the scaffolded GENERATED password wins over the `demo-admin` seed — `grep DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD deploy/.env`. app.sh's `up --wait` timeout now reports "still starting" and exits 0 when the app container is running (T75; a cold JVM can outrun the HEALTHCHECK window — 243s in the 2026-09-02 rehearsal) |
 | 2026-09-02 | v1.9 | multi-instance round 2 (050) | **§6.2 checklist gains the per-instance-limits row** (R2/M4/M7): `max-concurrent-executions-per-instance` is per instance and N replicas admit N × it — the multiplication stated once, plainly; the Redis row names the datasource pool-invalidation channel. §6.6 heap paragraph rewritten around the per-instance multiplier (the old text read the key as a "cluster-wide ceiling" — false at N > 1, and the exact trap the rename closed); §5.2 deploy-time keys updated to the renamed key. |
 | 2026-09-02 | v1.8 | demo artifact v2 + guards (049) | **Appendix B gains "Publish confirmation & release rehearsal — the drift guards"**: `scripts/sample-data/check-published.sh` (published `examples.json` vs repo vs manifest, 049 C2) is now a named pre-upload / rehearsal step, and the repo copy's semantic validation is pinned in `build` (`SampleDataExamplesContentTest`, 049 C1) — the two guards T70 (published-v1 drift → first-login 500 ×2 days) proved missing. A v2 artifact is staged from unchanged pins with the licence gate re-stamped 2026-09-02; this row's commit is the held version bump — it moved the demo pin (`SAMPLE_VERSION=v2`) and every current-version citation, and merges only after the owner's upload is confirmed live (`check-published.sh v2` against the bucket). |
 | 2026-09-01 | v1.7 | multi-instance readiness (036) | **The stale-execution sweep now ships (ARCH-AUDIT M2), and the §6.2 crash bullet is true again.** Every replica runs the idempotent sweep on a one-minute cadence (the project's first `@Scheduled`); `RUNNING` rows older than `datapipelines.executions.stale-timeout-minutes` are marked `ABORTED` with `pipeline.execution.instance_lost`. §8.3.2's SIGKILL-mid-flush consequence restored to match. Side effect: `DELETE /executions/{id}` on a crashed instance's stale row stops being a silent no-op — once swept, the row is terminal and the cancel is refused `pipeline.execution.not_running` instead of returning 204. |

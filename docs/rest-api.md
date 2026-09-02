@@ -1017,6 +1017,36 @@ Filters:
 - `status` — `RUNNING | SUCCESS | FAILED | ABORTED`.
 - `started_after` / `started_before` — ISO 8601 timestamp range.
 
+Each page item carries the §10.2 metadata projection minus `result_url` /
+`result_expires_at` (present only on the single-execution read, and only while the
+result is unexpired):
+
+| Field | Type | Description |
+|---|---|---|
+| `execution_id` | uuid | The execution's id |
+| `pipeline_id` | uuid | The pipeline that ran |
+| `pipeline_version` | int | The version of the pipeline that ran |
+| `status` | string | `RUNNING` \| `SUCCESS` \| `FAILED` \| `ABORTED` |
+| `draft_run` | bool | The version that ran was a draft at the time (or still is / was discarded) — an informational history label, never execution behaviour or promotion eligibility ([Versioning §8](versioning.md#8-executing-drafts)) |
+| `parameters` | object | The execution-time parameters the caller sent |
+| `started_at` | timestamp | Start of execution |
+| `completed_at` | timestamp \| null | Terminal timestamp; null while `RUNNING` |
+| `duration_ms` | int \| null | Wall-clock duration; null while `RUNNING` |
+| `node_stats` | array \| null | Per-node stats (rows read/written, timings) |
+| `error` | object \| null | The mapped failure (`code`, `message`) on `FAILED` |
+| `failed_node_id` | string \| null | The node the failure is attributed to |
+| `correlation_id` | uuid \| null | The caller-supplied correlation id |
+| `triggered_by` | uuid | The user (or owning execution's user context) that started it |
+| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` |
+| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
+| `result_size_bytes` | int \| null | Size of the materialized caller result |
+| `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
+| `parent_node_id` | string \| null | That node's id; null for a root |
+| `root_execution_id` | uuid | The family's top ancestor; equals `execution_id` for a root |
+
+Ownership: `admin` reads every execution in the workspace (optionally
+pipeline-narrowed); every other principal reads only executions they triggered.
+
 ### 10.2 Get execution metadata
 
 ```
@@ -1315,6 +1345,7 @@ Owner or global admin. Removing a member with the `owner` role is refused with `
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.18 | 051 auth/config sweep | §10.1 gains its field table (T19): the listing's items were documented only by cross-reference to §10.2. The table is the shared metadata projection minus `result_url`/`result_expires_at`, including the fields §10.2's example omitted (`draft_run`, `error`, `failed_node_id`, `correlation_id`), plus the ownership sentence |
 | 2026-08-05 | v1.0 | initial draft | Initial REST API + SSE specification: endpoints, envelopes, SSE event schemas, claim-check pattern, pagination, rate limits, CORS |
 | 2026-08-05 | v1.1 | propagation | Updated create-pipeline example to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`, node has `type`/`output`). |
 | 2026-08-05 | v1.2 | SSE hardening | Added SSE heartbeat (§6.6) for LB idle-timeout prevention. Updated stream reconnection (§6.8) for multi-instance without sticky sessions: execution continues on originating instance; client polls/fetches result via REST if SSE reconnects to different instance. |

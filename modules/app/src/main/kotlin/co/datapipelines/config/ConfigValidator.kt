@@ -47,7 +47,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 14
+        internal const val CHECK_COUNT = 15
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -81,6 +81,7 @@ class ConfigValidator(
             checkResultTtlOrdering(snapshot, violations)
             checkDevProfileGuard(snapshot, violations)
             checkWorkspacesProvisioningMode(snapshot, violations)
+            checkWorkspacesOpenJoinMode(snapshot, violations)
             checkExamplesSeederReachable(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
@@ -283,7 +284,7 @@ class ConfigValidator(
         }
 
         /**
-         * §7 — `datapipelines.workspaces.provisioning-mode` names a real mode (§3.17). A typo
+         * §7 / §3.17 — `datapipelines.workspaces.open-join` names a real mode (§3.17). A typo
          * here fails enum binding anyway; this names the offending value in the §7 format
          * instead of as a binder stack trace.
          */
@@ -296,6 +297,34 @@ class ConfigValidator(
                 violations +=
                     "datapipelines.workspaces.provisioning-mode '$mode' is not one of " +
                     "${PROVISIONING_MODES.sorted()} (§3.17)."
+            }
+        }
+
+        /**
+         * §7 / §3.17 — `open-join: true` under `closed` provisioning. §3.17 defines
+         * `open-join` as a `self-serve`-mode knob, and this is not dead-config hygiene:
+         * the self-join branch in `WorkspaceService.addMember` gates on `open-join`
+         * alone, so `closed` + `open-join: true` would let any authenticated user join
+         * any workspace — the exact management monopoly `closed` exists to give the
+         * admin. Refused, naming both keys.
+         *
+         * A misspelled mode is left to [checkWorkspacesProvisioningMode], which already
+         * names it — two violations for one typo would point at the wrong key. An unset
+         * mode is the shipped default (`self-serve`), where `open-join` is meaningful.
+         */
+        private fun checkWorkspacesOpenJoinMode(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (!snapshot.workspacesOpenJoin) return
+            val mode = snapshot.workspacesProvisioningMode?.trim()?.lowercase()
+            if (mode != null && mode !in PROVISIONING_MODES) return
+            if (mode == "closed") {
+                violations +=
+                    "datapipelines.workspaces.open-join is true while datapipelines.workspaces.provisioning-mode " +
+                    "is 'closed' (§3.17): open-join exists for self-serve provisioning, and under closed it " +
+                    "would re-open the membership surface closed mode exists to keep admin-only. " +
+                    "Set the mode to 'self-serve', or turn open-join off."
             }
         }
 
@@ -459,6 +488,7 @@ class ConfigValidator(
                 resultTtlDefaultSeconds = environment.getProperty("datapipelines.result.ttl-default-seconds", Long::class.java),
                 resultTtlMaxSeconds = environment.getProperty("datapipelines.result.ttl-max-seconds", Long::class.java),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
+                workspacesOpenJoin = environment.getProperty("datapipelines.workspaces.open-join", Boolean::class.java) ?: false,
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
                 bootstrapAdminEmail = environment.getProperty("datapipelines.auth.bootstrap-admin-email"),
@@ -579,6 +609,8 @@ internal data class ConfigSnapshot(
     val resultTtlDefaultSeconds: Long?,
     val resultTtlMaxSeconds: Long?,
     val workspacesProvisioningMode: String?,
+    /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
+    val workspacesOpenJoin: Boolean = false,
     /** §3.18 — unset (or blank) = bootstrap datasource registration is off. */
     val bootstrapDatasourcesFile: String?,
     /** §3.18 — unset (or blank) = example seeding is off. Carried so the §7 log reports it. */
@@ -615,6 +647,7 @@ internal data class ConfigSnapshot(
             "resultTtlDefaultSeconds=$resultTtlDefaultSeconds, " +
             "resultTtlMaxSeconds=$resultTtlMaxSeconds, " +
             "workspacesProvisioningMode=$workspacesProvisioningMode, " +
+            "workspacesOpenJoin=$workspacesOpenJoin, " +
             "bootstrapDatasourcesFile=$bootstrapDatasourcesFile, " +
             "bootstrapExamplesFile=$bootstrapExamplesFile, " +
             "bootstrapAdminEmail=$bootstrapAdminEmail, " +

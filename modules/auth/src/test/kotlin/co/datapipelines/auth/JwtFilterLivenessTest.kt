@@ -25,7 +25,7 @@ class JwtFilterLivenessTest {
     private val secret = Base64.getEncoder().encodeToString(ByteArray(32) { (it + 7).toByte() })
     private val jwtService = JwtService(JwtProperties(secret), AuthProperties())
     private val userService = mockk<UserService>()
-    private val filter = JwtAuthenticationFilter(jwtService, userService)
+    private val filter = JwtAuthenticationFilter(jwtService, userService, ClientAddressResolver(emptyList()))
 
     private val userId = UUID.randomUUID()
     private val token =

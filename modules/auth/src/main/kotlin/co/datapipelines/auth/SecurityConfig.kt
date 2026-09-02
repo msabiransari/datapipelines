@@ -101,9 +101,11 @@ class SecurityConfig(
                         // 033: the marketing site owns `/` (owner decision 2026-08-31) —
                         // public by design; the signed-in dashboard moved to /dashboard.
                         // Constant content only (Decision 4): no DB access, defended by
-                        // cache headers — NO rate limiter (OPEN-ITEMS T46: the limiter
-                        // keys on remoteAddr, which is the LB's address behind the
-                        // documented deployment, so one client could 429 the homepage).
+                        // cache headers — NO rate limiter (033/D1). The login limiter
+                        // keys on the CLIENT address since R8/T46 ([ClientAddressResolver]
+                        // + `datapipelines.auth.trusted-proxies`), so pointing it at `/`
+                        // is now possible; the no-limiter decision stands on its own
+                        // grounds (immutable content, shared-cache TTL).
                         "/",
                         // 033: the marketing site's own assets (css/js/img). The design
                         // system it references rides the already-public /vendor/** below.
