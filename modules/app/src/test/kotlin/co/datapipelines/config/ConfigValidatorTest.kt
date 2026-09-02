@@ -540,6 +540,70 @@ class ConfigValidatorTest {
         report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password-hash")
     }
 
+    // ------------------------------------------------------------------ §3.2 executor concurrency alias (050/R2)
+
+    @Test
+    fun `the deprecated executor alias alone is a WARN naming the new key - not a violation`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(executorMaxConcurrentGlobal = "150"),
+            )
+
+        report.violations.shouldBeEmpty()
+        report.warnings.shouldHaveSize(1)
+        report.warnings.single().shouldContain("max-concurrent-executions-per-instance")
+        report.warnings.single().shouldContain("150")
+    }
+
+    @Test
+    fun `both executor keys set and differing is refused - both keys named`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(executorMaxConcurrentGlobal = "150", executorMaxConcurrentPerInstance = "200"),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("max-concurrent-executions-global (150)")
+        report.violations.single().shouldContain("max-concurrent-executions-per-instance (200)")
+    }
+
+    @Test
+    fun `both executor keys set and equal carries the WARN only - no ambiguity, no refusal`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(executorMaxConcurrentGlobal = "120", executorMaxConcurrentPerInstance = "120"),
+            )
+
+        report.violations.shouldBeEmpty()
+        report.warnings.shouldHaveSize(1)
+    }
+
+    @Test
+    fun `the alias with the canonical key at its default is the alias-alone corner - WARN only`() {
+        // application.yml pins the canonical key to 100 (the documented default) even when the
+        // operator set nothing, so canonical == default reads as "unset". The corner — canonical
+        // explicitly set to exactly 100 beside alias 150 — resolves to the alias with the WARN
+        // stating the value in effect (documented on checkExecutorConcurrencyAlias).
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(executorMaxConcurrentGlobal = "150", executorMaxConcurrentPerInstance = "100"),
+            )
+
+        report.violations.shouldBeEmpty()
+        report.warnings.single().shouldContain("(150) is in effect")
+    }
+
+    @Test
+    fun `a non-integer executor alias is left to the binder - the §7 check skips it`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(executorMaxConcurrentGlobal = "lots"),
+            )
+
+        report.violations.shouldBeEmpty()
+        report.warnings.shouldBeEmpty()
+    }
+
     @Test
     fun `a local seed without local enabled is refused`() {
         val report =

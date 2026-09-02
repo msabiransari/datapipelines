@@ -82,10 +82,44 @@ data class ResultProperties(
 data class ExecutorProperties(
     val maxParallelNodes: Int = 4,
     val maxConcurrentExecutionsPerUser: Int = 10,
-    val maxConcurrentExecutionsGlobal: Int = 100,
+    /**
+     * `max-concurrent-executions-per-instance` — the instance-wide execution-slot ceiling
+     * (050/R2: the limit is per JVM; N replicas admit N × this in total). Before 050 this
+     * was named `-global`, which was false at N > 1 — the slot counter was always per JVM.
+     */
+    val maxConcurrentExecutionsPerInstance: Int = 100,
+    /**
+     * The deprecated `max-concurrent-executions-global` alias (050/R2, one release). Nullable
+     * so "unset" is distinguishable: the alias binds ONLY when an operator still sets it —
+     * application.yml no longer defines it. Resolution and the §7 WARN/refusal live in
+     * `ConfigValidator` + [effectiveMaxConcurrentExecutionsPerInstance].
+     */
+    @Deprecated("Use max-concurrent-executions-per-instance; removed next release (050/R2)")
+    val maxConcurrentExecutionsGlobal: Int? = null,
     val nodeQueryTimeoutSeconds: Int = 60,
     val executionTimeoutSeconds: Long = 600,
-)
+) {
+    /**
+     * What the executor runs with: the alias's value while it is set (the one-release bridge),
+     * otherwise the canonical key's. The §7 validator has already refused the two-keys-set-and-
+     * differing case by the time this is read in production.
+     */
+    @Suppress("DEPRECATION") // reading the alias here IS the bridge it exists for (050/R2)
+    val effectiveMaxConcurrentExecutionsPerInstance: Int
+        get() = maxConcurrentExecutionsGlobal ?: maxConcurrentExecutionsPerInstance
+
+    init {
+        require(maxParallelNodes > 0) { "datapipelines.executor.max-parallel-nodes must be > 0" }
+        require(maxConcurrentExecutionsPerUser > 0) { "datapipelines.executor.max-concurrent-executions-per-user must be > 0" }
+        require(maxConcurrentExecutionsPerInstance > 0) { "datapipelines.executor.max-concurrent-executions-per-instance must be > 0" }
+        @Suppress("DEPRECATION") // validating the alias here IS the bridge it exists for (050/R2)
+        maxConcurrentExecutionsGlobal?.let { alias ->
+            require(alias > 0) { "datapipelines.executor.max-concurrent-executions-global must be > 0" }
+        }
+        require(nodeQueryTimeoutSeconds > 0) { "datapipelines.executor.node-query-timeout-seconds must be > 0" }
+        require(executionTimeoutSeconds > 0) { "datapipelines.executor.execution-timeout-seconds must be > 0" }
+    }
+}
 
 /**
  * The `datapipelines.pipelines.*` keys ([Configuration §3.16](../../../../../../../docs/configuration.md)).
@@ -123,18 +157,23 @@ data class IdempotencyProperties(
 /**
  * The `datapipelines.executions.*` keys ([Configuration §3.11](../../../../../../../docs/configuration.md)).
  *
- * Only the key running code reads is bound. (`event-retention-days` is deliberately NOT bound
- * here: `ExecutionEventRepository.deleteOlderThan` has no production caller either — an
- * unscheduled retention job of the exact M2 shape, reported in the 036 handback rather than
- * silently wired in this round.) The default MUST equal configuration.md §3.11 —
+ * Defaults here MUST equal configuration.md §3.11 — that document is the single authority, and
+ * a binding class that quietly disagrees with it is a second authority.
  * `WebPropertiesSpecDriftTest` fails the build on any divergence.
  */
 @ConfigurationProperties(prefix = "datapipelines.executions")
 data class ExecutionsProperties(
     /** `stale-timeout-minutes` — a `RUNNING` row older than this belongs to a dead instance. */
     val staleTimeoutMinutes: Long = 60,
+    /**
+     * `event-retention-days` — how long `execution_events` rows live past their execution's
+     * completion (metadata-db §8.1). Bound and enforced since 050/T60: the hourly retention
+     * job (`RetentionSchedulingConfiguration`) deletes exactly these rows, never executions.
+     */
+    val eventRetentionDays: Long = 7,
 ) {
     init {
         require(staleTimeoutMinutes > 0) { "datapipelines.executions.stale-timeout-minutes must be > 0" }
+        require(eventRetentionDays > 0) { "datapipelines.executions.event-retention-days must be > 0" }
     }
 }

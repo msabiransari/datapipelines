@@ -9,6 +9,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
+import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.pipeline.AuthoringGuard
@@ -141,6 +142,7 @@ class DomainConfiguration {
         repository: DatasourceRepository,
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
+        invalidation: PoolInvalidationPublisher,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -149,6 +151,7 @@ class DomainConfiguration {
             references = references,
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
+            invalidation = invalidation,
         )
 
     /**

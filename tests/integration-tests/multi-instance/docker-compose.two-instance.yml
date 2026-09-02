@@ -20,7 +20,9 @@
 # recreates app1 explicitly between the two tests.
 
 x-app-common: &app-common
-  image: datapipelines:local-mi036
+  # MI_IMAGE lets sibling harnesses pin their own build (050 pool-invalidation run);
+  # unset, the image is exactly what the 036 harness builds.
+  image: ${MI_IMAGE:-datapipelines:local-mi036}
   pull_policy: never
   restart: "no"
   environment:

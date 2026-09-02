@@ -151,7 +151,11 @@ datapipelines:
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
     max-concurrent-executions-per-user: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_USER:10}
-    max-concurrent-executions-global: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_GLOBAL:100}
+    # Per-INSTANCE ceiling (050/R2): N replicas admit N × this. The deprecated alias
+    # `max-concurrent-executions-global` is deliberately NOT here — defining it would pin the
+    # alias set on every deployment and defeat the §7 "alias alone → WARN" detection; an
+    # operator who still sets the old key (or its env var) binds it through relaxed binding.
+    max-concurrent-executions-per-instance: ${DATAPIPELINES_EXECUTOR_MAX_CONCURRENT_EXECUTIONS_PER_INSTANCE:100}
     node-query-timeout-seconds: ${DATAPIPELINES_EXECUTOR_NODE_QUERY_TIMEOUT_SECONDS:60}
     execution-timeout-seconds: ${DATAPIPELINES_EXECUTOR_EXECUTION_TIMEOUT_SECONDS:600}
 

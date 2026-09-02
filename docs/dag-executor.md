@@ -539,7 +539,7 @@ All limits are configured in [Configuration §3.2](configuration.md#32-executor)
 |---|---|---|
 | Max parallel nodes per execution | `datapipelines.executor.max-parallel-nodes` | `nodePermits` semaphore inside `runExecution` (§5.2) |
 | Max concurrent executions per user | `datapipelines.executor.max-concurrent-executions-per-user` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
-| Max concurrent executions (global) | `datapipelines.executor.max-concurrent-executions-global` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
+| Max concurrent executions (per instance — 050/R2) | `datapipelines.executor.max-concurrent-executions-per-instance` | `ExecutionSlots.withSlot(userId)`, step 2 of §5.1 |
 | JDBC query timeout (per node) | `datapipelines.executor.node-query-timeout-seconds` | `Statement.queryTimeout` on every node statement. A datasource's own `query_timeout_seconds`, when set, overrides it for nodes on that datasource ([Datasources §5](datasources.md#55-query-timeout-precedence)) — this is what `config.nodeQueryTimeoutSeconds(node.source)` resolves. |
 | Execution overall timeout | `datapipelines.executor.execution-timeout-seconds` | `withTimeout(...)` wrapping the execution scope (§5.2). On expiry the executor also calls `Statement.cancel()` on every registered statement (§8.3.1) — see below. |
 | Disconnect grace before cancellation | `datapipelines.sse.disconnect-grace-seconds` | SSE layer's grace timer, which calls into the cancellation registry (§8.3) |
@@ -1230,7 +1230,7 @@ Implemented in the `dag` Gradle module:
 
 ### 15.2 Coroutine context
 
-- All executor code runs on a dedicated `ExecutorDispatcher` — a bounded IO dispatcher owned by the `dag` module, sized from `datapipelines.executor.max-concurrent-executions-global` × `max-parallel-nodes`. Executor code **never** references `Dispatchers.IO` directly: sharing the JVM-wide IO pool with Spring's own blocking work makes executor throughput a function of unrelated load, and makes starvation impossible to attribute.
+- All executor code runs on a dedicated `ExecutorDispatcher` — a bounded IO dispatcher owned by the `dag` module, sized from `datapipelines.executor.max-concurrent-executions-per-instance` × `max-parallel-nodes`. Executor code **never** references `Dispatchers.IO` directly: sharing the JVM-wide IO pool with Spring's own blocking work makes executor throughput a function of unrelated load, and makes starvation impossible to attribute.
 - Each execution has its own `coroutineScope` under `withTimeout(...)`, so failure, timeout, or cancellation of one execution never affects another.
 - `Job` cancellation is honored throughout — the three cancellation triggers in §8.3 all resolve to cancelling that scope's root `Job`, after the registered statements have been interrupted. The disconnect trigger's grace period is `datapipelines.sse.disconnect-grace-seconds`, and the timer is owned by the SSE layer, not the executor.
 

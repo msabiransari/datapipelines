@@ -86,7 +86,7 @@ class ResourceLeakTest {
     @Test
     fun `concurrent executions release every permit even when some are rejected`() =
         runBlocking<Unit> {
-            val slots = ExecutionSlots(maxPerUser = 4, maxGlobal = 8)
+            val slots = ExecutionSlots(maxPerUser = 4, maxPerInstance = 8)
             val users = (1..4).map { UUID.randomUUID() }
 
             (1..CONCURRENT)

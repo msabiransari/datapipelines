@@ -113,7 +113,7 @@ object ErrorCodeMapper {
      * copied into `MappedError`, into `NodeStats.errorMessage`, into the `node_failed` and
      * `pipeline_failed` SSE payloads, into `error_json` and `node_stats_json` in Postgres, and into
      * every log line that printed it — once per node, across up to
-     * `max-concurrent-executions-global` executions.
+     * `max-concurrent-executions-per-instance` executions (050/R2 name).
      *
      * 2000 characters keeps the diagnostic (the offending statement's head is where the error is)
      * and removes the amplifier. Same discipline, same reason, as

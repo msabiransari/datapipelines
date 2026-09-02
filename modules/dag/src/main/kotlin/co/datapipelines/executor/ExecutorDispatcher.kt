@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong
  * impossible to attribute. Node work is blocking JDBC plus blocking Redis, so it needs real
  * threads — this is the pool that owns them, and its size is the only thing that bounds them.
  *
- * Sized from `max-concurrent-executions-global × max-parallel-nodes` (§15.2): the largest number
+ * Sized from `max-concurrent-executions-per-instance × max-parallel-nodes` (§15.2): the largest number
  * of nodes that can be doing SQL at one instant under the configured limits. Threads are daemons,
  * so a forgotten [close] cannot keep the JVM alive.
  */
@@ -41,7 +41,7 @@ class ExecutorDispatcher private constructor(
          */
         fun forConfig(
             config: ExecutorConfig,
-            maxThreads: Int = config.maxConcurrentExecutionsGlobal * config.maxParallelNodes,
+            maxThreads: Int = config.maxConcurrentExecutionsPerInstance * config.maxParallelNodes,
         ): ExecutorDispatcher {
             require(maxThreads > 0) { "ExecutorDispatcher needs at least one thread, was $maxThreads" }
             // §15.2 sizes the pool as global × per-execution parallelism, which multiplies: the
@@ -52,7 +52,7 @@ class ExecutorDispatcher private constructor(
             val bounded = maxThreads.coerceAtMost(MAX_THREADS)
             if (bounded < maxThreads) {
                 LOG.warn(
-                    "Executor dispatcher sized {} from max-concurrent-executions-global x max-parallel-nodes; " +
+                    "Executor dispatcher sized {} from max-concurrent-executions-per-instance x max-parallel-nodes; " +
                         "capped to {}. Nodes queue beyond that rather than each taking a thread.",
                     maxThreads,
                     bounded,

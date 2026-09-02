@@ -18,6 +18,15 @@ app containers sharing one metadata Postgres and one Redis:
   survivor's log). Both apps run with
   `DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES=1`, so the wait is
   ≤ ~2.5 min (1 min staleness + 60s sweep cadence + margin).
+- **Pool-invalidation test (050/R1/M3)** — a datasource PUT on `app1`
+  repoints it at a second, distinguishable Postgres login; `app2`'s subscriber
+  logs `event=datasource.pool_invalidated_remotely` within seconds and its
+  NEXT execution serves the new login (`current_user` flips in the result
+  rows) — not at `app2`'s next restart. Run separately:
+  `./tests/integration-tests/multi-instance/run-pool-invalidation.sh`
+  (compose project `mi050`, image `datapipelines:local-mi050` via the
+  compose file's `MI_IMAGE` override; transcript
+  `gate-logs/050-pool-invalidation.log`).
 
 ## Run
 

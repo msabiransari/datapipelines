@@ -102,11 +102,42 @@ after start (staleness 1m + 60s cadence); the victim's logs carry zero `shutdown
 **Proposed fix:** Redis pub/sub invalidation that calls `poolManager.evict(name)` on all peers (shares infrastructure with M10), or row-version check at lease time.
 **Verification:** code-read (no expiry/version comparison exists on the path); not reproduced with two instances.
 
+**[resolved — 050, branch `feat/multi-instance-2`]** Owner ratified R1: registry save/delete
+publishes the datasource name on Redis channel `dp:datasource-invalidated` **after the row
+commit**, beside the synchronous local eviction (publish-before-commit races a subscriber into
+rebuilding from the OLD row — the reason for the ordering rule); every instance runs a
+`RedisMessageListenerContainer` (reconnect-surviving, subscribed before serving) whose listener
+skips its own origin and calls the registry's `evictPool(name)`; next use rebuilds from the row.
+Workspace→instance affinity considered and rejected (failover, scaling, and global rows would
+still cache everywhere). Documented in datasources §5.7 with the sizing sentence
+(`maximumPoolSize × replicas ≤ the customer DB's connection limit`) and the narrowed residual:
+an out-of-band row write (manual SQL, D10) still publishes nothing — bounded by layer 2's live
+check as before. Tests: `DatasourcePoolInvalidationE2eTest` (two application contexts, one
+Postgres + one Redis; execute on B reads the OLD marker, PUT on A, B's next execution reads the
+NEW one — falsified red with the subscriber disabled), `DatasourceRegistryIntegrationTest`
+(publish contract: update/delete publish after the row changed; refused/no-op delete publishes
+nothing; `evictPool` is the subscriber's target), `DatasourceInvalidationChannelTest` (payload,
+self-ignore, garbled-message tolerance, publish-failure-is-WARN). Live two-instance evidence in
+the 050 handback.
+
 ### M4 — `ExecutionSlots` limits are per-JVM, not global — HIGH
 **Evidence:** `ExecutionSlots.kt:27-28` — `global` AtomicInteger + `perUser` map. `max-concurrent-executions-global` (default 100) and per-user (10) enforced in-memory.
 **Failure mode:** N replicas → effective limits are N× configured. The named `-global` guarantee is void; source-DB protection is N times weaker than the operator set.
 **Proposed fix:** Redis-shared slot accounting (pattern precedent: `RedisRateLimiter`, `web/ratelimit/RateLimiter.kt:65`) — though atomic check-and-hold slots are harder than counters and need a lease/expiry design, or document as per-replica limits explicitly.
 **Verification:** code-read.
+
+**[resolved — 050, branch `feat/multi-instance-2`]** Owner ratified R2: **per-instance,
+documented as such** — no global semaphore. The key is renamed
+`datapipelines.executor.max-concurrent-executions-per-instance` (the old `-global` name was
+actively false at N > 1: the counter was always per JVM); the old key binds as a one-release
+deprecated alias (alone → its value runs + one startup WARN naming the new key; both set and
+differing → `ConfigValidator` refuses startup — §7's 14th check). Identifiers renamed to match
+(`ExecutorConfig`, `ExecutionSlots.maxPerInstance`; `LimitScope.GLOBAL`'s wire value stays for
+API stability). configuration.md §3.2/§5/§7 and the heap-sizing notes corrected; deployment.md
+§6.2 states the multiplication once plainly (N replicas admit N × the setting) and §6.6's heap
+paragraph now sizes per instance. `WebPropertiesSpecDriftTest` + `BootstrapConfigKeysSpecDriftTest`
++ `scripts/docs-audit.sh` parse the keys — all landed in the same commit; `ConfigValidatorTest`
+covers the WARN/refusal matrix.
 
 ### M5 — First-boot seeder races — MEDIUM
 **Evidence:** find-then-insert without duplicate tolerance:
@@ -138,6 +169,15 @@ Test: `UserServiceRaceTest`.
 - **SSE per-user stream cap** — `ExecutionStreamRegistry.kt:50,76,100`: `max-streams-per-user` is effectively ×N.
 - **LoginRateLimitFilter** — `auth/LoginRateLimitFilter.kt:38`: per-JVM; KDoc documents this as deliberate ("a brute-force damper, not a distributed quota"). A `RedisRateLimiter` exists if the decision is revisited. **Related but distinct: OPEN-ITEMS T46** — the login limiter keys on `request.remoteAddr`, which behind the documented LB is the LB's own address, collapsing the per-IP budget to ONE deployment-wide bucket. T46 is a wrong-key defect; M7 is a not-shared defect. Whoever fixes either should read the other, since a Redis-backed limiter keyed on the same wrong value would be no better.
 
+**[resolved — 050, branch `feat/multi-instance-2`]** Resolved WITH M4's ruling (R2): the class
+defect was caps that multiply by N **silently**. The multiplication is now stated once, plainly,
+where operators size (deployment.md §6.2's checklist row: per-instance limits × replica count),
+and the worst offender — the falsely-named "global" executor cap — is renamed per-instance (M4's
+block above). The SSE per-user stream cap and the login limiter stay per-JVM **by documented
+design** (a brute-force damper, not a distributed quota), now under an explicit "size by replica
+count" rule instead of an unspoken one. T46 (the limiter's wrong key behind an LB) remains open
+as R8's security round.
+
 ### M8 — Accepted staleness (documented, listed for completeness)
 - **AuthCache** (`auth/AuthCache.kt:47-58`): user deactivation, API-key revocation, membership revocation propagate to non-mutating instances within the 60s TTL — the accepted D13 contract. Within the TTL a revoked key keeps passing on a warm `verifiedSecrets` hit.
 - **Per-JVM gauges** (`ExecutorMetrics.kt:86-91`, `ExecutionStreamRegistry.kt:58`): correct only when summed across instances; cosmetic.
@@ -149,6 +189,14 @@ Test: `UserServiceRaceTest`.
 
 ### M10 — Any new server-push channel needs Redis fan-out (design constraint)
 The planned pipeline-change notification (reload the editor when MCP/REST updates a pipeline) cannot use a per-JVM emitter registry alone: the MCP write can land on instance A while the user's SSE lives on B. Required shape: Redis pub/sub topic (e.g. `pipeline-changes`, workspace-scoped payloads carrying `{pipelineId, version, updatedBy, at}`) → each instance fans out to its local emitters. The same topic can carry datasource-change invalidations, making M3's fix nearly free. Note this introduces a new pattern: the codebase's existing cross-instance answers are Redis *state* (flags, logs, counters) and TTL caches — not messaging. Worth an explicit decision in review.
+
+**[resolved — 050, branch `feat/multi-instance-2`]** The decision is made and the pattern now
+exists: M3's fix shipped `dp:datasource-invalidated` (R1) — the codebase's first Redis *message*
+beside all its Redis *state*, in `web`'s `DatasourceInvalidationConfiguration`, with the
+reconnect-surviving `RedisMessageListenerContainer` and origin-tagged payloads. The
+pipeline-change notification has NOT shipped (still future work) but inherits its shape from
+this precedent: a `dp:`-prefixed channel, per-instance subscribers fanning out to local state,
+publish after commit. module-structure §3.1/§5.6 record the pattern.
 
 ---
 

@@ -30,6 +30,14 @@ import java.util.UUID
  * Datasource metadata is served from [DatasourceMetadataCache] and invalidated on every save and
  * delete. The pool-build path deliberately does **not** read the cache: it needs the encrypted
  * credential, which the cache never holds.
+ *
+ * ## Cross-instance pool invalidation (§5.7, 050/R1)
+ *
+ * Every save/delete evicts the local pool synchronously and then hands the datasource name to
+ * [invalidation] so peer instances drop their pools for it too — without it, a replica serves a
+ * stale pool (old credentials, old URL) until restart (ARCH-AUDIT M3). Local eviction never
+ * waits on the channel: this instance's pool is gone the moment save returns, and the publisher
+ * must not rely on receiving its own message back.
  */
 class DefaultDatasourceRegistry(
     private val repository: DatasourceRepository,
@@ -38,6 +46,7 @@ class DefaultDatasourceRegistry(
     private val references: DatasourceReferences = DatasourceReferences.NONE,
     private val auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
+    private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
 ) : DatasourceRegistry {
     /**
      * Decrypts inside the pool-build factory only (§7.4). `computeIfAbsent` runs this at most
@@ -150,6 +159,10 @@ class DefaultDatasourceRegistry(
                 audit(DatasourceAuditEvents.POOL_REBUILD, toPersist.name, actor.toString())
             }
             cache.invalidate(toPersist.name)
+            // Cross-instance fan-out (§5.7, 050/R1): AFTER the row write returned (committed)
+            // and beside the synchronous local eviction above. The publisher's own instance
+            // does not act on its own message — local eviction stays THIS synchronous call.
+            invalidation.publish(toPersist.name)
             row.toDatasource()
         }
     }
@@ -168,9 +181,16 @@ class DefaultDatasourceRegistry(
         if (deleted) {
             poolManager.evict(name)
             cache.invalidate(name)
+            // Same §5.7 contract as update: peers learn the row is gone and drop their pools,
+            // so a soft-deleted datasource stops serving queries on every instance (M3's
+            // soft-delete tail), not just the one that happened to take the DELETE.
+            invalidation.publish(name)
         }
         return DeleteResult(deleted = deleted, name = name)
     }
+
+    /** The subscriber's target (§5.7, 050/R1): same drain the local save/delete paths run. */
+    override fun evictPool(name: String): Boolean = poolManager.evict(name)
 
     override fun poolFor(datasource: Datasource): ConnectionPool = poolManager.poolFor(datasource)
 

@@ -5,10 +5,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Per-user and global execution-slot admission (dag-executor.md §5.1 step 2, §5.3).
+ * Per-user and instance-wide execution-slot admission (dag-executor.md §5.1 step 2, §5.3).
  *
  * One slot per **execution**, not per node (§12.1): it is taken before any work starts and held
  * until the execution finishes, so a pipeline can never run out of slots halfway through.
+ *
+ * The instance-wide ceiling is **per JVM** (050/R2): `datapipelines.executor
+ * .max-concurrent-executions-per-instance` bounds THIS instance; N replicas admit N × it in
+ * total, and operators size accordingly (deployment.md §6.2). No cross-instance semaphore
+ * exists by owner ruling — rejected with the renaming.
  *
  * Admission is **reject, not queue**: a request over the limit fails immediately with
  * `pipeline.execution.concurrency_limit`. Waiting for a slot would turn a limit into a latency
@@ -22,13 +27,13 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class ExecutionSlots(
     private val maxPerUser: Int,
-    private val maxGlobal: Int,
+    private val maxPerInstance: Int,
 ) {
-    private val global = AtomicInteger()
+    private val instanceWide = AtomicInteger()
     private val perUser = ConcurrentHashMap<UUID, Int>()
 
-    /** Live executions across all users — observability and the §15.3 concurrency gauge. */
-    val inFlight: Int get() = global.get()
+    /** Live executions across all users on THIS instance — observability and the §15.3 gauge. */
+    val inFlight: Int get() = instanceWide.get()
 
     /** Live executions for [userId]; zero when the user has none (no entry is retained). */
     fun inFlightFor(userId: UUID): Int = perUser[userId] ?: 0
@@ -37,35 +42,36 @@ class ExecutionSlots(
     val trackedUsers: Int get() = perUser.size
 
     /**
-     * Runs [body] holding one global and one per-user slot.
+     * Runs [body] holding one instance-wide and one per-user slot.
      *
-     * @throws PipelineConcurrencyLimitException when either limit is already reached; the global
-     *   slot is released before throwing, so a per-user rejection never burns a global one.
+     * @throws PipelineConcurrencyLimitException when either limit is already reached; the
+     *   instance-wide slot is released before throwing, so a per-user rejection never burns an
+     *   instance-wide one.
      */
     suspend fun <T> withSlot(
         userId: UUID,
         body: suspend () -> T,
     ): T {
-        acquireGlobal()
+        acquireInstanceWide()
         try {
             acquirePerUser(userId)
         } catch (e: PipelineConcurrencyLimitException) {
-            global.decrementAndGet()
+            instanceWide.decrementAndGet()
             throw e
         }
         try {
             return body()
         } finally {
             releasePerUser(userId)
-            global.decrementAndGet()
+            instanceWide.decrementAndGet()
         }
     }
 
-    private fun acquireGlobal() {
+    private fun acquireInstanceWide() {
         while (true) {
-            val current = global.get()
-            if (current >= maxGlobal) throw PipelineConcurrencyLimitException(LimitScope.GLOBAL, maxGlobal)
-            if (global.compareAndSet(current, current + 1)) return
+            val current = instanceWide.get()
+            if (current >= maxPerInstance) throw PipelineConcurrencyLimitException(LimitScope.GLOBAL, maxPerInstance)
+            if (instanceWide.compareAndSet(current, current + 1)) return
         }
     }
 

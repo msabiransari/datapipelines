@@ -80,7 +80,7 @@ class EngineConfiguration {
         ExecutorConfig(
             maxParallelNodes = executor.maxParallelNodes,
             maxConcurrentExecutionsPerUser = executor.maxConcurrentExecutionsPerUser,
-            maxConcurrentExecutionsGlobal = executor.maxConcurrentExecutionsGlobal,
+            maxConcurrentExecutionsPerInstance = executor.effectiveMaxConcurrentExecutionsPerInstance,
             nodeQueryTimeoutSeconds = executor.nodeQueryTimeoutSeconds,
             executionTimeoutSeconds = executor.executionTimeoutSeconds,
             stagingMaxMemoryMb = staging.maxMemoryMb,
@@ -99,7 +99,7 @@ class EngineConfiguration {
     fun executionSlots(config: ExecutorConfig): ExecutionSlots =
         ExecutionSlots(
             maxPerUser = config.maxConcurrentExecutionsPerUser,
-            maxGlobal = config.maxConcurrentExecutionsGlobal,
+            maxPerInstance = config.maxConcurrentExecutionsPerInstance,
         )
 
     @Bean

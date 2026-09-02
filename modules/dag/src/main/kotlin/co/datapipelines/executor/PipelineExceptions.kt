@@ -75,7 +75,7 @@ class PipelineTimeoutException(
         details = mapOf("timed_out_node_id" to timedOutNodeId, "elapsed_ms" to elapsedMs),
     )
 
-/** No execution slot was free (§5.3) — per-user or global. */
+/** No execution slot was free (§5.3) — per-user or the instance-wide ceiling (050/R2). */
 class PipelineConcurrencyLimitException(
     val scope: LimitScope,
     val limit: Int,
@@ -85,7 +85,11 @@ class PipelineConcurrencyLimitException(
         details = mapOf("scope" to scope.wire, "limit" to limit),
     )
 
-/** Which concurrency limit refused an execution. */
+/**
+ * Which concurrency limit refused an execution. `GLOBAL` is the INSTANCE-WIDE ceiling (the
+ * wire value stays `global` for API stability; the limit it names has always been per JVM —
+ * 050/R2).
+ */
 enum class LimitScope(
     val wire: String,
 ) {

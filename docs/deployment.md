@@ -165,7 +165,7 @@ Everything else has a default and is optional.
 
 Optional keys — executor concurrency, staging memory, result TTLs and caps, SSE heartbeat and disconnect grace, rate limits, idempotency TTL, template cache, UI theme, retention windows, observability — are cataloged with their defaults in [Configuration §3](configuration.md#3-optional-configuration-with-defaults). Resolution precedence (env > profile YAML > base YAML, plus the two per-entity runtime overrides) is [Configuration §4](configuration.md#4-precedence).
 
-The keys an operator most often changes at deploy time are `datapipelines.result.max-size-bytes` (Redis sizing, §4.2.2), `datapipelines.executor.max-concurrent-executions-global` and `datapipelines.staging.h2.max-memory-mb` (heap sizing, §6.6), and `datapipelines.executor.execution-timeout-seconds` (the wall clock that bounds any single execution).
+The keys an operator most often changes at deploy time are `datapipelines.result.max-size-bytes` (Redis sizing, §4.2.2), `datapipelines.executor.max-concurrent-executions-per-instance` and `datapipelines.staging.h2.max-memory-mb` (heap sizing, §6.6), and `datapipelines.executor.execution-timeout-seconds` (the wall clock that bounds any single execution).
 
 ### 5.3 Full config file
 
@@ -230,12 +230,13 @@ The application is **stateless** for all CRUD operations, UI, MCP, and auth. Mul
 | Requirement | How |
 |---|---|
 | Shared Postgres | All instances connect to the same external Postgres. |
-| Shared Redis | All instances connect to the same Redis (results, idempotency keys, cancellation flags, event log) with `maxmemory-policy noeviction` — §4.2.1. A per-instance Redis breaks cross-instance cancel and result reads. |
+| Shared Redis | All instances connect to the same Redis (results, idempotency keys, cancellation flags, event log, datasource pool invalidation) with `maxmemory-policy noeviction` — §4.2.1. A per-instance Redis breaks cross-instance cancel, result reads and pool invalidation. |
 | Identical image | Same Docker image on every instance — design system CSS, JS, templates baked in. |
 | DB migrations | Flyway uses Postgres advisory locks — concurrent startup is safe (one runs, others wait). |
 | SSE heartbeat | Server sends `: heartbeat` comments every 15s to prevent LB idle-timeout kills. See [REST API §6.6](rest-api.md#66-heartbeat-keepalive). |
 | LB idle timeout | Configure to ≥ 120s (or rely on heartbeat). |
 | Health checks | `/health` and `/ready` work independently per instance. |
+| Size per-instance limits by replica count | The execution-slot ceiling `datapipelines.executor.max-concurrent-executions-per-instance` (default 100) is **per instance** (050/R2): N replicas admit **N × the setting** in total against the source databases, and the tempdb heap multiplier of [Configuration §3.2](configuration.md#32-executor) applies per box the same way. Raise replicas with that multiplication in mind, not just the per-instance number. |
 
 ### 6.3 Docker Compose (dev / evaluation)
 
@@ -276,7 +277,7 @@ Two numbers matter: JVM heap, and the container memory limit that must contain i
 heap ≥ (staging max-memory-mb × concurrent executions on THIS instance) + ~512 MB baseline
 ```
 
-The multiplier is the instance's realistic share, **not** `max-concurrent-executions-global`. That key is a cluster-wide ceiling; with N instances behind a round-robin LB the per-instance share is roughly `global / N`, but the ceiling is what an unbalanced moment can actually land on one instance — size for the share, and cap the exposure by lowering `max-concurrent-executions-global` (or `max-memory-mb`) rather than by hoping for even distribution. The ~512 MB baseline covers Spring context, Hikari pools, the template cache, and SSE buffers.
+The multiplier is the **per-instance** execution ceiling `max-concurrent-executions-per-instance` (050/R2): every execution runs on exactly one instance, and this instance can legitimately hold the full setting's worth at an unbalanced moment. The default 100 × 1024 MB is the worst case ONE box must absorb — size the container for it (with N replicas behind a round-robin LB the typical share is `setting / N`, but size for the ceiling, not the share; cap the exposure by lowering the setting — or `max-memory-mb` — per box, or scale on smaller per-instance limits). The ~512 MB baseline covers Spring context, Hikari pools, the template cache, and SSE buffers.
 
 Worked example — 4 concurrent executions per instance at the 1024 MB default: `4 × 1024 + 512 ≈ 4.6 GB` heap.
 
@@ -292,7 +293,7 @@ The 0.5 covers what the heap number does not: metaspace, code cache, thread stac
 
 **Servlet threads (MCP blocking calls).** An MCP `pipelines_execute` call ([MCP Server §6.2.3](mcp-server.md#623-pipelines_execute)) is a **single blocking HTTP request** that holds one servlet thread until the execution reaches a terminal state or `datapipelines.executor.execution-timeout-seconds` (default 600) elapses. Per-user concurrency is bounded (`max-concurrent-executions-per-user`, default 10) but the default Tomcat pool is 200 threads, so on the order of ~20 concurrent long-running MCP callers can saturate it and starve REST/UI traffic on the same instance for minutes. Size `server.tomcat.threads.max` at or above the expected count of simultaneously-blocking MCP executions plus normal REST concurrency, or isolate `/mcp` on its own connector/instance. This is in addition to raising proxy/LB idle timeouts above `execution-timeout-seconds` (MCP Server §6.2.3).
 
-**CPU.** Execution is coroutine-based and largely I/O-bound on source databases; 2 vCPU per instance is a reasonable floor. Scale out on `max-concurrent-executions-global` pressure, not CPU.
+**CPU.** Execution is coroutine-based and largely I/O-bound on source databases; 2 vCPU per instance is a reasonable floor. Scale out on `max-concurrent-executions-per-instance` pressure, not CPU.
 
 ### 6.7 Marketing site & in-product docs
 
@@ -713,6 +714,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.9 | multi-instance round 2 (050) | **§6.2 checklist gains the per-instance-limits row** (R2/M4/M7): `max-concurrent-executions-per-instance` is per instance and N replicas admit N × it — the multiplication stated once, plainly; the Redis row names the datasource pool-invalidation channel. §6.6 heap paragraph rewritten around the per-instance multiplier (the old text read the key as a "cluster-wide ceiling" — false at N > 1, and the exact trap the rename closed); §5.2 deploy-time keys updated to the renamed key. |
 | 2026-09-02 | v1.8 | demo artifact v2 + guards (049) | **Appendix B gains "Publish confirmation & release rehearsal — the drift guards"**: `scripts/sample-data/check-published.sh` (published `examples.json` vs repo vs manifest, 049 C2) is now a named pre-upload / rehearsal step, and the repo copy's semantic validation is pinned in `build` (`SampleDataExamplesContentTest`, 049 C1) — the two guards T70 (published-v1 drift → first-login 500 ×2 days) proved missing. A v2 artifact is staged from unchanged pins with the licence gate re-stamped 2026-09-02; this row's commit is the held version bump — it moved the demo pin (`SAMPLE_VERSION=v2`) and every current-version citation, and merges only after the owner's upload is confirmed live (`check-published.sh v2` against the bucket). |
 | 2026-09-01 | v1.7 | multi-instance readiness (036) | **The stale-execution sweep now ships (ARCH-AUDIT M2), and the §6.2 crash bullet is true again.** Every replica runs the idempotent sweep on a one-minute cadence (the project's first `@Scheduled`); `RUNNING` rows older than `datapipelines.executions.stale-timeout-minutes` are marked `ABORTED` with `pipeline.execution.instance_lost`. §8.3.2's SIGKILL-mid-flush consequence restored to match. Side effect: `DELETE /executions/{id}` on a crashed instance's stale row stops being a silent no-op — once swept, the row is terminal and the cancel is refused `pipeline.execution.not_running` instead of returning 204. |
 | 2026-09-01 | v1.6 | multi-instance readiness (036) | **The drain now ships (ARCH-AUDIT M1), and §8.3.1/§8.3.2 describe it.** On SIGTERM: readiness flips to REFUSING_TRAFFIC first, every local execution is cancelled through the ordinary path (`Statement.cancel()` first, `execution_aborted` with `reason: "shutdown"`, row `ABORTED`), the flush is awaited with a 20s bound, and `server.shutdown: graceful` lets in-flight requests end. The drain CANCELS rather than draining-to-completion — the v1.2 text's "drain up to `execution-timeout-seconds`" behavior is deliberately not what shipped; `terminationGracePeriodSeconds: 30` (not 630) and `preStop: sleep 5` are the matching pod settings, and the Helm chart carries both. The §6.2 crash bullet is still honest (the sweep lands next). |

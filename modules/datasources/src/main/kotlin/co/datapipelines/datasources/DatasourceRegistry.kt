@@ -129,6 +129,22 @@ interface DatasourceRegistry {
     fun poolFor(datasource: Datasource): ConnectionPool
 
     /**
+     * Drains the cached pool for [name] (§5.7's cross-instance invalidation, 050/R1) — the next
+     * [poolFor] rebuilds it from the row. Returns true when a pool existed and was closed.
+     *
+     * [DefaultDatasourceRegistry] calls this synchronously on every save/delete (the writer's own
+     * instance); OTHER instances reach it through the Redis invalidation channel their subscriber
+     * wires ([PoolInvalidationPublisher] carries the fan-out — `datasources` itself never talks
+     * to Redis, module-structure §4.2).
+     *
+     * **Default is a deliberate no-op, unlike [getLive]'s abstract-by-design:** the 020 F6 rule
+     * makes a live read abstract because a silent default would RE-OPEN a closed hole; here a
+     * fake that has no pool map has nothing to drain, and the production implementation is the
+     * only pool-holder. Read-only test fakes (mcp-server's, dag's) keep compiling untouched.
+     */
+    fun evictPool(name: String): Boolean = false
+
+    /**
      * Live connectivity probe (§8.1), or **null when no live datasource has this name** — the
      * caller maps that to HTTP 404, while §8.1's "HTTP 200 always" applies only to a datasource
      * that exists (§6.1, v1.4). Failure to *connect* is data, never an exception.
@@ -166,5 +182,29 @@ fun interface DatasourceReferences {
 
     companion object {
         val NONE = DatasourceReferences { emptyList() }
+    }
+}
+
+/**
+ * Announces "the row for [datasourceName] changed; every instance's pool for it is stale" — the
+ * publish half of §5.7's cross-instance pool invalidation (050/R1, ARCH-AUDIT M3).
+ *
+ * `datasources` is a Redis-free library (module-structure §4.2 — only `dag` and `web` talk to
+ * Redis), so the registry calls this port beside its synchronous local eviction on every
+ * save/delete, and the assembling layer supplies the Redis pub/sub implementation. The default
+ * [NONE] keeps the module testable and matches a single-instance deployment's needs: with no
+ * peers, the synchronous local eviction is the whole mechanism.
+ *
+ * The call happens AFTER the row write returns (committed) — publishing before the row is
+ * durable races a subscriber into rebuilding from the OLD row, which is the defect the channel
+ * exists to close. A publish failure must never fail the save that triggered it (the
+ * implementation degrades to the pre-050 behaviour: peers rebuild on their next restart).
+ */
+fun interface PoolInvalidationPublisher {
+    /** Fan out "pool for [datasourceName] is stale" to every OTHER instance. */
+    fun publish(datasourceName: String)
+
+    companion object {
+        val NONE = PoolInvalidationPublisher { }
     }
 }

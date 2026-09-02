@@ -54,8 +54,13 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.executor.max-parallel-nodes") shouldBe props.maxParallelNodes.toString()
         documented.getValue("datapipelines.executor.max-concurrent-executions-per-user") shouldBe
             props.maxConcurrentExecutionsPerUser.toString()
-        documented.getValue("datapipelines.executor.max-concurrent-executions-global") shouldBe
-            props.maxConcurrentExecutionsGlobal.toString()
+        documented.getValue("datapipelines.executor.max-concurrent-executions-per-instance") shouldBe
+            props.maxConcurrentExecutionsPerInstance.toString()
+        // The deprecated alias (050/R2): documented with default `unset` — the nullable
+        // binding MUST stay unset so application.yml defines it nowhere.
+        documented.getValue("datapipelines.executor.max-concurrent-executions-global") shouldBe "unset"
+        @Suppress("DEPRECATION")
+        props.maxConcurrentExecutionsGlobal shouldBe null
         documented.getValue("datapipelines.executor.node-query-timeout-seconds") shouldBe props.nodeQueryTimeoutSeconds.toString()
         documented.getValue("datapipelines.executor.execution-timeout-seconds") shouldBe props.executionTimeoutSeconds.toString()
     }
@@ -81,6 +86,8 @@ class WebPropertiesSpecDriftTest {
     fun `executions property defaults match configuration-md section 3-11`() {
         val props = ExecutionsProperties()
         documented.getValue("datapipelines.executions.stale-timeout-minutes") shouldBe props.staleTimeoutMinutes.toString()
+        // Bound since 050/T60 — the retention job enforces it hourly.
+        documented.getValue("datapipelines.executions.event-retention-days") shouldBe props.eventRetentionDays.toString()
     }
 
     private companion object {
