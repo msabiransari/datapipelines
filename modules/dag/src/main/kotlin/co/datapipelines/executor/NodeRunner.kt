@@ -13,6 +13,7 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.TypeMappingWarning
 import kotlinx.coroutines.CancellationException
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Statement
 import java.time.Instant
@@ -157,9 +158,13 @@ class NodeRunner(
                 )
         }
         val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
+        // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
+        // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
+        // never on a statement that half-executed with a silent null.
+        val bound = phase(NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
         return when (node.source) {
-            is NodeSource.Tempdb -> runOnTempdb(node, sql, ctx, startedAt)
-            is NodeSource.Datasource -> runOnDatasource(node, node.source.name, sql, ctx, startedAt)
+            is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
+            is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
         }
     }
 
@@ -177,40 +182,40 @@ class NodeRunner(
 
     private suspend fun runOnTempdb(
         node: ExecutableNode,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult {
         // tempdb is not a datasource, so there is no per-datasource override to consider (§5.5).
         val timeout = config.queryTimeoutSecondsFor(null)
         return when (node.type) {
-            NodeType.DQL -> tempdbQuery(node, sql, ctx, startedAt, timeout)
-            NodeType.DML, NodeType.DDL -> tempdbWrite(node, sql, ctx, startedAt, timeout)
+            NodeType.DQL -> tempdbQuery(node, bound, ctx, startedAt, timeout)
+            NodeType.DML, NodeType.DDL -> tempdbWrite(node, bound, ctx, startedAt, timeout)
             NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
         }
     }
 
     private suspend fun tempdbQuery(
         node: ExecutableNode,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
     ): NodeResult =
         when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
-                tempdbCreateTableAs(node, output, sql, ctx, startedAt, timeout)
+                tempdbCreateTableAs(node, output, bound, ctx, startedAt, timeout)
             }
 
             is NodeOutput.Caller -> {
                 phase(NodePhase.MATERIALIZE, node.id) {
-                    tempdbCursor(node, sql, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
+                    tempdbCursor(node, bound, ctx, timeout) { rs -> deliverToCaller(node, rs, ctx, startedAt, ctx.tempdbDialect) }
                 }
             }
 
             is NodeOutput.Datasource -> {
                 phase(NodePhase.WRITEBACK, node.id) {
-                    tempdbCursor(node, sql, ctx, timeout) { rs ->
+                    tempdbCursor(node, bound, ctx, timeout) { rs ->
                         NodeResult.of(node.id, writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId), startedAt)
                     }
                 }
@@ -244,16 +249,16 @@ class NodeRunner(
      */
     private suspend fun <T> tempdbCursor(
         node: ExecutableNode,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         timeout: Int,
         block: suspend (ResultSet) -> T,
     ): T =
         ctx.staging.withConnection { connection ->
-            connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { statement ->
+            statementFor(connection, bound).use { statement ->
                 statement.queryTimeout = timeout
                 ctx.handle.withStatement(node.id, statement) {
-                    statement.executeQuery(sql).use { rs -> block(rs) }
+                    query(statement, bound).use { rs -> block(rs) }
                 }
             }
         }
@@ -283,7 +288,7 @@ class NodeRunner(
     private suspend fun tempdbCreateTableAs(
         node: ExecutableNode,
         output: NodeOutput.Tempdb,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
@@ -295,12 +300,26 @@ class NodeRunner(
             )
         val rows =
             phase(NodePhase.STAGE, node.id) {
+                // 042 C1: the executed statement is the assembled `CREATE TABLE … AS <sql>`, so the
+                // translation runs over the FULL text here — the run()-level BoundSql carried the
+                // node SQL alone, and a prepared statement's placeholders must line up with the
+                // statement actually sent. The missing-parameter gate already ran in [run], so a
+                // name cannot fail it twice.
+                val fullBound = SqlBindTranslator.translate("CREATE TABLE $table AS ${bound.originalSql}", ctx.values)
                 ctx.staging.withConnection { connection ->
-                    connection.createStatement().use { statement ->
+                    statementFor(connection, fullBound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
-                            statement.executeUpdate("CREATE TABLE $table AS $sql")
-                            countRows(statement, table)
+                            update(statement, fullBound)
+                            // The row count runs on its OWN statement: H2 (and other drivers)
+                            // refuse Statement-level `executeQuery(String)` on a prepared
+                            // statement, so the count cannot ride the one that executed the CTAS.
+                            connection.createStatement().use { countStatement ->
+                                countStatement.queryTimeout = timeout
+                                ctx.handle.withStatement(node.id, countStatement) {
+                                    countRows(countStatement, table)
+                                }
+                            }
                         }
                     }
                 }
@@ -327,7 +346,7 @@ class NodeRunner(
     /** DML/DDL against tempdb — same timeout and cancellation reasoning as [tempdbCreateTableAs]. */
     private suspend fun tempdbWrite(
         node: ExecutableNode,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
@@ -335,13 +354,13 @@ class NodeRunner(
         val affected =
             phase(NodePhase.EXECUTE, node.id) {
                 ctx.staging.withConnection { connection ->
-                    connection.createStatement().use { statement ->
+                    statementFor(connection, bound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
                             if (node.type == NodeType.DML) {
-                                statement.executeUpdate(sql).toLong()
+                                update(statement, bound).toLong()
                             } else {
-                                executeDdl(statement, sql)
+                                executeDdl(statement, bound)
                             }
                         }
                     }
@@ -373,7 +392,7 @@ class NodeRunner(
     private suspend fun runOnDatasource(
         node: ExecutableNode,
         name: String,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult {
@@ -415,9 +434,9 @@ class NodeRunner(
             }
         return connection.use { conn ->
             when (node.type) {
-                NodeType.DQL -> datasourceQuery(node, conn, sql, ctx, startedAt, timeout, datasource.dialect)
-                NodeType.DML -> datasourceUpdate(node, conn, sql, ctx, startedAt, timeout)
-                NodeType.DDL -> datasourceDdl(node, conn, sql, ctx, startedAt, timeout)
+                NodeType.DQL -> datasourceQuery(node, conn, bound, ctx, startedAt, timeout, datasource.dialect)
+                NodeType.DML -> datasourceUpdate(node, conn, bound, ctx, startedAt, timeout)
+                NodeType.DDL -> datasourceDdl(node, conn, bound, ctx, startedAt, timeout)
                 NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
             }
         }
@@ -426,16 +445,16 @@ class NodeRunner(
     private suspend fun datasourceQuery(
         node: ExecutableNode,
         conn: Connection,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
         dialect: Dialect,
     ): NodeResult =
-        conn.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { statement ->
+        statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                val rs = phase(NodePhase.EXECUTE, node.id) { statement.executeQuery(sql) }
+                val rs = phase(NodePhase.EXECUTE, node.id) { query(statement, bound) }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
             }
@@ -548,13 +567,16 @@ class NodeRunner(
     private suspend fun datasourceUpdate(
         node: ExecutableNode,
         conn: Connection,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
     ): NodeResult =
-        conn.prepareStatement(sql).use { statement ->
+        conn.prepareStatement(bound.sql).use { statement ->
             statement.queryTimeout = timeout
+            // This path always prepared even before the round, so the statement shape is
+            // unchanged; binding is the one thing the parameter case adds (042 C1/C4).
+            if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
             ctx.handle.withStatement(node.id, statement) {
                 val affected = phase(NodePhase.EXECUTE, node.id) { statement.executeUpdate().toLong() }
                 NodeResult.of(node.id, affected, startedAt)
@@ -564,15 +586,15 @@ class NodeRunner(
     private suspend fun datasourceDdl(
         node: ExecutableNode,
         conn: Connection,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
         ctx: NodeExecutionContext,
         startedAt: Instant,
         timeout: Int,
     ): NodeResult =
-        conn.createStatement().use { statement ->
+        statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                phase(NodePhase.EXECUTE, node.id) { executeDdl(statement, sql) }
+                phase(NodePhase.EXECUTE, node.id) { executeDdl(statement, bound) }
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
@@ -580,11 +602,66 @@ class NodeRunner(
     /** DDL reports success, not rows (§6.3.3). */
     private fun executeDdl(
         statement: Statement,
-        sql: String,
+        bound: SqlBindTranslator.BoundSql,
     ): Long {
-        statement.execute(sql)
+        executeOf(statement, bound)
         return 0L
     }
+
+    // ---------------------------------------------------- bound execution helpers
+
+    /**
+     * The statement [bound] executes on [connection] (042 C1): prepared and bound when the
+     * rendered SQL uses `:name` parameters, otherwise created exactly as this class created
+     * statements before the round. Parameterless templates therefore keep their existing
+     * statement semantics byte-for-byte — including multi-statement author SQL, which a
+     * prepared statement would refuse.
+     */
+    private fun statementFor(
+        connection: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        resultSetType: Int = ResultSet.TYPE_FORWARD_ONLY,
+        resultSetConcurrency: Int = ResultSet.CONCUR_READ_ONLY,
+    ): Statement =
+        if (bound.hasBindParameters) {
+            connection.prepareStatement(bound.sql, resultSetType, resultSetConcurrency)
+                .also { SqlBindTranslator.bind(it, bound.bindValues) }
+        } else {
+            connection.createStatement(resultSetType, resultSetConcurrency)
+        }
+
+    /** `executeQuery` in the shape [bound] needs — a prepared statement already carries its SQL. */
+    private fun query(
+        statement: Statement,
+        bound: SqlBindTranslator.BoundSql,
+    ): ResultSet =
+        if (bound.hasBindParameters) {
+            (statement as PreparedStatement).executeQuery()
+        } else {
+            statement.executeQuery(bound.sql)
+        }
+
+    /** `executeUpdate` in the shape [bound] needs. */
+    private fun update(
+        statement: Statement,
+        bound: SqlBindTranslator.BoundSql,
+    ): Int =
+        if (bound.hasBindParameters) {
+            (statement as PreparedStatement).executeUpdate()
+        } else {
+            statement.executeUpdate(bound.sql)
+        }
+
+    /** `execute` in the shape [bound] needs. */
+    private fun executeOf(
+        statement: Statement,
+        bound: SqlBindTranslator.BoundSql,
+    ): Boolean =
+        if (bound.hasBindParameters) {
+            (statement as PreparedStatement).execute()
+        } else {
+            statement.execute(bound.sql)
+        }
 
     /** DQL always has a concrete output by deserialization time (§4.1). */
     private fun requireOutput(node: ExecutableNode): NodeOutput =

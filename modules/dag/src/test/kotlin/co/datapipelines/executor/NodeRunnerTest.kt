@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * `NodeRunner` against real H2 databases — one standing in for an external datasource, one the
@@ -378,6 +379,164 @@ class NodeRunnerTest {
             thrown.details["node"] shouldBe "child"
         }
 
+    // -------------------------------------------- bound `:name` parameters (042)
+
+    @Test
+    fun `a datasource DQL node binds a named parameter and returns only its row`() =
+        runBlocking<Unit> {
+            val source =
+                h2Datasource(
+                    "b1",
+                    listOf("CREATE TABLE people (id INT, name VARCHAR)", "INSERT INTO people VALUES (1, 'ada'), (2, 'grace')"),
+                )
+            val runner = runner(sql = "SELECT id FROM people WHERE name = :who", registry = FakeDatasourceRegistry(mapOf("b1" to source)))
+
+            runner.run(
+                ExecutableNode.from(Fixtures.node("q", source = "b1")),
+                context(values = mapOf("who" to "grace")),
+            ).rowsOut shouldBe 1
+        }
+
+    @Test
+    fun `a tempdb DQL cursor binds a named parameter`() =
+        runBlocking<Unit> {
+            staging.execute("""CREATE TABLE "seed" (n INT)""")
+            staging.execute("""INSERT INTO "seed" VALUES (1), (2), (3)""")
+            val store = InMemoryResultStore()
+            val runner = runner(sql = """SELECT n FROM "seed" WHERE n = :n""", resultStore = store)
+
+            val result = runner.run(ExecutableNode.from(Fixtures.node("caller")), context(values = mapOf("n" to 2)))
+
+            store.describe(result.callerResultRef.shouldNotBeNull()).shouldNotBeNull().firstPage shouldBe listOf(listOf(2))
+        }
+
+    @Test
+    fun `a tempdb CTAS node binds a named parameter into the assembled statement`() =
+        runBlocking<Unit> {
+            staging.execute("""CREATE TABLE "seed" (n INT)""")
+            staging.execute("""INSERT INTO "seed" VALUES (1), (2), (3)""")
+            val runner = runner(sql = """SELECT n FROM "seed" WHERE n = :n""")
+            val node = Fixtures.node("derive", output = NodeOutput.Tempdb("derived_b"))
+
+            runner.run(ExecutableNode.from(node), context(values = mapOf("n" to 2))).rowsOut shouldBe 1
+
+            staging.withQuery("""SELECT n FROM "derived_b" """) { rs ->
+                rs.next()
+                rs.getInt(1)
+            } shouldBe 2
+        }
+
+    @Test
+    fun `a tempdb DML node binds a named parameter`() =
+        runBlocking<Unit> {
+            staging.execute("""CREATE TABLE "acc" (v INT)""")
+            val runner = runner(sql = """INSERT INTO "acc" (v) VALUES (:v)""")
+
+            runner.run(
+                ExecutableNode.from(Fixtures.node("ins", type = NodeType.DML)),
+                context(values = mapOf("v" to 5)),
+            ).rowsOut shouldBe 1
+
+            staging.withQuery("""SELECT v FROM "acc" """) { rs ->
+                rs.next()
+                rs.getInt(1)
+            } shouldBe 5
+        }
+
+    @Test
+    fun `a datasource DML node binds a named parameter`() =
+        runBlocking<Unit> {
+            val source =
+                h2Datasource(
+                    "b2",
+                    listOf("CREATE TABLE people (id INT, name VARCHAR)", "INSERT INTO people VALUES (1, 'ada'), (2, 'grace')"),
+                )
+            val runner = runner(sql = "UPDATE people SET name = 'renamed' WHERE id = :id", registry = FakeDatasourceRegistry(mapOf("b2" to source)))
+
+            runner.run(
+                ExecutableNode.from(Fixtures.node("upd", type = NodeType.DML, source = "b2")),
+                context(values = mapOf("id" to 1)),
+            ).rowsOut shouldBe 1
+        }
+
+    @Test
+    fun `a datasource DDL node binds a named parameter instead of silently stopping`() =
+        runBlocking<Unit> {
+            val source =
+                h2Datasource(
+                    "b3",
+                    listOf("CREATE TABLE people (id INT, name VARCHAR)", "INSERT INTO people VALUES (1, 'ada'), (2, 'grace')"),
+                )
+            val registry = FakeDatasourceRegistry(mapOf("b3" to source))
+            val runner = runner(sql = "CREATE TABLE made_b AS SELECT id FROM people WHERE id = :id", registry = registry)
+
+            runner.run(
+                ExecutableNode.from(Fixtures.node("ddl", type = NodeType.DDL, source = "b3")),
+                context(values = mapOf("id" to 2)),
+            ).rowsOut shouldBe 0
+
+            DriverManager.getConnection(source.jdbcUrl, "sa", "").use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT id FROM made_b").use { rs ->
+                        rs.next()
+                        rs.getInt(1) shouldBe 2
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun `a named parameter the context does not declare fails loudly before connecting`() =
+        runBlocking<Unit> {
+            // The registry is EMPTY: reaching it would be datasource_not_found, so the
+            // `sql_parameter_missing` verdict proves the gate fired during render/translation,
+            // before any connection was leased (042 C2).
+            val runner = runner(sql = "SELECT 1 WHERE x = :ghost")
+
+            shouldThrow<NodeFailedSignal> {
+                runner.run(ExecutableNode.from(Fixtures.node("q", source = "nowhere")), context())
+            }.error.code shouldBe PipelineErrorCodes.Node.SQL_PARAMETER_MISSING
+        }
+
+    @Test
+    fun `bind-parameter SQL runs on a prepared statement registered with the handle and plain SQL does not`() =
+        runBlocking<Unit> {
+            val source = h2Datasource("b4", listOf("CREATE TABLE t (n INT)", "INSERT INTO t VALUES (1), (2)"))
+            val registry = FakeDatasourceRegistry(mapOf("b4" to source))
+            val boundRunner = runner(sql = "SELECT n FROM t WHERE n = :n", registry = registry)
+            val plainRunner = runner(sql = "SELECT n FROM t", registry = registry)
+
+            val boundHandle = RecordingCancellationHandle(handle)
+            boundRunner.run(
+                ExecutableNode.from(Fixtures.node("qb", source = "b4")),
+                context(values = mapOf("n" to 1), handle = boundHandle),
+            )
+            boundHandle.statementTypes.map { it.simpleName } shouldBe listOf("JdbcPreparedStatement")
+
+            val plainHandle = RecordingCancellationHandle(handle)
+            plainRunner.run(
+                ExecutableNode.from(Fixtures.node("qp", source = "b4")),
+                context(handle = plainHandle),
+            )
+            plainHandle.statementTypes.map { it.simpleName } shouldBe listOf("JdbcStatement")
+        }
+
+    /** Records the class of every statement the runner registers — the 042 C3 assertion surface. */
+    private class RecordingCancellationHandle(
+        private val delegate: CancellationHandle,
+    ) : CancellationHandle by delegate {
+        val statementTypes = CopyOnWriteArrayList<Class<*>>()
+
+        override suspend fun <T> withStatement(
+            nodeId: String,
+            stmt: java.sql.Statement,
+            body: suspend () -> T,
+        ): T {
+            statementTypes += stmt.javaClass
+            return delegate.withStatement(nodeId, stmt, body)
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** A runner over [engine] with no datasources — for the paths that fail before connecting. */
@@ -399,12 +558,14 @@ class NodeRunnerTest {
     private fun context(
         renderBudget: Long = ExecutorConfig().renderOutputBudgetChars(),
         directSink: DirectResultSink? = null,
+        values: Map<String, Any?> = emptyMap(),
+        handle: CancellationHandle = this.handle,
     ): NodeExecutionContext =
         NodeExecutionContext(
             executionId = executionId,
             staging = staging,
             handle = handle,
-            values = emptyMap(),
+            values = values,
             warnings = warnings,
             resultTtlSeconds = 300,
             renderBudgetChars = renderBudget,
