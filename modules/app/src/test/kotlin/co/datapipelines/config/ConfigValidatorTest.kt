@@ -225,6 +225,41 @@ class ConfigValidatorTest {
         report.violations.single().shouldContain("free-for-all")
     }
 
+    /**
+     * §3.17 says `open-join` is a `self-serve` knob; `closed` + `open-join: true` would
+     * re-open the membership surface closed mode exists to keep admin-only (the self-join
+     * branch gates on `open-join` alone). Refused on exactly that pair; the other three
+     * combinations of a set `open-join`/`closed` are clean.
+     */
+    @Test
+    fun `open-join true under closed provisioning is refused, and the other three combinations are clean`() {
+        val refused =
+            ConfigValidator.validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "closed"))
+
+        refused.violations.shouldHaveSize(1)
+        refused.violations.single().shouldContain("datapipelines.workspaces.open-join")
+        refused.violations.single().shouldContain("datapipelines.workspaces.provisioning-mode")
+        refused.violations.single().shouldContain("closed")
+
+        ConfigValidator
+            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "self-serve"))
+            .violations
+            .shouldBeEmpty()
+        ConfigValidator
+            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = "auto-per-user"))
+            .violations
+            .shouldBeEmpty()
+        ConfigValidator
+            .validate(validSnapshot().copy(workspacesOpenJoin = false, workspacesProvisioningMode = "closed"))
+            .violations
+            .shouldBeEmpty()
+        // An unset mode is the shipped default (self-serve) — open-join stays meaningful.
+        ConfigValidator
+            .validate(validSnapshot().copy(workspacesOpenJoin = true, workspacesProvisioningMode = null))
+            .violations
+            .shouldBeEmpty()
+    }
+
     @Test
     fun `passwordless redis off loopback warns but does not refuse`() {
         val report = ConfigValidator.validate(validSnapshot().copy(redisPassword = ""))

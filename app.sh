@@ -237,6 +237,25 @@ build() {
   docker build -t "$IMAGE_TAG" .
 }
 
+# Whether the app container is still RUNNING (per compose ps) — the discriminator for
+# a `up --wait` timeout. T75: the image HEALTHCHECK gives the app 40s start period + 3
+# 30s retries to answer /ready, but a cold JVM start can outrun that on a loaded machine
+# (243s measured in the 2026-09-02 rehearsal) — `up --wait` then exits 1 while the app
+# is merely still booting. A container that is running is a STARTING app; anything else
+# (exited, restarting, absent) is a real failure.
+app_container_running() {
+  "${COMPOSE[@]}" ps --format json datapipelines 2>/dev/null | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    rows = json.loads(raw)
+    rows = [rows] if isinstance(rows, dict) else rows
+except json.JSONDecodeError:
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+sys.exit(0 if any(r.get("State") == "running" for r in rows) else 1)
+'
+}
+
 start() {
   local do_build=1
   [[ ${1:-} == --no-build ]] && do_build=0
@@ -254,6 +273,15 @@ start() {
   fi
   echo "==> starting the stack (app healthcheck probes /ready; first boot runs migrations)"
   if ! "${COMPOSE[@]}" up -d --wait; then
+    # T75: a wait that is always long enough does not exist. When the only failure is
+    # the health probe timing out on a still-booting JVM, say so and exit 0 — a new
+    # user on a slow laptop must not be told a working app failed. ./app.sh --status
+    # flips to UP when Tomcat answers. Only a container that is NOT running keeps the
+    # hard failure, with the logs to read.
+    if app_container_running; then
+      echo "==> stack is still starting (a cold first boot can take minutes) — check ./app.sh --status"
+      exit 0
+    fi
     echo "---- app container, last 40 log lines ----"
     "${COMPOSE[@]}" logs --tail 40 datapipelines || true
     die "stack did not become healthy — full logs: ./app.sh --logs"

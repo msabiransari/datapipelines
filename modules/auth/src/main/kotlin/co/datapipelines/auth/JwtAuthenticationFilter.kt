@@ -31,6 +31,7 @@ import java.util.UUID
 class JwtAuthenticationFilter(
     private val jwtService: JwtService,
     private val userService: UserService,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(JwtAuthenticationFilter::class.java)
 
@@ -110,11 +111,11 @@ class JwtAuthenticationFilter(
         response.addCookie(clearedSessionCookie())
         request.setAttribute(AuthAttributes.AUTH_ERROR, cause)
         log.info(
-            "dp_session rejected reason={} user_id={} path={} remote={} cause={}",
+            "dp_session rejected reason={} user_id={} path={} client={} cause={}",
             reason,
             userId,
             request.requestURI,
-            request.remoteAddr,
+            clientAddressResolver.clientAddressOf(request),
             cause.javaClass.simpleName,
         )
     }

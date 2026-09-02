@@ -92,6 +92,7 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.auth.api-keys.cache-ttl-seconds` | `60` | Cache TTL for validated API keys and user `is_active` checks ([Auth §11.4](auth.md#114-api-key-validation-cache)) |
 | `datapipelines.auth.api-keys.default-scopes` | `read` | Default scope for new API keys |
 | `datapipelines.auth.rate-limit.login-per-minute` | `10` | Per-IP login attempts per minute (OIDC and local) |
+| `datapipelines.auth.trusted-proxies` | (empty) | CIDRs of proxies whose `X-Forwarded-For` names the real client — the login limiter and every audit `source_ip` resolve through it ([Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production)). Empty (the default) = the header is ignored entirely and the direct peer is the client — a bare deployment behaves exactly as before. Each entry must parse as a CIDR (a bare IP is a host CIDR, e.g. `10.0.0.5` = `10.0.0.5/32`); anything else refuses startup. Resolution is spoof-safe: an untrusted peer cannot forge a client by setting the header |
 | `datapipelines.auth.bootstrap-admin-email` | (none) | Bootstrap admin: when a user with exactly this email is provisioned via OIDC first login, `is_admin` is set true (idempotent, audit-logged as `auth.user.admin_granted` with actor `bootstrap`). The ONLY way a fresh deployment gets its first admin — "first login wins" is explicitly rejected ([Auth §4.4](auth.md#44-bootstrap-admin)) |
 | `datapipelines.auth.local.enabled` | `false` | Optional local username/password accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)) — a second sign-in method for deployments without an IdP. Disabled = the deployment behaves exactly as OIDC-only |
 | `datapipelines.auth.local.bootstrap-password-hash` | (none) | Initial credential for the FIRST ADMIN ONLY (the `bootstrap-admin-email` account), as a pre-computed Argon2id hash — the preferred form (produce one with the `hashPassword` Gradle task, [Deployment §5](deployment.md#5-configuration)). Seeding is create-if-absent and idempotent, forces a first-login change, and never applies to ordinary users — passwords are not a config medium |
@@ -209,7 +210,7 @@ Workspace provisioning mode (design 2026-08-16-workspaces §7, [auth.md §4.2/§
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.workspaces.provisioning-mode` | `self-serve` | `auto-per-user` \| `self-serve` \| `closed` |
-| `datapipelines.workspaces.open-join` | `false` | `self-serve` only: `true` lists all workspaces as joinable by any authenticated user; `false` = members are added by a workspace owner |
+| `datapipelines.workspaces.open-join` | `false` | `self-serve` only: `true` lists all workspaces as joinable by any authenticated user; `false` = members are added by a workspace owner. `open-join: true` under `closed` provisioning is refused at startup (§7) — it would re-open the membership surface `closed` exists to keep admin-only |
 | `datapipelines.workspaces.member-datasources-enabled` | `true` | May non-admin members create workspace-bound datasources (datasource visibility gate) |
 
 ### 3.18 Bootstrap
@@ -328,6 +329,7 @@ datapipelines:
       default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
     rate-limit:
       login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
+    trusted-proxies: ${DATAPIPELINES_AUTH_TRUSTED_PROXIES:}
     local:
       enabled: ${DATAPIPELINES_AUTH_LOCAL_ENABLED:false}
       bootstrap-password-hash: ${DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH:}
@@ -469,6 +471,8 @@ On startup, the app validates:
 - The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
+- `datapipelines.workspaces.open-join: true` together with `closed` provisioning is refused, naming both keys (§3.17) — open-join is a `self-serve` knob, and under `closed` it would let any authenticated user self-join any workspace, the exact surface `closed` exists to close.
+- Every `datapipelines.auth.trusted-proxies` entry parses as a CIDR (a bare IP is a host CIDR); anything else refuses startup at the auth module's resolver construction — a typo'd range must not silently widen proxy trust.
 - `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
 - `datapipelines.bootstrap.examples-file` is not set while `datapipelines.workspaces.provisioning-mode` is anything but `auto-per-user` (§3.18) — the violation names both keys. Only `auto-per-user` provisions the personal workspace the examples are seeded into, so any other mode (the shipped default included) leaves the configured file permanently unseeded. A mode that is misspelled is reported by the mode check alone, not twice.
 - No OIDC provider is **named** `bootstrap` or `local`. Those are the `users.provider` values the system writes for identities it creates itself (§6.1 bootstrap actor, §5A local accounts), and a provider's configured name is written to that column verbatim — an external provider under either name would be indistinguishable from them. The reservation is case-insensitive and applies to an entry with a blank `client-id` too.
@@ -486,6 +490,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.9 | 051 auth/config sweep | Added §3.4 `datapipelines.auth.trusted-proxies` (CIDR list, default empty = header ignored; the login limiter and every auth `source_ip` resolve the client through it — R8/T46, deployment.md §6.2) with the §5 template line and two §7 rules (each entry must parse as a CIDR or startup is refused; enforced at the auth module's resolver construction). §3.17: `open-join: true` + `closed` provisioning now refused at startup, naming both keys (T45 — the self-join branch gates on `open-join` alone, so the pair would re-open the membership surface `closed` exists to keep admin-only); §7 gains the rule |
 | 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |
 | 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-12 | v1.2 | dev infra ports | §6 dev profile now targets host ports 5434 (Postgres) / 6381 (Redis) instead of the colliding defaults 5432/6379; added the dev-host-ports note. Operator-facing keys and production defaults unchanged. |

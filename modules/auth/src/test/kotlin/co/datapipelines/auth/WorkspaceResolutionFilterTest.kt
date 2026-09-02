@@ -24,7 +24,14 @@ class WorkspaceResolutionFilterTest {
     private val workspaceService = mockk<WorkspaceService>()
     private val lastUsed = mockk<LastUsedWorkspaceStore>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
-    private val filter = WorkspaceResolutionFilter(workspaceService, lastUsed, AuthErrorWriter(ObjectMapper()), auditLogger)
+    private val filter =
+        WorkspaceResolutionFilter(
+            workspaceService,
+            lastUsed,
+            AuthErrorWriter(ObjectMapper()),
+            auditLogger,
+            ClientAddressResolver(emptyList()),
+        )
 
     private val userId = UUID.randomUUID()
     private val acme = WorkspaceContext(UUID.randomUUID(), "acme")

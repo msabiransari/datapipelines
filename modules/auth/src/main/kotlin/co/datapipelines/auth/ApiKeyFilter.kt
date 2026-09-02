@@ -39,6 +39,7 @@ class ApiKeyFilter(
     private val apiKeyService: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,
     private val auditLogger: AuditLogger,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(ApiKeyFilter::class.java)
 
@@ -72,16 +73,17 @@ class ApiKeyFilter(
             }
         } catch (e: AuthException) {
             request.setAttribute(AuthAttributes.AUTH_ERROR, e)
+            val client = clientAddressResolver.clientAddressOf(request)
             if (ApiKeyCredential.hasValidShape(credential)) {
                 auditLogger.log(
                     event = "auth.api_key.rejected",
-                    sourceIp = request.remoteAddr,
+                    sourceIp = client,
                     details = mapOf("code" to e.code),
                 )
-                log.info("DP-API-Key rejected code={} path={} remote={}", e.code, request.requestURI, request.remoteAddr)
+                log.info("DP-API-Key rejected code={} path={} client={}", e.code, request.requestURI, client)
             } else {
                 // Shape-rejected: not an `auth.api_key.rejected` event, and not a DB write.
-                log.debug("Malformed DP-API-Key discarded path={} remote={}", request.requestURI, request.remoteAddr)
+                log.debug("Malformed DP-API-Key discarded path={} client={}", request.requestURI, client)
             }
         }
     }
@@ -92,7 +94,7 @@ class ApiKeyFilter(
     ) {
         if (keyId == null) return
         try {
-            apiKeyRepository.touchUsage(keyId, request.remoteAddr, request.getHeader("User-Agent"))
+            apiKeyRepository.touchUsage(keyId, clientAddressResolver.clientAddressOf(request), request.getHeader("User-Agent"))
         } catch (e: DataAccessException) {
             log.warn("api_keys usage stamp failed key_id={} cause={}", keyId, e.javaClass.simpleName)
         }

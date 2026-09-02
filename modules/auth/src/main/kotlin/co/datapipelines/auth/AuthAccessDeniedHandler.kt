@@ -30,6 +30,7 @@ import org.springframework.security.web.csrf.MissingCsrfTokenException
  */
 class AuthAccessDeniedHandler(
     private val errorWriter: AuthErrorWriter,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : AccessDeniedHandler {
     private val log = LoggerFactory.getLogger(AuthAccessDeniedHandler::class.java)
 
@@ -41,20 +42,20 @@ class AuthAccessDeniedHandler(
         if (accessDeniedException is CsrfException) {
             val reason = csrfReason(request, accessDeniedException)
             log.info(
-                "CSRF rejected reason={} method={} path={} remote={}",
+                "CSRF rejected reason={} method={} path={} client={}",
                 reason,
                 request.method,
                 request.requestURI,
-                request.remoteAddr,
+                clientAddressResolver.clientAddressOf(request),
             )
             errorWriter.write(request, response, CsrfInvalidException(reason))
             return
         }
         log.info(
-            "Authorization denied method={} path={} remote={} cause={}",
+            "Authorization denied method={} path={} client={} cause={}",
             request.method,
             request.requestURI,
-            request.remoteAddr,
+            clientAddressResolver.clientAddressOf(request),
             accessDeniedException.javaClass.simpleName,
         )
         errorWriter.write(request, response, AccessDeniedWithoutScopeException())

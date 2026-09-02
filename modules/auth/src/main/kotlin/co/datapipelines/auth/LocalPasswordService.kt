@@ -206,6 +206,10 @@ class LocalPasswordService(
     ): Boolean {
         val changed = userRepository.clearLockout(userId)
         if (changed) {
+            // `users.locked_until` rides the cached snapshot (the admin table's lock
+            // indicator) — evict it, or a just-unlocked user renders locked for up to
+            // the 60s TTL. Same rule as every other mutation above (T48a).
+            authCache.invalidateUser(userId)
             auditLogger.log("auth.user.unlocked", userId = userId, details = mapOf("actor" to actorId.toString()))
         }
         return changed

@@ -34,7 +34,7 @@ class OidcSuccessHandlerTest {
         }
 
     private fun handler(props: AuthProperties = AuthProperties()) =
-        OidcSuccessHandler(userService, jwtService, auditLogger, props, workspaceService)
+        OidcSuccessHandler(userService, jwtService, auditLogger, props, workspaceService, ClientAddressResolver(emptyList()))
 
     private fun user(
         email: String = "alice@company.com",

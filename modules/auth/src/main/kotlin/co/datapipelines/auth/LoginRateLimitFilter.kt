@@ -12,6 +12,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * Per-IP rate limit on the login surface (AUTH-SEC-5), honoring
  * `datapipelines.auth.rate-limit.login-per-minute` ([Configuration §3.4], default 10).
  *
+ * The key is the CLIENT address from [ClientAddressResolver], not the raw peer: behind the
+ * documented load balancer (deployment.md §6.2) every peer is the LB, and keying on it
+ * makes the per-IP budget one deployment-wide bucket (R8/T46). With
+ * `datapipelines.auth.trusted-proxies` empty — the shipped default — the resolver returns
+ * the peer and the header is ignored, so a bare deployment behaves exactly as before.
+ *
  * Only the `/oauth2` and `/login` prefixes are metered: these are the sole unauthenticated,
  * state-creating endpoints, and each one costs a discovery-backed redirect or a
  * server-side token exchange with the IdP. Everything else is rate-limited per *user*
@@ -30,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * brute-force damper, not a distributed quota.
  */
 class LoginRateLimitFilter(
+    private val clientAddressResolver: ClientAddressResolver,
     private val authProperties: AuthProperties,
     private val errorWriter: AuthErrorWriter,
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -51,8 +58,9 @@ class LoginRateLimitFilter(
         filterChain: FilterChain,
     ) {
         val limit = authProperties.rateLimit.loginPerMinute
-        if (limit > 0 && exceeds(request.remoteAddr.orEmpty(), limit)) {
-            log.warn("Login rate limit hit remote={} path={} limit={}/min", request.remoteAddr, request.requestURI, limit)
+        val client = clientAddressResolver.clientAddressOf(request)
+        if (limit > 0 && exceeds(client, limit)) {
+            log.warn("Login rate limit hit client={} path={} limit={}/min", client, request.requestURI, limit)
             response.setHeader("Retry-After", WINDOW_SECONDS.toString())
             errorWriter.write(request, response, RateLimitExceededException(limit))
             return

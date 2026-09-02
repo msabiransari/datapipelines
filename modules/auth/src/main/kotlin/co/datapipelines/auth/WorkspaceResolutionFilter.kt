@@ -37,6 +37,7 @@ class WorkspaceResolutionFilter(
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
     private val authErrorWriter: AuthErrorWriter,
     private val auditLogger: AuditLogger,
+    private val clientAddressResolver: ClientAddressResolver,
 ) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(WorkspaceResolutionFilter::class.java)
 
@@ -56,13 +57,14 @@ class WorkspaceResolutionFilter(
         when (principal.authMethod) {
             AuthMethod.API_KEY -> {
                 if (switch != null) {
+                    val client = clientAddressResolver.clientAddressOf(request)
                     auditLogger.log(
                         event = "auth.workspace.header_rejected",
                         userId = principal.userId,
                         keyId = principal.keyId,
-                        sourceIp = request.remoteAddr,
+                        sourceIp = client,
                     )
-                    log.info("DP-Workspace rejected on API-key request path={} remote={}", request.requestURI, request.remoteAddr)
+                    log.info("DP-Workspace rejected on API-key request path={} client={}", request.requestURI, client)
                     authErrorWriter.write(request, response, WorkspaceHeaderForbiddenException())
                     return
                 }
@@ -77,10 +79,10 @@ class WorkspaceResolutionFilter(
                                 workspaceService.resolveSwitch(principal, switch)
                             } catch (e: WorkspaceMembershipRequiredException) {
                                 log.info(
-                                    "DP-Workspace switch refused user_id={} path={} remote={}",
+                                    "DP-Workspace switch refused user_id={} path={} client={}",
                                     principal.userId,
                                     request.requestURI,
-                                    request.remoteAddr,
+                                    clientAddressResolver.clientAddressOf(request),
                                 )
                                 authErrorWriter.write(request, response, e)
                                 return

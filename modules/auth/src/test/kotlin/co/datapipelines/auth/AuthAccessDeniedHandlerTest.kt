@@ -21,7 +21,7 @@ import org.springframework.security.access.AccessDeniedException
  */
 class AuthAccessDeniedHandlerTest {
     private val mapper = ObjectMapper()
-    private val handler = AuthAccessDeniedHandler(AuthErrorWriter(mapper))
+    private val handler = AuthAccessDeniedHandler(AuthErrorWriter(mapper), ClientAddressResolver(emptyList()))
 
     private fun deny(): Map<*, *> {
         val request = MockHttpServletRequest("GET", "/api/v1/pipelines")

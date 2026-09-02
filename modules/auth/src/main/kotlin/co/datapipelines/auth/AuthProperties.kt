@@ -35,6 +35,16 @@ data class AuthProperties(
     val apiKeys: ApiKeys = ApiKeys(),
     val rateLimit: RateLimit = RateLimit(),
     val local: Local = Local(),
+    /**
+     * `datapipelines.auth.trusted-proxies` (Configuration §3.4, deployment.md §6.2): CIDRs of
+     * proxies whose `X-Forwarded-For` may be trusted to name the real client. **Shipped
+     * default: empty** — the header is then ignored entirely and every client-address key
+     * (the login limiter, audit `source_ip`) uses the direct peer, exactly as before the
+     * key existed. Each entry must parse as a CIDR (a bare IP is a host CIDR); anything
+     * else refuses STARTUP at [ClientAddressResolver] construction — a typo'd range must
+     * not silently widen proxy trust.
+     */
+    val trustedProxies: List<String> = emptyList(),
     /** Configuration §3.4 / auth.md §4.4. `null` = no bootstrap admin. */
     val bootstrapAdminEmail: String? = null,
 ) {

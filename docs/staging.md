@@ -570,9 +570,11 @@ interface Staging : AutoCloseable {
 
     suspend fun stage(resultSet: ResultSet, tableName: String, sourceDialect: Dialect): StageResult
     // The already-decoded twin of stage(): canonical columns + rows (composition's direct
-    // delivery — a parent PIPELINE node's child rows). Same duplicate-name guard, same
-    // partial-table rollback, same post-write budget check; warnings always empty — the
-    // source-dialect mapping already happened in the child's executor.
+    // delivery — a parent PIPELINE node's child rows). Same column-label validation
+    // (§4.5: a malformed or case-insensitively duplicated label fails the node — labels
+    // are never trusted, never sanitised), same partial-table rollback, same post-write
+    // budget check; warnings always empty — the source-dialect mapping already happened
+    // in the child's executor.
     suspend fun stageRows(tableName: String, columns: List<ColumnSchema>, rows: Sequence<List<Any?>>): StageResult
     // Runs block against the cursor with the serialization lock held for the WHOLE consumption
     // (§3.3/§9.2). The cursor is never handed out to be read after the lock is released, so a
@@ -693,6 +695,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.12 | 051 auth/config sweep | §10’s `stageRows` note now names the column-label validation (T20): the same §4.5 refusal `stage()` applies — a malformed or case-insensitively duplicated label fails the node; labels are never trusted, never sanitised. (Wording only — `StagingIdentifiers.validateColumnNames` already ran on this path, per its @throws.) |
 | 2026-08-05 | v1.0 | initial draft | Initial staging spec: per-execution H2 lifecycle, table naming, type mapping, streaming, single-connection model, engine-agnostic interface |
 | 2026-08-05 | v1.1 | propagation | Renamed `__staging__` → `tempdb` throughout to match v1.1 Pipeline Contract. Updated reserved-identifier namespace reference. |
 | 2026-08-07 | v1.2 | spec review | Per [SPEC-REVIEW-2026-08 §2.7](SPEC-REVIEW-2026-08.md#27-stagingmd) (D6, D5, D8, D1, D9): removed `DB_CLOSE_DELAY=-1` and rewrote §3.1/§3.4/§3.5 lifecycle (explicit `DROP ALL OBJECTS` + close in `finally`, no GC reliance); explicit `Mutex` serialization (§9); new identifier-safety rules §4.5 (`invalid_column_name`, `table_already_exists`); `StageResult.columns: List<ColumnSchema>`; `StagingFactory.create(executionId, engine)` aligned with dag-executor + per-pipeline `max_memory_mb` precedence; `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` with real helper signatures (§5.3); memory accounting switched to polled `MEMORY_USED()` (§8.2); §7 config replaced by references to configuration.md §3.3 and error codes to pipeline-contract §13.5; §4.1 link fixed to pipeline-contract §10; §6.1 claim-check language replaced by the uniform result-delivery model; terminal-node language → caller node. |
