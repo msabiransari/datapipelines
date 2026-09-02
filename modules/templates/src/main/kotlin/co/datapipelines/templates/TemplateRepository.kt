@@ -10,6 +10,23 @@ import java.sql.ResultSet
 import java.time.OffsetDateTime
 import java.util.UUID
 
+/**
+ * One **virtual folder** of the template tree (template-hierarchy-design §3.1, §9.2).
+ *
+ * A folder is a name prefix and nothing else: there is no table, no column, no id, and no
+ * row anywhere that corresponds to one. It is derived, per request, from the names of the
+ * live templates beneath it — which is why [templateCount] is always ≥ 1 and an *empty*
+ * folder is unrepresentable rather than merely unrendered.
+ *
+ * [path] is the full prefix (`acme/finance`) — the value the next level's prefix query
+ * takes; [segment] is its last element (`finance`), which is what the tree labels.
+ */
+data class TemplateFolder(
+    val path: String,
+    val segment: String,
+    val templateCount: Int,
+)
+
 /** Version metadata, without the body — the `GET /templates/{id}/versions` projection (§9). */
 data class TemplateVersionSummary(
     val id: String,
@@ -202,6 +219,148 @@ class TemplateRepository(
                 ),
                 Int::class.java,
             ),
+        )
+
+    /**
+     * The **direct sub-folders** of [prefix] — one tree level, never a subtree
+     * (template-hierarchy-design §8, §9.2).
+     *
+     * A folder is a name prefix (§3.1), so this is a `GROUP BY` over the first path segment
+     * that follows `prefix/`, restricted to names that have *something* after it. A name with
+     * nothing after that segment is a template, not a folder, and comes back from
+     * [listChildTemplates] instead; `a/b` and `a/b/c` coexisting therefore yield both a leaf
+     * `b` and a folder `b` at the same level, which is exactly what §4.3 describes.
+     *
+     * [prefix] `null` (or empty) is the tree's **root** level: the first segment of every
+     * multi-segment name. Flat legacy names have no first-segment-plus-remainder, so they are
+     * absent here and present as root leaves — §4.5 forbids renaming them into folders.
+     *
+     * The count is over LIVE templates matching the same [dialect]/[type] filters as the
+     * level's leaves, so a folder whose entire subtree is filtered out does not come back at
+     * all: an empty folder is unrepresentable, not merely unrendered (§9.1).
+     *
+     * **Index use.** `t.workspace_id = :workspaceId` is the leading column of
+     * `uq_templates_workspace_name (workspace_id, name)`, so this is a bounded index range
+     * scan over one workspace, not a full table scan — the whole point of §8's prefix form
+     * over a `LIKE '%…%'` search. (The `name LIKE 'prefix/%'` predicate narrows further; on a
+     * non-`C` database collation Postgres applies it as a filter rather than as a second
+     * index bound, which is why the workspace equality carries the bound.)
+     */
+    fun listChildFolders(
+        workspaceId: UUID,
+        prefix: String? = null,
+        dialect: Dialect? = null,
+        type: TemplateType? = null,
+        limit: Int = MAX_PAGE_LIMIT,
+    ): List<TemplateFolder> =
+        jdbc.query(
+            """
+            SELECT split_part(substring(t.name FROM CAST(:cutFrom AS INT)), '/', 1) AS segment,
+                   COUNT(*) AS template_count
+              FROM templates t
+              JOIN template_versions v ON v.template_id = t.id
+            $TREE_WHERE
+              AND position('/' IN substring(t.name FROM CAST(:cutFrom AS INT))) > 0
+             GROUP BY 1
+             ORDER BY 1
+             LIMIT :limit
+            """.trimIndent(),
+            treeParams(workspaceId, prefix, dialect, type) + mapOf("limit" to limit.coerceIn(1, MAX_PAGE_LIMIT + 1)),
+        ) { rs, _ ->
+            val segment = rs.getString("segment")
+            TemplateFolder(
+                path = if (prefix.isNullOrEmpty()) segment else "$prefix/$segment",
+                segment = segment,
+                templateCount = rs.getInt("template_count"),
+            )
+        }
+
+    /**
+     * The **direct template children** of [prefix] — the leaves of one tree level, at their
+     * current version, `name`-ordered so paging is stable (§8, §9.2).
+     *
+     * "Direct" is the whole contract: a name whose remainder after `prefix/` still contains a
+     * `/` belongs to a sub-folder and is NOT returned here. With [prefix] `null` the level is
+     * the root and the leaves are the flat, single-segment names — every template that exists
+     * today (§4.1: single-segment names are valid paths that sit at the root).
+     *
+     * [q] is deliberately absent: browsing and searching are different presentations (§9.2),
+     * and search is a flat list of full paths served by [list], not a pruned tree.
+     */
+    fun listChildTemplates(
+        workspaceId: UUID,
+        prefix: String? = null,
+        dialect: Dialect? = null,
+        type: TemplateType? = null,
+        offset: Int = 0,
+        limit: Int = DEFAULT_PAGE_LIMIT,
+    ): List<Template> =
+        jdbc.query(
+            """
+            $SELECT_JOINED
+            $TREE_WHERE
+              AND position('/' IN substring(t.name FROM CAST(:cutFrom AS INT))) = 0
+             ORDER BY t.name
+             LIMIT :limit OFFSET :offset
+            """.trimIndent(),
+            treeParams(workspaceId, prefix, dialect, type) +
+                mapOf(
+                    "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT + 1),
+                    "offset" to maxOf(0, offset),
+                ),
+            MAPPER,
+        )
+
+    /**
+     * The truthful total of one level's [listChildTemplates] page — the same predicate, no
+     * paging, so the level and its pager cannot drift apart (the 034 E3 discipline [count]
+     * follows for the flat list).
+     */
+    fun countChildTemplates(
+        workspaceId: UUID,
+        prefix: String? = null,
+        dialect: Dialect? = null,
+        type: TemplateType? = null,
+    ): Int =
+        checkNotNull(
+            jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM templates t
+                  JOIN template_versions v ON v.template_id = t.id
+                $TREE_WHERE
+                  AND position('/' IN substring(t.name FROM CAST(:cutFrom AS INT))) = 0
+                """.trimIndent(),
+                treeParams(workspaceId, prefix, dialect, type),
+                Int::class.java,
+            ),
+        )
+
+    /**
+     * The bind values every tree query shares.
+     *
+     * `namePattern` is the prefix scope — `acme/finance/%` for a folder, `%` for the root
+     * (where every name is in scope by definition). The prefix's own LIKE metacharacters are
+     * escaped ([escapeLike]) exactly as [list] escapes `q`, so a folder literally named
+     * `100%_off` scopes to itself instead of to everything.
+     *
+     * `cutFrom` is the 1-based offset at which a name's remainder *below* the prefix begins:
+     * `prefix.length + 2` skips the prefix and its `/`, and `1` at the root means the whole
+     * name. Both tree queries then classify a row with one expression — a remainder that
+     * still contains `/` is a folder, one that does not is a leaf.
+     */
+    private fun treeParams(
+        workspaceId: UUID,
+        prefix: String?,
+        dialect: Dialect?,
+        type: TemplateType?,
+    ): Map<String, Any?> =
+        mapOf(
+            "workspaceId" to workspaceId,
+            "namePattern" to if (prefix.isNullOrEmpty()) "%" else "${escapeLike(prefix)}/%",
+            "cutFrom" to if (prefix.isNullOrEmpty()) 1 else prefix.length + 2,
+            "dialect" to dialect?.wire,
+            "type" to type?.wire,
         )
 
     /** Version metadata, newest first (§9 list-versions). */
@@ -720,6 +879,26 @@ class TemplateRepository(
                   )
             """.trimIndent()
 
+        /**
+         * The live-at-current-version predicate of ONE tree level, shared by
+         * [listChildFolders], [listChildTemplates] and [countChildTemplates] so a level, its
+         * folders and its total can never disagree.
+         *
+         * It is [LIST_WHERE] minus the `q` clause (browse and search are different
+         * presentations, §9.2) plus the prefix scope. Every optional filter is CAST in the
+         * SQL for the same reason as [LIST_WHERE]: a bare `? IS NULL` gives Postgres no type
+         * to infer and the statement will not even prepare.
+         */
+        private val TREE_WHERE =
+            """
+            WHERE t.is_deleted = FALSE
+              AND t.workspace_id = :workspaceId
+              AND v.version = t.current_version
+              AND t.name LIKE CAST(:namePattern AS TEXT) ESCAPE '\'
+              AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
+              AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
+            """.trimIndent()
+
         private const val SELECT_VERSION =
             "SELECT t.name AS template_id, v.version, v.engine, v.type, v.dialect, v.is_library, " +
                 "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by " +
@@ -733,9 +912,17 @@ class TemplateRepository(
          * one V6's backfill used, built from the write's own parameters so the hash can never
          * disagree with the row being stored. `jsonb_build_object` normalizes key order, so
          * parameter order is irrelevant to the result.
+         *
+         * `dialect` is CAST for the reason every optional filter in this file is: since 046 it
+         * is **nullable** (null exactly when `type = 'html'`, §5.1's `chk_type_dialect`), and a
+         * bare parameter in `jsonb_build_object` gives Postgres no type to infer — the whole
+         * statement then fails to prepare with `could not determine data type of parameter`,
+         * so creating an html template was impossible on every write path this expression
+         * serves. The cast does not change the hash: a text parameter and a `CAST(… AS TEXT)`
+         * parameter both build a JSON string, and both build JSON null from null.
          */
         private const val TEMPLATE_HASH_EXPR =
-            "encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', :dialect," +
+            "encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', CAST(:dialect AS TEXT)," +
                 " 'is_library', :isLibrary, 'imports', CAST(:importsJson AS jsonb), 'body', :body)" +
                 "::text, 'UTF8')), 'hex')"
 

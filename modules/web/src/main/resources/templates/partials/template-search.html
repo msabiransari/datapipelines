@@ -1,0 +1,66 @@
+<!-- Search results: a FLAT list of full paths (template-hierarchy-design §9.2, decided).
+
+     Not a tree pruned to matching leaves. Pruning requires walking the ancestors of every
+     match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list
+     of full paths is what someone searching `finance/agg` actually wants to see. Clearing `q`
+     returns to the tree — partials/templates dispatches on exactly that.
+
+     The ROOT carries id="template-list-wrapper", the same stable swap target the tree's root
+     level carries, so the filter controls and the pager address one id in both presentations
+     (ui-screens.md §4.5). The `oob` flag is set ONLY by the create-success path. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="template-list-wrapper"
+     th:attr="hx-swap-oob=${oob}">
+  <th:block th:if="${#lists.isEmpty(templates)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No templates match your search</p>
+      <div class="ds-empty-actions">
+        <button class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
+      </div>
+    </div>
+  </th:block>
+
+  <th:block th:unless="${#lists.isEmpty(templates)}">
+    <table class="ds-table">
+      <thead>
+        <tr>
+          <th>Path</th>
+          <th>Display Name</th>
+          <th>Type</th>
+          <th>Dialect</th>
+          <th>Description</th>
+          <th class="num">Version</th>
+          <th class="num">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="t : ${templates}"
+            style="cursor: pointer;"
+            th:attr="onclick='location.href=\'' + @{/templates/editor(name=${t.id})} + '\''">
+          <td>
+            <!-- The FULL path, and it rides on `title` too — a deep path in a narrow column
+                 truncates, and the truncated text must never be the only copy (§9.4). -->
+            <span class="tpl-path" th:text="${t.id}" th:title="${t.id}"></span>
+            <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
+                  th:text="'draft v' + ${drafts[t.id].version} + ' pending release'"
+                  title="A draft exists; release it from the editor to publish."></span>
+          </td>
+          <td th:text="${t.displayName}"></td>
+          <td><span class="ds-badge ds-badge-default" th:text="${t.type.wire}"></span></td>
+          <td>
+            <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}"></span>
+            <span th:unless="${t.dialect != null}" style="color:var(--text-muted)">—</span>
+          </td>
+          <td th:text="${t.description}"></td>
+          <td class="num" th:text="${'v' + t.version}"></td>
+          <td class="num" th:text="${#temporals.format(t.createdAt, 'yyyy-MM-dd HH:mm')}"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <th:block th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
+                       nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
+      <div th:replace="~{partials/pager :: pager('#template-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
+    </th:block>
+  </th:block>
+</div>

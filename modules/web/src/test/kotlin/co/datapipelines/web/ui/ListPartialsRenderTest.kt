@@ -187,9 +187,10 @@ class ListPartialsRenderTest {
 
         html shouldContain "id=\"template-filter-q\""
         html shouldContain "id=\"template-filter-dialect\""
-        // By ID, never by name — other name="dialect" inputs exist on these screens.
-        html shouldContain "hx-include=\"#template-filter-dialect\""
-        html shouldContain "hx-include=\"#template-filter-q\""
+        html shouldContain "id=\"template-filter-type\""
+        // By ID, never by name — the create modal carries its own name="dialect"/name="type".
+        html shouldContain "hx-include=\"#template-filter-dialect, #template-filter-type\""
+        html shouldContain "hx-include=\"#template-filter-q, #template-filter-dialect\""
         html shouldContain "hx-target=\"#template-list-wrapper\""
         html shouldContain "id=\"template-filter-spinner\""
     }
@@ -207,7 +208,11 @@ class ListPartialsRenderTest {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", listOf("POSTGRES", "SQLITE"))
+        setVariable("types", co.datapipelines.pipeline.TemplateType.WIRE_VALUES)
         setVariable("selectedDialect", "")
+        setVariable("namePattern", co.datapipelines.templates.TemplateNameGrammar.pattern)
+        setVariable("nameMaxLength", co.datapipelines.templates.TemplateNameGrammar.maxLength)
+        setVariable("nameHint", co.datapipelines.templates.TemplateNameGrammar.DESCRIPTION)
         fillTemplatesModel(listOf(templateRecord()))
     }
 
@@ -220,11 +225,19 @@ class ListPartialsRenderTest {
         setVariable("total", 30)
     }
 
+    /**
+     * The templates model. Since 047 the screen is a TREE, so the fragment is a dispatcher:
+     * these tests exercise the SEARCH presentation (`searching = true`), which is the one
+     * that still renders a `.ds-table` and the shared pager against `#template-list-wrapper`.
+     * The browse presentation has its own guard in `TemplateTreeRenderTest`.
+     */
     private fun WebContext.fillTemplatesModel(rows: List<Template>) {
+        setVariable("searching", true)
         setVariable("templates", rows)
         setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
-        setVariable("q", "")
+        setVariable("q", "orders")
         setVariable("selectedDialect", "")
+        setVariable("selectedType", "")
         setVariable("offset", 0)
         setVariable("hasMore", true)
         setVariable("total", 30)

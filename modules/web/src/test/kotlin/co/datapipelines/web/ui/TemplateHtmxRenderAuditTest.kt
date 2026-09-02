@@ -229,12 +229,31 @@ class TemplateHtmxRenderAuditTest {
         setVariable("total", 30)
     }
 
-    /** TemplateUiController's model — ONE row, or the pager never renders and the guard is vacuous. */
+    /**
+     * TemplateUiController's model — the BROWSE presentation, which is what a page load with
+     * no `q` renders since 047 (the screen is a tree). One folder and one root leaf, so the
+     * level renders its rows AND its pager and the guard is not vacuous; `levelId` is what the
+     * pager's `hx-target` is built from, so an absent one would target `#null`.
+     */
     private fun WebContext.fillTemplateList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
+        setVariable("types", co.datapipelines.pipeline.TemplateType.WIRE_VALUES)
         setVariable("selectedDialect", "")
+        setVariable("selectedType", "")
+        setVariable("namePattern", co.datapipelines.templates.TemplateNameGrammar.pattern)
+        setVariable("nameMaxLength", co.datapipelines.templates.TemplateNameGrammar.maxLength)
+        setVariable("nameHint", co.datapipelines.templates.TemplateNameGrammar.DESCRIPTION)
+        setVariable("searching", false)
+        setVariable("prefix", "")
+        setVariable("levelId", TemplateBrowseModel.ROOT_LEVEL_ID)
+        setVariable(
+            "folders",
+            listOf(TemplateFolderView("acme", "acme", 4, TemplateBrowseModel.levelId("acme"))),
+        )
+        setVariable("foldersTruncated", false)
+        setVariable("drafts", emptyMap<String, co.datapipelines.templates.TemplateVersionDetail>())
         setVariable(
             "templates",
             listOf(

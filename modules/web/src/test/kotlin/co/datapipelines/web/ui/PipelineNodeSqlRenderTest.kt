@@ -37,6 +37,10 @@ class PipelineNodeSqlRenderTest {
         html shouldContain "POSTGRES"
         html shouldContain "href=\"/templates/editor?name=trips_by_day.sql\""
         html shouldContain "trips_by_day.sql @ v1"
+        // 047 / §9.4: the reference is a PATH now — one line, with the FULL reference on
+        // `title` so the truncated text is never the only copy of it.
+        html shouldContain "class=\"pe-link pe-path\""
+        html shouldContain "title=\"trips_by_day.sql @ v1\""
         html shouldContain "pe-sql-copy"
         html shouldContain "<pre class=\"pe-sql\">"
     }
@@ -71,6 +75,10 @@ class PipelineNodeSqlRenderTest {
 
         html shouldContain "trips_by_day.sql @ v1"
         html shouldContain "not in this workspace"
+        // 047 / §9.4: a missing template is exactly when the reader most needs the WHOLE
+        // path, so the empty state truncates and titles it like every other call site.
+        html shouldContain "class=\"pe-path\""
+        html shouldContain "title=\"trips_by_day.sql @ v1\""
     }
 
     @Test

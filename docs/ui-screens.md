@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.15
+**Status:** v1.17
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-09-02
 
 ---
 
@@ -140,6 +140,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 
 - **SQL section (§8.3 there):** the details panel loads `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (a `READ_RESOURCES` read partial, htmx.ajax on selection) and highlights it client-side with the zero-dependency `sql-highlight.js`; the copy confirmation is a live-region announcement plus a 1.5s button-label swap — deliberately NOT a toast (high-frequency, self-evident).
 - **Result grid:** the execution result table renders on the shared `.ds-table`; the bespoke `.pe-result-table` styles are gone. Paging stays client-side cursor paging (the §10.2 contract there), restyled to the shared pager's look — ghost buttons, centred count text.
+- **Template reference (§9.4 there):** a node's template is a read-only reference display — a label and a link, `acme/finance/monthly_revenue @ v3`. **There is no template picker on this screen**, and template selection happens through pipeline JSON authoring, import and MCP. Since a name is a path, the reference truncates to one line with the FULL reference on `title`, at both call sites (the Alpine inspector's `templateRefText`, and the server-rendered `partials/pipeline-node-sql`) **and** in the `template-missing` empty state. **If a picker is ever added, it reuses §4.6's prefix fragment — it does not get its own client-side tree.** That constraint is recorded HERE, on the screen the picker would be built on, precisely because it would be built later, by a different task, and the rule that produced it lives on a different screen.
 - **Notifications:** the SSE terminal events are the raison d'être of §5.1's Shape D — `pipeline_completed` and `execution_aborted` report via `DpToast.show` (they carry no HTTP response to hang an OOB swap on); `pipeline_failed` keeps the error modal (a failure detail is not a 6s notification). All three also announce on the live region.
 
 ### 4.5 Datasource List
@@ -159,18 +160,36 @@ The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-b
 
 **§4.13's workspaces screen** owns workspace lifecycle; this screen's Register button is hidden entirely when the caller is a non-admin and `member-datasources-enabled` is off (the demo shape — open datasource creation is an SSRF primitive from the server's network position).
 
-### 4.6 Template List
+### 4.6 Template List (the template TREE)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /templates` |
-| Auth required | Yes (`read`) |
-| Purpose | Browse SQL templates, filter by dialect, search |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
-| JS | None |
-| htmx | Yes — search, dialect filter and pagination re-fetch `/partials/templates` into the fragment-root `#template-list-wrapper` (`outerHTML`); the `#template-filter-q` input and the `#template-filter-dialect` select address each other **by id** via `hx-include` (never by name — other `name="dialect"` inputs exist), with the shared §5 pager fragment |
+| Auth required | Yes (`read` to browse; `author` to create) |
+| Purpose | Browse the template tree, expand folders and versions, filter by dialect and type, search |
+| Design primitives | `.ds-table`, `.ds-badge`, `.ds-input`, `.ds-empty`, native `<details>`/`<summary>` + `static/css/template-tree.css` (structure and truncation only — every colour, size and gap is a token) |
+| JS | Only the create modal's lifecycle (open/close, inline refusal, dialect-conditional-on-type). **The tree itself has none**: expansion is `<details>` and htmx |
+| htmx | Yes — see the fragment contract below |
 
-Content: table of templates (id, display name, dialect badge, description, version, created). Clickable → template editor. The search covers every rendered column (the §5.1 Search rule): id, display name, description, and the dialect badge's wire value — the dialect match is repository-level (`ILIKE` on the version's dialect), so a `sqlite` query finds templates whose names never mention it.
+A template name is a **path** ([template-hierarchy-design §4.1](template-hierarchy-design.md#41-grammar)), so this screen is a tree. **Folders are virtual**: a folder is a name prefix with no table, no column, no id and no CRUD ([§3.1](template-hierarchy-design.md#3-design-principles)). There is no "New folder", no rename, no move, no delete and **no empty-folder state** anywhere on this screen — a folder is derived per request from the live rows beneath it, so one with nothing beneath it does not exist to be rendered. `TemplateTreeRenderTest` asserts those absences, because an absence is exactly what a well-meaning future round removes without noticing.
+
+**The fragment contract.** One route, `GET /partials/templates`, answers two shapes, chosen by the presence of `prefix`:
+
+| Request | Fragment | Swap |
+|---|---|---|
+| no `prefix` | `partials/templates` — a dispatcher whose one root element is `#template-list-wrapper` in **both** presentations | the filter controls' `hx-target`, `outerHTML` |
+| `prefix=acme/finance` (empty string = the root) | `partials/template-tree-level` — that ONE level: its direct sub-folders and its direct template children | the folder's own child container, `outerHTML` |
+| `GET /partials/templates/versions?name={path}` | `partials/template-versions` — one leaf's versions with RELEASED / DRAFT badges | the leaf's version container, `innerHTML` |
+
+Every level is a **server-side prefix query** ([§8](template-hierarchy-design.md#8-repository-registry-loader)). The flat list is never shipped to the browser and no tree is assembled in JS, at any size ([§9.1](template-hierarchy-design.md#91-constraints-the-ui-inherits-normative--none-of-these-are-ui-choices)). A folder expands with `<details>`/`<summary>` — the browser owns open/closed state and the a11y semantics — and the request rides on the **summary** with `hx-trigger="click once"`, targeting the placeholder below it with `next`. The obvious alternative, the request on the placeholder with `hx-trigger="toggle from:closest details"`, works at the root and silently does nothing for a folder that arrived in a swap (measured on the demo stack: the nested level's request never fires); `click` needs no `from:` indirection and no non-bubbling event, and `<summary>` raises it for keyboard activation too. Nested level containers carry an id derived once, server-side, from the prefix (`TemplateBrowseModel.levelId`), so the placeholder a folder renders and the root of the fragment that replaces it cannot disagree; the ROOT level's id is the screen's long-standing `#template-list-wrapper`, so the tree inherits the §4.5/§5 swap contract rather than inventing a second one. Names never travel in a URL path segment — `prefix` and `name` are query parameters ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)).
+
+**Browse and search are different presentations** ([§9.2](template-hierarchy-design.md#92-templates-browser--tree-presentation), decided). Browsing shows the tree. A non-empty `q` shows a **flat result list of full paths** — not a tree pruned to matching leaves, because pruning means walking the ancestors of every match, which is precisely the whole-list-in-the-browser work the tree exists to avoid, and a flat list of full paths is what someone searching `finance/agg` wants to see. Clearing `q` returns to the tree, by construction: the same dispatcher answers both.
+
+**Paging.** Each level pages its own leaves through the shared §5 pager, targeting that level's own root, so `Showing N of M` is that level's truthful count and not the workspace's. A level renders that pager only when it can act (`offset > 0` or `hasMore`): a tree shows many levels at once and most hold a handful of rows, so an always-on "Showing 1 of 1" with two dead buttons is noise repeated down the whole screen. The flat search list keeps the unconditional pager — there the count is the answer to the search. Sub-folders are a `GROUP BY` over one path segment and are not paged; past 200 at one level the fragment says so rather than cutting silently. Flat legacy names sit at the tree root and are never reorganised — §4.5 there forbids renaming them.
+
+**Filters.** `dialect` and `type` (046's column) are exact matches on the version row and travel with every level and pager request; both narrow the folder derivation too, so a folder whose whole subtree is filtered out is absent rather than empty. The search covers every rendered column (the §5.1 Search rule): id/path, display name, description, and the dialect badge's wire value — the dialect match is repository-level (`ILIKE` on the version's dialect), so a `sqlite` query finds templates whose names never mention it.
+
+**Create** (`author`/`admin`) is a modal posting to `POST /partials/templates`, §5.1 Shape A: the success node closes the modal and the refreshed root level rides along out-of-band with the toast. It gains a **`type` selector** (`sql` default) and makes `dialect` conditional — required for `sql`, disabled and absent for `html` (the control is *disabled*, not merely hidden, so it does not post; the controller drops it either way and `chk_type_dialect` is the database's backstop). The name field's `pattern` and `maxlength` are **rendered from the server's own grammar** (`TemplateNameGrammar`, which reads the validator's `Regex` and its cap) — never a regex retyped beside it; the server validates every write regardless and its rejection is the one that counts ([§9.5](template-hierarchy-design.md#95-client-side-name-validation-is-a-convenience-never-an-authority)). There is no rename affordance on this form or anywhere else: `name` is a create-time input, full stop.
 
 ### 4.7 Template Editor
 
@@ -192,6 +211,7 @@ Content:
 
   Whatever the active mode produces is posted verbatim as the `context` object of the render call ([REST §8.7](rest-api.md#87-validate-template-render-against-sample-context)). It is a scratch context for preview only — it is never stored on the template and has no effect on validation.
 - **Preview pane**: rendered SQL output, below the editor in the source column sharing its width (041 D3), highlighted as SQL by the shared tokenizer (041 D4) and scrolling inside its pane. A reference to a variable the supplied context does not contain fails the render; the error envelope is rendered inline into `#preview-output` per §5.1 (this is a *preview* failure, not a save failure — save-time render checking lives on the **pipeline**, [Pipeline Contract §12.6](pipeline-contract.md#126-template-validations)).
+- **Type and dialect**: rendered as read-only VALUES beside the id, never as controls. `type` is chosen at create and is immutable afterwards ([template-hierarchy-design §5.3](template-hierarchy-design.md#5-the-type-field)); the server refuses the write with `template.validation.type_immutable` either way, but a disabled `<select>` is re-enabled in devtools in one click, so the UI must not present a lock it does not own. There is likewise **no name field**: §4.5 there offers no rename, so a template's name appears on this screen only as text.
 - **Version selector**: dropdown to view previous versions. Versions are immutable; "restore" means opening an old version and saving it as a new one.
 - **Save button** (`author` scope): creates a new version via the partials endpoint backed by `PUT /api/v1/templates` (the `id` rides in the body — rest-api §8). Save runs parse-level validation only ([Templates §7.1](templates.md#7-validation-rules)).
 - **Imports panel**: the `imports` array as `{id, version, alias}` rows with links to each library template. The body never contains `<#import>` — the alias shown here is what the body calls ([Templates §6](templates.md#6-library-templates)).
@@ -493,6 +513,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.17 | template tree UI (047) | §4.6 rewritten as the template **tree**: the one-route/two-shape fragment contract (`/partials/templates` with and without `prefix`, plus `/partials/templates/versions`), levels as server-side prefix queries with no client-side tree assembly at any size, `<details>`-driven lazy expansion with no JS of our own, per-level paging through the shared §5 pager against each level's own derived id (the ROOT level's id stays `#template-list-wrapper`, so the existing swap contract carries over unchanged), and the decided **browse-vs-search** rule — a non-empty `q` is a FLAT list of full paths, not a pruned tree. The four §9.1 absences are recorded as absences and guarded by render assertions: no folder CRUD, no empty-folder state, no `type` control on the edit form, no rename affordance anywhere. The list screen gains a `type` filter (046's column) and a real Create modal (§5.1 Shape A) whose name `pattern`/`maxlength` are RENDERED FROM the server's grammar rather than retyped beside it, and whose `dialect` is disabled-and-absent for `type=html`. §4.7 records `type`/`dialect` as read-only values on the editor. §4.4 records the pipeline editor's read-only template reference (one-line truncation with the full path on `title`, at both call sites and in the `template-missing` state) **and the rule that a future template picker reuses §4.6's prefix fragment rather than building its own client-side tree** — written on the screen the picker would be built on. |
 | 2026-08-31 | v1.16 | recurrence defect round (034) | §4.5: the OOB whole-table rule recorded beside the swap-root rule — a table partial travels as a whole `<table>` on any out-of-band path; a `<tbody>` carrying `hx-swap-oob` nested in a `<div>` is silently discarded by the browser's fragment parser (030 F-1, previously known only from the §4.10 changelog note). Doc-only; a mechanical guard was judged disproportionate (the shape is only visible to a real HTML parser — a regex over templates cannot tell an OOB `<tbody>` from a legitimate one inside a `<table>`). |
 | 2026-08-31 | v1.15 | website + docs in-app (033) | §4.2 Dashboard moved from `/` to `GET /dashboard` — `/` is now the public marketing site (new §4.15, app-served, cache-defended per OPEN-ITEMS T46, no rate limiter); new §4.16 Documentation — the packaged spec set rendered in-product at `/docs` (session-only), with the §A link-rewrite rule (packaged slug or canonical GitHub URL, never a dead relative href) and `th:utext` doc-body insertion. Navbar gains the Docs entry; error pages and login/workspace-switch redirects point at `/dashboard`. The root `README.md` website pointer and the `website/` directory are gone (the app's vendored design system is the single copy). |
 | 2026-08-05 | v1.0 | initial draft | UI screens inventory: 12 screens (login, dashboard, pipeline list/editor, datasource list, template list/editor, execution history/detail, API keys, user settings, admin users), htmx patterns, error pages |

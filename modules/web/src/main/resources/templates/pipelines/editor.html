@@ -182,10 +182,14 @@
                 </div>
                 <div class="pe-field" x-show="selectedNode.type !== 'PIPELINE'">
                   <label class="pe-label">Template</label>
+                  <!-- §9.4: a template name is a PATH now. `acme/finance/monthly_revenue @ v3`
+                       in a 320px inspector truncates to one line, and the full reference rides
+                       on `title` so the truncated text is never the only copy of it. -->
                   <div class="pe-value">
-                    <a class="pe-link"
+                    <a class="pe-link pe-path"
                        x-bind:href="'/templates/editor?name=' + encodeURIComponent(selectedNode.template?.id || '')"
-                       x-text="(selectedNode.template?.id || '—') + (selectedNode.template?.version ? ' @ v' + selectedNode.template.version : '')"></a>
+                       x-bind:title="templateRefText(selectedNode)"
+                       x-text="templateRefText(selectedNode)"></a>
                   </div>
                 </div>
                 <div class="pe-field">

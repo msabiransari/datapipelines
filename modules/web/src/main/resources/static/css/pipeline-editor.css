@@ -155,6 +155,21 @@
   text-decoration: underline;
 }
 
+/* §9.4: a template reference is a PATH (`acme/finance/monthly_revenue @ v3`). In a 320px
+   inspector panel it stays on ONE line and ellipsises; the full reference is always on the
+   element's `title`, so nothing is lost — a wrapped or clipped path is what this replaces.
+   The `.pe-sql-meta .pe-path` rule further down restores `word-break: normal` at the
+   specificity that call site's `.pe-sql-meta .pe-link` rule needs. */
+.pe-path {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  vertical-align: bottom;
+}
+
 .pe-value-muted {
   color: var(--text-muted, #9ca3af);
   font-style: italic;
@@ -408,6 +423,16 @@
 .pe-sql-meta .pe-link {
   font-size: var(--text-xs, 0.75rem);
   word-break: break-all;
+}
+
+/* The path variant of that link: one line, ellipsised. `.pe-sql-meta` is a flex row, so the
+   item also needs `min-width: 0` — without it a flex item refuses to shrink below its
+   content and the ellipsis never appears (§9.4). This rule outranks the break-all above by
+   specificity, deliberately. */
+.pe-sql-meta .pe-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  word-break: normal;
 }
 
 .pe-sql-meta .pe-sql-copy {

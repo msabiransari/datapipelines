@@ -18,7 +18,22 @@
   <div style="display:flex;align-items:center;justify-content:space-between">
     <div>
       <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
-      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0" th:text="'ID: ' + ${template?.id ?: '—'}">Template ID</p>
+      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0"
+         th:text="'ID: ' + ${template?.id ?: '—'}" th:title="${template?.id}">Template ID</p>
+      <!-- §9.3: `type` is a create-time input and IMMUTABLE afterwards (§5.3), so it renders
+           here as a read-only VALUE — never as a disabled control. A disabled <select> is
+           re-enabled in devtools in one click; the server refuses the write with
+           `template.validation.type_immutable` either way, but the UI must not present a lock
+           it does not own. `dialect` shows for the same reason: it belongs to the type.
+           There is no name control here either — §4.5 offers no rename, anywhere. -->
+      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0">
+        <span>Type:</span>
+        <span class="ds-badge ds-badge-default" th:text="${template?.type?.wire ?: '—'}">sql</span>
+        <th:block th:if="${template?.dialect != null}">
+          <span>Dialect:</span>
+          <span class="ds-badge ds-badge-default" th:text="${template.dialect.wire}">POSTGRES</span>
+        </th:block>
+      </p>
     </div>
     <div style="display:flex;gap:var(--gap-sm);align-items:center">
       <!-- versioning §6/§7: the pending-release affordance. Release is the human action

@@ -2,38 +2,171 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
+  <link th:href="@{/css/template-tree.css}" rel="stylesheet">
+
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
     <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Templates</h1>
     <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
-      <button class="ds-button ds-button-primary" disabled
-              style="opacity: 0.6;" th:title="${'Create Template — Phase 2 other worktree'}">Create Template</button>
+      <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
     </th:block>
   </div>
 
-  <!-- Search and dialect address each other by ID (hx-include): a name-based include
-       would also sweep up any other name="dialect" input on the page (§4.6). -->
-  <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
+  <!-- Search, dialect and type address each other by ID (hx-include): a name-based include
+       would also sweep up the create modal's own name="dialect" and name="type" inputs
+       (§4.6). A non-empty search switches the fragment to a flat list of full paths; clearing
+       it returns to the tree (template-hierarchy-design §9.2). -->
+  <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
+       With three controls instead of two that starved the search box to a few pixels, so
+       the selects are sized by their content and only the search box flexes. -->
+  <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
     <input type="search" id="template-filter-q" name="q" th:value="${q}"
            placeholder="Search templates..."
            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
            hx-trigger="input changed delay:300ms, search"
-           hx-include="#template-filter-dialect"
+           hx-include="#template-filter-dialect, #template-filter-type"
            hx-indicator="#template-filter-spinner"
-           class="ds-input" style="flex: 1; max-width: 360px;">
-    <select id="template-filter-dialect" name="dialect" class="ds-input"
+           class="ds-input" style="flex: 1 1 240px; min-width: 180px; max-width: 360px;">
+    <select id="template-filter-dialect" name="dialect" class="ds-input" style="flex: 0 0 auto; width: auto;"
             th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
             hx-trigger="change"
-            hx-include="#template-filter-q"
+            hx-include="#template-filter-q, #template-filter-type"
             hx-indicator="#template-filter-spinner">
       <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
       <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
               th:selected="${d == selectedDialect}"></option>
     </select>
+    <!-- 046 shipped `type` on the version row; it filters like `dialect` and joins it here. -->
+    <select id="template-filter-type" name="type" class="ds-input" style="flex: 0 0 auto; width: auto;"
+            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+            hx-trigger="change"
+            hx-include="#template-filter-q, #template-filter-dialect"
+            hx-indicator="#template-filter-spinner">
+      <option value="" th:selected="${#strings.isEmpty(selectedType)}">All Types</option>
+      <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
+              th:selected="${ty == selectedType}"></option>
+    </select>
     <span id="template-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 
-  <!-- The fragment root carries id="template-list-wrapper", so the swap target
-       survives every refresh — this div is only a placeholder (§4.6). -->
+  <!-- The fragment's own root carries id="template-list-wrapper" in BOTH presentations, so
+       the swap target survives every refresh — this div is only a placeholder (§4.6). -->
   <div th:replace="~{partials/templates :: fragment}"></div>
+
+  <!-- CREATE (§9.3). `type` is a create-time input and appears on NO other form: it is
+       immutable after creation (§5.3), so the edit screen shows it as a read-only value.
+       `name` is likewise create-time only — §4.5 offers no rename, anywhere, so this modal
+       is the only place a template name is ever typed. -->
+  <div id="create-template-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+    <div class="ds-card" style="max-width:560px;width:100%;padding:var(--gap-lg);position:relative;max-height:90vh;overflow:auto;">
+      <button class="ds-button ds-button-ghost ds-button-sm" onclick="hideCreateTemplateModal()" style="position:absolute;top:var(--gap-sm);right:var(--gap-sm);font-size:var(--text-xl)">&times;</button>
+      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Create Template</h2>
+      <form th:attr="hx-post=@{/partials/templates}"
+            hx-target="#template-create-result"
+            hx-swap="innerHTML">
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Name (path)</label>
+          <!-- §9.5: `pattern` and `maxlength` are RENDERED FROM the server's own grammar
+               (TemplateNameGrammar reads the validator's Regex and its length cap) — not a
+               regex retyped beside it, which is the drift this project has been bitten by.
+               The check is a convenience that saves a round-trip; the server validates every
+               write regardless and its rejection is the one that counts. -->
+          <input type="text" name="name" class="ds-input" style="width:100%"
+                 placeholder="acme/finance/monthly_revenue" required
+                 th:attr="pattern=${namePattern}, maxlength=${nameMaxLength}, title=${nameHint}">
+          <p style="color:var(--text-muted);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0"
+             th:text="${nameHint}">grammar</p>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Display name (optional)</label>
+          <input type="text" name="displayName" class="ds-input" style="width:100%" placeholder="Monthly Revenue">
+        </div>
+        <div style="display:flex;gap:var(--gap-md);margin-bottom:var(--gap-md)">
+          <div style="flex:1">
+            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Type</label>
+            <select id="create-template-type" name="type" class="ds-input" style="width:100%" required
+                    onchange="syncTemplateDialect()">
+              <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
+                      th:selected="${ty == 'sql'}">sql</option>
+            </select>
+          </div>
+          <!-- `dialect` is CONDITIONAL on type: required for `sql`, hidden AND removed from
+               the submitted form for `html`. chk_type_dialect is the database's backstop and
+               the controller drops the field for `html` regardless — the form is not the
+               authority on that rule (§5.1). -->
+          <div style="flex:1" id="create-template-dialect-field">
+            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Dialect</label>
+            <select id="create-template-dialect" name="dialect" class="ds-input" style="width:100%" required>
+              <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}">POSTGRES</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Description</label>
+          <input type="text" name="description" class="ds-input" style="width:100%"
+                 placeholder="What this template expects and produces" required>
+        </div>
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Body</label>
+          <textarea name="body" class="ds-input" style="width:100%;min-height:140px;font-family:var(--font-mono);font-size:var(--text-sm)"
+                    placeholder="SELECT 1" required></textarea>
+        </div>
+        <div id="template-create-result" style="margin-bottom:var(--gap-md);"></div>
+        <button type="submit" class="ds-button ds-button-primary" style="width:100%">Create</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function showCreateTemplateModal() {
+      document.getElementById('template-create-result').removeAttribute('data-error');
+      document.getElementById('template-create-result').innerHTML = '';
+      document.getElementById('create-template-modal').style.display = 'flex';
+    }
+    function hideCreateTemplateModal() {
+      document.getElementById('create-template-modal').style.display = 'none';
+    }
+    /* §9.3: dialect is required for `sql` and ABSENT for `html`. `disabled` (not just hidden)
+       is what keeps the field out of the submitted form data — a hidden-but-enabled select
+       would still post a dialect for an html template. The server drops it either way. */
+    function syncTemplateDialect() {
+      var isSql = document.getElementById('create-template-type').value === 'sql';
+      var field = document.getElementById('create-template-dialect-field');
+      var select = document.getElementById('create-template-dialect');
+      field.hidden = !isSql;
+      select.disabled = !isSql;
+      select.required = isSql;
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      syncTemplateDialect();
+      var result = document.getElementById('template-create-result');
+      if (!result) return;
+
+      /* Refusals arrive as 4xx and htmx does not swap those. The modal must not close over an
+         error and a 6s toast is the wrong place for form-level feedback (the 022 review F9
+         rule), so this screen owns its error path: the refusal lands in the result node,
+         tagged so the observer below does NOT close the modal over it. */
+      document.body.addEventListener('htmx:responseError', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
+        result.setAttribute('data-error', 'true');
+        result.innerHTML = event.detail.xhr.responseText;
+      });
+      document.body.addEventListener('htmx:beforeRequest', function(event) {
+        if (!event.detail.elt.closest || !event.detail.elt.closest('#create-template-modal')) return;
+        result.removeAttribute('data-error');
+        result.innerHTML = '';
+      });
+
+      /* Close the modal only on SUCCESS content — never over an error. */
+      var observer = new MutationObserver(function() {
+        var modal = document.getElementById('create-template-modal');
+        if (modal.style.display === 'flex' &&
+            result.children.length > 0 &&
+            result.getAttribute('data-error') !== 'true') {
+          hideCreateTemplateModal();
+        }
+      });
+      observer.observe(result, {childList: true, subtree: true});
+    });
+  </script>
 </th:block>
 </html>
