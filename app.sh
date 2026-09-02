@@ -146,7 +146,7 @@ EOF
 # poisoned every later plain --start (023 review F1). Key-by-key and append-only;
 # a value the operator set in EITHER file is respected (deploy/.env wins — it is
 # passed last). SAMPLE_BASE_URL defaults to the PUBLISHED bucket (deployment.md
-# Appendix B; licence gate stamped 2026-08-29) — override it in deploy/.env for
+# Appendix B; licence gate stamped 2026-09-02) — override it in deploy/.env for
 # a mirror or a locally built artifact set.
 ensure_demo_env() {
   local added=0
@@ -157,7 +157,7 @@ ensure_demo_env() {
     added=1
   }
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
-  add_key SAMPLE_VERSION "v1"
+  add_key SAMPLE_VERSION "v2"
   add_key SAMPLE_DB_USER "dp_demo_ro"
   # hex, NOT base64: hex can never contain the one string the loader refuses
   # in a Postgres password — its dollar-quote tag (045 §A) — and stays
@@ -209,9 +209,9 @@ ensure_demo_env() {
   The sample artifacts are published to object storage by the owner; point this
   at that bucket (deployment.md Appendix B), or at a local server for a build
   you produced yourself — the loader fetches \$BASE_URL/\$VERSION/manifest.json
-  and the manifest declares v1, so serve the artifacts AS a v1 directory:
-    (cd scripts/sample-data/work && ln -sfn artifacts v1 && python3 -m http.server 8099)
-    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=v1"
+  and the manifest declares v2, so serve the artifacts AS a v2 directory:
+    (cd scripts/sample-data/work && ln -sfn artifacts v2 && python3 -m http.server 8099)
+    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=v2"
   fi
 }
 
