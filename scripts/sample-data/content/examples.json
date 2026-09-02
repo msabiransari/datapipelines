@@ -8,7 +8,7 @@
       "display_name": "Monthly trips by pickup zone",
       "description": "Reads the pre-aggregated trips_monthly rollup from the sample-trips Postgres datasource for the pipeline's start_date/end_date window. Expects DATE parameters named start_date and end_date; the shipped sample covers 2023-01-01..2024-12-31.",
       "imports": [],
-      "body": "SELECT\n    m.month_start     AS month_start,\n    m.pu_location_id  AS pu_location_id,\n    m.trip_count      AS trip_count,\n    m.total_revenue   AS total_revenue,\n    m.total_tips      AS total_tips\nFROM trips_monthly m\nWHERE m.month_start BETWEEN DATE '${start_date}' AND DATE '${end_date}'",
+      "body": "SELECT\n    m.month_start     AS month_start,\n    m.pu_location_id  AS pu_location_id,\n    m.trip_count      AS trip_count,\n    m.total_revenue   AS total_revenue,\n    m.total_tips      AS total_tips\nFROM trips_monthly m\nWHERE m.month_start BETWEEN :start_date AND :end_date",
       "is_library": false
     },
     {
@@ -19,7 +19,7 @@
       "display_name": "Daily trip counts and revenue",
       "description": "Reads the pre-aggregated trips_daily rollup from the sample-trips Postgres datasource for the pipeline's start_date/end_date window. Expects DATE parameters named start_date and end_date; the shipped sample covers 2023-01-01..2024-12-31.",
       "imports": [],
-      "body": "SELECT\n    d.pickup_date       AS pickup_date,\n    d.trip_count        AS trip_count,\n    d.total_revenue     AS total_revenue,\n    d.total_distance_mi AS total_distance_mi\nFROM trips_daily d\nWHERE d.pickup_date BETWEEN DATE '${start_date}' AND DATE '${end_date}'",
+      "body": "SELECT\n    d.pickup_date       AS pickup_date,\n    d.trip_count        AS trip_count,\n    d.total_revenue     AS total_revenue,\n    d.total_distance_mi AS total_distance_mi\nFROM trips_daily d\nWHERE d.pickup_date BETWEEN :start_date AND :end_date",
       "is_library": false
     },
     {
@@ -41,7 +41,7 @@
       "display_name": "Weekend and US federal holiday calendar",
       "description": "Reads the generated day calendar from the sample-reference SQLite datasource for the pipeline's window. Expects DATE parameters named start_date and end_date. cal_date is ISO-8601 TEXT because SQLite has no DATE type; cast it after staging.",
       "imports": [],
-      "body": "SELECT\n    c.cal_date     AS cal_date,\n    c.is_weekend   AS is_weekend,\n    c.is_holiday   AS is_holiday,\n    c.holiday_name AS holiday_name\nFROM calendar c\nWHERE c.cal_date BETWEEN '${start_date}' AND '${end_date}'",
+      "body": "SELECT\n    c.cal_date     AS cal_date,\n    c.is_weekend   AS is_weekend,\n    c.is_holiday   AS is_holiday,\n    c.holiday_name AS holiday_name\nFROM calendar c\nWHERE c.cal_date BETWEEN :start_date AND :end_date",
       "is_library": false
     },
     {
@@ -52,7 +52,7 @@
       "display_name": "Daily precipitation across the NYC stations",
       "description": "Averages the PRCP element across the five NYC-area GHCN stations, one row per day, from the sample-weather MySQL datasource. Expects DATE parameters named start_date and end_date. Values are millimetres.",
       "imports": [],
-      "body": "SELECT\n    o.obs_date                AS obs_date,\n    ROUND(AVG(o.value), 2)    AS precip_mm,\n    ROUND(MAX(o.value), 2)    AS max_precip_mm\nFROM observations o\nWHERE o.element = 'PRCP'\n  AND o.obs_date BETWEEN DATE '${start_date}' AND DATE '${end_date}'\nGROUP BY o.obs_date",
+      "body": "SELECT\n    o.obs_date                AS obs_date,\n    ROUND(AVG(o.value), 2)    AS precip_mm,\n    ROUND(MAX(o.value), 2)    AS max_precip_mm\nFROM observations o\nWHERE o.element = 'PRCP'\n  AND o.obs_date BETWEEN :start_date AND :end_date\nGROUP BY o.obs_date",
       "is_library": false
     },
     {
@@ -72,9 +72,9 @@
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Compare ridership on rainy versus dry days, by day type",
-      "description": "Runs in tempdb (H2) over stg_trips_daily (Postgres), stg_daily_rain (MySQL) and stg_calendar (SQLite) — a three-datasource join. Expects a BIGDECIMAL parameter named rain_threshold_mm; a day at or above it counts as rainy. Days with no weather observation count as dry.",
+      "description": "Runs in tempdb (H2) over stg_trips_daily (Postgres), stg_daily_rain (MySQL) and stg_calendar (SQLite) \u2014 a three-datasource join. Expects a BIGDECIMAL parameter named rain_threshold_mm; a day at or above it counts as rainy. Days with no weather observation count as dry.",
       "imports": [],
-      "body": "SELECT\n    CASE WHEN COALESCE(r.precip_mm, 0) >= ${rain_threshold_mm} THEN 'rainy' ELSE 'dry' END AS weather,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END                                   AS day_type,\n    COUNT(*)                                                  AS days,\n    SUM(t.trip_count)                                         AS trip_count,\n    ROUND(AVG(CAST(t.trip_count AS DECIMAL(18,2))), 1)        AS avg_trips_per_day,\n    ROUND(SUM(t.total_revenue), 2)                            AS total_revenue\nFROM stg_trips_daily t\nJOIN stg_calendar c ON CAST(c.cal_date AS DATE) = t.pickup_date\nLEFT JOIN stg_daily_rain r ON r.obs_date = t.pickup_date\nGROUP BY\n    CASE WHEN COALESCE(r.precip_mm, 0) >= ${rain_threshold_mm} THEN 'rainy' ELSE 'dry' END,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END\nORDER BY 1, 2",
+      "body": "SELECT\n    CASE WHEN COALESCE(r.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END AS weather,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END                                   AS day_type,\n    COUNT(*)                                                  AS days,\n    SUM(t.trip_count)                                         AS trip_count,\n    ROUND(AVG(CAST(t.trip_count AS DECIMAL(18,2))), 1)        AS avg_trips_per_day,\n    ROUND(SUM(t.total_revenue), 2)                            AS total_revenue\nFROM stg_trips_daily t\nJOIN stg_calendar c ON CAST(c.cal_date AS DATE) = t.pickup_date\nLEFT JOIN stg_daily_rain r ON r.obs_date = t.pickup_date\nGROUP BY\n    CASE WHEN COALESCE(r.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END\nORDER BY 1, 2",
       "is_library": false
     }
   ],
@@ -83,7 +83,7 @@
       "schema_version": 1,
       "name": "revenue_by_borough",
       "display_name": "Revenue by borough",
-      "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup — two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
+      "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup \u2014 two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
       "settings": {
         "tempdb": {
           "engine": "H2"
@@ -157,7 +157,7 @@
       "schema_version": 1,
       "name": "rainy_vs_dry_ridership",
       "display_name": "Rainy vs dry ridership",
-      "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) — three engines, one answer. Split by weather and by day type.",
+      "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) \u2014 three engines, one answer. Split by weather and by day type.",
       "settings": {
         "tempdb": {
           "engine": "H2"
