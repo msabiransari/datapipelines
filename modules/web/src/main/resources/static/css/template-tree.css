@@ -1,0 +1,116 @@
+/* The templates screen's tree chrome (template-hierarchy-design §9.2).
+ *
+ * Structure and truncation only: every colour, size, radius and gap is a design-system
+ * token (CLAUDE.md rule 3 / §9.1's last row), and the rows themselves are built from the
+ * existing .ds-badge / .ds-button primitives. Nothing here styles a folder as an object —
+ * a folder is a name prefix with no identity (§3.1), so there is no folder chrome to own.
+ *
+ * Expansion is native <details>/<summary>; these rules only replace the default marker with
+ * a rotating disclosure triangle and lay the summary out as one line.
+ */
+
+.tpl-tree,
+.tpl-tree .tpl-level .tpl-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A nested level indents one step; the root level does not. */
+.tpl-level .tpl-level {
+  margin-left: var(--gap-md);
+  border-left: 1px solid var(--border-subtle);
+  padding-left: var(--gap-sm);
+}
+
+.tpl-node {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tpl-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-xs);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.tpl-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The disclosure marker, drawn from the summary rather than the default one so the row's
+   layout is ours and the rotation can animate with the shared duration token. */
+.tpl-summary::before {
+  content: "\25B8";
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+details[open] > .tpl-summary::before {
+  transform: rotate(90deg);
+}
+
+.tpl-summary:hover {
+  background: var(--surface-hover);
+}
+
+/* The label is one line and truncates; the FULL path always rides on the element's title,
+   so the truncated text is never the only copy of it (§9.4). */
+.tpl-label,
+.tpl-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tpl-label {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+}
+
+/* A folder reads as a container, a leaf as a document — the only visual difference between
+   them, because a folder has no identity to give it any other one (§3.1). */
+.tpl-folder > .tpl-summary > .tpl-label {
+  font-weight: var(--weight-semibold);
+}
+
+.tpl-path {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  font-family: var(--font-mono);
+}
+
+.tpl-count {
+  flex: 0 0 auto;
+}
+
+.tpl-open {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* A level or version list that has not loaded yet is just the spinner's room. */
+.tpl-level-pending {
+  padding: var(--gap-sm);
+}
+
+.tpl-versions {
+  padding: var(--gap-xs) 0 var(--gap-sm) var(--gap-lg);
+}
+
+.tpl-versions-table {
+  font-size: var(--text-xs);
+}
+
+.tpl-overflow {
+  margin: var(--gap-sm) 0 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}

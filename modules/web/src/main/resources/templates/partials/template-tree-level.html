@@ -1,0 +1,110 @@
+<!-- ONE level of the template tree (template-hierarchy-design §9.2).
+
+     The tree is backed by server-side prefix queries: this fragment renders the direct
+     sub-folders and the direct template children of one prefix, and expanding a folder issues
+     ONE more request for ONE more level. Nothing here ships the flat list to the browser and
+     nothing assembles a tree in JS — at any size (§9.1).
+
+     Folders are virtual (§3.1): a folder is a name prefix with no table, no column, no id and
+     no CRUD. There is deliberately no New folder / rename / move / delete control anywhere in
+     this file, and no empty-folder state — a folder is derived from the live rows beneath it,
+     so one with nothing beneath it does not exist to be rendered.
+
+     Expansion is <details>/<summary>: the browser owns open/closed state and the keyboard and
+     screen-reader semantics, and htmx loads the level on the summary's FIRST click only
+     (hx-trigger="click once"). No JS of our own is involved.
+
+     The root level's id is the screen's long-standing #template-list-wrapper, so browsing
+     inherits the existing SPA swap contract instead of inventing a second one; nested levels
+     get a derived id from TemplateBrowseModel.levelId so a placeholder and the fragment that
+     replaces it cannot disagree. The `oob` flag is set ONLY by the create-success path
+     (partials/template-created); every other render leaves the attribute off. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="hx-swap-oob=${oob}">
+
+  <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
+       child, because its folder was derived from that child (§3.1). -->
+  <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No templates yet</p>
+      <p class="ds-empty-description">Create your first template to get started.</p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree" th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}">
+
+    <!-- FOLDERS. The count is over live templates in the subtree under the SAME filters, so a
+         folder whose whole subtree is filtered out is absent rather than empty. -->
+    <li class="tpl-node" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <!-- The request rides on the SUMMARY, triggered by its own `click`, and targets the
+             placeholder below with `next`. The obvious alternative — the request on the
+             placeholder, triggered by `toggle from:closest details` — works at the root and
+             silently does NOTHING for a folder that arrived in a swap: measured on the demo
+             stack, the nested level's request never fires. `click` needs no `from:`
+             indirection and no non-bubbling event, and `<summary>` raises it for keyboard
+             activation too, so the keyboard path is unchanged. `once`: the level is fetched
+             on first open and then simply shown and hidden. -->
+        <summary class="tpl-summary"
+                 th:attr="hx-get=@{/partials/templates(prefix=${f.path}, dialect=${selectedDialect}, type=${selectedType})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">finance</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.templateCount}">12</span>
+        </summary>
+        <!-- Replaced whole by the child level, which carries this same derived id. -->
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES. A leaf expands to its versions with their RELEASED / DRAFT badges. -->
+    <li class="tpl-node" th:each="t : ${templates}">
+      <details class="tpl-leaf">
+        <summary class="tpl-summary"
+                 th:attr="hx-get=@{/partials/templates/versions(name=${t.id})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-versions" hx-swap="innerHTML">
+          <!-- The label is the leaf's own segment; the full path always rides on `title`
+               (§9.4's rule for every surface that shows a template name). -->
+          <span class="tpl-label"
+                th:text="${#strings.isEmpty(prefix)} ? ${t.id} : ${t.id.substring(prefix.length() + 1)}"
+                th:title="${t.id}">monthly_revenue</span>
+          <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
+          <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
+          <span class="ds-badge ds-badge-default" th:text="${'v' + t.version}">v1</span>
+          <!-- versioning §7: unreleased edits visible on the list (templates §6). -->
+          <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
+                th:text="'draft v' + ${drafts[t.id].version} + ' pending release'"
+                title="A draft exists; release it from the editor to publish."></span>
+          <a class="ds-button ds-button-ghost ds-button-sm tpl-open"
+             th:href="@{/templates/editor(name=${t.id})}" th:title="${t.id}">Open</a>
+        </summary>
+        <div class="tpl-versions tpl-level-pending">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+  </ul>
+
+  <!-- Honest overflow rather than a silent cut: sub-folders are a GROUP BY over one path
+       segment and are not paged. -->
+  <p class="tpl-overflow" th:if="${foldersTruncated}">
+    Only the first 200 sub-folders of this level are shown — narrow the view with search.
+  </p>
+
+  <!-- The level's own leaves page through the one shared pager, targeting this level's own
+       root. `prefix` travels so the pager stays inside this level; an empty `prefix` is the
+       root level, which is how the wrapper and the level agree on one presentation. -->
+  <!-- The shared pager, rendered only when it can DO something: a tree renders many levels
+       at once and most hold a handful of rows, so an always-on "Showing 1 of 1" with two
+       dead buttons is noise repeated down the whole screen. The flat search list keeps the
+       unconditional pager — there the count is the answer to the search. -->
+  <th:block th:if="${!#lists.isEmpty(templates) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/templates(prefix=${prefix}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset - 25})},
+                     nextUrl=@{/partials/templates(prefix=${prefix}, dialect=${selectedDialect}, type=${selectedType}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
+  </th:block>
+</div>

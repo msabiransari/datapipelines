@@ -1,0 +1,13 @@
+<!-- The create modal's success response (ui-screens.md §5.1, Shape A).
+
+     The form targets #template-create-result, so htmx swaps the non-OOB remainder (this
+     success node) there — its arrival is what closes the modal. The refreshed list rides
+     along out-of-band; no HX-Redirect, so the screen never navigates and the toast survives. -->
+<div xmlns:th="http://www.thymeleaf.org">
+  <p style="color: var(--accent-success); font-size: var(--text-sm);"
+     th:text="'Template ' + ${createdName} + ' created.'">created</p>
+  <!-- outerHTML OOB: the browse root already carries id="template-list-wrapper"; the
+       controller set oob=true, which puts hx-swap-oob="true" on it for THIS render only. -->
+  <th:block th:replace="~{partials/templates :: fragment}"></th:block>
+  <div th:replace="~{partials/toast-oob :: oob('success', 'Template created', ${createdName} + ' is ready to edit.')}"></div>
+</div>

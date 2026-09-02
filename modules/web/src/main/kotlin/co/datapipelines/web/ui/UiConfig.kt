@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.UserRepository
+import co.datapipelines.templates.TemplateRepository
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -28,4 +29,8 @@ class UiConfig {
     /** 033: the memoized in-product spec set (renders once at startup; see [DocsCatalog]). */
     @Bean
     fun docsCatalog(): DocsCatalog = DocsCatalog(javaClass.classLoader)
+
+    /** 047: the templates screen's one model, shared by the page and the partial controllers. */
+    @Bean
+    fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
 }

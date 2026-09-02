@@ -82,6 +82,44 @@ internal val TEMPLATE_PATH = Regex("^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_
 /** Total template-name length cap (§4.1 — raised from the flat rule's 100: paths are longer). */
 internal const val MAX_TEMPLATE_PATH_CHARS = 200
 
+/**
+ * The §4.1 grammar **published for a form to render** — the one thing a client-side check may
+ * take from the server (template-hierarchy-design §9.5).
+ *
+ * The point of this object is that it is a *read of the validator's own values*, never a
+ * second copy of them: [pattern] is [TEMPLATE_PATH]'s own source and [maxLength] is
+ * [MAX_TEMPLATE_PATH_CHARS] itself, so a create form that renders them into an HTML
+ * `pattern` / `maxlength` attribute cannot drift from the rule the server enforces. Changing
+ * the grammar changes both, in one edit, by construction.
+ *
+ * The server still validates every write and its rejection is the only one that counts
+ * (`TemplateValidator`): what a form renders from here is a convenience that saves a
+ * round-trip, never an authority.
+ *
+ * [pattern] is deliberately expressed in the character-class-and-repetition subset that HTML5
+ * `pattern` (a JavaScript RegExp, implicitly anchored) and `kotlin.text.Regex` read
+ * identically — no lookarounds, no named groups, no back-references.
+ */
+object TemplateNameGrammar {
+    /** The §4.1 pattern source, taken from the validator's own [Regex]. */
+    val pattern: String get() = TEMPLATE_PATH.pattern
+
+    /** The §4.1 total-length cap, taken from the validator's own constant. */
+    val maxLength: Int get() = MAX_TEMPLATE_PATH_CHARS
+
+    /**
+     * True when [name] satisfies the §4.1 grammar — the same total check the save path runs
+     * ([isValidTemplateName]), published so a caller outside this module can ask the question
+     * without owning a second copy of the answer.
+     */
+    fun matches(name: String): Boolean = isValidTemplateName(name)
+
+    /** A human rendering of the rule, for a form's hint text and a refusal message. */
+    const val DESCRIPTION: String =
+        "Lower-case path segments separated by `/` — each segment starts with a letter or digit " +
+            "and may contain letters, digits, `_`, `.` and `-`; at most 10 segments, 200 characters."
+}
+
 /** True when [name] satisfies the full §4.1 grammar — shape and total length. */
 internal fun isValidTemplateName(name: String): Boolean = name.length <= MAX_TEMPLATE_PATH_CHARS && TEMPLATE_PATH.matches(name)
 

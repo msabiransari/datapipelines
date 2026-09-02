@@ -8,7 +8,11 @@
   <div th:case="'rendered'" class="pe-sql-block">
     <div class="pe-sql-meta">
       <span class="ds-badge ds-badge-default" th:text="${dialect}">POSTGRES</span>
-      <a class="pe-link" th:href="@{/templates/editor(name=${templateId})}"
+      <!-- §9.4: the reference is a PATH now (`acme/finance/monthly_revenue @ v3`). It stays
+           on ONE line in the narrow inspector and the full reference rides on `title`, so
+           the truncated text is never the only copy of it. -->
+      <a class="pe-link pe-path" th:href="@{/templates/editor(name=${templateId})}"
+         th:title="${templateId} + ' @ v' + ${templateVersion}"
          th:text="${templateId} + ' @ v' + ${templateVersion}">template.sql @ v1</a>
       <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-sql-copy"
               th:attr="data-sql=${sql}">Copy</button>
@@ -33,9 +37,13 @@
 
   <div th:case="'template-missing'" class="ds-empty">
     <p class="ds-empty-title">Template not found</p>
-    <p class="ds-empty-description"
-       th:text="${templateId} + ' @ v' + ${templateVersion} + ' is not in this workspace’s template registry.'">
-      template.sql @ v1 is not in this workspace’s template registry.
+    <!-- The empty state names the SAME path, and truncates it the same way (§9.4) — a
+         missing template is exactly when the reader most needs to read the whole name, so
+         the full reference rides on `title` here too. -->
+    <p class="ds-empty-description">
+      <span class="pe-path" th:title="${templateId} + ' @ v' + ${templateVersion}"
+            th:text="${templateId} + ' @ v' + ${templateVersion}">template.sql @ v1</span>
+      is not in this workspace’s template registry.
     </p>
   </div>
 

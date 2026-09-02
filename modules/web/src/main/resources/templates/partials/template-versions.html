@@ -1,0 +1,37 @@
+<!-- A leaf's versions, newest first, with their lifecycle badges
+     (template-hierarchy-design §9.2; versioning §6, V6__version_lifecycle.sql).
+
+     `uq_template_versions_one_draft` permits at most one DRAFT per template, so the status is
+     DERIVED from the draft pointer rather than re-queried per row: the version the pointer
+     names is the DRAFT, every other version is RELEASED.
+
+     There is no rename, move or delete affordance here, and no version is editable in place —
+     a version is immutable (templates §5.1) and a name is its identity (§4.5). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="versions" class="tpl-versions">
+  <table class="ds-table tpl-versions-table">
+    <thead>
+      <tr>
+        <th class="num">Version</th>
+        <th>Status</th>
+        <th class="num">Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr th:each="v : ${versions}">
+        <td class="num" th:text="${'v' + v.version}">v1</td>
+        <td>
+          <span th:if="${draftVersion != null and draftVersion == v.version}"
+                class="ds-badge ds-badge-warning">DRAFT</span>
+          <span th:unless="${draftVersion != null and draftVersion == v.version}"
+                class="ds-badge ds-badge-success">RELEASED</span>
+        </td>
+        <td class="num" th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
+        <td>
+          <a class="ds-button ds-button-ghost ds-button-sm"
+             th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>

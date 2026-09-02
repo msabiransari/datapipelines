@@ -1,61 +1,20 @@
-<!-- The ROOT carries id="template-list-wrapper": the single stable swap target for
-     search, the dialect filter and the pager. The old <th:block> root contributed no
-     element, and the page's host div was consumed by th:replace, so the target never
-     existed in the DOM at all (ui-screens.md §4.6, the 028 §4.5 contract). -->
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="fragment" id="template-list-wrapper">
-  <th:block th:if="${#lists.isEmpty(templates)}">
-    <!-- §5.1: "nothing exists" offers the create action; "nothing matched" offers Clear filters. -->
-    <div class="ds-empty">
-      <p class="ds-empty-title" th:if="${#strings.isEmpty(q)}">No templates yet</p>
-      <p class="ds-empty-title" th:unless="${#strings.isEmpty(q)}">No templates match your search</p>
-      <p class="ds-empty-description" th:if="${#strings.isEmpty(q)}">Create your first template to get started.</p>
-      <div class="ds-empty-actions" th:unless="${#strings.isEmpty(q)}">
-        <button class="ds-button ds-button-secondary ds-button-sm"
-                th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'">Clear filters</button>
-      </div>
-    </div>
-  </th:block>
+<!-- The templates screen's swap ROOT — a dispatcher, not an element of its own.
 
-  <th:block th:unless="${#lists.isEmpty(templates)}">
-    <!-- .ds-table brings its own border, radius, header fill and row hover (app.css) —
-         no wrapper div, no zebra striping, no per-cell padding. The last column renders
-         createdAt — Template has no updatedAt, so the header says "Created". -->
-    <table class="ds-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Display Name</th>
-          <th>Dialect</th>
-          <th>Description</th>
-          <th class="num">Version</th>
-          <th class="num">Created</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr th:each="t : ${templates}"
-            style="cursor: pointer;"
-            th:attr="onclick='location.href=\'' + @{/templates/editor(name=${t.id})} + '\''">
-          <td>
-            <span th:text="${t.id}"></span>
-            <!-- versioning §7: unreleased edits visible on the list (templates §6). -->
-            <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
-                  th:text="'draft v' + ${drafts[t.id].version} + ' pending release'"
-                  title="A draft exists; release it from the editor to publish."></span>
-          </td>
-          <td th:text="${t.displayName}"></td>
-          <td>
-            <span class="ds-badge ds-badge-default" th:text="${t.dialect.wire}"></span>
-          </td>
-          <td th:text="${t.description}"></td>
-          <td class="num" th:text="${'v' + t.version}"></td>
-          <td class="num" th:text="${#temporals.format(t.createdAt, 'yyyy-MM-dd HH:mm')}"></td>
-        </tr>
-      </tbody>
-    </table>
+     Browse and search are different presentations of the same surface
+     (template-hierarchy-design §9.2, decided): browsing renders the tree one level per
+     request; a non-empty `q` renders a FLAT list of full paths. Pruning a tree to matching
+     leaves would mean walking the ancestors of every match — exactly the whole-list-in-the-
+     browser work §9.1 forbids — and a flat list of full paths is what someone searching
+     `finance/agg` wants to see. Clearing `q` returns to the tree, by construction: the same
+     dispatcher answers both.
 
-    <th:block th:with="prevUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},
-                       nextUrl=@{/partials/templates(q=${q}, dialect=${selectedDialect}, offset=${offset + 25})}">
-      <div th:replace="~{partials/pager :: pager('#template-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${templates.size()}, ${total})}"></div>
-    </th:block>
-  </th:block>
-</div>
+     Either branch's own root element carries id="template-list-wrapper", so the single stable
+     swap target of ui-screens.md §4.5 survives every refresh in both presentations. This
+     th:block contributes no element and MUST NOT carry the id — th:replace removes the host,
+     so an id written here would never reach the DOM. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="fragment"
+          th:replace="${searching} ? ~{partials/template-search :: results} : ~{partials/template-tree-level :: level}">
+  <!-- ONE conditional fragment expression, not two blocks each carrying th:if + th:replace:
+       th:replace has HIGHER attribute precedence than th:if, so the pair-of-blocks form
+       renders BOTH presentations and the condition never runs. -->
+</th:block>

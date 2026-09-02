@@ -292,6 +292,20 @@
         return JSON.stringify(o);
       },
 
+      /*
+       * §9.4's template reference: `acme/finance/monthly_revenue @ v3`.
+       *
+       * A template name is a PATH (template-hierarchy-design §4.1), so this string is the
+       * one the inspector truncates to a single line AND the one it puts on `title` — the
+       * two must be the same value, which is why the panel calls this once for each rather
+       * than building the text twice. An em dash stands in for a node with no template.
+       */
+      templateRefText: function (node) {
+        var t = node && node.template;
+        if (!t || !t.id) return "—";
+        return t.version ? t.id + " @ v" + t.version : t.id;
+      },
+
       /* Execution status → the badge variant the rest of the app uses for it. */
       statusBadgeClass: function (state) {
         switch (state) {

@@ -1,7 +1,7 @@
 # Template Hierarchy & Typed Templates — v1 Design
 
-**Status:** design (not yet normative; no code changed)
-**Revision:** v1.5 — 2026-09-02 (round 046 implemented §5–§7 and §10; the typing migration's stray V7 references corrected to V8 — naming shipped alone as V7 in 043. Earlier v1.4: round 043 implemented §4 naming and §9.6 addressing; §5.1's migration renamed `V8__typed_templates.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
+**Status:** normative — implemented by rounds 043 (§4 naming, §9.6 addressing), 046 (§5–§7 typing, §10) and 047 (§9 UI: the tree, the create/edit forms, the pipeline-editor reference)
+**Revision:** v1.6 — 2026-09-02 (round 047 implemented §9 — the templates tree, browse-vs-search, the create/edit forms and the pipeline-editor reference — completing the design; the Status line goes NORMATIVE, which also ends its docs-audit check-C exemption. Earlier v1.5: round 046 implemented §5–§7 and §10; the typing migration's stray V7 references corrected to V8 — naming shipped alone as V7 in 043. Earlier v1.4: round 043 implemented §4 naming and §9.6 addressing; §5.1's migration renamed `V8__typed_templates.sql`. Earlier v1.3: §9.6 measured and resolved; UI section §9; hash-input decision §5.2; legacy-name gate §4.6; `html` acceptance bar §2)
 **Owner:** datapipelines.co core
 **Depends on:** [Templates spec](templates.md), [Pipeline Contract spec](pipeline-contract.md), [Metadata DB spec](metadata-db.md), [Enums](enums.md)
 **Date:** 2026-09-01
