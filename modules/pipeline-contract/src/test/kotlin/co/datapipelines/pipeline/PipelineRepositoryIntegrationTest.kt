@@ -976,6 +976,110 @@ class PipelineRepositoryIntegrationTest {
         emptyStamps shouldBe emptyMap()
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The template reverse scan (040) — the two questions are different queries, and each
+    // test below fails if they are conflated.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `the working-version scan sees a draft that just adopted a pin - a current_version-only scan misses it`() {
+        // p1: v1 RELEASED pins t@1; a DRAFT v2 adopts t@2. p2 stays on t@1 released.
+        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
+        val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
+        val draftBody = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        checkNotNull(
+            repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(draftBody), releasedHash, owner),
+        )
+
+        // Direction 1: the working scan reports the draft's adoption of t@2.
+        val pinsOfTwo = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 2)
+        pinsOfTwo.map { it.pipelineName to it.pipelineVersion to it.versionStatus } shouldContainExactly
+            listOf("p1" to 2 to PipelineVersionStatus.DRAFT)
+        pinsOfTwo.single().nodeId shouldBe "fetch"
+
+        // Direction 2: the datasource scan's shape (join on current_version only) does NOT see
+        // the draft — mechanically proven with the old join, not asserted in prose. This is the
+        // under-report a released-only used-by answer would ship.
+        currentVersionOnlyPins("t.sql", 2) shouldBe emptyList()
+
+        // The draft owns p1's working state, so p1 no longer counts as using t@1 — p2 still does.
+        val pinsOfOne = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 1)
+        pinsOfOne.map { it.pipelineName } shouldContainExactly listOf("p2")
+    }
+
+    @Test
+    fun `the any-version scan sees historical pins the working scan reports as gone`() {
+        // p1 moves from t@1 (v1) to t@2 (v2, released) — v1's pin is historical but still real.
+        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
+        val v2Body = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        val draft =
+            checkNotNull(repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(v2Body), releasedHash, owner))
+        checkNotNull(
+            repository.releaseDraft(WORKSPACE_ID, p1Record.id, v2Body.name, v2Body.displayName, v2Body.description, draft.bodyHash, owner),
+        )
+
+        // The working scan says nobody uses t@1 anymore…
+        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 1) shouldBe emptyList()
+
+        // …but the any-version scan reports both pins, historical one included, each with its
+        // own pinned version and the status of the pipeline version carrying it.
+        val anyPins = repository.findAnyVersionTemplatePins(WORKSPACE_ID, "t.sql")
+        anyPins.map { it.pipelineVersion to it.versionStatus to it.pinnedVersion } shouldContainExactly
+            listOf(2 to PipelineVersionStatus.RELEASED to 2, 1 to PipelineVersionStatus.RELEASED to 1)
+    }
+
+    @Test
+    fun `per-version in-use counts use the working version and count pipelines, not nodes`() {
+        // p1 has TWO nodes pinning t@1 (one caller, one tempdb) — one pipeline, not two uses.
+        val p1 =
+            Fixtures.pipeline(
+                name = "p1",
+                nodes =
+                    listOf(
+                        Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1)),
+                        Fixtures.node(id = "again", template = TemplateRef("t.sql", 1), output = NodeOutput.Tempdb("stg_again")),
+                    ),
+            )
+        repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
+        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
+        val p3 = Fixtures.pipeline(name = "p3", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        repository.create(WORKSPACE_ID, NewPipeline.from(p3, owner), serializer.write(p3), owner)
+
+        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "t.sql") shouldBe mapOf(1 to 2, 2 to 1)
+
+        // Soft-deleted pipelines drop out of the working scan (and therefore the counts).
+        val p3Record = checkNotNull(repository.findByName(WORKSPACE_ID, "p3"))
+        repository.softDelete(WORKSPACE_ID, p3Record.id)
+        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "t.sql") shouldBe mapOf(1 to 2)
+        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 2) shouldBe emptyList()
+        // …and the any-version scan agrees: a soft-deleted pipeline can no longer be edited or
+        // executed, so its stored pins are inert and excluded there too (the documented choice).
+        repository.findAnyVersionTemplatePins(WORKSPACE_ID, "t.sql").map { it.pipelineName } shouldContainExactly listOf("p1", "p1", "p2")
+    }
+
+    /** The datasource reverse-scan's own join shape (current_version only), so the tests prove the miss mechanically. */
+    private fun currentVersionOnlyPins(
+        templateId: String,
+        version: Int,
+    ): List<String> =
+        jdbc.query(
+            """
+            SELECT p.name
+              FROM pipelines p
+              JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = p.current_version
+             WHERE p.is_deleted = FALSE AND p.workspace_id = :workspaceId
+               AND v.body_json @> jsonb_build_object('nodes', jsonb_build_array(
+                      jsonb_build_object('template', jsonb_build_object('id', :templateId, 'version', :version))))
+            """.trimIndent(),
+            mapOf("workspaceId" to WORKSPACE_ID, "templateId" to templateId, "version" to version),
+        ) { rs, _ -> rs.getString("name") }
+
     /** A minimal execution row referencing (pipeline_id, version) — the FK that makes discard a flip. */
     private fun insertExecution(
         pipelineId: UUID,

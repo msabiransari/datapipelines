@@ -23,6 +23,23 @@ sealed interface DiscardOutcome {
 }
 
 /**
+ * One pipeline node's pin of a template version — the template used-by reverse arrow (040).
+ *
+ * Enough to act on (040 D3), not just to count: the pipeline (id + machine name), the node id
+ * within it, and the pipeline version whose body carries the pin. `pinnedVersion` is redundant
+ * for the per-version scans (they filter on it) and load-bearing for the any-version scan,
+ * where each row may pin a different version of the same template.
+ */
+data class TemplatePin(
+    val pipelineId: UUID,
+    val pipelineName: String,
+    val pipelineVersion: Int,
+    val versionStatus: PipelineVersionStatus,
+    val nodeId: String,
+    val pinnedVersion: Int,
+)
+
+/**
  * Persistence for `pipelines` and `pipeline_versions` (metadata-db §4.4/§4.5/§6,
  * versioning §5/§9).
  *
@@ -386,6 +403,77 @@ class PipelineRepository(
             mapOf("name" to name, "workspaceId" to workspaceId, "excludePipelineId" to excludePipelineId),
             Boolean::class.java,
         ) == true
+
+    // ---------------------------------------------------------------------------------------------
+    // The template reverse scan (040) — two questions, two scans; they are NOT one query
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * **Who is using `templateId@version` right now?** (040 D1, question 1.)
+     *
+     * Scans each live pipeline's **working version** — the DRAFT when one exists, else
+     * `current_version` (versioning §7, 039's rule) — and returns one [TemplatePin] per node
+     * pinning exactly that template version. This is the scan behind the used-by listing, the
+     * "who do I notify" answer and the upgrade-available signal: it must see a draft that just
+     * adopted the pin, which a released-only scan would silently miss.
+     *
+     * Soft-deleted pipelines are excluded: they can no longer be edited or executed, so their
+     * pins are inert (the same predicate [findAllByDatasource] uses, for the same reason).
+     */
+    fun findWorkingVersionTemplatePins(
+        workspaceId: UUID,
+        templateId: String,
+        version: Int,
+    ): List<TemplatePin> =
+        jdbc.query(
+            WORKING_TEMPLATE_PINS_SQL,
+            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "pinnedVersion" to version),
+            PIN_MAPPER,
+        )
+
+    /**
+     * **Is it safe to remove `templateId` (any version of it)?** (040 D1, question 2.)
+     *
+     * Scans **every version, ever** — DRAFT, RELEASED and DISCARDED alike — of every live
+     * pipeline, and returns one [TemplatePin] per node pinning ANY version of the template
+     * (each row's `pinnedVersion` says which). Pipeline versions are immutable and executable
+     * (an explicit-version execution reads any stored body), so a reference from a historical
+     * version is a real reference; conflating this with the working-version scan is how a
+     * delete guard under-reports and lets a still-pinned version be removed.
+     *
+     * Deliberately NOT the [findAllByDatasource] shape: that scan joins `current_version`
+     * only, so a reference living solely in a historical version is invisible to it — a
+     * latent defect in the datasource delete path (reported as a 040 finding, out of that
+     * round's fence to fix). Do not copy that join into a delete guard.
+     */
+    fun findAnyVersionTemplatePins(
+        workspaceId: UUID,
+        templateId: String,
+    ): List<TemplatePin> =
+        jdbc.query(
+            ANY_TEMPLATE_PINS_SQL,
+            mapOf("workspaceId" to workspaceId, "templateId" to templateId),
+            PIN_MAPPER,
+        )
+
+    /**
+     * Distinct live pipelines pinning each version of [templateId], counted over the
+     * **working version** — the template screen's per-version in-use count (040 D6).
+     *
+     * The unit is the PIPELINE, not the node: two nodes of one pipeline pinning the same
+     * version is one pipeline using it, which is the number a template author acts on. A
+     * version no working version pins is simply absent from the map (renders as zero).
+     */
+    fun countWorkingTemplatePinsByPinnedVersion(
+        workspaceId: UUID,
+        templateId: String,
+    ): Map<Int, Int> =
+        jdbc
+            .query(
+                COUNT_TEMPLATE_PINS_SQL,
+                mapOf("workspaceId" to workspaceId, "templateId" to templateId),
+            ) { rs, _ -> rs.getInt("pinned_version") to rs.getInt("pipelines") }
+            .toMap()
 
     /**
      * The content hash of a candidate body, computed by the SAME database expression every
@@ -991,6 +1079,76 @@ class PipelineRepository(
                AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND p.is_deleted = FALSE
             RETURNING $DETAIL_COLUMNS
             """.trimIndent()
+
+        /**
+         * 040 D1 question 1 — the working-version template-pin scan. The join picks each live
+         * pipeline's working version (DRAFT if one exists, else `current_version` — the §7 rule,
+         * made a join predicate here so the "which body" choice cannot drift from every other
+         * working-version reader); the lateral expands that one body's nodes, and containment
+         * matches the node's `template {id, version}` pin exactly (extra keys in the stored
+         * object would still match — containment, not equality — which is the safe direction).
+         */
+        val WORKING_TEMPLATE_PINS_SQL =
+            """
+            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
+                   v.status AS version_status, node->>'id' AS node_id,
+                   (node->'template'->>'version')::int AS pinned_version
+              FROM pipelines p
+              JOIN pipeline_versions v
+                ON v.pipeline_id = p.id
+               AND v.version = COALESCE(
+                       (SELECT d.version FROM pipeline_versions d
+                         WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
+                       p.current_version)
+             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
+             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+               AND node->'template' @> jsonb_build_object('id', :templateId, 'version', :pinnedVersion)
+             ORDER BY p.name, node->>'id'
+            """.trimIndent()
+
+        /** 040 D1 question 2 — every version ever, any pin of this template id. */
+        val ANY_TEMPLATE_PINS_SQL =
+            """
+            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
+                   v.status AS version_status, node->>'id' AS node_id,
+                   (node->'template'->>'version')::int AS pinned_version
+              FROM pipelines p
+              JOIN pipeline_versions v ON v.pipeline_id = p.id
+             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
+             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+               AND node->'template'->>'id' = :templateId
+             ORDER BY p.name, v.version DESC, node->>'id'
+            """.trimIndent()
+
+        /** 040 D6 — the working-version scan grouped by pinned version, pipelines as the unit. */
+        val COUNT_TEMPLATE_PINS_SQL =
+            """
+            SELECT (node->'template'->>'version')::int AS pinned_version,
+                   COUNT(DISTINCT p.id)::int AS pipelines
+              FROM pipelines p
+              JOIN pipeline_versions v
+                ON v.pipeline_id = p.id
+               AND v.version = COALESCE(
+                       (SELECT d.version FROM pipeline_versions d
+                         WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
+                       p.current_version)
+             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
+             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+               AND node->'template'->>'id' = :templateId
+             GROUP BY 1
+            """.trimIndent()
+
+        val PIN_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                TemplatePin(
+                    pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                    pipelineName = rs.getString("pipeline_name"),
+                    pipelineVersion = rs.getInt("pipeline_version"),
+                    versionStatus = PipelineVersionStatus.fromWire(rs.getString("version_status")),
+                    nodeId = rs.getString("node_id"),
+                    pinnedVersion = rs.getInt("pinned_version"),
+                )
+            }
 
         /** The version-less import path: next version appended directly as RELEASED. */
         val APPEND_RELEASED_SQL =
