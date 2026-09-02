@@ -760,6 +760,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
 | `pipeline.node.child_execution_failed` | 500 | A PIPELINE node's child execution failed; the detail carries the child's error code and execution id |
 | `pipeline.node.composition_depth_exceeded` | 500 | Runtime composition-depth backstop hit; indicates a save-time validation gap, since static depth (§12.9) should catch it first |
+| `pipeline.node.sql_parameter_missing` | 500 | The rendered SQL references a `:name` bind parameter the execution context does not declare. Raised before anything executes (042: a missing value bound as null would return wrong data instead of an error); the message names the parameter |
 
 ### 13.5 Staging
 
@@ -839,6 +840,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
+| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The message names the parameter and shows the `:name` form |
 | `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 | `template.version.conflict` | 409 | Content-hash precondition failed on a template draft write/release/discard — another writer changed it after the caller loaded it ([Versioning §4](versioning.md#4-content-hash-body_hash)) |

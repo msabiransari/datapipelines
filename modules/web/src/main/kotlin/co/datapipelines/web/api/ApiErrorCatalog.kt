@@ -99,11 +99,17 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED to HttpStatus.BAD_GATEWAY,
+            // §13.4 — 500 like the pipeline.node family default, wired explicitly so the code
+            // owns a row rather than being absorbed by the default (the 025 A2 convention).
+            PipelineErrorCodes.Node.SQL_PARAMETER_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.IN_USE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
+            // §13.9 — 400 like the template.validation family default, wired explicitly for
+            // the same 025 A2 reason.
+            PipelineErrorCodes.Template.PARAMETER_INTERPOLATED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Result.EXECUTION_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Result.EXECUTION_INCOMPLETE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Result.EXECUTION_FAILED to HttpStatus.GONE,

@@ -264,6 +264,14 @@ object PipelineErrorCodes {
         const val CHILD_EXECUTION_FAILED = "pipeline.node.child_execution_failed"
 
         /**
+         * §13.4 — the rendered SQL references a `:name` bind parameter the execution context
+         * does not declare (042 C2). Raised before anything executes: a missing value bound as
+         * null would return wrong data instead of an error, so the refusal is loud and names
+         * the parameter.
+         */
+        const val SQL_PARAMETER_MISSING = "pipeline.node.sql_parameter_missing"
+
+        /**
          * §13.4 — the run-time composition-depth backstop fired. Reaching it means save-time
          * validation (§12.9 `composition_too_deep`) was bypassed, since the static depth check
          * over immutable pins should have caught the chain first.
@@ -339,6 +347,14 @@ object PipelineErrorCodes {
         const val IMPORT_CYCLE = "template.validation.import_cycle"
         const val IMPORT_DEPTH_EXCEEDED = "template.validation.import_depth_exceeded"
         const val DUPLICATE_ALIAS = "template.validation.duplicate_alias"
+
+        /**
+         * §13.9 — a declared pipeline parameter name appears inside a `${}` interpolation
+         * (042 B2): declared parameters are values and must be referenced as `:name`, bound
+         * as SQL parameters. Interpolation is for structure only, and this refusal is what
+         * makes the bind form the *only* way a value can reach SQL from a new template.
+         */
+        const val PARAMETER_INTERPOLATED = "template.validation.parameter_interpolated"
 
         /**
          * §13.9 — name already exists in this workspace (UNIQUE(workspace_id, name),
