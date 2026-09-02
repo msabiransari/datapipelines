@@ -138,17 +138,59 @@ class WorkspaceService(
      *
      * On a freshly created workspace the D9 [PersonalWorkspaceSeeder] fires last (see its
      * KDoc); it is not re-run for a workspace that already existed.
+     *
+     * ## The name race (048/§C, the check-then-act 036's M5/M6 did not reach)
+     * [availablePersonalName] asks `nameExists` and then inserts, and `workspaces.name` is
+     * globally unique — so two logins racing on one fresh database used to hand the loser a
+     * raw `DuplicateKeyException` out of a login. Both interleavings are now tolerated in the
+     * house catch-and-re-read shape:
+     *
+     *  - **The same user twice** (two pods, two tabs): the loser re-reads its memberships and
+     *    returns the winner's workspace rather than minting a second personal one.
+     *  - **Two different users whose emails share a local-part** (`alice@a.com`,
+     *    `alice@b.com`): the loser has no membership to find — the name belongs to somebody
+     *    else — so it allocates the next free name and inserts again.
+     *
+     * One narrow window stays open and is deliberately not closed here: the same-user loser
+     * can return a workspace whose seeding is still in flight on the winner's thread, so its
+     * first screen may be a moment early. Closing it needs a lock spanning two processes,
+     * which the D9 hook has no place to take, and the loser must not seed a second copy — a
+     * re-import of the same examples collides on `uq_pipelines_workspace_name` and refuses
+     * with `pipeline.validation.duplicate_name`, which would turn a cosmetic race into a
+     * failed login.
      */
     fun ensurePersonalWorkspace(
         user: User,
         email: String,
     ): Workspace {
-        memberships(user.id).firstOrNull()?.let { existing ->
-            return checkNotNull(workspaceRepository.findById(existing.workspaceId)) {
+        existingWorkspace(user.id)?.let { return it }
+        repeat(PERSONAL_NAME_ATTEMPTS) {
+            try {
+                return provisionPersonalWorkspace(user, availablePersonalName(email))
+            } catch (_: org.springframework.dao.DuplicateKeyException) {
+                // The atomic authority spoke: somebody took the name between the check and the
+                // insert. If it was this user's own concurrent login, its workspace is now
+                // ours to return; otherwise fall through and allocate the next free name.
+                authCache.invalidateMemberships(user.id)
+                existingWorkspace(user.id)?.let { return it }
+            }
+        }
+        error("Could not provision a personal workspace for ${user.id} in $PERSONAL_NAME_ATTEMPTS attempts")
+    }
+
+    /** [userId]'s first membership resolved to its workspace row, or null when it has none. */
+    private fun existingWorkspace(userId: UUID): Workspace? =
+        memberships(userId).firstOrNull()?.let { existing ->
+            checkNotNull(workspaceRepository.findById(existing.workspaceId)) {
                 "Membership ${existing.workspaceId} resolved to no workspace row"
             }
         }
-        val name = availablePersonalName(email)
+
+    /** The insert, its audit row and the D9 seeding — the part that must not run twice. */
+    private fun provisionPersonalWorkspace(
+        user: User,
+        name: String,
+    ): Workspace {
         val created = workspaceRepository.create(name, displayName = name, isPersonal = true, createdBy = user.id)
         authCache.invalidateMemberships(user.id)
         auditLogger.log(
@@ -530,5 +572,13 @@ class WorkspaceService(
 
         /** metadata-db §4.11 — workspace names are 1–63 chars. */
         private const val MAX_NAME_LENGTH = 63
+
+        /**
+         * How many times a lost name race is re-allocated before the login gives up. A retry
+         * re-scans from the base name, so two attempts already cover a concurrent pair; the
+         * third exists so an unlucky burst does not surface as a 500, and the bound exists so
+         * a pathological repository can never spin.
+         */
+        private const val PERSONAL_NAME_ATTEMPTS = 3
     }
 }
