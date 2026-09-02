@@ -51,6 +51,7 @@ object McpToolCatalog {
             Entry("pipelines_update", mutating = true),
             Entry("templates_list", mutating = false),
             Entry("templates_get", mutating = false),
+            Entry("templates_used_by", mutating = false),
             Entry("templates_create", mutating = true),
             Entry("templates_render", mutating = false),
             Entry("datasources_list", mutating = false),

@@ -33,6 +33,7 @@ import reactor.core.publisher.Mono
 class McpProtocolIntegrationTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>(relaxed = true)
+    private val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
     private val datasources = mockk<DatasourceRegistry>(relaxed = true)
     private val executions = mockk<ExecutionRepository>(relaxed = true)
     private val events = mockk<ExecutionEventRepository>(relaxed = true)
@@ -43,7 +44,7 @@ class McpProtocolIntegrationTest {
     init {
         McpServerFactory.server(
             transport = transport,
-            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(pipelines), PipelinesListTool(pipelines)), auditLogger),
+            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(pipelines, usage), PipelinesListTool(pipelines)), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
             reader = McpResourceReader(pipelines, templates, datasources, executions, events),

@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 20 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 21 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -173,6 +173,7 @@ Tools are named `{domain}_{action}`:
 - `pipelines_update`
 - `templates_list`
 - `templates_get`
+- `templates_used_by`
 - `templates_create`
 - `templates_render`
 - `datasources_list`
@@ -225,7 +226,7 @@ Fetch a full pipeline definition.
 ```json
 {
   "name": "pipelines_get",
-  "description": "Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it.",
+  "description": "Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it. The result carries the version, its status and body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased edits exist. When a node pins a template version that a newer released version outdates, an upgrade_available array names the node, the template and both versions — an offer to re-pin via pipelines_update, never an automatic change.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -238,6 +239,8 @@ Fetch a full pipeline definition.
 ```
 
 Returns: full pipeline JSON body (per [Pipeline Contract §3](pipeline-contract.md#3-top-level-pipeline-schema)) merged with the fields the version-lifecycle protocol needs (versioning §4.2, since 035): the version's `body_hash` and `status` — echo `body_hash` back as `expected_hash` on `pipelines_update` — plus `current_version` (the latest RELEASED version, what execute-default runs) and a `draft` pointer when unreleased edits exist. Since 039 the DEFAULT body is the **working version** (versioning §7): the DRAFT when one exists, else the latest released — an agent that read released while a draft was open would rebase on stale content and quietly discard the draft with its next write. The response always states which `version` and `status` it returned; an explicit `version` argument still wins.
+
+Since 040, the response also carries `upgrade_available` **whenever a node's pinned template has a newer RELEASED version** (040 D5): one `{node, template_id, pinned, latest_released}` row per outdating pin, computed from the very body being returned. Absent when no pin is outdated (omit-when-empty, the envelope convention). Surfaced, never applied — moving a pin is a pipeline edit (`pipelines_update`) and stays the caller's decision; a pin of a template DRAFT version is not an upgrade (the author is ahead of release, which is information, not a prompt). See [Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040).
 
 **Scope:** `read`.
 
@@ -731,6 +734,30 @@ Refusals, all before anything runs: an unknown node id → `pipeline.node.not_fo
 
 **Scope:** `author` — this runs real SQL and returns arbitrary customer row data; the same 037 F reasoning as `datasources_preview_rows`.
 
+#### 6.2.21 `templates_used_by`
+
+Which pipelines pin a given template version — the reverse arrow of a node's `{id, version}` template pin (040).
+
+```json
+{
+  "name": "templates_used_by",
+  "description": "Which pipelines pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["id", "version"],
+    "properties": {
+      "id": {"type": "string", "description": "Template id."},
+      "version": {"type": "integer", "description": "The pinned version to look for."}
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}]}` — one row per pinning NODE, so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
+
+An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Scope:** `read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -835,7 +862,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 20 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 21 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1063,6 +1090,7 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v1.17 | 040 template used-by | Tool surface 20 → **21**: new §6.2.21 `templates_used_by` (which pipelines pin a template version in their working version — one reference per node with the carrying pipeline version; scope `read`, 040 D7). §6.2.2 `pipelines_get` gains `upgrade_available` (omit-when-empty; node/template/pinned/latest-released rows; surfaced, never applied). §6.1, §5.1 and §8 admission-rule counts updated. |
 | 2026-08-05 | v1.0 | initial draft | Initial MCP server spec: streamable HTTP transport, API key auth, 15 tools, 8 resource types, 3 prompts, error model |
 | 2026-08-05 | v1.1 | propagation | Updated `pipelines_create` tool to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`; nodes carry `type`, `output`, `settings`). |
 | 2026-08-10 | v1.3 | P6b build (Gate C) | Aligned the frozen spec with the merged `mcp-server` module. Additive/corrective only. **§3.1 implementation-gate RESOLVED**: protocol version pinned `2025-06-18` (negotiate-down), the v1 transport is **stateless** — `GET /mcp` optional and NOT served (405), no session ids, no resumability; SDK `mcp-sdk 2.0.0`. **§5.1**: `logging` capability **removed** — a stateless transport has no stream to deliver `notifications/message`, so advertising it promised notifications no client can receive. **§10**: marked not-delivered-in-v1 (defines the v2 shape only); `node_stats` in a tool's final result is the authoritative per-node record. **§6.2.3**: corrected the abandoned-call paragraph — a blocking `POST /mcp` has no disconnect callback, so `disconnect-grace` cancellation does **not** apply to an abandoned MCP tool call (only out-of-band `DELETE /executions/{id}` + the execution timeout do); result-shape enumeration now lists `ttl_seconds` (mirrors REST `data_ready`). §6.2.9 (bare rendered-SQL string) and §6.2.10 (`dialect` free `{"type":"string"}`, no enum) unchanged — the code was aligned to them. Rate limiting on `/mcp` (§13), repository limit/offset push-down, execution-record persistence and the admin all-executions listing are cross-surface carry-forwards to `web`/`app` (P6a/P7), not defects in this module. |

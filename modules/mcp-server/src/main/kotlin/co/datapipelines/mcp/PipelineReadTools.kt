@@ -93,9 +93,16 @@ class PipelinesListTool(
  * would rebase on stale content and quietly discard the draft with its next write. The
  * response always states which `version` and `status` it returned; an explicit `version`
  * argument still wins.
+ *
+ * Since 040 the response also carries `upgrade_available` WHENEVER a node's pinned template
+ * has a newer RELEASED version (040 D5): one `{node, template_id, pinned, latest_released}`
+ * row per outdating pin, absent when there is nothing to say (the envelope's
+ * omit-when-empty convention). Surfaced, never applied — moving a pin is a pipeline edit
+ * (`pipelines_update`) and stays the caller's decision.
  */
 class PipelinesGetTool(
     private val pipelines: PipelineRepository,
+    private val usage: co.datapipelines.templates.TemplateUsageService,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -105,7 +112,9 @@ class PipelinesGetTool(
                     "edits exist, else the latest released version — or a specific version). Use this to read the " +
                     "pipeline body before executing or modifying it. The result carries the version, its status and " +
                     "body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present " +
-                    "when unreleased edits exist.",
+                    "when unreleased edits exist. When a node pins a template version that a newer released version " +
+                    "outdates, an upgrade_available array names the node, the template and both versions — an offer " +
+                    "to re-pin via pipelines_update, never an automatic change.",
             schema =
                 """
                 {
@@ -156,6 +165,21 @@ class PipelinesGetTool(
                 .put("updated_at", draft.updatedAt?.toString() ?: "")
         } else {
             tree.remove("draft")
+        }
+        // 040 D5 rides this payload rather than a new endpoint: the upgrade signal is computed
+        // from the SAME body being returned (the service walks its template pins against each
+        // template's latest released version). Absent when no pin is outdated — omit-when-empty.
+        val signal = usage.upgradeAvailable(workspaceId, json)
+        if (signal.isNotEmpty()) {
+            val array = tree.putArray("upgrade_available")
+            signal.forEach {
+                array
+                    .addObject()
+                    .put("node", it.node)
+                    .put("template_id", it.templateId)
+                    .put("pinned", it.pinned)
+                    .put("latest_released", it.latestReleased)
+            }
         }
         return tree
     }

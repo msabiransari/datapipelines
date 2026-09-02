@@ -672,16 +672,16 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
 
-**MCP tools** (all 20 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 21 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
 | `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `pipelines_execute_node` | `author` |
 
-(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 20 tools operate inside the API key's pinned workspace, design §9.)
+(MCP has no datasource-management tools in v1 — creating/editing datasources is UI/REST-only: workspace-bound datasource CUD is `author` + the workspaces D8 gates, global datasource CUD is `admin`. All 21 tools operate inside the API key's pinned workspace, design §9.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 
@@ -1058,6 +1058,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-02 | v2.11 | 040 template used-by | §7.6 MCP table: `templates_used_by` joins the `read` row (20 → 21 tools) — it returns which pipelines reference which template version, reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data (040 D7). |
 | 2026-08-30 | v2.10 | local password auth | **§5A (new): optional local password accounts** — admin-created only (no self-registration), Argon2id via the API-key `SecretHasher`, `provider = 'local'` placeholder, per-account lockout (§5A.3), config-seeded first admin with a forced first-login change (§5A.2/§5A.4), enumeration-resistant failures with timing equalization (§5A.5), `POST /login` converging on the OIDC session (§5A.6). §1/§2 Principle 1 amended honestly: identity delegated by default, the narrow local exception and WHY. §5.3 login page: form + divider + buttons, only enabled methods. §8.3: `/login` covers the local POST. §10.1 gains `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` are shared with OIDC. The local-auth error codes join §9 and the §13.7 registry (see the catalog commit). §14 postscript. |
 | 2026-08-28 | v2.9 | sample data, slice A | **§4.4 pre-provisioning:** when `datapipelines.bootstrap.datasources-file` is set, startup creates the configured bootstrap admin's row before serving traffic (placeholder `provider = 'bootstrap'` / `provider_subject` = the email, `display_name` from the local-part) so bootstrap-registered datasources have a real `created_by`. Grant-at-creation semantics are unchanged — this is the same single path firing earlier, one audit event across provision → restart → login. **§4.2 linking:** the update no longer rewrites `display_name` on every sign-in; it is set at row creation, and refreshed from the ID token's `name` claim only when the login completes a `provider = 'bootstrap'` placeholder |
 | 2026-08-26 | v2.8 | workspaces slice 2 | **Workspace resolution (design §5/§7):** §4.2 step 4 — login stamps `active_workspace` (last-used, else first membership, else freshly provisioned personal workspace under `auto-per-user`); §5.6 — `DP-Workspace` per-request switch, membership-checked (`403 workspace.membership_required`), API-key requests pin the key's workspace and refuse the header (`400 workspace.header_forbidden`); §7.4 — issuance restricted to the creator's workspaces; `workspace.*` codes catalogued in pipeline-contract §13.12. **§11.1:** stock config ships Google only; Microsoft becomes a commented single-tenant example — multi-tenant `/common` documented as unsupported in v1 (Nimbus refuses its `{tenantid}` discovery metadata at startup). |

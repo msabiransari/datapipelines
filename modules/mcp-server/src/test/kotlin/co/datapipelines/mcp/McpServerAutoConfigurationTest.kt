@@ -70,8 +70,8 @@ class McpServerAutoConfigurationTest {
 
             assertAll(
                 { servlet.urlMappings shouldContainExactly listOf(McpServerFactory.ENDPOINT) },
-                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 20 },
-                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 20 },
+                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 21 },
+                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 21 },
             )
         }
     }

@@ -17,6 +17,10 @@ import java.util.UUID
 
 class PipelineReadToolsTest {
     private val pipelines = mockk<PipelineRepository>()
+
+    // 040: the upgrade-signal service. Relaxed so the existing get-tests see an empty signal
+    // (no upgrade_available key) without each stubbing it; the signal's own tests stub it.
+    private val usage = mockk<co.datapipelines.templates.TemplateUsageService>(relaxed = true)
     private val ctx = McpFixtures.ctx(Scope.READ)
 
     private val revenue = McpFixtures.pipelineRecord(name = "monthly_revenue", displayName = "Monthly Revenue")
@@ -96,9 +100,59 @@ class PipelineReadToolsTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val body = PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body = PipelinesGetTool(pipelines, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
 
         McpTools.readTree(body.toString())["name"].asText() shouldBe "monthly_revenue"
+        // 040 D5: an empty upgrade signal is OMITTED, not an empty array — the envelope's
+        // omit-when-empty convention (the relaxed mock answers emptyList).
+        McpTools.readTree(body.toString()).has("upgrade_available") shouldBe false
+    }
+
+    private fun upgrade(
+        node: String,
+        templateId: String,
+        pinned: Int,
+        latest: Int,
+    ): co.datapipelines.templates.TemplateUsageService.UpgradeAvailable =
+        co.datapipelines.templates.TemplateUsageService.UpgradeAvailable(
+            node,
+            templateId,
+            pinned,
+            latest,
+        )
+
+    @Test
+    fun `get carries the upgrade signal for pins a newer released version outdates`() {
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 1,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                bodyHash = "hash-v1",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+        every { usage.upgradeAvailable(any(), any<String>()) } returns
+            listOf(
+                upgrade("fetch_orders", "fetch_orders.sql", 2, 3),
+                upgrade("join_revenue", "join_revenue.sql", 1, 4),
+            )
+
+        val body = PipelinesGetTool(pipelines, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val signal = McpTools.readTree(body.toString())["upgrade_available"]
+
+        signal.isArray shouldBe true
+        signal.size() shouldBe 2
+        signal[0].let {
+            it["node"].asText() shouldBe "fetch_orders"
+            it["template_id"].asText() shouldBe "fetch_orders.sql"
+            it["pinned"].asInt() shouldBe 2
+            it["latest_released"].asInt() shouldBe 3
+        }
+        signal[1]["latest_released"].asInt() shouldBe 4
     }
 
     @Test
@@ -126,7 +180,7 @@ class PipelineReadToolsTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val body = PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val body = PipelinesGetTool(pipelines, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
         val tree = McpTools.readTree(body.toString())
 
         // §7.1: the default is the working version — an agent must read the draft, never
@@ -153,7 +207,7 @@ class PipelineReadToolsTest {
             )
 
         val body =
-            PipelinesGetTool(pipelines).call(
+            PipelinesGetTool(pipelines, usage).call(
                 McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 2)),
                 ctx,
             )
@@ -167,7 +221,7 @@ class PipelineReadToolsTest {
 
         val error =
             shouldThrow<DatapipelinesException> {
-                PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+                PipelinesGetTool(pipelines, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
             }
         error.code shouldBe PipelineErrorCodes.Execution.NOT_FOUND
     }
@@ -179,7 +233,7 @@ class PipelineReadToolsTest {
 
         val error =
             shouldThrow<DatapipelinesException> {
-                PipelinesGetTool(pipelines).call(
+                PipelinesGetTool(pipelines, usage).call(
                     McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 9)),
                     ctx,
                 )
@@ -194,7 +248,7 @@ class PipelineReadToolsTest {
         assertAll(
             {
                 shouldThrow<McpError> {
-                    PipelinesGetTool(pipelines).call(
+                    PipelinesGetTool(pipelines, usage).call(
                         McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to 0)),
                         ctx,
                     )
@@ -202,7 +256,7 @@ class PipelineReadToolsTest {
             },
             {
                 shouldThrow<McpError> {
-                    PipelinesGetTool(pipelines).call(
+                    PipelinesGetTool(pipelines, usage).call(
                         McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "version" to -3)),
                         ctx,
                     )
@@ -214,13 +268,13 @@ class PipelineReadToolsTest {
 
     @Test
     fun `a missing id is a protocol error, not a tool error`() {
-        val error = shouldThrow<McpError> { PipelinesGetTool(pipelines).call(McpArguments(emptyMap()), ctx) }
+        val error = shouldThrow<McpError> { PipelinesGetTool(pipelines, usage).call(McpArguments(emptyMap()), ctx) }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 
     @Test
     fun `a non-uuid id is a protocol error`() {
-        val error = shouldThrow<McpError> { PipelinesGetTool(pipelines).call(McpArguments(mapOf("id" to "not-a-uuid")), ctx) }
+        val error = shouldThrow<McpError> { PipelinesGetTool(pipelines, usage).call(McpArguments(mapOf("id" to "not-a-uuid")), ctx) }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
 }
