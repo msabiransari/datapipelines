@@ -54,7 +54,8 @@ datapipelines/
 │   ├── web/                             # REST API, SSE, Thymeleaf UI
 │   └── app/                             # Spring Boot entry point, assembles everything
 ├── tests/
-│   └── integration-tests/               # cross-module integration tests
+│   ├── integration-tests/           # cross-module integration tests
+│   └── browser-tests/               # Playwright browser suite (separate invocation: `./gradlew browserTest`)
 └── docs/                                # these specs
 ```
 
@@ -73,6 +74,7 @@ datapipelines/
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
 | `app` | (this spec) | Spring Boot `main()`, assembles all modules, configuration, runnable JAR, **Flyway dependency + migration scripts**. | Owns schema *creation* (Flyway), not data access |
 | `tests/integration-tests` | (this spec) | Cross-module integration tests (Testcontainers for real databases). | — |
+| `tests/browser-tests` | (this spec §5.12) | Mechanical browser E2E of the UI golden paths (Playwright for Java, chromium-only). Separately invoked via `./gradlew browserTest` — NOT part of `build`/`check`. | — |
 
 #### Persistence ownership rule (normative)
 
@@ -144,6 +146,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `web` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `mcp-server` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
+| `tests/browser-tests` | `app` |
 
 Notes on the shape (explanatory, not additional rules):
 
@@ -468,6 +471,40 @@ The per-request `is_active` / revocation re-check (D13) reads through the same 6
 - `io.rest-assured:rest-assured` or `spring-boot-starter-webflux` (for reactive test client)
 
 **Purpose:** end-to-end tests that spin up real database containers, register datasources, create templates, build pipelines, execute them, verify results. The "cold executable" check — if the integration tests pass, the app works.
+
+### 5.12 `tests/browser-tests`
+
+**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11).
+
+**Dependencies (external):**
+- `com.microsoft.playwright:playwright` — pinned in the catalog; the pin covers the
+  driver AND the bundled browser build (a Playwright release pins its browser set).
+- `org.springframework.boot:spring-boot-starter-test`, Testcontainers
+  (PostgreSQL + Redis) — same as §5.11.
+- `de.mkammerer:argon2-jvm` — same declared-exception rationale as §5.11's seeding
+  note: the seeded admin's stored hash must be a real Argon2id of the known password.
+
+**Purpose:** the mechanical, LLM-free browser suite of the release-critical UI golden
+paths (TEST-GAP-2026-09.md): login → forced password change → dashboard, datasource
+CRUD, template/pipeline editors, execute+SSE, history, API keys, workspace switching.
+Codifies the ad-hoc `.playwright-mcp` dev loop as a re-runnable gate.
+
+**Design rules (ratified 2026-09-03):**
+- **Self-contained boot:** `@SpringBootTest(RANDOM_PORT)` + Testcontainers Postgres +
+  Redis + local auth with a seeded admin — one command, zero manual setup, no
+  dependency on an operator's running stack.
+- **Separate invocation:** the root `browserTest` lifecycle task →
+  `:tests:browser-tests:test`. Deliberately NOT wired into `build`/`check`/`gate.sh` —
+  the browser binary download (~150 MB, first run only) and the chromium launch make
+  it too heavy for every-build; it is invoked deliberately before a release.
+- **Fails loud, never skips:** a deliberate invocation without browser binaries FAILS
+  with the install instructions — a silent skip is not a verdict. (The banner-skip
+  precedent of `editorJsTest` is for INVOLUNTARY toolchain absence; it does not apply.)
+- **Chromium only, headless, auto-wait:** no timing sleeps; selectors by stable
+  `id` first (the templates carry them), role/text otherwise. Traces + screenshots
+  saved under `tests/browser-tests/build/reports/` on failure.
+- **Out of scope for v1:** multi-browser matrix, visual regression pixel-diffing,
+  accessibility scans.
 
 ---
 

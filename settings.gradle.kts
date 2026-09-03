@@ -34,4 +34,5 @@ include(
     ":modules:web",
     ":modules:app",
     ":tests:integration-tests",
+    ":tests:browser-tests",
 )

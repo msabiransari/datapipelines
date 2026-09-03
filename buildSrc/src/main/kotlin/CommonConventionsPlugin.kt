@@ -397,6 +397,10 @@ class CommonConventionsPlugin : Plugin<Project> {
         val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> = setOf(
             // No main sources of its own — nothing to measure. (2026-08-15)
             ":tests:integration-tests",
+            // Same reason as integration-tests, plus: pulling Playwright's browser
+            // launch into the Kover-instrumented unit graph would defeat the suite's
+            // deliberate separate invocation (module-structure §5.12). (2026-09-03)
+            ":tests:browser-tests",
         )
     }
 }

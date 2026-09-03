@@ -148,6 +148,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),
+    ":tests:browser-tests" to setOf(":modules:app"),
 )
 
 // Kover wires a per-module SELF-edge through its `kover` aggregation bucket —
@@ -221,6 +222,15 @@ tasks.register("integrationTest") {
     group = "verification"
     description = "Runs cross-module integration tests (tests/integration-tests)."
     dependsOn(":tests:integration-tests:test")
+}
+
+// The browser suite's separate invocation (module-structure §5.12): deliberately NOT
+// part of build/check/verify — it downloads browser binaries on first use and launches
+// chromium, so it is invoked deliberately before a release, never on every build.
+tasks.register("browserTest") {
+    group = "verification"
+    description = "Runs the Playwright browser suite of the UI golden paths (tests/browser-tests)."
+    dependsOn(":tests:browser-tests:test")
 }
 
 tasks.register("verify") {
