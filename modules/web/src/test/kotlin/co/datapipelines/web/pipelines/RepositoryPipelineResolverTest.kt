@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe

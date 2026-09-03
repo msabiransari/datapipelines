@@ -177,6 +177,21 @@ class CommonConventionsPlugin : Plugin<Project> {
 
         project.tasks.withType<Test>().configureEach {
             useJUnitPlatform()
+            // Order-shuffle verification (round 060 §A): `./gradlew :m:test
+            // -Pjunit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer$Random
+            // -Pjunit.jupiter.execution.order.random.seed=<seed>` must reach the TEST JVM.
+            // Read as GRADLE properties, not -D system properties: Gradle's -D stops at the
+            // build JVM, and a config-time System.getProperty would be invisible to the
+            // configuration cache — a changed seed could silently reuse the cached ordering.
+            // Gradle properties are tracked CC inputs; absent (every normal gate run) nothing
+            // is set and JUnit's deterministic default ordering applies.
+            listOf(
+                "junit.jupiter.testmethod.order.default",
+                "junit.jupiter.testclass.order.default",
+                "junit.jupiter.execution.order.random.seed",
+            ).forEach { key ->
+                project.providers.gradleProperty(key).orNull?.let { value -> systemProperty(key, value) }
+            }
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)

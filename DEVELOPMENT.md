@@ -441,6 +441,48 @@ Notes for agent users:
 
 Integration tests use **Testcontainers** to spin up real Postgres, Redis, and source databases (PG, MySQL, MSSQL) in Docker containers. Docker must be running.
 
+### 9.1 One container per module, not per suite
+
+Each module's integration suites share ONE container per engine for the whole test JVM (a `SharedPostgres` / `SharedRedis` / `SharedE2e` singleton in the module's test sources). The container starts on first touch, is reset to an empty database, and — in the domain modules — the shipped migrations are applied once; `app` and the E2E module let the first Spring context's Flyway do it, exactly as production boots.
+
+Sharing is safe because of a rule the suites already follow: **each spec cleans the tables it touches** (`TRUNCATE ... CASCADE` plus re-seed) instead of relying on a fresh container, and E2E seeds carry suite-unique identities. When you add an integration suite:
+
+- reference the module's shared container — never declare a per-class `@Container` for Postgres/Redis;
+- clean what you touch, and give your seeds identities no other suite uses (emails, ids, names);
+- if your assertions are global (exact-set listings, whole-table counts) or your suite re-seeds the shared `acme`/`globex` fixture world, call `E2eClean.beforeSeeding()` from your first-test seed hook;
+- if you need the schema in a partial migration state, take `SharedPostgres.scratchDatabase("your_name")` — a fresh empty database on the same container.
+
+### 9.2 Reusing test containers across runs (opt-in, OFF by default)
+
+The shared containers declare `withReuse(true)`. This is a **no-op** unless you opt in per machine by adding to `~/.testcontainers.properties`:
+
+```properties
+testcontainers.reuse.enable=true
+```
+
+With the opt-in, the containers survive Gradle runs, saving their cold starts (Postgres ~4 s; the auth module's Keycloak ~22 s). The shared objects drop and recreate their database (and FLUSHALL Redis) at first touch of every run, so a reused container behaves exactly like a fresh one — yesterday's rows cannot leak into today's assertions.
+
+The one trap: a container left wedged by a **killed** run (Ryuk never reaped it) keeps its old database reset working but may hold stale ports or state. When in doubt, remove it and let the next run start clean:
+
+```bash
+docker ps --filter 'name=datapipelines_'   # reuse-enabled containers carry their config hash
+docker rm <container>
+```
+
+CI never sets the opt-in, so CI behaviour is unchanged.
+
+### 9.3 Verifying order independence (shuffled method order)
+
+Suites sharing a container must not depend on test-method order. To verify a module under shuffled ordering (two different seeds, both must be green):
+
+```bash
+./gradlew :modules:templates:test \
+  -Pjunit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer\$Random \
+  -Pjunit.jupiter.execution.order.random.seed=202 --rerun-tasks
+```
+
+The ordering properties are forwarded to the test JVM by the common conventions plugin; without them, JUnit's deterministic default ordering applies.
+
 ---
 
 ## 10. Linting and Formatting

@@ -413,13 +413,17 @@ class PipelineShapesE2eTest {
                         )
                         """.trimIndent(),
                     )
+                    // The seed OWNS this table: three tests call this helper and the old
+                    // ON CONFLICT DO NOTHING was a no-op (email carries no unique
+                    // constraint), so a shuffled order stacked 3 rows per call and the
+                    // DAG test counted 6 active where it asserts 2. Truncate, then seed.
+                    statement.execute("TRUNCATE users")
                     statement.execute(
                         """
                         INSERT INTO users (email, name, is_active, created_at) VALUES
                             ('${ACTIVE_EMAILS[1]}', 'Older Active', TRUE,  NOW() - INTERVAL '2 days'),
                             ('inactive@datapipelines.test', 'Inactive', FALSE, NOW() - INTERVAL '1 day'),
                             ('${ACTIVE_EMAILS[0]}', 'Newer Active', TRUE,  NOW())
-                        ON CONFLICT DO NOTHING
                         """.trimIndent(),
                     )
                 }
