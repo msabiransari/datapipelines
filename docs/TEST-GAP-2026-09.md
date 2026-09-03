@@ -38,26 +38,34 @@ audit is about **where behavior is unasserted**, not about a red build.
 
 House style (verified from `PipelinesControllerTest`): direct instantiation +
 MockK, no Spring context, no `@WebMvcTest` anywhere in the repo (0 files — the
-convention is plain JUnit 5). 20 of 35 controllers have a same-name test;
-**15 do not** — and they cluster almost entirely in the Thymeleaf/htmx UI:
+convention is plain JUnit 5). 20 of 35 controllers have a direct unit test;
+**13 do not** — and they cluster in the Thymeleaf/htmx UI:
 
 | Untested controller | Kind | Any other coverage? |
 |---|---|---|
 | `PromotionController` | REST | `PromotionTwoDeploymentE2eTest` (E2E only) |
 | `PipelinePartialController` | htmx partial | none found |
-| `TemplatePartialController` | htmx partial | none found |
+| `TemplatePartialController` | htmx partial | `TemplateCreatePartialTest` (create path only) |
 | `DatasourcePartialController` | htmx partial | none found |
-| `ApiKeysPartialController` | htmx partial | none found |
-| `AdminUsersPartialController` | htmx partial | none found |
-| `DashboardPartialController` | htmx partial | none found |
 | `ExecutionHistoryPartialController` | htmx partial | none found |
 | `ExecutionDetailPartialController` | htmx partial | none found |
+| `DashboardPartialController` | htmx partial | render tests only (template, not logic) |
 | `ExecutionHistoryController` | page | partial E2E touches history pages |
 | `ExecutionDetailController` | page | none found directly |
 | `PromotionUiController` | page | promotion E2E touches UI |
 | `DocsController` | page | `SiteDocsE2eTest` |
 | `SiteController` | page | `SiteDocsE2eTest` |
 | `LocalLoginController` | page | `LocalLoginE2eTest` |
+
+**Correction (2026-09-03, found while backfilling):** this table originally listed
+15 controllers — two were false gaps. `ApiKeysPartialController` and
+`AdminUsersPartialController` have unit tests as CLASSES INSIDE SIBLING FILES
+(`ApiKeysControllerTest.kt:158`, `AdminUsersControllerTest.kt:104`), plus the
+8-test `CredentialMintingSessionOnlyTest` standing guard on the session gate.
+The audit SCRIPT (name-reference) was right about both; the controller table was
+built from a filename-based check that could not see same-name classes in other
+files. Lesson folded into the method section: match by declared class name, not
+file name.
 
 The pattern is historical: REST controllers got the unit-test treatment as they
 were built; the UI layer grew later (024 website round onward) and leaned on E2Es
