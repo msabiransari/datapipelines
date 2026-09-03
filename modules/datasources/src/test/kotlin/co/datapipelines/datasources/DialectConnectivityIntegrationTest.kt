@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.assertAll
 import org.testcontainers.containers.MySQLContainer
-import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.Connection
@@ -162,12 +161,16 @@ class DialectConnectivityIntegrationTest {
     }
 
     private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        /**
+         * The module's shared container — this suite's Postgres half is a pure connectivity
+         * probe (connect, query, map a column), so the migrated database is irrelevant and
+         * starting a container of its own would be pure overhead.
+         */
+        val postgres get() = SharedPostgres.postgres
 
         /** `my_app` on purpose: the underscore-named database is what catches an escaped
-         *  catalog argument (a literal must match the stored name exactly). */
+         *  catalog argument (a literal must match the stored name exactly). One container,
+         * one suite, one subject — MySQL stays per-class. */
         @Container
         @JvmStatic
         val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4").withDatabaseName("my_app")
