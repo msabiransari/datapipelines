@@ -48,6 +48,43 @@ Eight use cases are implemented twice (or more), once per surface. A service lay
 ### S5 — Proposed direction (for review)
 Per-aggregate services (`PipelineService`, `TemplateService`, `ExecutionService`, `DatasourceService`) in their domain modules, absorbing D1–D8; auth's service-first shape is the in-repo exemplar. The planned pipeline-change notification hook (listener on pipeline save) should hang off `PipelineService`, not the repository — today `PipelineRepository.update` (`PipelineRepository.kt:256`) is the single choke point both surfaces share, which is what makes either hook viable.
 
+**[ratified — R6, 2026-09-02] [partially resolved — 056 slice A, branch `feat/service-layer-a`]**
+The owner ratified a service layer with `@Transactional` on every multi-statement write and the
+manager NAMED. The interpretation that shipped, stated here because it is reviewable rather than
+implicit: **per-aggregate services live in the module that owns the aggregate** (S5's own shape,
+with `auth` as the in-repo exemplar), and a **new `modules/application`** — below `web` and
+`mcp-server`, above the domain modules — holds the cross-aggregate orchestrators that lived in
+`web` only because S4 left nowhere else for them. The placement rule is one sentence, recorded in
+[module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable): *cross-aggregate
+use cases live in `application`; single-aggregate ones live with the aggregate.*
+
+Slice A landed the plumbing and ONE aggregate end to end, as the exemplar slices B and C copy:
+
+- **S3 resolved.** `metadataTransactionManager` (a `DataSourceTransactionManager` over the metadata
+  `DataSource`, `app`'s `TransactionConfiguration`) plus `@EnableTransactionManagement(proxyTargetClass = true)`.
+  The atomic-CTE convention SURVIVES unchanged — the layer adds atomicity to multi-statement work
+  and rewrites no working SQL. Two multi-statement writes are deliberately NOT transactional and
+  both are findings rather than preferences: `PipelineService.update` (its 409 recovery reads AFTER
+  catching a constraint violation, which a transaction turns into `25P02`) and
+  `PipelineService.discard` (its two statements are alternatives selected by a foreign-key
+  violation, not a composition). `ArchitectureGuardTest` now requires the manager NAME on every
+  annotation; `TransactionRollbackE2eTest` proves rollback with a commit control beside it.
+- **D1, D2, D6 resolved.** `PipelineService` (in `pipeline-contract`) is the single save-validation
+  and list-filter implementation — the `q` filter alone had FOUR copies (REST, MCP, the UI list
+  screen, its HTMX partial). D6's behavioural divergence is closed: `pipelines_execute` now shares
+  `application`'s `ExecutionLauncher` with the REST path and therefore honours `Idempotency-Key`,
+  which it never had. The key rides the same HTTP header REST uses on the same `POST /mcp` request,
+  so the MCP tool schemas — the surface `McpToolSurfaceSpecDriftTest` freezes — are unchanged.
+- **S4 resolved structurally.** `mcp-server` can now reach a shared use case without depending on
+  `web`; the layering is asserted by `ArchitectureGuardTest`, so a service importing a web type
+  fails the build rather than a review.
+- **Open: D3, D4, D5, D7, D8** — slices B and C (`TemplateService`, `DatasourceService`,
+  `ExecutionService`, the import services and promotion's move into `application`).
+
+The pipeline-change notification hook S5 anticipates now has its choke point: `PipelineService`
+rather than `PipelineRepository.update`.
+
+
 ---
 
 ## Part 2 — Multi-instance findings

@@ -44,7 +44,7 @@ import java.util.UUID
  * The launch flow (rest-api §3.5/§6, §12.1): the stream cap, the up-front parameter gate, the
  * idempotency reservation, and the retry attach.
  */
-class ExecutionLauncherTest {
+class ExecutionStreamLauncherTest {
     private val idempotencyStore = mockk<IdempotencyStore>()
     private val streamer = mockk<SseLogStreamer>()
     private val userId = UUID.randomUUID()
@@ -64,8 +64,8 @@ class ExecutionLauncherTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun launcher(executorFactory: (co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor): ExecutionLauncher =
-        ExecutionLauncher(
+    private fun launcher(executorFactory: (co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor): ExecutionStreamLauncher =
+        ExecutionStreamLauncher(
             templateEngines = mockk(),
             datasourceRegistry = mockk(),
             stagingFactory = mockk(),
@@ -84,10 +84,13 @@ class ExecutionLauncherTest {
             streamer = streamer,
             eventRepository = mockk(relaxed = true),
             executionRepository = mockk(relaxed = true),
-            idempotencyStore = idempotencyStore,
-            idempotency = IdempotencyProperties(),
+            launcher =
+                co.datapipelines.application.ExecutionLauncher(
+                    idempotencyStore = idempotencyStore,
+                    idempotencyTtlSeconds = IdempotencyProperties().ttlSeconds,
+                    metrics = WebIdempotencyMetrics(WebMetrics(SimpleMeterRegistry())),
+                ),
             mapper = JsonMapper.builder().build(),
-            metrics = WebMetrics(SimpleMeterRegistry()),
             scope = CoroutineScope(UnconfinedTestDispatcher()),
             executorFactory = executorFactory,
         )

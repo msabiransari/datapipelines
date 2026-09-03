@@ -3,7 +3,7 @@
 **Status:** v1.3 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-08-10
+**Last updated:** 2026-09-03
 
 ---
 
@@ -1284,6 +1284,88 @@ Four points where the shipped instruments are sharper than v1.2's list:
 - **`datapipelines.result.writes`'s success `outcome` value is `stored`, not `success`** — observability §4.1 is the single authority for tag values, and a dashboard written against the doc would otherwise have matched nothing. The two failure outcomes correspond 1:1 to the `result.too_large` and `result.storage_unavailable` error codes.
 
 See the [Observability spec](observability.md) for the full metric catalog, naming rules, and the cardinality discipline the `pipeline_id` / `node_id` tags are allowed under.
+
+---
+
+## 16. Consistency Model
+
+**Ratified 2026-09-02 (ruling R6 §E); implemented in round 056.**
+
+Everything below is true of the code today. It is written down because the most important
+sentence in it is one a customer must have read BEFORE filing the bug, and until 056 it existed
+nowhere:
+
+> **Each node is atomic on its own database; the pipeline as a whole is not, and a node that fails
+> does not undo the committed work of the nodes before it.**
+
+### 16.1 One transaction, one database
+
+There is exactly **one** Spring transaction manager in this application — `metadataTransactionManager`,
+over the metadata database — and there are N Hikari pools for customer databases which are **not**
+Spring transaction resources and must never become one.
+
+No XA, no JTA, no two-phase commit. The customer databases are not ours; SQLite and DuckDB have no
+meaningful XA; and an in-doubt distributed transaction left on a customer's database is a worse
+failure than any it would prevent. Every seam between two databases is therefore handled by design,
+and every mechanism in the table below already exists in the code.
+
+| Seam | Mechanism | Where |
+|---|---|---|
+| metadata ↔ metadata, multi-statement | `@Transactional("metadataTransactionManager")` on the service method | the service layer (`PipelineService` and its siblings) |
+| customer DB, within one node | per-connection `autoCommit=false` + commit/rollback, savepoint for `REPLACE` | `WritebackRunner` (§6.4.3) |
+| customer DB ↔ customer DB, across nodes | **none — each node is atomic, the pipeline is not** | §16.2 below |
+| metadata ↔ customer DB (status vs. work) | the terminal status write runs in `NonCancellable`; the stale sweeper reconciles what a dead instance left | §5.1, §8.3 |
+| metadata ↔ Redis (idempotency) | claim-before-work via `SET NX` | §11 |
+| sender ↔ receiver (promotion) | the receiver applies a batch in ONE metadata transaction; the sender stores nothing and re-derives from inventory; `body_hash` makes a retry a no-op | `PromotionReceiveService` |
+
+Two rules make this mechanical rather than remembered:
+
+1. **The manager is always named.** A bare `@Transactional` binds to whichever manager Spring
+   finds — correct by accident with one manager, a trap with two. `ArchitectureGuardTest` fails
+   the build on a bare one.
+2. **No customer-datasource I/O inside a metadata transaction.** `ConnectionLease` refuses to
+   lease while `TransactionSynchronizationManager.isActualTransactionActive()` is true, with the
+   catalogued `datasource.lease_in_transaction` (pipeline-contract §13.8). Holding a metadata
+   transaction — and its row locks — open across arbitrary customer SQL is the failure being
+   prevented; and its rollback could not undo the customer-side effect anyway. Orchestration runs
+   OUTSIDE the transaction; status writes are short, separate transactions.
+
+### 16.2 What a partial failure leaves behind
+
+A pipeline is a DAG of nodes, each running against whatever database its `source` names. A node
+that writes back (`output.target: "datasource"`, §6.4.3) commits on ITS OWN connection when it
+finishes. If a later node then fails, that commit stands: there is no transaction spanning the two,
+by the design above, and there cannot be one when the two nodes write to different databases.
+
+So a failed execution can leave a target table populated by the nodes that ran before the failure.
+That is not a defect and there is no rollback coming. Design for it the way any at-least-once
+pipeline is designed:
+
+- prefer **idempotent** write-backs — `REPLACE` (which truncates under a savepoint, §6.4.3) over
+  `APPEND` where a re-run must not double rows;
+- stage into a tempdb table and write back in ONE final node, so the multi-write window closes;
+- read `node_stats` on a failed execution to see exactly which nodes committed
+  (`GET /executions/{id}`, rest-api §10.2).
+
+The parts that ARE atomic: each node's own write-back against its own database (§6.4.3); each
+metadata service method that carries `@Transactional` (§16.1); the tempdb, which is per-execution
+and discarded whole (§9).
+
+### 16.3 Why not "just" wrap the pipeline
+
+Every alternative was considered and rejected in the same ruling:
+
+- **XA / two-phase commit** — needs the customer's database to participate, needs a recovery log we
+  would have to operate, and leaves in-doubt transactions holding locks on a database that is not
+  ours when our process dies. Two of the five supported dialects cannot do it at all.
+- **A compensating-transaction (saga) layer** — the compensation for "this INSERT already
+  committed" is a DELETE we cannot write safely without knowing the customer's schema semantics,
+  and a wrong compensation destroys data the pipeline did not create.
+- **Buffering every write to the end** — turns a streaming executor into one bounded by the size of
+  the largest write-back, which is the constraint the tempdb design exists to avoid.
+
+The honest position is the one stated: node-level atomicity, an explicit consistency model, and a
+document a customer can read before they need it.
 
 ---
 

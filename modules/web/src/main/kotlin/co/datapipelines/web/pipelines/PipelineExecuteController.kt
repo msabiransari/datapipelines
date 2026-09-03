@@ -3,9 +3,8 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutorJson
-import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
@@ -30,7 +29,7 @@ import java.util.UUID
  * The handler itself only resolves and checks: pipeline (404 `pipeline.execution.not_found` for
  * unknown **or soft-deleted**, §5.6), optional `version`, `parameters`, the
  * `DP-Result-TTL-Seconds` and `Idempotency-Key` headers, and the request's correlation id. The
- * orchestration — stream, emitter, executor, idempotency — is [ExecutionLauncher]'s.
+ * orchestration — stream, emitter, executor, idempotency — is [ExecutionStreamLauncher]'s.
  *
  * The body is read as a tree rather than bound to a DTO: `parameters` is an open map whose values
  * must reach `ParameterBinder` as `JsonNode`s exactly as sent (numbers stay numbers, strings stay
@@ -39,9 +38,8 @@ import java.util.UUID
 @RestController
 @RequestMapping("/api/v1/pipelines")
 class PipelineExecuteController(
-    private val pipelines: PipelineRepository,
-    private val launcher: ExecutionLauncher,
-    private val deserializer: PipelineDeserializer = PipelineDeserializer(),
+    private val pipelines: PipelineService,
+    private val launcher: ExecutionStreamLauncher,
 ) {
     /**
      * §6.1 — returns the live event stream. Empty body means "latest version, no parameters".
@@ -62,23 +60,23 @@ class PipelineExecuteController(
     ): SseEmitter {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val tree = parseBody(body)
         val version = versionOf(tree, record.currentVersion)
         val parametersNode = parametersOf(tree)
 
-        val bodyJson =
-            pipelines.findVersionBody(workspaceId, id, version)
+        // D6: the version resolution is the aggregate's, shared with `pipelines_execute`.
+        val executable =
+            pipelines.findExecutable(workspaceId, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
-        val pipeline = deserializer.readOrThrow(bodyJson)
         val parameters: Map<String, JsonNode> = parametersNode.properties().associate { it.key to it.value }
 
         return launcher.launch(
             ExecuteLaunch(
                 pipelineId = id,
                 pipelineVersion = version,
-                pipeline = pipeline,
+                pipeline = executable.pipeline,
                 principal = principal,
                 parameters = parameters,
                 parametersJson = MAPPER.writeValueAsString(parametersNode),

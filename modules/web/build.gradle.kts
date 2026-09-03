@@ -11,6 +11,7 @@ dependencies {
     implementation(project(":modules:staging"))
     implementation(project(":modules:dag"))
     implementation(project(":modules:auth"))
+    implementation(project(":modules:application"))
     implementation(project(":modules:mcp-server"))
 
     implementation(libs.spring.boot.starter.web)

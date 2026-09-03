@@ -128,6 +128,18 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:datasources",
         ":modules:staging",
     ),
+    // The cross-aggregate use-case layer (056/R6): below `web` and `mcp-server`, above the
+    // domain modules. `templates` and `datasources` are allowed here for slices B/C's moves
+    // (the import services, promotion) and are not declared in the module's build file until
+    // something compiles against them.
+    ":modules:application" to setOf(
+        ":modules:typesystem",
+        ":modules:pipeline-contract",
+        ":modules:templates",
+        ":modules:datasources",
+        ":modules:dag",
+        ":modules:auth",
+    ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
         ":modules:pipeline-contract",
@@ -135,6 +147,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:datasources",
         ":modules:dag",
         ":modules:auth",
+        ":modules:application",
     ),
     ":modules:web" to setOf(
         ":modules:typesystem",
@@ -144,6 +157,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:staging",
         ":modules:dag",
         ":modules:auth",
+        ":modules:application",
         ":modules:mcp-server",
     ),
     ":modules:app" to setOf(":modules:web"),

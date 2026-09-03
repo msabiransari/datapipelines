@@ -35,7 +35,7 @@ import java.util.UUID
  * `mcp-server`'s [McpExecutionRunner] (P7): runs an agent-initiated execution through the same
  * recording emitter REST executions use, with **no SSE stream** attached.
  *
- * The shape mirrors [ExecutionLauncher]'s per-run assembly — one [PipelineExecutor] per run,
+ * The shape mirrors [ExecutionStreamLauncher]'s per-run assembly — one [PipelineExecutor] per run,
  * because the emitter captures per-execution state — minus everything stream-shaped: no
  * `SseEmitter`, no stream registration, no idempotency reservation (the MCP execute tool has no
  * `Idempotency-Key` carrier). Nothing is registered in [ExecutionStreamRegistry], so the
@@ -71,7 +71,7 @@ class McpRecordingExecutionRunner(
     /**
      * The composition port (design 2026-08-13-pipeline-node-type §4.1) an MCP-run pipeline's
      * PIPELINE nodes dispatch to — passed through to the per-run executor, as in
-     * [ExecutionLauncher].
+     * [ExecutionStreamLauncher].
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
 ) : McpExecutionRunner {
@@ -106,7 +106,7 @@ class McpRecordingExecutionRunner(
     }
 
     /**
-     * The §10.2 result-history columns — same write [ExecutionLauncher] performs for REST runs;
+     * The §10.2 result-history columns — same write [ExecutionStreamLauncher] performs for REST runs;
      * the emitter's terminal event carries no result size, so they land after `execute` returns.
      * Bookkeeping only: a failure is logged, never fails the completed execution.
      */
@@ -118,7 +118,7 @@ class McpRecordingExecutionRunner(
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
-    /** One executor per run — same reasoning as [ExecutionLauncher.newExecutor]; the engine is the workspace's own (T24). */
+    /** One executor per run — same reasoning as [ExecutionStreamLauncher.newExecutor]; the engine is the workspace's own (T24). */
     private fun newExecutor(
         emitter: WebEventEmitter,
         workspaceId: UUID,

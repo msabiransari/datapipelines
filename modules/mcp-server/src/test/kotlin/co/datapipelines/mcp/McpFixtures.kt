@@ -9,10 +9,18 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorJson
+import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.pipeline.PipelineReleaseService
+import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
+import io.mockk.mockk
 import io.modelcontextprotocol.spec.McpSchema
 import java.time.Instant
 import java.util.UUID
@@ -49,7 +57,31 @@ object McpFixtures {
     fun ctx(
         vararg scopes: Scope,
         userId: UUID = USER,
-    ): McpToolContext = McpToolContext(principal(*scopes, userId = userId), CORRELATION_ID)
+        idempotencyKey: String? = null,
+    ): McpToolContext = McpToolContext(principal(*scopes, userId = userId), CORRELATION_ID, idempotencyKey)
+
+    /**
+     * A REAL [PipelineService] over the suite's own mocked collaborators (056).
+     *
+     * The pipeline tools take the service rather than the repository now, but a suite's existing
+     * `every { repository.… }` stubs keep firing unchanged: the service is a thin composition over
+     * exactly those repository calls, so what moved is the wiring, not what any test asserts.
+     */
+    fun pipelineService(
+        pipelines: PipelineRepository,
+        validator: PipelineValidator = mockk(),
+        authoring: AuthoringGuard = AuthoringGuard(true),
+        templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
+        drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),
+        releases: PipelineReleaseService = PipelineReleaseService(pipelines, templateVersions, validator, authoring),
+    ): PipelineService =
+        PipelineService(
+            pipelines = pipelines,
+            validator = validator,
+            drafts = drafts,
+            releases = releases,
+            authoring = authoring,
+        )
 
     fun request(
         tool: String,

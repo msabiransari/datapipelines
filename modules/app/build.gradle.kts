@@ -17,6 +17,12 @@ dependencies {
     // Authorized by module-structure.md §5.10: serves the root-level /health,
     // /ready and /info probes (rest-api.md §11, observability.md §6).
     implementation(libs.spring.boot.starter.web)
+    // spring-jdbc + spring-tx: `app` owns the metadata `DataSource` (§3.1 rule 4) and, since
+    // 056, declares the ONE transaction manager over it (`TransactionConfiguration`), so
+    // `DataSourceTransactionManager` and `@EnableTransactionManagement` are COMPILE-time types
+    // here. Both already arrived transitively through `web`; declaring the starter is §4.2's
+    // "everything used at compile time is listed", and no new artifact enters the build.
+    implementation(libs.spring.boot.starter.jdbc)
 
     // Flyway: this module is the ONLY one that may depend on it (§3.1 rule 2).
     // Nothing compiles against it — Spring Boot autoconfigures the migration on

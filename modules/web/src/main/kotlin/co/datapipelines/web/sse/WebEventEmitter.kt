@@ -92,7 +92,7 @@ class WebEventEmitter(
      * Invoked with the executor-minted execution id the moment `execution_started` is persisted —
      * the first point any code outside the executor learns it. The execute launcher uses this to
      * rebind the idempotency reservation (which had to be claimed *before* the id existed) onto the
-     * real id; see `ExecutionLauncher`.
+     * real id; see `ExecutionStreamLauncher`.
      */
     private val onExecutionStarted: (UUID) -> Unit = {},
 ) : EventEmitter {

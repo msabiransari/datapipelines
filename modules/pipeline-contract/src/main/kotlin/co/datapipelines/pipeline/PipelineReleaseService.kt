@@ -1,15 +1,6 @@
-package co.datapipelines.web.pipelines
+package co.datapipelines.pipeline
 
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.PipelineVersionDetail
-import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.web.api.ApiErrors
 import java.util.UUID
 
 /**
@@ -36,9 +27,9 @@ import java.util.UUID
  */
 class PipelineReleaseService(
     private val pipelines: PipelineRepository,
-    private val templates: TemplateRepository,
+    private val templates: TemplateVersionStatuses,
     private val validator: PipelineValidator,
-    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
+    private val authoring: AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /** What a release produced: the bumped record, the released version, the released body. */
@@ -51,7 +42,7 @@ class PipelineReleaseService(
     /**
      * Releases the pipeline's DRAFT at [expectedHash].
      *
-     * @throws DatapipelinesException / `PipelineValidationException` / [co.datapipelines.web.api.ApiException]:
+     * @throws DatapipelinesException / [PipelineValidationException]:
      *   `pipeline.version.not_draft`, §12 validation codes re-run on the draft body,
      *   `pipeline.release.template_not_released`, `pipeline.version.conflict` (stale hash).
      */
@@ -79,7 +70,7 @@ class PipelineReleaseService(
 
         // §6: templates lock first — a DRAFT template pin blocks the pipeline's release.
         pipeline.nodes.map { it.template }.forEach { ref ->
-            val status = templates.findVersionStatus(workspaceId, ref.id, ref.version)
+            val status = templates.statusOf(workspaceId, ref.id, ref.version)
             if (status != PipelineVersionStatus.RELEASED) {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
@@ -134,8 +125,8 @@ class PipelineReleaseService(
         authoring.requirePipelineAuthoring()
 
         return when (val outcome = pipelines.discardDraft(workspaceId, pipelineId, expectedHash)) {
-            co.datapipelines.pipeline.DiscardOutcome.Deleted -> Discarded.Deleted
-            is co.datapipelines.pipeline.DiscardOutcome.FlippedToDiscarded -> Discarded.Flipped(outcome.detail)
+            DiscardOutcome.Deleted -> Discarded.Deleted
+            is DiscardOutcome.FlippedToDiscarded -> Discarded.Flipped(outcome.detail)
             null -> throw conflictAfterGuardFailure(workspaceId, pipelineId)
         }
     }
@@ -168,22 +159,4 @@ class PipelineReleaseService(
             message = "Pipeline '$pipelineId' has no draft to release or discard.",
             details = mapOf("pipeline_id" to pipelineId.toString()),
         )
-}
-
-/**
- * The `If-Match` precondition header every version-lifecycle mutation carries (versioning
- * §4.2; the exact spelling rest-api.md fixes). A missing header is a protocol error, not a
- * conflict — the caller has not participated in the protocol at all.
- */
-object IfMatchHeader {
-    const val NAME = "If-Match"
-
-    /** @throws co.datapipelines.web.api.ApiException when the header is absent or blank. */
-    fun required(value: String?): String =
-        value?.trim()?.takeIf { it.isNotEmpty() }
-            ?: throw co.datapipelines.web.api.ApiException(
-                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                "The $NAME header (the body hash you based this change on) is required.",
-                mapOf(ApiErrors.REASON to "precondition_missing", "header" to NAME),
-            )
 }

@@ -112,7 +112,7 @@ class ApiErrorCatalogSpecDriftTest {
          * `.target_unreachable`, each landed in the SAME commit as its constant and catalog
          * row. Re-derived from the merged document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 111
+        const val SECTION_13_ROW_COUNT = 112
 
         /** §12's distinct validation codes on 2026-09-02 (046 added §12.6's template_type_mismatch). */
         const val SECTION_12_CODE_COUNT = 48

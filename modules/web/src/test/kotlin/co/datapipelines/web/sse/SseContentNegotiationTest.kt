@@ -8,7 +8,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.executions.ExecutionsController
 import co.datapipelines.web.executions.ResultCursor
-import co.datapipelines.web.pipelines.ExecutionLauncher
+import co.datapipelines.web.pipelines.ExecutionStreamLauncher
 import co.datapipelines.web.pipelines.PipelineExecuteController
 import io.mockk.every
 import io.mockk.mockk
@@ -36,8 +36,11 @@ class SseContentNegotiationTest {
         MockMvcBuilders
             .standaloneSetup(
                 PipelineExecuteController(
-                    pipelines = mockk<PipelineRepository> { every { findById(any(), pipelineId) } returns null },
-                    launcher = mockk<ExecutionLauncher>(),
+                    pipelines =
+                        co.datapipelines.web.pipelineServiceOver(
+                            mockk<PipelineRepository> { every { findById(any(), pipelineId) } returns null },
+                        ),
+                    launcher = mockk<ExecutionStreamLauncher>(),
                 ),
             ).setControllerAdvice(ApiExceptionHandler())
             .build()

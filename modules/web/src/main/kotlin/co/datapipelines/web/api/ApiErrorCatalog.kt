@@ -114,6 +114,10 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Datasource.IN_USE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Datasource.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED to HttpStatus.BAD_REQUEST,
+            // 056 §E.2: a customer lease attempted inside a metadata transaction. Nothing a
+            // caller sends can produce it — it means a service annotated @Transactional grew a
+            // datasource lease, so it is a server fault, loudly, rather than a silent lock hold.
+            PipelineErrorCodes.Datasource.LEASE_IN_TRANSACTION to HttpStatus.INTERNAL_SERVER_ERROR,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.9 (040 D4) — the in-use delete refusal, against any template-family default:
             // it is a conflict with live references, not a validation failure.

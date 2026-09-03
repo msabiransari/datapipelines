@@ -116,7 +116,7 @@ class SubPipelineExecutionRunner(
     private val executionRepository: ExecutionRepository,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     /**
-     * Test seam, same reasoning as [ExecutionLauncher]'s: builds the per-child executor. Null in
+     * Test seam, same reasoning as [ExecutionStreamLauncher]'s: builds the per-child executor. Null in
      * production wiring, where [newExecutor] assembles the real one from the shared
      * collaborators; tests substitute a mock so the request the runner builds can be captured.
      */
@@ -263,7 +263,7 @@ class SubPipelineExecutionRunner(
         compositionDepth = ctx.compositionDepth + 1,
         // F5: the family shares the id of the request that started it. Carried on the REQUEST, not
         // just handed to the emitter, so it reaches the child's own `execution_started` payload and
-        // is inherited again by every grandchild. Roots always carry one (`ExecutionLauncher`,
+        // is inherited again by every grandchild. Roots always carry one (`ExecutionStreamLauncher`,
         // `McpRecordingExecutionRunner`); the fallback only covers a request built without one.
         correlationId = ctx.correlationId ?: UUID.randomUUID(),
     )

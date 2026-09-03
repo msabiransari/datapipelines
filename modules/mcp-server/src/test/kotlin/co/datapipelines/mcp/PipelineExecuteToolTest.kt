@@ -38,7 +38,10 @@ class PipelineExecuteToolTest {
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
     private val ctx = McpFixtures.ctx(Scope.EXECUTE)
 
-    private val tool = PipelineExecuteTool(pipelines, executor, resultStore, resultUrls)
+    private val executions = mockk<co.datapipelines.executor.ExecutionRepository>(relaxed = true)
+    private val service = McpFixtures.pipelineService(pipelines)
+
+    private val tool = PipelineExecuteTool(service, executor, executions, resultStore, resultUrls)
 
     private val args =
         McpArguments(
@@ -236,8 +239,14 @@ class PipelineExecuteToolTest {
 
         @Suppress("UNCHECKED_CAST")
         val payload =
-            PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, resultConfig = ResultConfig(ttlDefaultSeconds = 900))
-                .call(args, ctx) as Map<String, Any?>
+            PipelineExecuteTool(
+                service,
+                executor,
+                executions,
+                resultStore,
+                resultUrls,
+                resultConfig = ResultConfig(ttlDefaultSeconds = 900),
+            ).call(args, ctx) as Map<String, Any?>
 
         payload["ttl_seconds"] shouldBe 900L
     }
@@ -271,7 +280,7 @@ class PipelineExecuteToolTest {
         val request = slot<ExecuteRequest>()
         coEvery { runner.run(capture(request), any()) } returns result(resultRef = null)
         val withRunner =
-            PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, executionRunner = runner)
+            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls, executionRunner = runner)
 
         @Suppress("UNCHECKED_CAST")
         val payload = withRunner.call(args, ctx) as Map<String, Any?>

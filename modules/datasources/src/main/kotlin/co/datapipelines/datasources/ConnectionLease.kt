@@ -1,5 +1,7 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.DatapipelinesException
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.sql.Connection
 import java.sql.SQLException
 
@@ -27,7 +29,12 @@ import java.sql.SQLException
  * failure). `Error` is never caught.
  */
 internal object ConnectionLease {
-    /** Leases a connection for [datasource] and runs [block] with it, closed on exit. */
+    /**
+     * Leases a connection for [datasource] and runs [block] with it, closed on exit.
+     *
+     * @throws DatapipelinesException `datasource.lease_in_transaction` when a metadata
+     *   transaction is open on this thread — see [refuseInsideMetadataTransaction].
+     */
     @Suppress("TooGenericExceptionCaught")
     fun <T> lease(
         registry: DatasourceRegistry,
@@ -35,6 +42,7 @@ internal object ConnectionLease {
         block: (Connection) -> T,
     ): T {
         val datasourceName = datasource.name
+        refuseInsideMetadataTransaction(datasourceName)
         val connection =
             try {
                 registry.poolFor(datasource).leaseConnection()
@@ -50,6 +58,33 @@ internal object ConnectionLease {
             // other SQLException from the caller's read is the caller's to classify.
             if (e.isConnectionFailure()) unreachable(datasourceName, e) else throw e
         }
+    }
+
+    /**
+     * **One transaction, one database** (056 §E.2, ratified 2026-09-02; dag-executor §16).
+     *
+     * The application has exactly one Spring transaction manager, and it is the METADATA
+     * database's. Customer datasources are Hikari pools that are deliberately not Spring
+     * transaction resources, so a lease taken while a metadata transaction is active would hold
+     * that transaction — and its locks — open across arbitrary customer SQL, and its rollback
+     * could not undo the customer-side effect in any case. Orchestration therefore runs outside
+     * the transaction and status writes are short, separate ones.
+     *
+     * The rule was previously only prose. This is the mechanical form: the refusal happens at the
+     * one boundary every customer connection passes through, so no future service can violate it
+     * quietly. [TransactionSynchronizationManager.isActualTransactionActive] is true only for a
+     * REAL started transaction (not a `SUPPORTS`/no-op one), which is exactly the condition that
+     * would hold locks.
+     */
+    fun refuseInsideMetadataTransaction(datasourceName: String) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) return
+        throw DatapipelinesException(
+            code = DatasourceErrorCodes.LEASE_IN_TRANSACTION,
+            message =
+                "Refusing to lease a connection to datasource '$datasourceName' while a metadata " +
+                    "transaction is open: one transaction, one database.",
+            details = mapOf("datasource" to datasourceName),
+        )
     }
 
     /** The single throw point of the lease boundary's translation. */

@@ -436,6 +436,11 @@ This is also enforced at **save time**: pipeline validation dry-renders every re
 
 ## 8. Node Execution Behavior (per `type` and `output.target`)
 
+> **Consistency:** a write-back node commits on its own connection when it finishes, and nothing
+> rolls it back if a later node fails — each node is atomic on its own database, the pipeline as a
+> whole is not. The full model, the seams between databases, and how to design a write-back around
+> it are [DAG Executor §16](dag-executor.md#16-consistency-model).
+
 ### 8.1 DQL nodes
 
 A DQL node runs a `SELECT` query and produces a ResultSet. Behavior depends on `output.target`:
@@ -836,6 +841,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
+| `datasource.lease_in_transaction` | 500 | A customer-database connection was requested while a metadata transaction was open on the thread — refused by design (one transaction, one database; see [dag-executor §16](dag-executor.md#16-consistency-model)) |
 | `pipeline.execution.datasource_unreachable` | 502 | Pre-execution reachability check failed for a referenced datasource |
 
 ### 13.9 Template

@@ -1,38 +1,25 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.executor.ExecutorJson
-import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.Pipeline
-import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
-import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.PipelineVersionDetail
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
 
 /**
- * The save path shared by `pipelines_create` and `pipelines_update` (§6.2.4, §6.2.5).
+ * The **wire shapes** `pipelines_create` and `pipelines_update` share (§6.2.4, §6.2.5): the §3
+ * body assembled from the tool arguments, the result payload, and the two long property
+ * descriptions both input schemas restate verbatim.
  *
- * Both run the **universal save-time validation** (pipeline-contract §2.8): deserialize → §12
- * validate → store. Nothing invalid ever reaches the database, and a validation failure comes
- * back as a tool result with `isError: true` carrying the validation code (§9.2) — the agent
- * fixes and retries, no partial creation is possible.
+ * This is what is left of `PipelineSaveSupport`, which 056 deleted. Its `validated()` — the
+ * deserialize → §12 validate → canonical triple — was the MCP copy of the identical triple
+ * `PipelinesController` carried (ARCH-AUDIT S2/D1); that rule is [PipelineService.validate] now,
+ * and both surfaces call it. What remained here is genuinely MCP-shaped and belongs on this side
+ * of the boundary: a service must not know what a tool result looks like.
  */
-internal class PipelineSaveSupport(
-    private val deserializer: PipelineDeserializer,
-    private val validator: PipelineValidator,
-    private val serializer: PipelineSerializer,
-) {
-    /** Args → validated [Pipeline] + its canonical body JSON. Validates within [workspaceId]. */
-    fun validated(
-        args: McpArguments,
-        workspaceId: UUID,
-    ): Pair<Pipeline, String> {
-        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(bodyJson(args)), workspaceId)
-        return pipeline to serializer.write(pipeline)
-    }
-
+internal object PipelineToolPayloads {
     /**
      * Assembles the §3 body from the tool arguments.
      *
@@ -40,7 +27,7 @@ internal class PipelineSaveSupport(
      * schema has no such property (and is `additionalProperties: false`), so v1 is the only
      * version an MCP-authored pipeline can be.
      */
-    private fun bodyJson(args: McpArguments): String {
+    fun bodyJson(args: McpArguments): String {
         val body =
             buildMap<String, Any?> {
                 put("schema_version", Pipeline.SUPPORTED_SCHEMA_VERSION)
@@ -63,8 +50,8 @@ internal class PipelineSaveSupport(
     fun response(
         record: PipelineRecord,
         body: String,
-        version: co.datapipelines.pipeline.PipelineVersionDetail? = null,
-        draft: co.datapipelines.pipeline.PipelineVersionDetail? = null,
+        version: PipelineVersionDetail? = null,
+        draft: PipelineVersionDetail? = null,
     ): Map<String, Any?> =
         buildMap<String, Any?> {
             put("id", record.id.toString())
@@ -91,36 +78,28 @@ internal class PipelineSaveSupport(
             }
         }
 
-    companion object {
-        /** The §6.2.4 `nodes` description, restated verbatim by both tools. */
-        const val NODES_DESCRIPTION: String =
-            "Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL " +
-                "only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most " +
-                "one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare " +
-                "output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref " +
-                "{name, version} pinning an existing pipeline version to execute as a child execution, an optional " +
-                "parameters map (typed literals, or '\${parent_param}' to pass a parent parameter through), and an " +
-                "optional output block allowed only when the pinned child has a caller node; it declares neither source " +
-                "nor template."
+    /** The §6.2.4 `nodes` description, restated verbatim by both tools. */
+    const val NODES_DESCRIPTION: String =
+        "Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL " +
+            "only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most " +
+            "one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare " +
+            "output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref " +
+            "{name, version} pinning an existing pipeline version to execute as a child execution, an optional " +
+            "parameters map (typed literals, or '${'$'}{parent_param}' to pass a parent parameter through), and an " +
+            "optional output block allowed only when the pinned child has a caller node; it declares neither source " +
+            "nor template."
 
-        /** The §6.2.4 `parameters` description, restated verbatim by both tools. */
-        const val PARAMETERS_DESCRIPTION: String =
-            "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter " +
-                "declaration point: the full parameter map, defaults applied, is the render context for every template " +
-                "the pipeline references."
-    }
+    /** The §6.2.4 `parameters` description, restated verbatim by both tools. */
+    const val PARAMETERS_DESCRIPTION: String =
+        "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter " +
+            "declaration point: the full parameter map, defaults applied, is the render context for every template " +
+            "the pipeline references."
 }
 
 /** `pipelines_create` (mcp-server.md §6.2.4). Scope: `author`. */
 class PipelinesCreateTool(
-    private val pipelines: PipelineRepository,
-    private val authoring: co.datapipelines.pipeline.AuthoringGuard,
-    deserializer: PipelineDeserializer,
-    validator: PipelineValidator,
-    serializer: PipelineSerializer = PipelineSerializer(),
+    private val pipelines: PipelineService,
 ) : McpTool {
-    private val support = PipelineSaveSupport(deserializer, validator, serializer)
-
     override val definition: McpSchema.Tool =
         McpTools.tool(
             name = "pipelines_create",
@@ -137,16 +116,15 @@ class PipelinesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
-        // versioning §5.5: creation is authoring — a promotion receiver refuses it
-        // (pipeline.authoring.disabled names the reason).
-        authoring.requirePipelineAuthoring()
-        val workspaceId = ctx.principal.requireWorkspace().id
-        val (pipeline, body) = support.validated(args, workspaceId)
-        val record = pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = ctx.principal.userId), body, ctx.principal.userId)
-        // Creation is not modification (§3.2): v1 lands RELEASED and immediately executable —
-        // read back the row the database stored so the response carries its real hash.
-        val version = pipelines.findCurrentVersionDetail(workspaceId, record.id)
-        return support.response(record, body, version)
+        // The authoring capability check (versioning §5.5), the §12 validation and the write are
+        // all PipelineService.create's — the same call PUT /pipelines makes.
+        val saved =
+            pipelines.create(
+                ctx.principal.requireWorkspace().id,
+                PipelineToolPayloads.bodyJson(args),
+                ctx.principal.userId,
+            )
+        return PipelineToolPayloads.response(saved.record, saved.bodyJson, saved.version)
     }
 
     private companion object {
@@ -159,9 +137,9 @@ class PipelinesCreateTool(
                 "name": {"type": "string", "pattern": "^[a-z0-9_]+${'$'}"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},
-                "parameters": {"type": "object", "description": "${PipelineSaveSupport.PARAMETERS_DESCRIPTION}"},
+                "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
-                "nodes": {"type": "array", "description": "${PipelineSaveSupport.NODES_DESCRIPTION}"}
+                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"}
               },
               "additionalProperties": false
             }
@@ -185,14 +163,8 @@ class PipelinesCreateTool(
  * each other; on `pipeline.version.conflict`, re-read and rebase, never retry blindly.
  */
 class PipelinesUpdateTool(
-    private val pipelines: PipelineRepository,
-    private val drafts: co.datapipelines.pipeline.PipelineDraftService,
-    deserializer: PipelineDeserializer,
-    validator: PipelineValidator,
-    serializer: PipelineSerializer = PipelineSerializer(),
+    private val pipelines: PipelineService,
 ) : McpTool {
-    private val support = PipelineSaveSupport(deserializer, validator, serializer)
-
     override val definition: McpSchema.Tool =
         McpTools.tool(
             name = "pipelines_update",
@@ -210,24 +182,19 @@ class PipelinesUpdateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
-        val workspaceId = ctx.principal.requireWorkspace().id
         val id: UUID = args.requiredUuid("id")
-        val expectedHash = args.requiredString("expected_hash")
-        val (pipeline, body) = support.validated(args, workspaceId)
-        val written =
-            drafts.write(
-                workspaceId = workspaceId,
+        val saved =
+            pipelines.update(
+                workspaceId = ctx.principal.requireWorkspace().id,
                 pipelineId = id,
-                pipeline = pipeline,
-                canonical = body,
-                expectedHash = expectedHash,
+                bodyJson = PipelineToolPayloads.bodyJson(args),
+                expectedHash = args.requiredString("expected_hash"),
                 actor = ctx.principal.userId,
             )
         // A no-op update (versioning §5.1) reports status RELEASED and carries NO draft
-        // pointer — the body already equals the released one, nothing was opened.
-        val draftPointer =
-            if (written.version.status == co.datapipelines.pipeline.PipelineVersionStatus.RELEASED) null else written.version
-        return support.response(written.record, written.bodyJson, written.version, draftPointer)
+        // pointer — the body already equals the released one, nothing was opened. That branch
+        // is the service's now; PUT /pipelines/{id} spelled it identically before 056.
+        return PipelineToolPayloads.response(saved.record, saved.bodyJson, saved.version, saved.draft)
     }
 
     private companion object {
@@ -242,9 +209,9 @@ class PipelinesUpdateTool(
                 "name": {"type": "string", "pattern": "^[a-z0-9_]+${'$'}"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},
-                "parameters": {"type": "object", "description": "${PipelineSaveSupport.PARAMETERS_DESCRIPTION}"},
+                "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
-                "nodes": {"type": "array", "description": "${PipelineSaveSupport.NODES_DESCRIPTION}"}
+                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"}
               },
               "additionalProperties": false
             }

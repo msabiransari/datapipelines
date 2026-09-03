@@ -11,7 +11,6 @@ import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.mcp.McpServerAutoConfiguration
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
@@ -107,9 +106,12 @@ class WebsiteFactsGuardTest {
     private fun productionToolCount(): Int {
         val executionRunner = mockk<ObjectProvider<McpExecutionRunner>>()
         every { executionRunner.getIfAvailable() } returns null
+        val launcher = mockk<ObjectProvider<co.datapipelines.application.ExecutionLauncher>>()
+        every { launcher.getIfAvailable() } returns null
         return McpServerAutoConfiguration()
             .mcpTools(
                 pipelines = mockk<PipelineRepository>(),
+                pipelineService = mockk<co.datapipelines.pipeline.PipelineService>(),
                 templates = mockk<TemplateRepository>(),
                 datasources = mockk<DatasourceRegistry>(),
                 introspector = mockk<SchemaIntrospector>(),
@@ -118,11 +120,11 @@ class WebsiteFactsGuardTest {
                 resultStore = mockk<ResultStore>(),
                 resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" },
                 executorConfig = ExecutorConfig(),
-                pipelineValidator = mockk<PipelineValidator>(),
                 templateValidator = mockk<TemplateValidator>(),
                 templateEngines = mockk<WorkspaceTemplateEngines>(),
                 environment = StandardEnvironment(),
                 executionRunner = executionRunner,
+                launcher = launcher,
             ).size
     }
 

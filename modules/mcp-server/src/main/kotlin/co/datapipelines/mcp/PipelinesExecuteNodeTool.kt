@@ -28,7 +28,7 @@ private const val NANOS_PER_MILLI = 1_000_000L
  * query, not an execution**: no ancestors, no tempdb, no `pipeline_executions` row, no SSE, no
  * slots, no idempotency — steps 1–2 are [NodeSqlResolver] (032's resolution, extracted) and
  * step 3 is [SqlRunner] against the node's own datasource. It never touches
- * `PipelineExecutor`/`ExecutionLauncher`/the DAG.
+ * `PipelineExecutor`/`ExecutionStreamLauncher`/the DAG.
  *
  * **DML/DDL nodes execute FOR REAL** against a real datasource, with no history and no trace —
  * that consequence is ratified (§A) and stated in the description's first sentence. The

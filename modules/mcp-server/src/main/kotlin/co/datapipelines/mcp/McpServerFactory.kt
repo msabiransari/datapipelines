@@ -46,6 +46,13 @@ object McpServerFactory {
     const val ENDPOINT: String = "/mcp"
 
     /**
+     * The idempotency header, spelled exactly as `web`'s `WebHeaders.IDEMPOTENCY_KEY` spells it.
+     * Duplicated rather than imported because `mcp-server` must not depend on `web` (§4.2); the
+     * two spellings are pinned together by `McpExecuteIdempotencyTest`.
+     */
+    const val IDEMPOTENCY_KEY_HEADER: String = "Idempotency-Key"
+
+    /**
      * §5.1's `instructions` field (workspaces design §9): the workspace context every
      * agent needs before its first tool call, so it does not reason about invisible
      * sibling workspaces (mcp-server.md §2).
@@ -135,12 +142,22 @@ object McpServerFactory {
             }
         }
 
-    /** The per-request context the MCP layer reads ([toolContext]), populated by [McpAuthFilter]. */
-    private fun transportContext(request: HttpServletRequest): McpTransportContext {
+    /**
+     * The per-request context the MCP layer reads ([toolContext]). The principal and correlation
+     * id are request attributes [McpAuthFilter] wrote; the `Idempotency-Key` is read straight off
+     * the HTTP request here, because it needs no authentication and no validation — it is an
+     * opaque client string (056/D6, rest-api §3.5's same header on the same POST).
+     */
+    internal fun transportContext(request: HttpServletRequest): McpTransportContext {
         val values =
             buildMap<String, Any> {
                 request.getAttribute(McpTransportKeys.PRINCIPAL)?.let { put(McpTransportKeys.PRINCIPAL, it) }
                 request.getAttribute(McpTransportKeys.CORRELATION_ID)?.let { put(McpTransportKeys.CORRELATION_ID, it) }
+                request
+                    .getHeader(IDEMPOTENCY_KEY_HEADER)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { put(McpTransportKeys.IDEMPOTENCY_KEY, it) }
             }
         return McpTransportContext.create(values)
     }

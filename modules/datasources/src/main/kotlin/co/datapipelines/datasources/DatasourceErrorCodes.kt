@@ -75,4 +75,19 @@ object DatasourceErrorCodes {
 
     /** The JDBC driver class for `dialect` is not on the classpath (§10.3) — a packaging state. */
     const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
+
+    /**
+     * A customer-database connection was requested while a **metadata** transaction was open on
+     * the calling thread (056 §E.2, dag-executor §16).
+     *
+     * Refused rather than allowed, because both outcomes of allowing it are bad: the metadata
+     * transaction — and its locks — would stay open for the duration of arbitrary customer SQL,
+     * and a rollback of the metadata transaction could not undo the customer-side effect anyway.
+     * Orchestration runs OUTSIDE the transaction; status writes are short, separate transactions.
+     *
+     * It is a server-fault code (500) on purpose: nothing a caller sent can produce it. Reaching
+     * it means a service method annotated `@Transactional` grew a datasource lease, which is a
+     * defect the guard turns into a loud, catalogued refusal instead of a silent lock-holder.
+     */
+    const val LEASE_IN_TRANSACTION = "datasource.lease_in_transaction"
 }
