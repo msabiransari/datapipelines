@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import co.datapipelines.web.SharedPostgres
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.util.UUID
@@ -121,6 +120,5 @@ class RepositoryPipelineResolverTest {
     private companion object {
         /** The V4-seeded `default` workspace every repository call in this suite is scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
-
     }
 }

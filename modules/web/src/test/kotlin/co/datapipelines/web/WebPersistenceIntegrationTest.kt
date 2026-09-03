@@ -259,6 +259,5 @@ class WebPersistenceIntegrationTest {
     private companion object {
         /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
-
     }
 }
