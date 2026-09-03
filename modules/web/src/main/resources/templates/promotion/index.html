@@ -7,7 +7,35 @@
     <span th:if="${hasTarget}" class="ds-badge" th:text="${targetBaseUrl}">https://uat.example.com</span>
   </div>
 
-  <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack (§5.1). -->
+  <!-- The result panel (§4.17). Promotion's outcomes are rendered HERE rather than as toasts
+       in the shared layout: a promotion result is a per-screen statement ("2 pipelines and 1
+       template landed on uat"), and its refusals are promotion's own vocabulary. Piling that
+       copy into the layout's shared code→text map would put one screen's language in every
+       screen's shell. -->
+  <div th:if="${param.ok}" class="ds-card" role="status" style="margin-bottom: var(--gap-lg); padding: var(--gap-md);">
+    <span class="ds-badge ds-badge-success">Promoted</span>
+    <span th:text="${param.pipelines != null ? param.pipelines[0] : '0'}">2</span> pipeline(s) and
+    <span th:text="${param.templates != null ? param.templates[0] : '0'}">1</span> template version(s)
+    were applied on the target, in one transaction.
+  </div>
+
+  <div th:if="${param.error}" th:with="code=${param.error[0]}" class="ds-card" role="alert"
+       style="margin-bottom: var(--gap-lg); padding: var(--gap-md);">
+    <span class="ds-badge ds-badge-danger">Nothing was promoted</span>
+    <span th:if="${code == 'nothing_selected'}">Select at least one pipeline first.</span>
+    <span th:if="${code == 'not_released'}">One of the selected pipelines has no released version. Drafts are never promoted — release it first.</span>
+    <span th:if="${code == 'not_newer'}">The target already serves that version. Nothing changed here since the last promotion.</span>
+    <span th:if="${code == 'missing_datasources'}">The target has no datasource by one of the names these pipelines reference. Register it there — with the target's own credentials — and try again.</span>
+    <span th:if="${code == 'target_is_authoring'}">The target has authoring enabled and does not accept promoted content. Set <code>authoring-enabled=false</code> there.</span>
+    <span th:if="${code == 'target_unreachable'}">The target did not answer. Check that it is running and that the base URL is right.</span>
+    <span th:if="${code == 'key_invalid'}">The target refused this deployment's promotion key. The same secret must be set on both sides.</span>
+    <span th:if="${code == 'missing_template' or code == 'missing_datasource' or code == 'version_conflict' or code == 'hash_mismatch'}">
+      The target refused the batch and rolled all of it back. Its own refusal code is
+      <code th:text="${code}">version_conflict</code>.
+    </span>
+    <span th:if="${code == 'session_required'}">Promoting needs a signed-in session — an API key cannot drive a deployment-to-deployment push.</span>
+    <span th:if="${code == 'not_found'}">The target has no workspace by this name. Create it there first.</span>
+  </div>
 
   <!-- State 1: this deployment promotes nowhere. A config change, not a promotion. -->
   <div th:unless="${hasTarget}" class="ds-empty">
