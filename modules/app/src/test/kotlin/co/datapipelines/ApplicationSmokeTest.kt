@@ -1,5 +1,6 @@
 package co.datapipelines
 
+import co.datapipelines.config.SharedRedis
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -15,10 +16,6 @@ import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -33,9 +30,9 @@ import java.util.Base64
  * (auth.md §5.2), against an in-process loopback discovery document — no network, no
  * container, no test-only substitute bean.
  *
- * Self-contained by design — it starts its own Postgres and Redis rather than
- * assuming `deploy/docker-compose.dev.yml` is up, so CI and a fresh checkout
- * behave identically.
+ * Self-contained by design — it runs against the module's shared Postgres and
+ * Redis containers rather than assuming `deploy/docker-compose.dev.yml` is up, so
+ * CI and a fresh checkout behave identically.
  *
  * Deliberately does NOT activate the `dev` profile. Two reasons: the dev profile
  * resolves its secrets from a developer's `.env.local` (configuration.md §6), and
@@ -47,7 +44,6 @@ import java.util.Base64
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 class ApplicationSmokeTest {
     @Autowired
     private lateinit var rest: TestRestTemplate
@@ -118,23 +114,11 @@ class ApplicationSmokeTest {
         applicationContext.getBean("pipelineResolver") shouldNotBe null
     }
 
-    companion object {
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+    private companion object {
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedPostgres.postgres
+        private val redis get() = SharedRedis.redis
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
-
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
         /**
@@ -162,10 +146,10 @@ class ApplicationSmokeTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedRedis.port }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedRedis.port }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
