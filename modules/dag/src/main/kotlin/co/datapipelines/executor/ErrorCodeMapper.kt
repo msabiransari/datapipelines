@@ -4,11 +4,28 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import java.sql.SQLException
 
-/** One node's failure resolved to a catalog code plus the structured detail that travels with it. */
+/**
+ * One node's failure resolved to a catalog code plus the structured detail that travels with it.
+ *
+ * The three 057 fields are the **failure record** — facts attached at the failure site
+ * ([NodeRunner] decorates an escaping signal with [NodeErrorContext] and the rendered SQL)
+ * and completed where the failure is recorded ([PipelineExecutor.failNode] adds the
+ * [ExceptionDetail]). `node_failed`, the terminal `pipeline_failed` and `error_json` then
+ * carry the SAME object unchanged; nulls are omitted on the wire, not serialized.
+ *
+ * @property node which node failed and against what (datasource, dialect, pinned template).
+ * @property sql the rendered SQL in `:name` form, when the failure is at or after RENDER.
+ *   Never the positional form, never a bound value (042's contract).
+ * @property exception the original failure's class, message, capped frames and bounded
+ *   `caused_by` chain — present only under [ErrorDetail.FULL].
+ */
 data class MappedError(
     val code: String,
     val message: String,
     val details: Map<String, Any?> = emptyMap(),
+    val node: NodeErrorContext? = null,
+    val sql: String? = null,
+    val exception: ExceptionDetail? = null,
 )
 
 /**

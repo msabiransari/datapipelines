@@ -1057,6 +1057,18 @@ The `finally` block runs unconditionally in all paths — failure, timeout, canc
 
 ---
 
+### 8.4 The failure record
+
+**What the engineer sees when a node fails is the failure itself** (057/T85: three demo executions failed with `datasource_connection_failed` / `FATAL: password authentication failed` and the screen said only "Pipeline failed." — the owner opened the database to learn why). The `MappedError` therefore carries, besides code/message/details:
+
+- `node` — `{id, type, datasource, dialect, template, template_version}`: the node half. The node runner decorates an escaping failure with it at the failure site, where the facts live (the datasource dialect once the registry resolved it; the tempdb engine's dialect for a `tempdb` source). Facts are attached **where they exist**: the datasource path stamps the dialect, the outer wrapper stamps the rendered SQL, and `PipelineExecutor.failNode` — the recording site — fills anything still missing.
+- `sql` — the rendered SQL in `:name` form, when the failure is at or after RENDER. Never the positional form, never a bound value: the values live only in the executor's bind array (042's contract), and a test pins that a bound value appears nowhere in the failure events or the error record. Bounded at 16 384 characters with an explicit truncation marker — the render budget permits megabytes, and an unbounded echo would be the same amplifier the 2000-char message bound removes.
+- `exception` — the ORIGINAL failure (`cause.cause ?: cause` unwraps the `NodeFailedSignal`): `{class, message, frames, caused_by}`. `caused_by` is a flat list, outermost-first, **root cause last** (the orientation `getCause` walks; display reverses it). Frames are capped at 40 per level, the chain walked to 16 levels (`ConnectionLease.CHAIN_WALK_LIMIT` is the house precedent for a bounded walk); both bounds exist so a pathological chain cannot turn the record into an amplifier across the SSE frame, the `execution_events` row and `error_json` — all of which carry it, because it is the same driver text the server log already prints.
+
+The record is completed **once**, at `failNode`, and carried unchanged into the `node_failed` event, the terminal `pipeline_failed` event, `error_json` (which `web` serializes from the same projected error object) and the thrown `PipelineExecutionFailed` (which the MCP surface reads). Timeout and setup failures carry the same exception detail, minus `node`/`sql` — neither exists for them.
+
+`datapipelines.executions.error-detail` (Configuration §3.11) gates the two raw halves: `full` (default — a self-hosted product whose users are engineers; the stack IS the diagnostic) carries `exception` and `sql`; `structured` omits both and keeps the catalogued code, message, details and node context. Every consumer downstream of the capture sees the same level — there is no per-surface stripping.
+
 ## 9. Tempdb Lifecycle Integration
 
 The executor creates a tempdb instance per execution via `StagingFactory`, choosing the engine from `pipeline.settings.tempdb.engine`:
@@ -1122,6 +1134,8 @@ Each event also carries the `SseEventType` it publishes under; that enum is decl
 Wire names, payloads, and ordering guarantees are owned by [REST API §6.4](rest-api.md#64-event-types) and [Enums §11](enums.md#11-sseeventtype--pipeline-execution-event-types); this spec only says which event the executor emits where.
 
 **Every event payload carries `correlation_id`** on the wire — that is normative in [REST API §6.4](rest-api.md#64-event-types) and [Observability §3.3](observability.md#33-correlation-id-propagation). It is **not** a field on every executor event type: `ExecuteRequest` carries the correlation id, `ExecutionStarted` carries it through, and `web` threads the request's correlation id onto every other event when it projects to the wire. The projecting layer, not the executor, is where the guarantee is met.
+
+**The `error` object of `node_failed` and `pipeline_failed` is the §8.4 failure record** (057), carried unchanged; the projecting layer also stamps `correlation_id` INSIDE it and serializes the same object into `error_json` — one record, every surface, no rebuilds.
 
 **Wire projection — what `web` derives rather than reads.** The executor's event objects are not the wire payloads; three fields are computed at projection time:
 

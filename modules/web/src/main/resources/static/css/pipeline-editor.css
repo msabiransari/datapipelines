@@ -488,6 +488,122 @@
   padding: var(--gap-xs, 4px) 0 0;
 }
 
+/* ---- Node failure record (057/T85) ---- */
+/* The inspector's Failure section and the result panel's failure mode share this vocabulary:
+   monospace for machine text (codes, correlation ids, frames), the danger accent only for
+   the failure's own badge/summary, design tokens throughout — no new colours. */
+.pe-error-code {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  word-break: break-all;
+  color: var(--accent-danger, #dc2626);
+}
+
+.pe-error-corr {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  word-break: break-all;
+  color: var(--text-secondary, #4b5563);
+}
+
+.pe-error-details-json {
+  margin: 0;
+  padding: var(--gap-xs, 4px);
+  background: var(--surface-inset, #f3f4f6);
+  border-radius: var(--pe-radius);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary, #4b5563);
+}
+
+.pe-error-exception {
+  border: 1px solid var(--border-default, #e5e7eb);
+  border-radius: var(--pe-radius);
+  padding: var(--gap-xs, 4px) var(--gap-sm, 8px);
+}
+
+.pe-error-exception > summary {
+  cursor: pointer;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--text-secondary, #4b5563);
+  word-break: break-all;
+}
+
+.pe-error-root {
+  font-weight: var(--weight-medium, 400);
+  color: var(--text-muted, #9ca3af);
+}
+
+.pe-error-level {
+  margin-top: var(--gap-sm, 8px);
+}
+
+.pe-error-level-title {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--text-primary, #111827);
+  word-break: break-all;
+}
+
+.pe-error-level-message {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-secondary, #4b5563);
+  word-break: break-word;
+}
+
+.pe-error-frames {
+  margin: var(--gap-xs, 4px) 0 0;
+  padding: var(--gap-xs, 4px);
+  background: var(--surface-inset, #f3f4f6);
+  border-radius: var(--pe-radius);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.5;
+  color: var(--text-secondary, #4b5563);
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.pe-result-failure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm, 8px);
+  padding: var(--gap-md, 16px);
+  max-width: 120ch;
+}
+
+.pe-failure-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm, 8px);
+  flex-wrap: wrap;
+}
+
+.pe-failure-summary .ds-badge {
+  font-family: var(--font-mono, monospace);
+}
+
+.pe-failure-message {
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--text-primary, #111827);
+  word-break: break-word;
+}
+
+.pe-failure-meta {
+  display: flex;
+  gap: var(--gap-md, 16px);
+  flex-wrap: wrap;
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-muted, #9ca3af);
+  word-break: break-all;
+}
+
 /* ---- Result panel ---- */
 .pe-result-panel {
   position: fixed;

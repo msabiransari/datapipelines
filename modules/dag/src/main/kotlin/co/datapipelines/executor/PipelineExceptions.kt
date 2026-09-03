@@ -31,12 +31,19 @@ sealed class PipelineException(
  *
  * `cause` is passed to the base constructor and **not** redeclared as a `val` (§8.1): shadowing
  * it would hide the real cause from stack traces and from every log that prints the cause chain.
+ *
+ * [errorRecord] (057) is the completed failure record the executor already emitted on
+ * `node_failed` — carried so the terminal `pipeline_failed`, `error_json` and the MCP failure
+ * envelope ship the SAME object rather than a rebuild that drops the node context, the SQL and
+ * the exception chain. Null only on paths that never passed a recording site (the
+ * vanished-result throw in `PipelineExecutor.resolveStoredResult`).
  */
 class NodeExecutionException(
     val nodeId: String,
     val errorCode: String,
     val errorDetails: Map<String, Any?>,
     cause: Throwable,
+    val errorRecord: MappedError? = null,
 ) : PipelineException(
         code = errorCode,
         message = "Node $nodeId failed ($errorCode): ${cause.message}",
@@ -47,11 +54,15 @@ class NodeExecutionException(
 /**
  * The execution aborted because a node failed — the outer handler's translation of a
  * [NodeExecutionException] (§8.1). The three-argument form is the only form.
+ *
+ * [errorRecord] (057): the failure record, when the caller holds one — the MCP surface reads it
+ * so `pipelines_execute`'s error result carries what `executions_get` would return.
  */
 class PipelineExecutionFailed(
     val failedNodeId: String,
     val errorCode: String,
     val errorDetails: Map<String, Any?>,
+    val errorRecord: MappedError? = null,
 ) : PipelineException(
         code = errorCode,
         message = "Pipeline aborted: node $failedNodeId failed ($errorCode)",

@@ -128,7 +128,11 @@ class ExecutionsGetTool(
         McpTools.tool(
             name = "executions_get",
             description =
-                "Get metadata for a specific execution: status, timing, node_stats, parameters used. To get the result " +
+                "Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED " +
+                    "execution, error carries the full failure record: code, message, correlation_id, node context " +
+                    "(datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the " +
+                    "exception chain with stack frames — read error.code first, then error.exception.caused_by (root " +
+                    "cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result " +
                     "rows, use executions_get_result.",
             schema =
                 """

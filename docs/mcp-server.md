@@ -539,7 +539,7 @@ Fetch metadata for a specific execution (no rows).
 ```json
 {
   "name": "executions_get",
-  "description": "Get metadata for a specific execution: status, timing, node_stats, parameters used. To get the result rows, use executions_get_result.",
+  "description": "Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result.",
   "inputSchema": {
     "type": "object",
     "required": ["execution_id"],
@@ -551,6 +551,34 @@ Fetch metadata for a specific execution (no rows).
 ```
 
 **Scope:** `read`.
+
+**Response (057, on a `FAILED` execution):** `error` is the full failure record — the same object the SSE stream carried and `error_json` stores. (Plain fence: an example, not a tool definition — §6.2's `json` fences are exactly the input schemas `McpToolSurfaceSpecDriftTest` pins.)
+
+```
+{
+  "status": "FAILED",
+  "failed_node_id": "stage_daily_trips",
+  "error": {
+    "code": "pipeline.node.datasource_connection_failed",
+    "message": "Failed to initialize pool",
+    "details": {"phase": "connect", "node_id": "stage_daily_trips"},
+    "correlation_id": "1b0e6a52-…",
+    "node": {"id": "stage_daily_trips", "type": "DQL", "datasource": "sample-trips", "dialect": "POSTGRES",
+             "template": "sample_trips_daily.sql", "template_version": 1},
+    "sql": "SELECT * FROM trips WHERE borough = :borough",
+    "exception": {
+      "class": "java.lang.RuntimeException", "message": "Failed to initialize pool",
+      "frames": ["…capped at 40 per level…"],
+      "caused_by": [
+        {"class": "org.postgresql.util.PSQLException",
+         "message": "FATAL: password authentication failed for user \"dp_demo_ro\"", "frames": ["…"]}
+      ]
+    }
+  }
+}
+```
+
+Read `error.code` first, then `error.exception.caused_by` (outermost first — the **root cause is the LAST entry**), then `error.sql`. Quote `error.correlation_id` when escalating to a human; it is the field that joins the page to the server log. Under `datapipelines.executions.error-detail=structured` (Configuration §3.11) the `exception` and `sql` keys are absent; everything else stays. `pipelines_execute`'s failure result (§6.3) carries the same record inline, so a failed run's error needs no second call.
 
 #### 6.2.15 `executions_get_result`
 
@@ -789,6 +817,8 @@ On error:
 ```
 
 The inner JSON matches the [REST API error envelope's `error` object](rest-api.md#42-error-envelope) — same codes, same shape, so agents see consistent errors whether they come via REST or MCP.
+
+**Execution failures carry the full record (057).** When the error is an execution failure — a `pipelines_execute` whose pipeline failed — the `error` object additionally carries `node`, `sql` and `exception`: the §6.2.14 failure record, so the agent that just ran the pipeline sees the root cause without a second call. Every other error keeps exactly the shape above.
 
 Every tool result — success or error — carries the request's `correlation_id` in its `_meta`, echoing the `DP-Correlation-Id` of the underlying request so a user can hand an agent's output straight to an operator and have it traced ([Observability §9](observability.md)).
 

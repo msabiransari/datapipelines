@@ -197,6 +197,10 @@
           editor.graph.setEdgesToNodeActive(payload.node_id, true);
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "failed";
+        // 057/T85: the error object is the failure record — code, message, node context,
+        // rendered SQL, exception chain. Dropping it (the reported defect) left the
+        // inspector with nothing but a red node; the owner opened the database to learn why.
+        if (payload.error && editor.nodeErrors) editor.nodeErrors[payload.node_id] = payload.error;
         if (payload.dependents && editor.graph) {
           payload.dependents.forEach(function (depId) {
             editor.graph.setNodeState(depId, "aborted");
@@ -222,8 +226,15 @@
       case "pipeline_failed":
         self.terminalSeen = true;
         editor.isExecuting = false;
-        // A failure detail is not a 6s notification — the modal keeps it (§9).
-        editor.showError(payload.message || "Pipeline execution failed");
+        // 057: the FULL payload goes to the result panel's failure mode — the code, the
+        // message, the correlation id, the rendered SQL and the exception chain, on the
+        // screen the engineer is already looking at. The modal keeps a one-line summary
+        // (a failure detail is not a 6s notification, §9 — but the DETAIL lives in the panel).
+        if (editor.handlePipelineFailed) {
+          editor.handlePipelineFailed(payload);
+        } else {
+          editor.showError((payload.error && payload.error.message) || payload.message || "Pipeline execution failed");
+        }
         editor.announceStatus("Pipeline execution failed");
         break;
 
@@ -326,7 +337,12 @@
           self.editor.setBanner("Pipeline completed", "success");
         } else if (status === "failed") {
           self.editor.isExecuting = false;
-          self.editor.setBanner("Pipeline failed", "error");
+          // 057: even the degraded recovery path names the CODE — a bare "Pipeline failed"
+          // was the exact screen the owner reported (T85). The full record is a click away
+          // on the execution page; this banner at least says what failed.
+          var errCode =
+            (data.error && data.error.code) || (data.data && data.data.error && data.data.error.code) || null;
+          self.editor.setBanner(errCode ? "Pipeline failed — " + errCode : "Pipeline failed", "error");
         } else if (status === "aborted") {
           // The recovery poll previously had no aborted branch (031 F5): a cancel
           // that raced a dropped stream fell through to "Connection lost".

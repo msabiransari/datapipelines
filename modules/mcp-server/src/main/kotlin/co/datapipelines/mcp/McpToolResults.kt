@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.AuthErrorCodes
 import co.datapipelines.auth.AuthException
 import co.datapipelines.executor.ExecutorJson
+import co.datapipelines.executor.PipelineExecutionFailed
 import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
@@ -60,12 +61,21 @@ object McpToolResults {
  *
  * `user_message` is present only when the source exception carries one ([AuthException] does);
  * inventing one would put a fabricated string in an error payload.
+ *
+ * 057: an **execution** failure additionally carries the failure record — the node context, the
+ * rendered SQL and the exception chain — the same object `executions_get` returns from
+ * `error_json`, so an agent that reads the tool error it just got has nothing further to fetch.
+ * Present only when the failure is a node/execution failure under `error-detail=full`; absent
+ * (never null) otherwise.
  */
 data class McpErrorPayload(
     val code: String,
     val message: String,
     val userMessage: String? = null,
     val details: Map<String, Any?> = emptyMap(),
+    val node: Any? = null,
+    val sql: String? = null,
+    val exception: Any? = null,
 ) {
     /** `doc_url` is derived from [code] exactly as auth derives it (REST §4.2). */
     fun toMap(): Map<String, Any?> =
@@ -75,6 +85,9 @@ data class McpErrorPayload(
             userMessage?.let { put("user_message", it) }
             put("details", details)
             put("doc_url", AuthErrorCodes.docUrl(code))
+            node?.let { put("node", it) }
+            sql?.let { put("sql", it) }
+            exception?.let { put("exception", it) }
         }
 
     companion object {
@@ -85,12 +98,19 @@ data class McpErrorPayload(
          * catalogued code (module-structure §4.3), so the mapping is a projection, not a lookup
          * table that could drift from [co.datapipelines.pipeline.PipelineErrorCodes].
          */
-        fun of(e: DatapipelinesException): McpErrorPayload =
-            McpErrorPayload(
+        fun of(e: DatapipelinesException): McpErrorPayload {
+            // 057: the record the executor completed at the failure site, when this failure is
+            // an execution failure — everything else maps exactly as before.
+            val record = (e as? PipelineExecutionFailed)?.errorRecord
+            return McpErrorPayload(
                 code = e.code,
                 message = e.message.orEmpty(),
                 userMessage = (e as? AuthException)?.userMessage,
                 details = e.details,
+                node = record?.node,
+                sql = record?.sql,
+                exception = record?.exception,
             )
+        }
     }
 }

@@ -16,6 +16,8 @@
     this.ttlSeconds = 0;
     this.ttlInterval = null;
     this.expired = false;
+    /* 057: the execution-level failure record shown in place of the result table. */
+    this.failure = null;
   }
 
   // The wire contract (rest-api.md §6.4.7 data_ready, §7.3 cursor) carries
@@ -56,6 +58,8 @@
   ResultPanel.prototype.showData = function (payload) {
     var self = this;
     self.visible = true;
+    // A new success clears any failure the panel was showing (a re-run that succeeded).
+    self.failure = null;
     self.cursorEndpoint = payload.cursor_endpoint || payload.result_url || null;
 
     var page = normalizePage(payload);
@@ -89,6 +93,23 @@
     if (!expiresAt) return 0;
     var ms = Date.parse(expiresAt) - Date.now();
     return ms > 0 ? Math.floor(ms / 1000) : 0;
+  };
+
+  /*
+   * 057/T85: the failure mode. On pipeline_failed the panel opens HERE — in the place the
+   * engineer is already looking — with the full failure record (code, message, correlation
+   * id, node context, rendered SQL, exception chain), instead of leaving the screen with a
+   * red node and a modal reading one generic string. A failure has no TTL to count down.
+   */
+  ResultPanel.prototype.showFailure = function (payload) {
+    this.failure = (payload && payload.error) || null;
+    this.visible = true;
+    if (this.ttlInterval) {
+      clearInterval(this.ttlInterval);
+      this.ttlInterval = null;
+    }
+    this.ttlSeconds = 0;
+    this.syncToEditor();
   };
 
   ResultPanel.prototype.startTtl = function (seconds) {
@@ -149,6 +170,7 @@
     var rp = this.editor.resultPanel;
     rp.visible = this.visible;
     rp.data = this.data;
+    rp.failure = this.failure;
     rp.columns = this.columns;
     rp.rows = this.rows;
     rp.page = this.page;
@@ -164,6 +186,7 @@
 
   ResultPanel.prototype.hide = function () {
     this.visible = false;
+    this.failure = null;
     if (this.ttlInterval) clearInterval(this.ttlInterval);
     this.ttlInterval = null;
     this.syncToEditor();

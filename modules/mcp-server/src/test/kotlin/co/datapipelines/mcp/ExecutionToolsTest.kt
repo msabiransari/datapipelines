@@ -99,6 +99,50 @@ class ExecutionToolsTest {
     }
 
     @Test
+    fun `get on a FAILED execution returns the full failure record verbatim`() {
+        // 057/T85: the error object an agent reads must be the one the run produced — node
+        // context, rendered SQL and the exception chain — with the root cause at the END of
+        // caused_by. Nothing is rebuilt or filtered on the way out.
+        val errorJson =
+            """
+            {"code":"pipeline.node.datasource_connection_failed",
+             "message":"Failed to initialize pool",
+             "details":{"phase":"connect"},
+             "correlation_id":"${McpFixtures.CORRELATION_ID}",
+             "node":{"id":"stage_daily_trips","type":"DQL","datasource":"sample-trips","dialect":"POSTGRES",
+                     "template":"sample_trips_daily.sql","template_version":1},
+             "sql":"SELECT * FROM trips WHERE borough = :borough",
+             "exception":{"class":"java.lang.RuntimeException","message":"Failed to initialize pool",
+                          "frames":["Boom.f0(Boom.kt:1)"],
+                          "caused_by":[{"class":"org.postgresql.util.PSQLException",
+                                        "message":"FATAL: password authentication failed for user \"dp_demo_ro\""}]}}
+            """.trimIndent()
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
+            McpFixtures.executionRecord(status = ExecutionStatus.FAILED).copy(
+                failedNodeId = "stage_daily_trips",
+                errorJson = errorJson,
+                resultRowCount = null,
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            ExecutionsGetTool(executions).call(
+                McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())),
+                ctx,
+            ) as Map<String, Any?>
+
+        val error = McpTools.readTree(payload["error"].toString())
+        assertAll(
+            { error["code"].asText() shouldBe "pipeline.node.datasource_connection_failed" },
+            { error["correlation_id"].asText() shouldBe McpFixtures.CORRELATION_ID.toString() },
+            { error["node"]["datasource"].asText() shouldBe "sample-trips" },
+            { error["sql"].asText() shouldBe "SELECT * FROM trips WHERE borough = :borough" },
+            { error["exception"]["class"].asText() shouldBe "java.lang.RuntimeException" },
+            { error["exception"]["caused_by"][0]["class"].asText() shouldBe "org.postgresql.util.PSQLException" },
+        )
+    }
+
+    @Test
     fun `another user's execution is invisible, reported as not found`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
             McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)

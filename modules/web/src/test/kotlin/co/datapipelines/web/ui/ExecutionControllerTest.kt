@@ -10,14 +10,18 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.executions.ResultCursor
+import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -248,6 +252,73 @@ class ExecutionControllerTest {
     }
 
     @Test
+    fun `detail exposes the parsed failure record for a failed execution`() {
+        authenticate(owner, setOf(Scope.READ))
+        every { executions.findById(any(), executionId) } returns
+            record(ExecutionStatus.FAILED).copy(
+                failedNodeId = "stage_daily_trips",
+                errorJson = FAILURE_JSON,
+            )
+        every { executions.findByRoot(any(), executionId) } returns listOf(record(ExecutionStatus.FAILED))
+        every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
+        every { resultStore.keyFor(executionId) } returns "result:key"
+        every { resultStore.describe("result:key") } returns null
+        every { resultUrls.urlFor(executionId) } returns "/api/v1/executions/$executionId/result"
+
+        val model = ExtendedModelMap()
+        detailController.detail(executionId, model)
+
+        model["errorCode"] shouldBe "pipeline.node.datasource_connection_failed"
+        model["errorCorrelationId"] shouldBe "1b0e6a52-9c3d-4f8e-9a2b-7c6d5e4f3a21"
+        model["errorSql"] shouldBe "SELECT * FROM trips WHERE borough = :borough"
+        model["errorNodeLine"] shouldBe "stage_daily_trips · DQL · sample-trips (POSTGRES) · sample_trips_daily.sql @ v1"
+        // Root cause FIRST — the reversal is the fragment's contract.
+        @Suppress("UNCHECKED_CAST")
+        val chain = model["errorChain"] as List<Map<String, String?>>
+        chain.first()["cls"] shouldBe "org.postgresql.util.PSQLException"
+        chain.last()["label"] shouldBe "Raised at: "
+    }
+
+    @Test
+    fun `the result partial on a failed execution carries the record, not one code string`() {
+        authenticate(owner, setOf(Scope.READ))
+        every { cursor.readable(executionId, any()) } throws
+            co.datapipelines.web.api.ApiException(
+                co.datapipelines.pipeline.PipelineErrorCodes.Result.EXECUTION_FAILED,
+                "failed",
+            )
+        every { executions.findById(any(), executionId) } returns
+            record(ExecutionStatus.FAILED).copy(
+                failedNodeId = "stage_daily_trips",
+                errorJson = FAILURE_JSON,
+            )
+
+        val model = ExtendedModelMap()
+        detailPartialController.result(executionId, 0, model)
+
+        model["errorCode"] shouldBe "pipeline.node.datasource_connection_failed"
+        model["errorCorrelationId"] shouldBe "1b0e6a52-9c3d-4f8e-9a2b-7c6d5e4f3a21"
+    }
+
+    @Test
+    fun `the error fragment renders code, message, correlation id, sql and the root-first chain`() {
+        val html =
+            engine().process(
+                "partials/execution-error",
+                webContext().apply { ExecutionErrorView.attributes(FIXTURE_ERROR_NODE).forEach(::setVariable) },
+            )
+
+        html shouldContain "pipeline.node.datasource_connection_failed"
+        html shouldContain "Failed to initialize pool"
+        html shouldContain "1b0e6a52-9c3d-4f8e-9a2b-7c6d5e4f3a21"
+        html shouldContain "SELECT * FROM trips WHERE borough = :borough"
+        // Root cause FIRST in the rendered order; the raised-at entry LAST.
+        html.indexOf("org.postgresql.util.PSQLException") shouldBeGreaterThan -1
+        html.indexOf("Root cause: org.postgresql.util.PSQLException") shouldBeLessThan
+            html.indexOf("Raised at: java.lang.RuntimeException")
+    }
+
+    @Test
     fun `cancel by owner requests cancellation`() {
         authenticate(owner, setOf(Scope.EXECUTE))
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
@@ -316,4 +387,25 @@ class ExecutionControllerTest {
                 .buildApplication(MockServletContext())
                 .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
         )
+
+    private companion object {
+        val FAILURE_JSON =
+            """
+            {"code":"pipeline.node.datasource_connection_failed",
+             "message":"Failed to initialize pool",
+             "user_message":"We couldn't reach the database this step uses.",
+             "details":{"phase":"connect"},
+             "correlation_id":"1b0e6a52-9c3d-4f8e-9a2b-7c6d5e4f3a21",
+             "node":{"id":"stage_daily_trips","type":"DQL","datasource":"sample-trips","dialect":"POSTGRES",
+                     "template":"sample_trips_daily.sql","template_version":1},
+             "sql":"SELECT * FROM trips WHERE borough = :borough",
+             "exception":{"class":"java.lang.RuntimeException","message":"Failed to initialize pool",
+                          "frames":["Boom.f0(Boom.kt:1)"],
+                          "caused_by":[{"class":"org.postgresql.util.PSQLException",
+                                        "message":"FATAL: password authentication failed for user \"dp_demo_ro\"",
+                                        "frames":["org.postgresql.util.PSQLException.parseServerError(PSQLException.java:285)"]}]}}
+            """.trimIndent()
+
+        val FIXTURE_ERROR_NODE: JsonNode = ExecutorJson.mapper.readTree(FAILURE_JSON)
+    }
 }

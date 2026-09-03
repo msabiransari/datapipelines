@@ -63,6 +63,9 @@ class ExecutionDetailController(
         val errorJson = record.errorJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("errorJson", errorJson)
         model.addAttribute("failedNodeId", record.failedNodeId)
+        // 057: the fragment's parsed model — code, message, correlation id, node line, sql,
+        // root-first chain. Plain values keep the template markup, not string surgery.
+        ExecutionErrorView.attributes(errorJson).forEach { (k, v) -> model.addAttribute(k, v) }
 
         return "executions/detail"
     }

@@ -240,6 +240,10 @@ datapipelines:
   executions:
     event-retention-days: ${DATAPIPELINES_EXECUTIONS_EVENT_RETENTION_DAYS:7}
     stale-timeout-minutes: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES:60}
+    # 057/T85: `full` carries the exception chain + rendered SQL on every failure surface;
+    # `structured` omits both. A YAML 1.1 bare `off`/`no` trap does not apply — the values are
+    # `full`|`structured`, never boolean words.
+    error-detail: ${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:full}
 
   audit:
     retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}

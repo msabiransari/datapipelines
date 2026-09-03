@@ -75,6 +75,7 @@ class EngineConfiguration {
         staging: StagingH2Properties,
         sse: SseProperties,
         pipelines: PipelineProperties,
+        executions: ExecutionsProperties,
         result: ResultConfig,
     ): ExecutorConfig =
         ExecutorConfig(
@@ -88,6 +89,9 @@ class EngineConfiguration {
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.
             cancelPollIntervalSeconds = sse.heartbeatIntervalSeconds,
             maxCompositionDepth = pipelines.maxCompositionDepth,
+            // 057: the failure record's detail level — the executions keyspace owns it because
+            // every surface (not just the executor) carries the record.
+            errorDetail = executions.errorDetail,
             result = result,
         )
 
