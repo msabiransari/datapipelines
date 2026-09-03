@@ -287,8 +287,10 @@
   color: var(--text-secondary, #6b7280);
 }
 
-.pe-card-type-icon,
-.pe-card-engine-icon {
+/* The type glyph is the card's ONE svg (059b) — muted, sized by icons.css's
+ * .ds-icon-xs (12px). The engine glyph that also lived here is retired: on every
+ * db-backed card it drew the same `#db` the type glyph draws. */
+.pe-card-type-icon {
   color: var(--text-muted, #9ca3af);
 }
 

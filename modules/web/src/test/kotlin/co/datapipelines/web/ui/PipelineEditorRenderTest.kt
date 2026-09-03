@@ -48,6 +48,11 @@ class PipelineEditorRenderTest {
      * and controls draw from, and the keyboard-reachable view controls. If any of these
      * disappears from the template the graph degrades to the empty-box look the owner
      * rejected — this pins the wiring, not the visual.
+     *
+     * 059b: icons.css joins the wiring pins. The card/toolbar svgs always carried the
+     * .ds-icon size classes, but the page never loaded the stylesheet that gives them
+     * meaning — every svg rendered at the 300×150 replaced-element default ("the icons
+     * are the size of the canvas"). The link is load-bearing, not decorative.
      */
     @Test
     fun `the card overlay script, the icon sprite and the view controls are wired`() {
@@ -59,6 +64,9 @@ class PipelineEditorRenderTest {
         html shouldContain "aria-label=\"Graph view controls\""
         html shouldContain "graph.fitToView()"
         html shouldContain "graph.resetView()"
+        // 059b: the icon system's stylesheet, and the toolbar row at md (20px).
+        html shouldContain "/vendor/design-system/icons.css"
+        html shouldContain "ds-icon ds-icon-md"
     }
 
     @Test

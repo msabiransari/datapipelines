@@ -15,6 +15,17 @@
 //      + the full name on `title`).
 //   4. The card is built from node DATA — state dot, ports, badge — and every
 //      interpolated value is HTML-escaped (names come from user-authored pipeline JSON).
+//
+// 059b — the icon-sizing round, on the same harness:
+//
+//   5. The page WIRES the icon system: editor.html links icons.css, icons.css
+//      sizes .ds-icon from --icon-* tokens, and every <svg> the card template
+//      emits carries the class pair — never bare. RED on 5187efd, where the
+//      classes were present but the stylesheet was never loaded and every svg
+//      fell to the 300×150 replaced-element default.
+//   6. EXACTLY ONE glyph svg per card. 5187efd drew #db twice on every
+//      db-backed card (the type glyph AND the engine glyph are the same
+//      database drawing); the engine's identity is the source line's TEXT.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -206,12 +217,50 @@ test("the layout breathes for cards, and fit is fitToView's job so the readable 
   assert.ok(loadGraph().FIT_MIN_ZOOM >= 0.5, "the fit floor keeps three nodes filling the pane");
 });
 
-test("engine glyphs are generic — file-embedded dialects, database for the rest, never a vendor logo", () => {
+test("the editor page wires the icon system — icons.css linked, toolbar at md, never a bare svg", () => {
   const g = loadGraph();
-  assert.equal(g.iconForDialect("SQLITE"), "file");
-  assert.equal(g.iconForDialect("duckdb"), "file");
-  assert.equal(g.iconForDialect("POSTGRES"), "db");
-  assert.equal(g.iconForDialect("H2"), "db");
+  const tpl = fs.readFileSync(
+    path.resolve(here, "../../main/resources/templates/pipelines/editor.html"),
+    "utf8",
+  );
+  // Three layers, each of which 5187efd got wrong or left unwired: the page
+  // loads the stylesheet, the stylesheet sizes .ds-icon, the tokens give the
+  // sizes pixels. Any one missing and the svgs render at the 300×150 default.
+  assert.ok(tpl.includes("/vendor/design-system/icons.css"), "the editor page must load icons.css");
+  const iconsCss = fs.readFileSync(
+    path.resolve(here, "../../main/resources/static/vendor/design-system/icons.css"),
+    "utf8",
+  );
+  assert.match(iconsCss, /\.ds-icon\s*\{[^}]*width:\s*var\(--icon-size/, "the .ds-icon rule carries the width");
+  assert.match(iconsCss, /\.ds-icon\s*\{[^}]*height:\s*var\(--icon-size/, "…and the height");
+  const tokensCss = fs.readFileSync(
+    path.resolve(here, "../../main/resources/static/vendor/design-system/tokens.css"),
+    "utf8",
+  );
+  assert.match(tokensCss, /--icon-md:\s*\d+px/, "the size classes resolve to real px");
+  // The toolbar is a row of md glyphs at the canvas's top-right (059b fix §3).
+  const controls = tpl.slice(tpl.indexOf("pe-graph-controls"), tpl.indexOf("pe-node-list"));
+  assert.equal((controls.match(/ds-icon-md/g) || []).length, 4, "four toolbar buttons at ds-icon-md");
+  assert.ok(!controls.includes("ds-icon-sm"), "the toolbar no longer uses sm glyphs");
+  // Every svg the card template emits carries the class pair — never bare.
+  const card = g.buildCardHtml({ id: "n1", label: "n1", type: "DQL", state: "success", run: "1 ms", sourceLabel: "s · P" });
+  const svgs = card.match(/<svg[^>]*>/g) || [];
+  assert.ok(svgs.length >= 2, "a success card carries the glyph svg and the dot svg");
+  svgs.forEach((s) => assert.match(s, /class="[^"]*ds-icon ds-icon-(xs|sm|md)[^"]*"/, `every svg is sized: ${s}`));
+});
+
+test("exactly ONE glyph svg per card — the engine line is text, the db glyph no longer paints twice", () => {
+  const g = loadGraph();
+  const card = g.buildCardHtml({ id: "n1", label: "stage_trips", type: "DQL", state: "idle", sourceLabel: "sample-trips · POSTGRES" });
+  assert.equal((card.match(/<svg/g) || []).length, 1, "an idle card carries exactly one svg — the type glyph");
+  const sourceAt = card.indexOf("pe-card-source");
+  const sourceLine = sourceAt >= 0 ? card.slice(sourceAt, card.indexOf("</div>", sourceAt)) : "";
+  assert.ok(sourceAt >= 0, "the source line renders");
+  assert.ok(!sourceLine.includes("<svg"), "the source line is text-only");
+  // The seeded data no longer carries an engine glyph, and applyDialects
+  // upgrades the LABEL only — there is no second glyph slot to fill.
+  const els = g.buildElements([{ id: "n", type: "DQL", source: "pg" }], {});
+  assert.ok(!("engineIcon" in els[0].data), "no engine glyph key in the seeded card data");
   assert.equal(g.iconForType("DQL"), "db");
   assert.equal(g.iconForType("DML"), "table");
   assert.equal(g.iconForType("DDL"), "boxes");

@@ -5,17 +5,14 @@
 
   /* Type glyphs (059 §reference): TYPE is an ICON on a rectangular card, not a shape —
    * the per-type shapes (round-diamond / round-tag / hexagon) are retired with the
-   * label-below contract. Engine glyphs are GENERIC (database / file), never a vendor
-   * logo — trademarks stay out of the repo. */
+   * label-below contract. ONE glyph per card (059b): the engine glyph that also
+   * lived here drew the same `#db` the type glyph draws on every db-backed card,
+   * twice at card scale. Generic glyphs only — never a vendor logo; the engine's
+   * identity is the source line's TEXT. */
   var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow" };
-  var FILE_EMBEDDED_DIALECTS = ["SQLITE", "DUCKDB"];
 
   function iconForType(type) {
     return TYPE_ICONS[String(type || "").toUpperCase()] || "db";
-  }
-
-  function iconForDialect(dialect) {
-    return FILE_EMBEDDED_DIALECTS.indexOf(String(dialect || "").toUpperCase()) >= 0 ? "file" : "db";
   }
 
   function readDesignTokens() {
@@ -236,13 +233,15 @@
 
   /**
    * The HTML card (059 §A), top to bottom: name (title, two lines then ellipsis),
-   * type badge + type icon, datasource · dialect (or the child pipeline's name),
-   * template@version, run line (absent until a completion carries stats). Ports sit
-   * on the card's right/left edges; the state dot (✓ / ✕ / spinner / –) makes a
-   * static screenshot read without the legend, beside §6.2's accent border which the
-   * canvas paints under the transparent overlay. Pure: node --test drives it with a
-   * data snapshot — everything dynamic arrives as `data`, written by
-   * buildElements/setNodeState/setNodeStats/applyDialects.
+   * type badge + type icon (the card's ONE glyph — 059b), datasource · dialect
+   * (or the child pipeline's name) as TEXT, template@version, run line (absent
+   * until a completion carries stats). Ports sit on the card's right/left edges;
+   * the state dot (✓ / ✕ / spinner / –) makes a static screenshot read without
+   * the legend, beside §6.2's accent border which the canvas paints under the
+   * transparent overlay. Every svg carries the .ds-icon size classes (icons.css —
+   * loaded by the page; an unsized svg is 300×150 of replaced-element default).
+   * Pure: node --test drives it with a data snapshot — everything dynamic arrives
+   * as `data`, written by buildElements/setNodeState/setNodeStats/applyDialects.
    */
   function buildCardHtml(data) {
     if (!data) return "";
@@ -259,10 +258,7 @@
       "</div>";
 
     if (data.sourceLabel) {
-      h +=
-        '<div class="pe-card-line pe-card-source">' +
-        (data.engineIcon ? iconSvg(data.engineIcon, "ds-icon-xs pe-card-engine-icon") : "") +
-        "<span>" + esc(data.sourceLabel) + "</span></div>";
+      h += '<div class="pe-card-line pe-card-source"><span>' + esc(data.sourceLabel) + "</span></div>";
     }
 
     var tpl = templateLine(data.template);
@@ -411,13 +407,14 @@
 
   PipelineGraph.prototype.applyDialects = function (dialectsByname) {
     if (!this.cy) return;
+    // 059b: the label TEXT is the upgrade — there is no engine glyph slot any
+    // more (the type glyph is the card's one glyph).
     this.cy.nodes().forEach(function (n) {
       var name = n.data("sourceName");
       if (!name) return;
       var dialect = dialectsByname[name];
       if (dialect) {
         n.data("sourceLabel", name + " \u00b7 " + String(dialect).toUpperCase());
-        n.data("engineIcon", iconForDialect(dialect));
       }
     });
   };
@@ -537,17 +534,14 @@
     };
     if (type === "PIPELINE") {
       data.sourceLabel = n.pipeline && n.pipeline.name ? n.pipeline.name : "pipeline";
-      data.engineIcon = null;
     } else if (n.source === "tempdb") {
       var engine =
         settings && settings.tempdb && settings.tempdb.engine ? settings.tempdb.engine : "H2";
       data.sourceLabel = "tempdb \u00b7 " + engine;
       data.sourceName = null;
-      data.engineIcon = "db";
     } else if (n.source) {
       data.sourceLabel = n.source;
       data.sourceName = n.source;
-      data.engineIcon = "db";
     }
     return data;
   }
@@ -723,7 +717,6 @@
     templateLine: templateLine,
     edgeControlPoints: edgeControlPoints,
     iconForType: iconForType,
-    iconForDialect: iconForDialect,
     escapeHtml: escapeHtml,
     FIT_MIN_ZOOM: FIT_MIN_ZOOM,
   };

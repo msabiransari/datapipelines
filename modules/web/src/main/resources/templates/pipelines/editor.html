@@ -4,6 +4,10 @@
 <th:block th:fragment="content">
 
   <link th:href="@{/css/pipeline-editor.css}" rel="stylesheet">
+  <!-- 059b: the icon system the cards and view controls draw from. Without this
+       link every .ds-icon class on the page is inert and each <svg> falls to the
+       300×150 replaced-element default — "the icons are the size of the canvas". -->
+  <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
 
   <script th:src="@{/vendor/alpinejs/alpine.min.js}" defer></script>
   <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
@@ -127,19 +131,19 @@
         <div class="pe-graph-controls" role="toolbar" aria-label="Graph view controls">
           <button type="button" class="ds-button ds-button-ghost ds-button-sm"
                   @click="graph && graph.fitToView()" title="Fit graph to view" aria-label="Fit graph to view">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
+            <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
           </button>
           <button type="button" class="ds-button ds-button-ghost ds-button-sm"
                   @click="graph && graph.resetView()" title="Reset zoom (100%)" aria-label="Reset zoom to 100 percent">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
+            <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
           </button>
           <button type="button" class="ds-button ds-button-ghost ds-button-sm"
                   @click="graph && graph.zoomBy(1.25)" title="Zoom in" aria-label="Zoom in">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-in"></use></svg>
+            <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-in"></use></svg>
           </button>
           <button type="button" class="ds-button ds-button-ghost ds-button-sm"
                   @click="graph && graph.zoomBy(0.8)" title="Zoom out" aria-label="Zoom out">
-            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-out"></use></svg>
+            <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-out"></use></svg>
           </button>
         </div>
 
