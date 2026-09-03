@@ -238,7 +238,6 @@ class TypedTemplatesMigrationTest {
 
     private fun v8(): String = TemplateFixtures.repoFile(ShippedMigrations.paths().first { it.contains("V8__") }).readText()
 
-
     private companion object {
         /** templates.created_by is NOT NULL REFERENCES users — V1/V4 seed no users, so one is inserted. */
         val ACTOR_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000000046")

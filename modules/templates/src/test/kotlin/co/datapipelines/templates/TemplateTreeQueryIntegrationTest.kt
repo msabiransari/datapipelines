@@ -246,6 +246,5 @@ class TemplateTreeQueryIntegrationTest {
 
         /** Zero-padded so `name`-ordering and numeric ordering agree and the assertions can be literal. */
         fun leafName(i: Int): String = "leaf_%03d".format(i)
-
     }
 }

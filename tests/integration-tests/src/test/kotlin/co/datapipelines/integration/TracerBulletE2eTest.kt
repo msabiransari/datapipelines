@@ -447,7 +447,6 @@ class TracerBulletE2eTest {
     }
 
     companion object {
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
         private const val REQUESTED_TTL_SECONDS = 120L
         private const val SSE_BUDGET_MINUTES = 2L

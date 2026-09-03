@@ -320,7 +320,9 @@ class WorkspaceIsolationIntegrationTest {
             if (seeded) return
             seeded = true
 
-            // This suite's world (acme/globex, alice/bob/carol) is the SAME fixture vocabulary two other suites seed — plain INSERTs that must find an empty database, exactly as their former per-suite container guaranteed.
+            // This suite's world (acme/globex, alice/bob/carol) is the SAME fixture
+            // vocabulary two other suites seed — plain INSERTs that must find an empty
+            // database, exactly as their former per-suite container guaranteed.
             E2eClean.beforeSeeding()
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 seedRows(connection)

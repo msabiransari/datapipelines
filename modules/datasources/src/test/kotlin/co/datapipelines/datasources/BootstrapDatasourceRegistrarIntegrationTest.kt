@@ -286,6 +286,5 @@ class BootstrapDatasourceRegistrarIntegrationTest {
                 readonly: false
                 global: true
             """.trimIndent()
-
     }
 }

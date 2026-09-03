@@ -381,7 +381,9 @@ class WorkspaceSurfacesFixRoundE2eTest {
             if (seeded) return
             seeded = true
 
-            // This suite re-seeds the shared acme/globex fixture world (see WorkspaceSurfacesE2eTest) — it must start from the empty, freshly-migrated state its own container used to guarantee.
+            // This suite re-seeds the shared acme/globex fixture world (see
+            // WorkspaceSurfacesE2eTest) — it must start from the empty, freshly-migrated
+            // state its own container used to guarantee.
             E2eClean.beforeSeeding()
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 connection.createStatement().use { statement ->

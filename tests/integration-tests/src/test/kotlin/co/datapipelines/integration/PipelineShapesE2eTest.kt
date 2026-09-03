@@ -606,7 +606,6 @@ class PipelineShapesE2eTest {
     // ---------------------------------------------------------------- companion
 
     companion object {
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val CANCEL_SLEEP_SECONDS = 15
