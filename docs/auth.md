@@ -150,6 +150,27 @@ Startup refuses when `datasources-file` is set and this key is not ([Configurati
 
 **Explicitly rejected: "first user to log in becomes admin."** Combined with the open-provisioning default (§4.3), that rule is a land-grab race on any reachable instance — whoever hits `/login` first owns every datasource credential. Do not reintroduce it as a convenience.
 
+### 4.5 The system service account (R7)
+
+`pipeline_versions.created_by` and `pipeline_executions.triggered_by` are `NOT NULL REFERENCES users(id)`. Some writes the system makes belong to **no human**: a version promoted from another deployment (authenticated by a shared server key, not a principal — [Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)), a retention sweep, a stale-execution reap. Those writes still need an actor row.
+
+One row serves all of them, provisioned at first boot through the same `createUser` path §4.2 and §4.4 use, and read back through the **one** well-known lookup `UserService.systemActor()` — so promotion, scheduled jobs and any future automated write stamp the SAME actor and nobody mints a second.
+
+| Column | Value | Why |
+|---|---|---|
+| `provider` | `system` | Reserved at startup validation ([Configuration §7](configuration.md#7-config-validation)) exactly as `bootstrap` and `local` are: an OIDC provider named `system` could link an external identity onto this row through §4.2's linking step |
+| `provider_subject` | `system` | A fixed sentinel, never a real subject claim |
+| `email` | `system@system.invalid` | RFC 2606 reserves the `.invalid` TLD as permanently unresolvable — no mail-based flow can reach it. Deliberately not under a `datapipelines.` domain: that would read as a configuration key to the docs audit, and an address is not one |
+| `display_name` | `System` | What history and the audit trail render |
+| `is_admin` | `FALSE` | It is an actor, not an authority. Every path that stamps it already knows the workspace it is writing into; nothing here needs a membership bypass |
+
+**Login is disabled by construction, not by a flag.** Three independent facts each make it impossible: no OIDC provider may be named `system`, so no external identity can link to the row; the address cannot resolve; and the local-password paths refuse it — `createLocalUser` at the reserved address answers `EmailTaken` (the row already holds it), and `resetPassword` on a `system`-provider row answers "no such user". There is nothing to disable because there is no credential to hold.
+
+**Idempotent.** A restart returns the existing row untouched — no re-grant, no identity rewrite, no `updated_at` bump, the same contract §4.4's pre-provisioning states. Two replicas racing a fresh database settle it by catch-and-reread, exactly as the bootstrap actor does (ARCH-AUDIT M5).
+
+It is deliberately **not** a credential. It holds no API key and no password, and nothing authenticates *as* it; it is the name history writes down when the writer was the system itself. The promotion peer credential is a separate thing entirely (§10.6) — a shared secret between two deployments, with no `users` row of its own.
+
+
 ---
 
 ## 5. OIDC Login Flow

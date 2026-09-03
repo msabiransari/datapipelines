@@ -510,6 +510,33 @@ class ConfigValidatorTest {
     }
 
     @Test
+    fun `system is reserved too - the system service account's whole safety argument is that no identity can link to it`() {
+        // auth.md §4.5 / R7: `users.provider = 'system'` marks the non-human actor every
+        // promoted row and every scheduled write is stamped with. An OIDC provider named
+        // `system` would let a real person's identity land on that row through §4.2's linking
+        // step — and the account's only defence against login is that nothing can link to it.
+        listOf("system", " System ", "SYSTEM").forEach { name ->
+            val report =
+                ConfigValidator.validate(
+                    validSnapshot().copy(
+                        oidcProviders =
+                            listOf(
+                                OidcProviderSnapshot(
+                                    name = name,
+                                    clientId = "id",
+                                    clientSecret = "secret",
+                                    issuerUri = "https://idp.example.com",
+                                ),
+                            ),
+                    ),
+                )
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("reserved")
+        }
+    }
+
+    @Test
     fun `the stock provider names are untouched`() {
         listOf("google", "microsoft", "okta", "bootstrap-idp").forEach { name ->
             ConfigValidator

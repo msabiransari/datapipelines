@@ -60,10 +60,16 @@ class ConfigValidator(
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
-         * `LOCAL_PROVIDER`). An OIDC provider may not be NAMED one of these — see
-         * [checkReservedProviderNames].
+         * `LOCAL_PROVIDER`, `SYSTEM_PROVIDER`). An OIDC provider may not be NAMED one of these
+         * — see [checkReservedProviderNames].
+         *
+         * Spelled as literals, not imported: `auth` is not on this module's test compile
+         * classpath, and a validator rule reads better as the literal an operator would type.
+         * `SystemActorProvisioningIntegrationTest` asserts the row's stored `provider` against
+         * `UserService.SYSTEM_PROVIDER`, and `ConfigValidatorTest` asserts this set refuses
+         * that same spelling — the two meet at the string, which is the thing that matters.
          */
-        private val RESERVED_PROVIDER_NAMES = setOf("bootstrap", "local")
+        private val RESERVED_PROVIDER_NAMES = setOf("bootstrap", "local", "system")
 
         /** §3.10 — the directory the UI theme is validated against, on the classpath. */
         internal const val THEME_ROOT = "static/vendor/design-system"
@@ -389,8 +395,10 @@ class ConfigValidator(
          *
          * `OidcSuccessHandler` writes the provider's configured NAME (the Spring registration
          * id) verbatim into `users.provider`, and the system writes two placeholder values of
-         * its own there: `bootstrap` for the pre-provisioned admin (§6.1) and `local` for an
-         * admin-created password account (§5A). A provider named either one makes external
+         * its own there: `bootstrap` for the pre-provisioned admin (§6.1), `local` for an
+         * admin-created password account (§5A), and `system` for the system service account
+         * (§4.5, R7) — whose entire safety argument is that no external identity can link to
+         * it. A provider named any one of them makes external
          * identities land on rows the system labels system-created — the two become
          * indistinguishable in `users`, in the audit trail and in the `(provider,
          * provider_subject)` uniqueness the schema enforces. Nothing else reserves the names

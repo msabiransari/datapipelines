@@ -136,6 +136,64 @@ class UserService(
     }
 
     /**
+     * Pre-provisions the **system service account** (auth.md §4.5, versioning §10.6 / R7) — the
+     * actor every write the SYSTEM makes on nobody's behalf is stamped with, so
+     * `pipeline_versions.created_by` and `pipeline_executions.triggered_by` (both
+     * `NOT NULL REFERENCES users(id)`) point at a real, nameable row without inventing a human.
+     *
+     * Promotion is its first consumer: a promoted row carries no source user id that means
+     * anything here, and the credential that authorised the push is a shared server key, not a
+     * principal. The retention job, the stale-execution sweeper and every future automated write
+     * take the SAME row through [systemActor] — one actor for the whole system, so nobody mints
+     * a second.
+     *
+     * ## Login is disabled by construction, not by a flag
+     *
+     * - `provider` is [SYSTEM_PROVIDER], and no OIDC provider may be NAMED `system` — startup
+     *   refuses it exactly as it refuses `bootstrap` and `local` (configuration.md §7), so no
+     *   external identity can ever link to this row through §4.2's `linkIdentity`.
+     * - `email` is [SYSTEM_ACTOR_EMAIL], under RFC 2606's reserved `.invalid` TLD: it cannot
+     *   resolve, so no mail-based flow can reach it.
+     * - The local-password paths refuse it ([LocalPasswordService]), so the row can never
+     *   acquire a credential to log in WITH.
+     *
+     * Same create-if-absent contract as [provisionBootstrapActor]: an existing row is returned
+     * untouched — no re-grant, no identity rewrite, no `updated_at` bump — and the two-replica
+     * first-boot insert race is settled by catch-and-reread (ARCH-AUDIT M5).
+     */
+    fun provisionSystemActor(): User {
+        userRepository.findByEmail(SYSTEM_ACTOR_EMAIL)?.let { return it }
+        return try {
+            createUser(
+                normalizedEmail = SYSTEM_ACTOR_EMAIL,
+                displayName = SYSTEM_ACTOR_DISPLAY_NAME,
+                pictureUrl = null,
+                provider = SYSTEM_PROVIDER,
+                providerSubject = SYSTEM_ACTOR_SUBJECT,
+            )
+        } catch (_: DuplicateKeyException) {
+            // Two instances seeding one fresh database race here, exactly as the bootstrap
+            // actor does (ARCH-AUDIT M5): the loser re-reads the winner's row rather than
+            // crashing its own context inside afterSingletonsInstantiated().
+            checkNotNull(userRepository.findByEmail(SYSTEM_ACTOR_EMAIL)) {
+                "System actor $SYSTEM_ACTOR_EMAIL lost the insert race but is absent on re-read"
+            }
+        }
+    }
+
+    /**
+     * The ONE well-known lookup of the system service account (R7).
+     *
+     * Every non-user-bound write in the system stamps THIS row. It is provisioned at boot by
+     * [SystemActorSeeder] before the connector accepts traffic, so absence here is a wiring
+     * bug, not a runtime condition — hence the check rather than a null return.
+     */
+    fun systemActor(): User =
+        checkNotNull(userRepository.findByEmail(SYSTEM_ACTOR_EMAIL)) {
+            "The system actor row is absent; SystemActorSeeder must provision it at boot (auth.md §4.5)"
+        }
+
+    /**
      * The ONE path that creates a `users` row (auth.md §4.4): insert, then — and only then —
      * the bootstrap-admin grant and its audit event. §4.2's first login and §6.1's
      * pre-provisioning are the same act at two different moments, not two mechanisms.
@@ -181,14 +239,21 @@ class UserService(
     fun createLocalAccount(
         normalizedEmail: String,
         displayName: String,
-    ): User =
-        createUser(
+    ): User {
+        // §4.5: the system service account is not an account anybody administers. Its row
+        // already holds this email, so the insert would fail on the UNIQUE constraint anyway —
+        // refusing here makes the reason legible instead of leaving it to a race-shaped error.
+        require(normalizedEmail != SYSTEM_ACTOR_EMAIL) {
+            "$SYSTEM_ACTOR_EMAIL is the reserved system service account (auth.md §4.5); it has no local credential"
+        }
+        return createUser(
             normalizedEmail = normalizedEmail,
             displayName = displayName,
             pictureUrl = null,
             provider = LOCAL_PROVIDER,
             providerSubject = normalizedEmail,
         )
+    }
 
     /** Cached (D13, ~60s) `users.is_active` — read on every authenticated request. */
     fun isActive(id: UUID): Boolean = authCache.isUserActive(id) { userRepository.findById(it) }
@@ -290,6 +355,27 @@ class UserService(
          * OIDC with the same email.
          */
         const val LOCAL_PROVIDER = "local"
+
+        /**
+         * `users.provider` of the SYSTEM service account (auth.md §4.5, R7) — the actor every
+         * non-user-bound write is stamped with. Reserved at startup validation exactly as
+         * [BOOTSTRAP_PROVIDER] and [LOCAL_PROVIDER] are: an OIDC provider named `system` would
+         * be indistinguishable from it and could link an external identity to the row.
+         */
+        const val SYSTEM_PROVIDER = "system"
+
+        /**
+         * The system actor's `users.email`. RFC 2606 reserves the `.invalid` TLD as
+         * permanently unresolvable, so this address cannot receive mail by construction — the
+         * property that makes it safe to hold a row nobody owns.
+         */
+        const val SYSTEM_ACTOR_EMAIL = "system@system.invalid"
+
+        /** The system actor's fixed `users.provider_subject` sentinel — never a real subject claim. */
+        const val SYSTEM_ACTOR_SUBJECT = "system"
+
+        /** What the system actor is called wherever a display name is rendered (history, audit). */
+        const val SYSTEM_ACTOR_DISPLAY_NAME = "System"
 
         /** auth.md §4.2 — one canonical form for every lookup, store and comparison. */
         private fun normalize(email: String): String = email.trim().lowercase()
