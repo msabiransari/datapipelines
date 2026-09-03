@@ -146,7 +146,11 @@ class ListPartialsRenderTest {
                 webContext().apply { fillTemplatesModel(listOf(templateRecord())) },
             )
 
-        html shouldContain "<table class=\"ds-table\">"
+        // 058: search renders IN THE LEFT PANE — full-path rows on ds primitives, not the
+        // full-width seven-column table. The migration claim this test guards ("ds-table
+        // done, inline styles gone") carries over to the row shape: badges are ds-badge,
+        // and no inline table styles survive.
+        html shouldContain "class=\"tpl-result\""
         html shouldContain "ds-badge"
         // The migration is only done when the inline table styles are GONE.
         html shouldNotContain "border-collapse: collapse"

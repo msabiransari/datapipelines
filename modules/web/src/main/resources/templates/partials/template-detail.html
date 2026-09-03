@@ -1,0 +1,54 @@
+<!-- The RIGHT pane's content: the SELECTED template (058). What a leaf's inline expansion was
+     in 047 — header, then the versions table — rendered in the detail pane instead of under
+     the leaf, so opening one template moves nothing else on the screen.
+
+     Swapped (innerHTML) into #template-detail by /partials/templates/versions; selection
+     never re-renders the tree, by construction: this fragment contains no tree markup, no
+     tree swap target and no out-of-band swap — the render guard pins exactly that.
+
+     `template` is the current-version projection (findLatest) and is NULL when the name no
+     longer names a live template (deleted elsewhere, or a stale pane): the pane then says so
+     quietly rather than rendering a header full of nothing.
+
+     There is no rename, move or delete affordance here, and no version is editable in place —
+     a version is immutable (templates §5.1) and a name is its identity (§4.5). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="tplx-detail-content">
+  <th:block th:if="${template == null}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">Template not found</p>
+      <p class="ds-empty-description"
+         th:text="'No live template named ' + ${templateId} + ' in this workspace — it may have been deleted.'">
+        It may have been deleted.
+      </p>
+    </div>
+  </th:block>
+
+  <th:block th:if="${template != null}">
+    <header class="tplx-detail-header">
+      <!-- The FULL path, and it rides on `title` too (§9.4) — it is the one place the whole
+           screen shows it untruncated. -->
+      <h2 class="tplx-detail-path" th:text="${templateId}" th:title="${templateId}">acme/finance/reports/monthly</h2>
+      <p class="tplx-detail-meta">
+        <span th:text="${template.displayName}">Monthly Revenue</span>
+        <span th:if="${!#strings.isEmpty(template.description)}"
+              class="tplx-detail-description" th:text="${template.description}">What this template expects and produces.</span>
+      </p>
+      <div class="tplx-detail-badges">
+        <span class="ds-badge ds-badge-default" th:text="${template.type.wire}">sql</span>
+        <span class="ds-badge ds-badge-default" th:if="${template.dialect != null}"
+              th:text="${template.dialect.wire}">POSTGRES</span>
+        <span class="ds-badge ds-badge-default" th:text="${'v' + template.version}">v1</span>
+        <!-- versioning §7: the draft this template holds, stated in full here — the pane's
+             leaf could only afford the compact badge. -->
+        <span th:if="${draftVersion != null}" class="ds-badge ds-badge-warning"
+              th:text="'draft v' + ${draftVersion} + ' pending release'"
+              title="A draft exists; release it from the editor to publish."></span>
+        <span class="htmx-indicator ds-spinner" id="template-detail-spinner" aria-hidden="true"></span>
+        <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open"
+           th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open in editor</a>
+      </div>
+    </header>
+
+    <div th:replace="~{partials/template-versions :: versions}"></div>
+  </th:block>
+</div>

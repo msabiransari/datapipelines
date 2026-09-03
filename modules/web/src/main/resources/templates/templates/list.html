@@ -3,54 +3,87 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <link th:href="@{/css/template-tree.css}" rel="stylesheet">
+  <!-- 058: the explorer's keyboard layer — up/down moves selection, right/left expands and
+       collapses, Enter opens the editor. The tree's expansion itself stays htmx+<details>
+       (047); this script only owns selection, focus and the aria state the layout adds. -->
+  <script th:src="@{/js/template-explorer.js}" defer></script>
 
-  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Templates</h1>
-    <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
-      <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
-    </th:block>
+  <!-- 058 — the explorer: TREE LEFT, the selected template RIGHT. The 047 accordion put each
+       template's versions table under its own row, pushing every other row down; the owner's
+       spec is Windows file explorer — "tree on the left and when click on the leaf, table
+       should show up on the right". Everything 047 built underneath (server-side prefix
+       levels, virtual folders, browse-vs-search) stays; this is what those queries are
+       rendered INTO. -->
+  <div class="tplx-page">
+
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Templates</h1>
+      <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+        <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
+      </th:block>
+    </div>
+
+    <!-- Search, dialect and type address each other by ID (hx-include): a name-based include
+         would also sweep up the create modal's own name="dialect" and name="type" inputs
+         (§4.6). A non-empty search switches the LEFT pane to a flat list of full paths;
+         clearing it returns to the tree (template-hierarchy-design §9.2). -->
+    <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
+         With three controls instead of two that starved the search box to a few pixels, so
+         the selects are sized by their content and only the search box flexes. -->
+    <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
+      <input type="search" id="template-filter-q" name="q" th:value="${q}"
+             placeholder="Search templates..."
+             th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+             hx-trigger="input changed delay:300ms, search"
+             hx-include="#template-filter-dialect, #template-filter-type"
+             hx-indicator="#template-filter-spinner"
+             class="ds-input" style="flex: 1 1 240px; min-width: 180px; max-width: 360px;">
+      <select id="template-filter-dialect" name="dialect" class="ds-input" style="flex: 0 0 auto; width: auto;"
+              th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+              hx-trigger="change"
+              hx-include="#template-filter-q, #template-filter-type"
+              hx-indicator="#template-filter-spinner">
+        <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
+        <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
+                th:selected="${d == selectedDialect}"></option>
+      </select>
+      <!-- 046 shipped `type` on the version row; it filters like `dialect` and joins it here. -->
+      <select id="template-filter-type" name="type" class="ds-input" style="flex: 0 0 auto; width: auto;"
+              th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
+              hx-trigger="change"
+              hx-include="#template-filter-q, #template-filter-dialect"
+              hx-indicator="#template-filter-spinner">
+        <option value="" th:selected="${#strings.isEmpty(selectedType)}">All Types</option>
+        <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
+                th:selected="${ty == selectedType}"></option>
+      </select>
+      <span id="template-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
+    </div>
+
+    <!-- The two panes. The LEFT pane is a stable container around #template-list-wrapper —
+         filters, the search pager and level swaps all replace INSIDE it, so the pane (and
+         the RIGHT pane beside it) never move. The RIGHT pane is #template-detail: a leaf's
+         selection swaps its innerHTML and nothing else — the whole point of the layout. -->
+    <div class="tplx-body">
+      <div class="tplx-tree" id="template-tree-pane">
+        <!-- The fragment's own root carries id="template-list-wrapper" in BOTH presentations, so
+             the swap target survives every refresh — this div is only a placeholder (§4.6). -->
+        <div th:replace="~{partials/templates :: fragment}"></div>
+      </div>
+
+      <div class="tplx-detail">
+        <!-- Nothing selected: a quiet empty state, not a blank panel. Replaced (innerHTML)
+             the first time a leaf is selected, by /partials/templates/versions. The spinner
+             lives here and in the detail header — exactly one of the two is in the DOM at
+             any time, and it is what a selection's hx-indicator points at. -->
+        <div id="template-detail" class="tplx-detail-empty-state">
+          <p class="ds-empty-title">Select a template</p>
+          <p class="ds-empty-description">Choose a template in the tree to see its versions.</p>
+          <span class="htmx-indicator ds-spinner" id="template-detail-spinner" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
   </div>
-
-  <!-- Search, dialect and type address each other by ID (hx-include): a name-based include
-       would also sweep up the create modal's own name="dialect" and name="type" inputs
-       (§4.6). A non-empty search switches the fragment to a flat list of full paths; clearing
-       it returns to the tree (template-hierarchy-design §9.2). -->
-  <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
-       With three controls instead of two that starved the search box to a few pixels, so
-       the selects are sized by their content and only the search box flexes. -->
-  <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
-    <input type="search" id="template-filter-q" name="q" th:value="${q}"
-           placeholder="Search templates..."
-           th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
-           hx-trigger="input changed delay:300ms, search"
-           hx-include="#template-filter-dialect, #template-filter-type"
-           hx-indicator="#template-filter-spinner"
-           class="ds-input" style="flex: 1 1 240px; min-width: 180px; max-width: 360px;">
-    <select id="template-filter-dialect" name="dialect" class="ds-input" style="flex: 0 0 auto; width: auto;"
-            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
-            hx-trigger="change"
-            hx-include="#template-filter-q, #template-filter-type"
-            hx-indicator="#template-filter-spinner">
-      <option value="" th:selected="${#strings.isEmpty(selectedDialect)}">All Dialects</option>
-      <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}"
-              th:selected="${d == selectedDialect}"></option>
-    </select>
-    <!-- 046 shipped `type` on the version row; it filters like `dialect` and joins it here. -->
-    <select id="template-filter-type" name="type" class="ds-input" style="flex: 0 0 auto; width: auto;"
-            th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
-            hx-trigger="change"
-            hx-include="#template-filter-q, #template-filter-dialect"
-            hx-indicator="#template-filter-spinner">
-      <option value="" th:selected="${#strings.isEmpty(selectedType)}">All Types</option>
-      <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
-              th:selected="${ty == selectedType}"></option>
-    </select>
-    <span id="template-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
-  </div>
-
-  <!-- The fragment's own root carries id="template-list-wrapper" in BOTH presentations, so
-       the swap target survives every refresh — this div is only a placeholder (§4.6). -->
-  <div th:replace="~{partials/templates :: fragment}"></div>
 
   <!-- CREATE (§9.3). `type` is a create-time input and appears on NO other form: it is
        immutable after creation (§5.3), so the edit screen shows it as a read-only value.

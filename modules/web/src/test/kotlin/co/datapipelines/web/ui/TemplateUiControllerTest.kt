@@ -36,6 +36,7 @@ import java.util.UUID
 class TemplateUiControllerTest {
     private val repository = mockk<TemplateRepository>()
     private val themeResolver = mockk<ThemeResolver>()
+    private val pipelines = mockk<PipelineRepository>()
     private val browse = TemplateBrowseModel(repository)
     private val controller = TemplateUiController(browse, themeResolver)
     private val partialController =
@@ -44,7 +45,7 @@ class TemplateUiControllerTest {
             browse,
             mockk<TemplateValidator>(),
             mockk<AuthoringGuard>(),
-            TemplateUsageService(repository, mockk<co.datapipelines.pipeline.PipelineRepository>()),
+            TemplateUsageService(repository, pipelines),
         )
 
     private val userId = UUID.randomUUID()
@@ -230,6 +231,42 @@ class TemplateUiControllerTest {
         model["total"] shouldBe 0
         // The repository is a strict mock with nothing stubbed: reaching it would throw.
         verify(exactly = 0) { repository.listChildFolders(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the versions endpoint answers the DETAIL fragment for the explorer's right pane`() {
+        authenticate()
+        val name = "acme/finance/monthly_revenue"
+        every { repository.findLatest(workspaceId, name) } returns template(name)
+        every { repository.listVersions(workspaceId, name) } returns
+            listOf(co.datapipelines.templates.TemplateVersionSummary(name, 1, java.time.Instant.parse("2026-09-01T00:00:00Z"), userId))
+        every { repository.findDraftDetail(workspaceId, name) } returns null
+        every { pipelines.countWorkingTemplatePinsByPinnedVersion(workspaceId, name) } returns mapOf(1 to 2)
+
+        val model = ExtendedModelMap()
+        val viewName = partialController.versions(model, name)
+
+        // 058: a selection fills the RIGHT pane — header (from findLatest) + versions table.
+        viewName shouldBe "partials/template-detail"
+        model["templateId"] shouldBe name
+        model["template"] shouldBe template(name)
+        model["draftVersion"] shouldBe null
+        model["inUse"] shouldBe mapOf(1 to 2)
+    }
+
+    @Test
+    fun `a name with no live template answers the quiet not-found detail, not an error`() {
+        authenticate()
+        every { repository.findLatest(workspaceId, "gone.sql") } returns null
+        every { repository.listVersions(workspaceId, "gone.sql") } returns emptyList()
+        every { repository.findDraftDetail(workspaceId, "gone.sql") } returns null
+        every { pipelines.countWorkingTemplatePinsByPinnedVersion(workspaceId, "gone.sql") } returns emptyMap()
+
+        val model = ExtendedModelMap()
+        val viewName = partialController.versions(model, "gone.sql")
+
+        viewName shouldBe "partials/template-detail"
+        model["template"] shouldBe null
     }
 
     @Test

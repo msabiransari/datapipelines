@@ -80,8 +80,13 @@ class TemplatePartialController(
     }
 
     /**
-     * One leaf's versions, newest first, with their RELEASED / DRAFT lifecycle badges
-     * (versioning §6, `V6__version_lifecycle.sql`) — what a leaf expands to (§9.2).
+     * The SELECTED template, for the explorer's right pane (058) — the header (full path,
+     * badges, Open-in-editor) and the leaf's versions, newest first, with their RELEASED /
+     * DRAFT lifecycle badges (versioning §6, `V6__version_lifecycle.sql`).
+     *
+     * A selection swaps this fragment into `#template-detail` with `innerHTML` and touches
+     * nothing else: the tree pane's DOM is never re-rendered by a selection, which is the
+     * whole point of the two-pane layout.
      *
      * The status is derived, not re-queried per row: `uq_template_versions_one_draft` permits
      * at most one DRAFT per template, so the one version the draft pointer names is the DRAFT
@@ -92,6 +97,10 @@ class TemplatePartialController(
      * delete guard read. A version with no working-version pin renders "—" (nothing to act
      * on), not a zero: the count's unit is the pipeline, and "no one uses this" is the
      * retirement-ready signal an author is looking for.
+     *
+     * A name that no longer names a live template (deleted in another tab, a stale pane)
+     * renders the pane's quiet not-found state — never a header full of nothing, and never
+     * an error page for what is an ordinary read.
      *
      * §9.6: the name is a query parameter. It may contain `/`, and an encoded `%2F` in a URL
      * **path segment** is refused 400 by the container below routing — no handler could reach
@@ -105,10 +114,11 @@ class TemplatePartialController(
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
         model.addAttribute("templateId", name)
+        model.addAttribute("template", templates.findLatest(workspaceId, name))
         model.addAttribute("versions", templates.listVersions(workspaceId, name))
         model.addAttribute("draftVersion", templates.findDraftDetail(workspaceId, name)?.version)
         model.addAttribute("inUse", usage.inUseCounts(workspaceId, name))
-        return "partials/template-versions"
+        return "partials/template-detail"
     }
 
     /**

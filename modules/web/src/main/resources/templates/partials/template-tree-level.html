@@ -1,4 +1,5 @@
-<!-- ONE level of the template tree (template-hierarchy-design §9.2).
+<!-- ONE level of the template tree (template-hierarchy-design §9.2), as the LEFT pane of
+     the 058 explorer renders it.
 
      The tree is backed by server-side prefix queries: this fragment renders the direct
      sub-folders and the direct template children of one prefix, and expanding a folder issues
@@ -10,18 +11,28 @@
      this file, and no empty-folder state — a folder is derived from the live rows beneath it,
      so one with nothing beneath it does not exist to be rendered.
 
-     Expansion is <details>/<summary>: the browser owns open/closed state and the keyboard and
-     screen-reader semantics, and htmx loads the level on the summary's FIRST click only
-     (hx-trigger="click once"). No JS of our own is involved.
+     A leaf does NOT expand inline any more (058): selecting it swaps its header + versions
+     table into #template-detail on the RIGHT, and nothing in this pane moves. The selection
+     swap is innerHTML into a stable pane outside this fragment — the tree's DOM is untouched
+     by construction.
+
+     Folder expansion is <details>/<summary>: the browser owns open/closed state and the
+     keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
+     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
 
      The root level's id is the screen's long-standing #template-list-wrapper, so browsing
      inherits the existing SPA swap contract instead of inventing a second one; nested levels
      get a derived id from TemplateBrowseModel.levelId so a placeholder and the fragment that
      replaces it cannot disagree. The `oob` flag is set ONLY by the create-success path
-     (partials/template-created); every other render leaves the attribute off. -->
+     (partials/template-created); every other render leaves the attribute off.
+
+     ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
+     its folder's treeitem. aria-expanded/aria-selected/tabindex are owned by
+     static/js/template-explorer.js, which initialises them on load and after every htmx swap
+     (the server cannot know which leaf is selected — selection is client state). -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
      th:id="${levelId}" class="tpl-level"
-     th:attr="hx-swap-oob=${oob}">
+     th:attr="hx-swap-oob=${oob}, role=${#strings.isEmpty(prefix)} ? null : 'group'">
 
   <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
        child, because its folder was derived from that child (§3.1). -->
@@ -32,11 +43,14 @@
     </div>
   </th:block>
 
-  <ul class="tpl-tree" th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}">
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Templates' : null">
 
     <!-- FOLDERS. The count is over live templates in the subtree under the SAME filters, so a
          folder whose whole subtree is filtered out is absent rather than empty. -->
-    <li class="tpl-node" th:each="f : ${folders}">
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
       <details class="tpl-folder">
         <!-- The request rides on the SUMMARY, triggered by its own `click`, and targets the
              placeholder below with `next`. The obvious alternative — the request on the
@@ -46,7 +60,7 @@
              indirection and no non-bubbling event, and `<summary>` raises it for keyboard
              activation too, so the keyboard path is unchanged. `once`: the level is fetched
              on first open and then simply shown and hidden. -->
-        <summary class="tpl-summary"
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
                  th:attr="hx-get=@{/partials/templates(prefix=${f.path}, dialect=${selectedDialect}, type=${selectedType})}"
                  hx-trigger="click once"
                  hx-target="next .tpl-level" hx-swap="outerHTML">
@@ -60,32 +74,30 @@
       </details>
     </li>
 
-    <!-- LEAVES. A leaf expands to its versions with their RELEASED / DRAFT badges. -->
-    <li class="tpl-node" th:each="t : ${templates}">
-      <details class="tpl-leaf">
-        <summary class="tpl-summary"
-                 th:attr="hx-get=@{/partials/templates/versions(name=${t.id})}"
-                 hx-trigger="click once"
-                 hx-target="next .tpl-versions" hx-swap="innerHTML">
-          <!-- The label is the leaf's own segment; the full path always rides on `title`
-               (§9.4's rule for every surface that shows a template name). -->
-          <span class="tpl-label"
-                th:text="${#strings.isEmpty(prefix)} ? ${t.id} : ${t.id.substring(prefix.length() + 1)}"
-                th:title="${t.id}">monthly_revenue</span>
-          <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
-          <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
-          <span class="ds-badge ds-badge-default" th:text="${'v' + t.version}">v1</span>
-          <!-- versioning §7: unreleased edits visible on the list (templates §6). -->
-          <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
-                th:text="'draft v' + ${drafts[t.id].version} + ' pending release'"
-                title="A draft exists; release it from the editor to publish."></span>
-          <a class="ds-button ds-button-ghost ds-button-sm tpl-open"
-             th:href="@{/templates/editor(name=${t.id})}" th:title="${t.id}">Open</a>
-        </summary>
-        <div class="tpl-versions tpl-level-pending">
-          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
-        </div>
-      </details>
+    <!-- LEAVES. A leaf SELECTS: its header + versions table swap into #template-detail on the
+         right (innerHTML — the tree's DOM is untouched by the selection swap, which is the
+         whole point of the two-pane layout). Enter opens the editor; data-editor-url is what
+         the keyboard path reads, and it is the same URL the detail pane's Open button uses. -->
+    <li class="tpl-node" role="none" th:each="t : ${templates}">
+      <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
+              th:attr="hx-get=@{/partials/templates/versions(name=${t.id})},
+                       data-editor-url=@{/templates/editor(name=${t.id})}"
+              hx-target="#template-detail" hx-swap="innerHTML"
+              hx-sync="#template-detail:replace"
+              hx-indicator="#template-detail-spinner">
+        <!-- The label is the leaf's own segment; the full path always rides on `title`
+             (§9.4's rule for every surface that shows a template name). -->
+        <span class="tpl-label"
+              th:text="${#strings.isEmpty(prefix)} ? ${t.id} : ${t.id.substring(prefix.length() + 1)}"
+              th:title="${t.id}">monthly_revenue</span>
+        <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
+        <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
+        <!-- versioning §7: unreleased edits stay visible in the list (templates §6). The pane
+             keeps the badge compact; the version number and the release action live in the
+             detail pane, one click away. -->
+        <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
+              th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the editor to publish.'">draft</span>
+      </button>
     </li>
   </ul>
 
