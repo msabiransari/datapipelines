@@ -12,9 +12,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -39,14 +36,13 @@ import java.util.UUID
  * [TemplateRepository.TEMPLATE_HASH_EXPR] and bind the parameter, and this test goes red —
  * verified in the round's handback, then reverted.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TypedTemplatesMigrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
 
     @BeforeAll
     fun createPreV8SchemaThenApplyV8() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(DriverManagerDataSource(db.jdbcUrl, db.username, db.password))
         val dir = TemplateFixtures.repoDirectory("modules/app/src/main/resources/db/migration")
         ShippedMigrations.migrations(dir).filter { it.first < 8 }.forEach { pair ->
             jdbc.jdbcTemplate.execute(pair.second.readText())
@@ -242,10 +238,6 @@ class TypedTemplatesMigrationTest {
 
     private fun v8(): String = TemplateFixtures.repoFile(ShippedMigrations.paths().first { it.contains("V8__") }).readText()
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
 
     private companion object {
         /** templates.created_by is NOT NULL REFERENCES users — V1/V4 seed no users, so one is inserted. */
@@ -253,12 +245,11 @@ class TypedTemplatesMigrationTest {
 
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        /**
+         * A scratch database on the module's shared container: this suite builds the schema
+         * PART-WAY on purpose (pre-V8), so it must not see the fully-migrated database the
+         * rest of the module runs against — the migration boundary is the subject.
+         */
+        val db = SharedPostgres.scratchDatabase("pre_v8_typed")
     }
 }

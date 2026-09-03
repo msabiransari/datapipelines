@@ -9,9 +9,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -32,7 +29,6 @@ import java.util.UUID
  * `TemplateRepositoryIntegrationTest` mirrors the template half of the backfill with the
  * real `TemplateRepository`.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class VersionBackfillMigrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -42,7 +38,7 @@ class VersionBackfillMigrationTest {
 
     @BeforeAll
     fun createPreV6SchemaThenMigrate() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(DriverManagerDataSource(db.jdbcUrl, db.username, db.password))
         // V1–V5 only, by version number: the state a live deployment was in before V6.
         val dir = Fixtures.repoDirectory("modules/app/src/main/resources/db/migration")
         val preV6 = ShippedMigrations.migrations(dir).filter { it.first < 6 }
@@ -186,20 +182,15 @@ class VersionBackfillMigrationTest {
             ),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
     private companion object {
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        /**
+         * A scratch database on the module's shared container: this suite builds the schema
+         * PART-WAY on purpose (V1–V5, then V6), so it must not see the fully-migrated
+         * database the rest of the module runs against — the backfill's whole subject is
+         * the before/after boundary.
+         */
+        val db = SharedPostgres.scratchDatabase("pre_v6_backfill")
     }
 }

@@ -14,9 +14,6 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -42,9 +39,9 @@ import java.util.concurrent.TimeUnit
  *
  * ## Container lifetime
  *
- * One container for the class, truncated before each test. Per the shared-test-container
- * discipline the project already follows: each spec cleans the tables it touches, in FK
- * order, rather than dropping the schema.
+ * The module's ONE shared container ([SharedPostgres]), truncated before each test. Per
+ * the shared-test-container discipline the project already follows: each spec cleans the
+ * tables it touches, in FK order, rather than dropping the schema.
  *
  * `LargeClass` is suppressed: this suite is the repository's contract in one place — CRUD,
  * concurrency, and the version lifecycle (V6) read against the SAME shipped schema and
@@ -52,7 +49,6 @@ import java.util.concurrent.TimeUnit
  * argument `PipelineRepository` itself makes.
  */
 @Suppress("LargeClass")
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PipelineRepositoryIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -62,17 +58,12 @@ class PipelineRepositoryIntegrationTest {
     private val serializer = PipelineSerializer()
 
     /**
-     * Creates the schema once for the class.
-     *
-     * `@BeforeAll` under `PER_CLASS` rather than a `@BeforeEach` guarded by a static
-     * `schemaCreated` flag: the flag was mutable state shared across instances that JUnit is
-     * free to stop honouring (a parallel or re-ordered run would have two instances race it),
-     * and it encoded "run once" in a place the framework already expresses directly.
+     * Binds the JDBC template to the module's shared, already-migrated container — the
+     * migrations are applied once per JVM by [SharedPostgres], not per class.
      */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(Fixtures.repoFile(it).readText()) }
     }
 
     @BeforeEach
@@ -1182,16 +1173,13 @@ class PipelineRepositoryIntegrationTest {
         )
 
     /**
-     * A fresh `DataSource` on the container.
+     * A fresh `DataSource` on the shared container.
      *
      * `DriverManagerDataSource` hands out a new physical connection per `getConnection()`, so
      * two instances give the concurrency test two genuinely independent sessions — a shared
      * pooled connection would serialise the two inserts and prove nothing.
      */
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private fun countRows(table: String): Int =
         checkNotNull(jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
@@ -1203,24 +1191,7 @@ class PipelineRepositoryIntegrationTest {
          */
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
-        /**
-         * The shipped migrations in version order — DERIVED from the migration directory
-         * (`ShippedMigrations`), never hand-copied: this list said "V1–V4" for two migrations
-         * after V4 landed (035/H), and a hand-maintained copy re-acquires exactly that drift
-         * the moment the next migration ships.
-         */
-        val MIGRATION_PATHS: List<String> = ShippedMigrations.paths()
-
         /** Generous: the assertion is about the outcome, not about how fast Postgres is. */
         const val CONCURRENCY_TIMEOUT_SECONDS = 30L
-
-        /** Matches deploy/docker-compose.dev.yml — the schema requires Postgres 16+ (§2). */
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }
