@@ -962,7 +962,7 @@ Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints pagina
 GET /datasources/{name}
 ```
 
-Returns everything except `password`, plus the additive `workspace` (the bound workspace's name, `null` = global) and `readonly` fields (workspaces design §9). A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
+Returns everything except `password`, plus the additive `workspace` (the bound workspace's name, `null` = global), `readonly` (workspaces design §9) and `last_test` fields. `last_test` is the outcome of the last connection test — `{"tested_at": "...", "ok": true|false, "message": "..."}`, or `null` when the datasource has never been probed ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)); it is also on every `GET /datasources` row, which is what lets a reader see a credential has stopped working without running an execution. A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
 
 ### 9.4 Update datasource
 
@@ -978,7 +978,11 @@ Updates connection details. Password is optional — omit to keep existing. The 
 DELETE /datasources/{name}
 ```
 
-Fails with `datasource.in_use` if any non-deleted pipeline references it. D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
+Fails with `datasource.in_use` if any non-deleted pipeline references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
+
+`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names) and `references` — one entry per referencing node, `{"pipeline", "node_id", "pipeline_version", "version_status"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+
+D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
 
 ### 9.6 Test connection
 
@@ -986,7 +990,9 @@ Fails with `datasource.in_use` if any non-deleted pipeline references it. D8-gat
 POST /datasources/{name}/test
 ```
 
-Returns `200 OK` with `{connected: true, server_version: "..."}` on success, or `200 OK` with `{connected: false, error: "..."}` on failure (note: not an HTTP error — connection test failure is a normal outcome, not a server error).
+Returns `200 OK` with the full wire form of `TestResult` ([Datasources §8.1](datasources.md#81-post-apiv1datasourcesnametest)) — `connected`, `tested_at`, `latency_ms`, `server_version`, `error`, `error_class` — on success and on failure alike (note: not an HTTP error — connection test failure is a normal outcome, not a server error).
+
+The probe also **records its outcome on the datasource row**, so the result shows up as `last_test` on the list and get responses and on the datasources screen ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). The write touches the three outcome columns only: it does not move `updated_at` and is not a datasource edit.
 
 ### 9.7 Schema introspection
 

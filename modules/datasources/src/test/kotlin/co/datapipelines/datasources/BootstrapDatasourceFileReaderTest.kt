@@ -63,7 +63,7 @@ class BootstrapDatasourceFileReaderTest {
         val entries = reader(mapOf("SAMPLE_PG_PASSWORD" to "s3cr3t")).read(file(twoEntries))
 
         entries shouldHaveSize 2
-        val trips = entries.first()
+        val trips = entries.first().datasource
         trips.name shouldBe "sample-trips"
         trips.displayName shouldBe "NYC Taxi Trips (sample)"
         trips.description shouldBe "Yellow-taxi trips"
@@ -77,11 +77,44 @@ class BootstrapDatasourceFileReaderTest {
         trips.properties.jdbc shouldBe mapOf("ssl" to "true")
         trips.properties.unknownNamespaces shouldBe emptySet()
 
-        val reference = entries[1]
+        val reference = entries[1].datasource
         reference.dialect shouldBe Dialect.SQLITE
         // display_name is optional and defaults to name — the same rule the REST bind uses.
         reference.displayName shouldBe "sample-reference"
         reference.properties.jdbc shouldBe mapOf("open_mode" to "1")
+    }
+
+    /**
+     * 061/T84: the reader keeps the `${'$'}{VAR}` NAME each entry's password referenced, because
+     * resolution destroys it and §8A.3 rule 3's ERROR line has to tell an operator which
+     * variable to change. A literal password — the SQLite sample entry, which authenticates
+     * against nothing — has no env key to name.
+     */
+    @Test
+    fun `each entry keeps the env key its password referenced, positionally, and null for a literal`() {
+        val yaml =
+            """
+            datasources:
+              - name: from-env
+                dialect: H2
+                jdbc_url: jdbc:h2:mem:from_env
+                username: sa
+                password: ${'$'}{SAMPLE_PG_PASSWORD}
+                global: true
+              - name: literal
+                dialect: SQLITE
+                jdbc_url: jdbc:sqlite:/srv/sample/ref.db
+                username: sqlite
+                password: sqlite-file-datasource-has-no-authentication
+                global: true
+            """.trimIndent()
+
+        val entries = reader(mapOf("SAMPLE_PG_PASSWORD" to "s3cr3t")).read(file(yaml))
+
+        entries.map { it.datasource.name to it.passwordEnvKey } shouldBe
+            listOf("from-env" to "SAMPLE_PG_PASSWORD", "literal" to null)
+        // The entity still carries the RESOLVED value — keeping the key changes nothing else.
+        entries.first().datasource.password shouldBe "s3cr3t"
     }
 
     @Test
@@ -109,7 +142,7 @@ class BootstrapDatasourceFileReaderTest {
                     "PG_PASSWORD" to "hunter2",
                     "PG_SSL_PASSPHRASE" to "keypass",
                 ),
-            ).read(file(yaml)).single()
+            ).read(file(yaml)).single().datasource
 
         entry.jdbcUrl shouldBe "jdbc:postgresql://pg.internal:5432/db"
         entry.username shouldBe "app"

@@ -62,6 +62,36 @@ class FlywayMigrationIntegrationTest {
                 "6|version lifecycle|true",
                 "7|hierarchical template names|true",
                 "8|typed templates|true",
+                "9|datasource last test outcome|true",
+            )
+    }
+
+    @Test
+    fun `V9 adds the last-test-outcome columns to datasources`() {
+        // datasources §8.1B (061/T84): three additive, NULLABLE columns with no default —
+        // NULL across all three is "never tested", which is the truthful state of every
+        // pre-V9 row. A default would have to invent an outcome nobody observed.
+        //
+        // They are the ONE documented exception to metadata-db §2's "every UPDATE sets
+        // updated_at": recordTestOutcome writes these three and nothing else, because a test
+        // outcome is an observation ABOUT the datasource, not a change TO it — which is what
+        // keeps §8A.3 rule 1's byte-untouched guarantee mechanically checkable.
+        val columns =
+            query(
+                """
+                SELECT column_name || '|' || data_type || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'datasources'
+                   AND column_name IN ('last_test_at', 'last_test_ok', 'last_test_message')
+                 ORDER BY 1
+                """.trimIndent(),
+            ) { it.getString(1) }
+
+        columns shouldContainExactly
+            listOf(
+                "last_test_at|timestamp with time zone|YES|NONE",
+                "last_test_message|text|YES|NONE",
+                "last_test_ok|boolean|YES|NONE",
             )
     }
 

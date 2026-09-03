@@ -22,7 +22,7 @@ class BootstrapDatasourceRegistrarRaceTest {
         val repository = mockk<DatasourceRepository>()
         val registry = mockk<DatasourceRegistry>()
         val reader = mockk<BootstrapDatasourceFileReader>()
-        every { reader.read(any()) } returns listOf(datasource)
+        every { reader.read(any()) } returns listOf(BootstrapDatasource(datasource, "SAMPLE_PG_PASSWORD"))
         every { repository.existsIncludingDeleted(datasource.name) } returns false
         every { registry.save(datasource, any()) } throws DuplicateKeyException("datasources_pkey")
 

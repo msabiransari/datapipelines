@@ -6,6 +6,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
 import co.datapipelines.datasources.TestResult
@@ -215,18 +216,35 @@ class DatasourcesControllerTest {
     }
 
     @Test
-    fun `delete is 204, in_use is 409 with the referencing pipelines, unknown is 404`() {
+    fun `delete is 204, in_use is 409 with the referencing pipelines and their versions, unknown is 404`() {
         authenticate()
         every { registry.getVisible(any(), workspaceId) } answers
             { datasource().takeIf { firstArg<String>() == "pg-prod" || firstArg<String>() == "busy" } }
         every { registry.delete("pg-prod") } returns DeleteResult(deleted = true, name = "pg-prod")
         controller.delete("pg-prod")
 
+        // 061/T79: two nodes of ONE pipeline, one of them in a HISTORICAL version — the
+        // shape the old current_version-only guard could not see. `referencing_pipelines`
+        // distinct-ifies; `references` carries the versions the operator has to go and edit.
         every { registry.delete("busy") } returns
-            DeleteResult(false, "busy", PipelineErrorCodes.Datasource.IN_USE, listOf("monthly_revenue"))
+            DeleteResult(
+                deleted = false,
+                name = "busy",
+                errorCode = PipelineErrorCodes.Datasource.IN_USE,
+                references =
+                    listOf(
+                        DatasourceReference("monthly_revenue", 1, "RELEASED", "extract"),
+                        DatasourceReference("monthly_revenue", 2, "RELEASED", "load"),
+                    ),
+            )
         val inUse = shouldThrow<ApiException> { controller.delete("busy") }
         inUse.code shouldBe "datasource.in_use"
         inUse.details["referencing_pipelines"] shouldBe listOf("monthly_revenue")
+        inUse.details["references"] shouldBe
+            listOf(
+                mapOf("pipeline" to "monthly_revenue", "node_id" to "extract", "pipeline_version" to 1, "version_status" to "RELEASED"),
+                mapOf("pipeline" to "monthly_revenue", "node_id" to "load", "pipeline_version" to 2, "version_status" to "RELEASED"),
+            )
 
         every { registry.delete("nope") } returns DeleteResult(deleted = false, name = "nope")
         shouldThrow<ApiException> { controller.delete("nope") }.code shouldBe "datasource.not_found"

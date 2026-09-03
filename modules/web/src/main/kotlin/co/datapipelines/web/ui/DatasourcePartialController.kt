@@ -179,10 +179,13 @@ class DatasourcePartialController(
 
     /**
      * The screen's search covers EVERY column the table renders (§4.5): name +
-     * readonly, dialect, workspace, URL, username — plus description, which is
-     * searchable though only the modal shows it. A search that silently ignores a
+     * readonly, dialect, workspace, URL, username, last-test state — plus description,
+     * which is searchable though only the modal shows it. A search that silently ignores a
      * visible column reads as "no results" to the user (029). The workspace column
-     * renders the bound workspace's name or the literal `global`, so both match.
+     * renders the bound workspace's name or the literal `global`, so both match; the
+     * last-test column renders `ok`, `failed` or `never tested`, so all three do — which is
+     * what makes "show me the broken datasources" a search rather than a manual scan
+     * (061/T84).
      */
     private fun filter(
         list: List<Datasource>,
@@ -200,9 +203,18 @@ class DatasourcePartialController(
                 d.username.lowercase().contains(lower) ||
                 (d.workspaceName ?: "global").lowercase().contains(lower) ||
                 (d.isReadonly && "readonly".contains(lower)) ||
+                lastTestLabel(d).contains(lower) ||
                 (d.description?.lowercase()?.contains(lower) == true)
         }
     }
+
+    /** Exactly the words the §8.1B column renders, so the search and the screen agree. */
+    private fun lastTestLabel(datasource: Datasource): String =
+        when (datasource.lastTest?.ok) {
+            null -> "never tested"
+            true -> "ok"
+            false -> "failed"
+        }
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

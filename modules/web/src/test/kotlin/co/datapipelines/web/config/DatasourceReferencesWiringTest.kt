@@ -2,10 +2,14 @@ package co.datapipelines.web.config
 
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceRepository
+import co.datapipelines.datasources.DatasourceReference
+import co.datapipelines.pipeline.DatasourceRef
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.pipelines.PipelineBodies
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -22,6 +26,11 @@ import java.util.UUID
  * optimization whose correctness premise (a bound datasource is referenceable only from its
  * own workspace) is exactly what the re-bind falsifies — pre-re-bind references in other
  * workspaces exist and must still block the delete.
+ *
+ * **061/T79 added the second axis.** The aggregate is across workspaces AND across pipeline
+ * VERSIONS: the bean reads [PipelineBodies.anyVersionReferences], never the working-version
+ * scan the pipelines listing uses. Both axes are the same failure — a scan narrower than the
+ * promise — reached from different directions.
  */
 class DatasourceReferencesWiringTest {
     private val bodies = mockk<PipelineBodies>()
@@ -34,10 +43,10 @@ class DatasourceReferencesWiringTest {
     @Test
     fun `a global datasource counts references across ALL workspaces`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.pipelinesReferencing(wsA.id, "shared") } returns emptyList()
-        every { bodies.pipelinesReferencing(wsB.id, "shared") } returns listOf("globex-report")
+        every { bodies.anyVersionReferences(wsA.id, "shared") } returns emptyList()
+        every { bodies.anyVersionReferences(wsB.id, "shared") } returns listOf(ref("globex-report"))
 
-        references.pipelinesReferencing("shared") shouldBe listOf("globex-report")
+        references.referencesTo("shared").map { it.pipelineName } shouldBe listOf("globex-report")
     }
 
     /**
@@ -47,21 +56,52 @@ class DatasourceReferencesWiringTest {
     @Test
     fun `a bound datasource counts references across ALL workspaces - the re-bind cannot orphan them`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.pipelinesReferencing(wsA.id, "bound") } returns listOf("acme-report")
-        every { bodies.pipelinesReferencing(wsB.id, "bound") } returns listOf("globex-report")
+        every { bodies.anyVersionReferences(wsA.id, "bound") } returns listOf(ref("acme-report"))
+        every { bodies.anyVersionReferences(wsB.id, "bound") } returns listOf(ref("globex-report"))
 
-        val referencing = references.pipelinesReferencing("bound")
+        val referencing = references.referencesTo("bound")
 
-        referencing shouldBe listOf("acme-report", "globex-report")
+        referencing.map { it.pipelineName } shouldBe listOf("acme-report", "globex-report")
+    }
+
+    /**
+     * 061/T79: the whole point of the second scan. A reference living only in a RELEASED v1
+     * that v2 dropped is a real reference — v1 is immutable and still executable by explicit
+     * version — and the projection carries the version so the refusal can name it.
+     */
+    @Test
+    fun `a reference in a HISTORICAL version blocks the delete and its version reaches the refusal`() {
+        every { workspaces.findAll() } returns listOf(wsA)
+        every { bodies.anyVersionReferences(wsA.id, "retired") } returns
+            listOf(DatasourceRef(UUID.randomUUID(), "monthly_revenue", 1, PipelineVersionStatus.RELEASED, "extract"))
+
+        references.referencesTo("retired") shouldBe
+            listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract"))
     }
 
     @Test
     fun `an unknown name scans globally and finds nothing - the registry's not-found path is unaffected`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.pipelinesReferencing(any(), "ghost") } returns emptyList()
+        every { bodies.anyVersionReferences(any(), "ghost") } returns emptyList()
 
-        references.pipelinesReferencing("ghost") shouldBe emptyList()
+        references.referencesTo("ghost") shouldBe emptyList()
     }
+
+    /**
+     * The guard must never fall back to the working-version scan: that join sees
+     * `current_version` only, which is the defect this wiring exists to close.
+     */
+    @Test
+    fun `the guard never reads the working-version listing scan`() {
+        every { workspaces.findAll() } returns listOf(wsA)
+        every { bodies.anyVersionReferences(wsA.id, "any") } returns emptyList()
+
+        references.referencesTo("any")
+
+        verify(exactly = 0) { bodies.scan(any(), any(), any()) }
+    }
+
+    private fun ref(pipeline: String) = DatasourceRef(UUID.randomUUID(), pipeline, 1, PipelineVersionStatus.RELEASED, "n1")
 
     private fun workspace(name: String) =
         Workspace(

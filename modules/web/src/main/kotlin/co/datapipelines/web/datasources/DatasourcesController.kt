@@ -155,7 +155,17 @@ class DatasourcesController(
         return ApiResponse.of(datasources.save(datasource, principal.userId).toResponse())
     }
 
-    /** §9.5 — soft delete, D8-gated like update; `409 datasource.in_use` while any live pipeline references it. */
+    /**
+     * §9.5 — soft delete, D8-gated like update; `409 datasource.in_use` while any live
+     * pipeline references it **in any version it has ever stored** (061/T79).
+     *
+     * `details` carries the referencing pipeline names AND the full reverse-scan rows —
+     * pipeline, node, the carrying pipeline version and that version's status — the way
+     * `template.in_use` does (040 D4). The versions are the load-bearing half: the reference
+     * that used to slip through this guard lived in a released v1 that a later v2 had
+     * dropped, and "pipeline X" alone would send the operator to look at v2, where the
+     * datasource is not mentioned at all.
+     */
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
@@ -177,8 +187,22 @@ class DatasourcesController(
             result.errorCode == PipelineErrorCodes.Datasource.IN_USE -> {
                 throw ApiException(
                     PipelineErrorCodes.Datasource.IN_USE,
-                    "Datasource '$name' is referenced by ${result.referencingPipelines.size} pipeline(s).",
-                    mapOf("datasource_name" to name, "referencing_pipelines" to result.referencingPipelines),
+                    "Datasource '$name' is referenced by ${result.referencingPipelines.size} pipeline(s)" +
+                        " across ${result.references.size} node(s), including historical pipeline versions." +
+                        " Remove or repoint the referencing nodes before deleting it.",
+                    mapOf(
+                        "datasource_name" to name,
+                        "referencing_pipelines" to result.referencingPipelines,
+                        "references" to
+                            result.references.map {
+                                mapOf(
+                                    "pipeline" to it.pipelineName,
+                                    "node_id" to it.nodeId,
+                                    "pipeline_version" to it.pipelineVersion,
+                                    "version_status" to it.versionStatus,
+                                )
+                            },
+                    ),
                 )
             }
 
@@ -192,6 +216,11 @@ class DatasourcesController(
      * §9.6 — live connectivity probe. A connection failure is **data** (`200` with
      * `connected: false`), never an HTTP error; an unknown name is a 404 — and so is a name
      * bound to another workspace (§5.3 visibility).
+     *
+     * The body is the full wire form of `TestResult` datasources §8.1 documents — `tested_at`,
+     * `latency_ms` and `error_class` included; three of the six fields were missing here while
+     * the spec's example carried them. Since 061/T84 the probe also RECORDS its outcome on the
+     * row (§8.1B), which is what puts it on the list screen.
      */
     @PostMapping("/{name}/test")
     @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
@@ -204,8 +233,11 @@ class DatasourcesController(
         return ApiResponse.of(
             mapOf(
                 "connected" to result.connected,
+                "tested_at" to result.testedAt.toString(),
+                "latency_ms" to result.latencyMs,
                 "server_version" to result.serverVersion,
                 "error" to result.error,
+                "error_class" to result.errorClass,
             ),
         )
     }
@@ -339,6 +371,16 @@ class DatasourcesController(
             // and the readonly flag (machine-readable, D6).
             put("workspace", workspaceName)
             put("readonly", isReadonly)
+            // §8.1B (061/T84) — additive: the outcome of the LAST connection test, so a
+            // reader learns a credential has stopped working without running one. NULL (not
+            // absent) when never tested: "we have never checked" is a fact a client acts on
+            // differently from "the field does not exist", and every pre-V9 row is in it.
+            put(
+                "last_test",
+                lastTest?.let {
+                    mapOf("tested_at" to it.testedAt.toString(), "ok" to it.ok, "message" to it.message)
+                },
+            )
         }
 
     private companion object {

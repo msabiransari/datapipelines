@@ -23,7 +23,7 @@ import java.util.UUID
  * pipeline-contract's own KDoc anticipates ("the datasources module — or the wiring in app —
  * supplies an implementation").
  */
-@Suppress("TooManyFunctions") // the registry IS the surface; +2 visibility reads (§5.3), +2 live reads (§5.7)
+@Suppress("TooManyFunctions") // the registry IS the surface; +2 visibility reads (§5.3), +2 live reads (§5.7), +1 bootstrap resync (§8A.3)
 interface DatasourceRegistry {
     /** Every live datasource, optionally narrowed to one [dialect]. Passwords never included. */
     fun list(dialect: Dialect? = null): List<Datasource>
@@ -122,6 +122,48 @@ interface DatasourceRegistry {
     /** Runs the §9 validation (including the test pool build) without persisting. */
     fun validate(datasource: Datasource): ValidationResult
 
+    /**
+     * **Rule 3** of bootstrap registration (datasources.md §8A.3, 061/T84): reconcile an
+     * EXISTING row's stored credential with the one the bootstrap file now carries, without
+     * turning "never update" into "always update".
+     *
+     * Called only when the file's credential differs from the stored one. The decision is
+     * made by CONNECTING, never by preferring one source over the other — which is what keeps
+     * rule 1 (an operator's edit survives every restart) intact while closing the desync that
+     * broke the demo on 2026-09-02:
+     *
+     * - stored credential authenticates → [CredentialResync.STORED_WORKS]; the row is left
+     *   byte-untouched, because the operator's value is the working one.
+     * - stored fails and the FILE credential authenticates →
+     *   [CredentialResync.RESYNCED]; **only `password_encrypted` is written** — not the name,
+     *   the display name, the URL, the properties or the readonly flag — and the pool is
+     *   evicted so the next lease uses it.
+     * - neither authenticates → [CredentialResync.BOTH_FAILED]; the row is left alone. There
+     *   is nothing to resync to, and overwriting a broken credential with another broken one
+     *   would destroy the operator's value for nothing.
+     *
+     * Every branch that probed records the outcome on the row (§8.1B), so the datasources
+     * screen shows what happened without an execution having to fail first.
+     *
+     * The probe is the SAME one [testConnection] runs — this method exists so the comparison
+     * and the credential write happen where the encryptor lives, not so a second probe can be
+     * invented. It never throws for a connection failure (§8.1: failure is data) and never
+     * fails startup: the app must boot so an operator can fix the row.
+     *
+     * **Defaulted, not abstract** — the [evictPool] precedent, not the [getLive] one: a
+     * registry that holds no ciphertext answers [CredentialResync.NOT_APPLICABLE], which
+     * cannot re-open a hole because bootstrap registration runs against the production
+     * registry alone. Read-only test fakes in other modules keep compiling untouched.
+     *
+     * @param name the bootstrap entry's datasource name.
+     * @param fileCredential the plaintext credential the bootstrap file resolved.
+     * @return which branch ran, for the caller's startup log.
+     */
+    fun resyncBootstrapCredential(
+        name: String,
+        fileCredential: String,
+    ): CredentialResync = CredentialResync.NOT_APPLICABLE
+
     /** Soft-deletes [name]; fails with `datasource.in_use` when pipelines reference it (§6.2). */
     fun delete(name: String): DeleteResult
 
@@ -169,16 +211,51 @@ interface DatasourceRegistry {
 }
 
 /**
- * Supplies the pipelines that reference a datasource, for the §6.2 in-use delete guard.
+ * One pipeline node's reference to a datasource — the delete guard's evidence (061/T79,
+ * the datasource twin of `pipeline-contract`'s `TemplatePin`).
+ *
+ * Enough to act on, not just to count: which pipeline, which node inside it, and **which
+ * pipeline version's body carries the reference**. That last field is the whole point — the
+ * defect this type exists to close was a delete guard that saw only each pipeline's
+ * `current_version` and therefore could not see a reference living in a released v1 that a
+ * later v2 dropped.
+ *
+ * [versionStatus] is the pipeline version's lifecycle status as its wire string (`DRAFT` /
+ * `RELEASED` / `DISCARDED`); it is a String rather than the `pipeline-contract` enum because
+ * `datasources` may depend on `typesystem` alone (module-structure §5.4) — the same layering
+ * that makes [DatasourceReferences] an inverted port in the first place.
+ */
+data class DatasourceReference(
+    val pipelineName: String,
+    val pipelineVersion: Int,
+    val versionStatus: String,
+    val nodeId: String,
+)
+
+/**
+ * Supplies the pipeline references that block a datasource delete, for the §6.2 in-use guard.
  *
  * The reference lives in `pipeline-contract`'s domain, which `datasources` cannot depend on, so
  * the check is inverted: `app` wires a real implementation backed by the pipeline repository;
  * the default [NONE] treats every datasource as unreferenced (safe for tests and for a
  * deployment with no pipelines yet).
+ *
+ * **The scan behind this port is the ANY-VERSION one** (061/T79, mirroring 040's two-scan
+ * split for templates): every version ever stored of every live pipeline, DRAFT, RELEASED and
+ * DISCARDED alike. Pipeline versions are immutable and executable by explicit version, so a
+ * reference from a historical version is a live reference — deleting the datasource out from
+ * under it fails that version's next execution at connect. The working-version scan
+ * (`PipelineRepository.findAllByDatasource`) stays where it belongs: filtering the pipelines
+ * LISTING, which answers "what am I looking at now", a different question with a different
+ * right answer.
  */
 fun interface DatasourceReferences {
-    /** The ids/names of non-deleted pipelines referencing [datasourceName]; empty when none. */
-    fun pipelinesReferencing(datasourceName: String): List<String>
+    /**
+     * Every node of every stored version of every non-deleted pipeline that references
+     * [datasourceName]; empty when none. One entry per referencing node, not per pipeline —
+     * [DeleteResult.referencingPipelines] distinct-ifies for the message.
+     */
+    fun referencesTo(datasourceName: String): List<DatasourceReference>
 
     companion object {
         val NONE = DatasourceReferences { emptyList() }

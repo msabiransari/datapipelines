@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.crypto.CredentialDecryptionException
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
@@ -48,6 +49,8 @@ class DefaultDatasourceRegistry(
     private val cache: DatasourceMetadataCache = DatasourceMetadataCache(),
     private val invalidation: PoolInvalidationPublisher = PoolInvalidationPublisher.NONE,
 ) : DatasourceRegistry {
+    private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
+
     /**
      * Decrypts inside the pool-build factory only (§7.4). `computeIfAbsent` runs this at most
      * once per datasource, so the credential is decrypted once per pool build, not per lease —
@@ -167,14 +170,21 @@ class DefaultDatasourceRegistry(
         }
     }
 
+    /**
+     * §6.2's in-use guard, over the ANY-VERSION scan (061/T79). The refusal carries one entry
+     * per referencing NODE — with the pipeline VERSION whose body holds it — because a
+     * reference that lives only in a released v1 is exactly the one the old
+     * `current_version`-only join could not see, and the operator's next move is to go and
+     * change that node in that version.
+     */
     override fun delete(name: String): DeleteResult {
-        val referencing = references.pipelinesReferencing(name)
+        val referencing = references.referencesTo(name)
         if (referencing.isNotEmpty()) {
             return DeleteResult(
                 deleted = false,
                 name = name,
                 errorCode = DatasourceErrorCodes.IN_USE,
-                referencingPipelines = referencing,
+                references = referencing,
             )
         }
         val deleted = repository.softDelete(name)
@@ -194,11 +204,119 @@ class DefaultDatasourceRegistry(
 
     override fun poolFor(datasource: Datasource): ConnectionPool = poolManager.poolFor(datasource)
 
+    /**
+     * The §8.1 probe — and, since 061/T84, the write that makes its outcome VISIBLE without
+     * an execution (§8.1B): the result is recorded on the row before it is returned, so the
+     * datasources list can say "auth failed since 2026-08-30" instead of nothing at all. The
+     * write touches the three `last_test_*` columns only and leaves `updated_at` alone
+     * ([DatasourceRepository.recordTestOutcome]); the §6.3 cache is invalidated so the next
+     * read serves the fresh badge rather than a minute-old one.
+     */
     override fun testConnection(name: String): TestResult? {
         val row = repository.findByName(name) ?: return null
         val datasource = row.toDatasource(encryptor.decrypt(row.passwordEncrypted, row.name))
         audit(DatasourceAuditEvents.CONNECTION_TEST, name, DatasourceAuditEvent.SYSTEM_ACTOR)
-        return probe(datasource)
+        return probe(datasource).also { record(name, it) }
+    }
+
+    /**
+     * §8A.3 rule 3 (061/T84) — the bootstrap credential reconcile, decided by CONNECTING.
+     *
+     * Lives here because this is where the encryptor is: comparing the file's credential with
+     * the stored one needs the decrypt, and writing the resynced one needs the encrypt. The
+     * probe is [probe] — the SAME one [testConnection] runs, not a second one — and every
+     * branch that probes records its outcome, so the screen tells the truth afterwards either
+     * way.
+     *
+     * A soft-deleted row answers [CredentialResync.NO_LIVE_ROW] and is not touched: rule 1
+     * says a deleted datasource never resurrects, and `findByName` filters `is_deleted` for
+     * exactly that reason.
+     */
+    override fun resyncBootstrapCredential(
+        name: String,
+        fileCredential: String,
+    ): CredentialResync {
+        // Three guards, then the decision. The guards are the cases where NOTHING is probed —
+        // no live row, an unreadable ciphertext, or credentials that already agree — and
+        // separating them from [decideByProbing] is what keeps "rule 3 fires only on a
+        // difference" readable as one line rather than inferred from control flow.
+        val row = repository.findByName(name) ?: return CredentialResync.NO_LIVE_ROW
+        val stored = decryptStored(row) ?: return CredentialResync.STORED_UNREADABLE
+        // The gate that keeps rule 3 free on a healthy boot: equal credentials mean there is
+        // no desync to diagnose, and probing every bootstrap datasource on every restart to
+        // rediscover that would be a cost with no question behind it.
+        if (stored == fileCredential) return CredentialResync.CREDENTIAL_MATCHES
+        return decideByProbing(row, stored, fileCredential)
+    }
+
+    /**
+     * The stored plaintext, or **null when the ciphertext cannot be read at all** — a wrong
+     * master key, a row restored from another deployment, corruption.
+     *
+     * Null is not a login failure and must never be treated as one: the remedies differ (fix
+     * `datapipelines.db.encryption-key`, not the database role's password), and overwriting an
+     * unreadable credential would paper over a key problem every other datasource shares.
+     * Startup must not die on it either — the app has to boot for the key to be fixable.
+     */
+    private fun decryptStored(row: DatasourceRow): String? =
+        try {
+            encryptor.decrypt(row.passwordEncrypted, row.name)
+        } catch (e: CredentialDecryptionException) {
+            log.debug("bootstrap credential for {} could not be decrypted", row.name, e)
+            null
+        }
+
+    /**
+     * Rule 3's actual decision, once the two credentials are known to differ: probe the STORED
+     * one, and only if it fails probe the FILE's. Every branch records its outcome (§8.1B), so
+     * the screen tells the truth whichever way this goes.
+     */
+    private fun decideByProbing(
+        row: DatasourceRow,
+        stored: String,
+        fileCredential: String,
+    ): CredentialResync {
+        val name = row.name
+        audit(DatasourceAuditEvents.CONNECTION_TEST, name, DatasourceAuditEvent.SYSTEM_ACTOR)
+        val storedProbe = probe(row.toDatasource(stored))
+        if (storedProbe.connected) {
+            // Rule 1 wins: the operator's value works, so the row keeps it and only the
+            // observation is written.
+            record(name, storedProbe)
+            return CredentialResync.STORED_WORKS
+        }
+        val fileProbe = probe(row.toDatasource(fileCredential))
+        if (!fileProbe.connected) {
+            // Nothing to resync TO. The stored probe's failure is what the row's credential
+            // actually does, so that is the outcome the screen should show.
+            record(name, storedProbe)
+            return CredentialResync.BOTH_FAILED
+        }
+        repository.updateCredential(name, encryptor.encrypt(fileCredential, name))
+        record(name, fileProbe)
+        // The credential changed: the same three-step every save does (§5.2/§5.7) — drain the
+        // local pool, drop the cached row, tell the peers. A pool built during startup from
+        // the OLD ciphertext would otherwise outlive the fix.
+        if (poolManager.evict(name)) {
+            audit(DatasourceAuditEvents.POOL_REBUILD, name, DatasourceAuditEvent.SYSTEM_ACTOR)
+        }
+        cache.invalidate(name)
+        invalidation.publish(name)
+        return CredentialResync.RESYNCED
+    }
+
+    /**
+     * Persists a probe's outcome (§8.1B) and drops the cached row so the next read sees it.
+     * Silent when the row vanished between probe and write — a datasource deleted mid-probe
+     * has no outcome to carry, and a test must not resurrect a deleted row's columns.
+     */
+    private fun record(
+        name: String,
+        result: TestResult,
+    ) {
+        if (repository.recordTestOutcome(name, DatasourceTestOutcome.of(result))) {
+            cache.invalidate(name)
+        }
     }
 
     /** Closes every pool (application shutdown). */
@@ -266,9 +384,25 @@ class DefaultDatasourceRegistry(
     ) = TestResult(
         connected = false,
         testedAt = Instant.now(),
-        error = e.message?.scrubbedForError(datasource.password),
+        error = rootMessage(e)?.scrubbedForError(datasource.password),
         errorClass = e.javaClass.name,
     )
+
+    /**
+     * The DEEPEST message in the cause chain, not the outermost one.
+     *
+     * HikariCP wraps a rejected login in its own "Connection is not available, request timed
+     * out after 10007ms" — which is what the operator's screen showed, and which says nothing
+     * about the actual problem. The driver's `FATAL: password authentication failed for user
+     * "dp_demo_ro"` is two causes down, and it is the sentence that ends the investigation
+     * (061/T84 — the incident's message is the incident's diagnosis). Scrubbing runs on the
+     * result either way, so a deeper message is no more of a leak surface than a shallower one.
+     */
+    private fun rootMessage(e: Throwable): String? =
+        generateSequence(e) { it.cause }
+            .toList()
+            .lastOrNull { !it.message.isNullOrBlank() }
+            ?.message
 
     private companion object {
         const val PROBE_CONNECTION_TIMEOUT_MS = 10_000L

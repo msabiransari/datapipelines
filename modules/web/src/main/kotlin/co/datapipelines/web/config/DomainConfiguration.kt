@@ -6,6 +6,7 @@ import co.datapipelines.auth.WorkspaceContentCheck
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
+import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
@@ -128,7 +129,13 @@ class DomainConfiguration {
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
      * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
-     * datasource filter to SQL via [PipelineRepository.findAllByDatasource].
+     * datasource filter to SQL via [PipelineRepository.findAnyVersionDatasourceRefs] — the
+     * ANY-VERSION scan (061/T79). The working-version scan it replaced here joined
+     * `current_version` only, so a released pipeline whose OLDER version pinned the datasource
+     * was invisible: the delete succeeded and that version's next execution failed at connect.
+     * A delete guard reads every version ever stored; the pipelines LISTING keeps the
+     * working-version scan, because "what am I looking at" and "what would I break" are
+     * different questions (040's split, applied to datasources).
      *
      * The count ALWAYS aggregates across every workspace (023 verified, 025 A4): §6.2's
      * "any non-deleted pipeline" is unconditional, and a binding-scoped branch — however
@@ -146,7 +153,16 @@ class DomainConfiguration {
         workspaces: WorkspaceRepository,
     ): DatasourceReferences =
         DatasourceReferences { name ->
-            workspaces.findAll().flatMap { bodies.pipelinesReferencing(it.id, name) }
+            workspaces.findAll().flatMap { workspace ->
+                bodies.anyVersionReferences(workspace.id, name).map { ref ->
+                    DatasourceReference(
+                        pipelineName = ref.pipelineName,
+                        pipelineVersion = ref.pipelineVersion,
+                        versionStatus = ref.versionStatus.name,
+                        nodeId = ref.nodeId,
+                    )
+                }
+            }
         }
 
     @Bean

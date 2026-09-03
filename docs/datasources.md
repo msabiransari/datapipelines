@@ -84,6 +84,10 @@ Identical to request, except:
 - `jdbc_url` is included (operators need it for debugging).
 - `workspace` (string, additive — workspaces design §9): the bound workspace's NAME, `null` = global.
 - `readonly` (boolean, additive): the §5.7 flag, machine-readable.
+- `last_test` (object or `null`, additive — §8.1B): the outcome of the LAST connection test —
+  `{"tested_at": "2026-08-30T09:15:00Z", "ok": false, "message": "FATAL: password authentication failed …"}`.
+  `null` means never tested, which is what every datasource registered before this field existed
+  is. Never supplied on write: it is an observation, recorded by the probe.
 
 ### 3.3 Field reference
 
@@ -327,8 +331,9 @@ interface DatasourceRegistry {
     fun save(datasource: Datasource, actor: UUID): Datasource   // create or update; validates first (§5.4, §9). actor: created_by (Metadata DB §4.10) + the §7.4 audit actor
     fun delete(name: String): DeleteResult         // soft delete; fails if in use
     fun poolFor(datasource: Datasource): ConnectionPool   // lazy, thread-safe (§5.2)
-    fun testConnection(name: String): TestResult?  // null = no such datasource (caller maps to 404); §8.1's "HTTP 200 always" applies only when it exists
+    fun testConnection(name: String): TestResult?  // null = no such datasource (caller maps to 404); §8.1's "HTTP 200 always" applies only when it exists — records the outcome on the row (§8.1B)
     fun validate(datasource: Datasource): ValidationResult
+    fun resyncBootstrapCredential(name: String, fileCredential: String): CredentialResync  // §8A.3 rule 3; defaults to NOT_APPLICABLE
 }
 ```
 
@@ -342,7 +347,29 @@ data class DeleteResult(
     val deleted: Boolean,
     val name: String,
     val errorCode: String? = null,          // 'datasource.in_use' when deleted = false
-    val referencingPipelines: List<String> = emptyList()   // pipeline ids blocking the delete
+    val references: List<DatasourceReference> = emptyList()  // the ANY-VERSION scan (§6.2): one entry per referencing NODE
+) {
+    val referencingPipelines: List<String> get() = references.map { it.pipelineName }.distinct()
+}
+
+/** One node of one stored pipeline version referencing a datasource — the delete guard's evidence (§6.2). */
+data class DatasourceReference(
+    val pipelineName: String,
+    val pipelineVersion: Int,               // WHICH stored version carries it — the field the old guard did not have
+    val versionStatus: String,              // DRAFT | RELEASED | DISCARDED
+    val nodeId: String
+)
+
+/** Which branch of §8A.3 rule 3 ran for one bootstrap entry. */
+enum class CredentialResync {
+    NO_LIVE_ROW, CREDENTIAL_MATCHES, STORED_WORKS, RESYNCED, BOTH_FAILED, STORED_UNREADABLE, NOT_APPLICABLE
+}
+
+/** The stored outcome of the last connection test (§8.1B) — the persisted twin of TestResult. */
+data class DatasourceTestOutcome(
+    val testedAt: Instant,
+    val ok: Boolean,
+    val message: String? = null             // driver message on failure, server version on success; scrubbed at the probe
 )
 
 /** Outcome of a live connectivity probe (§8.1). Failure is data, not an exception. */
@@ -373,7 +400,28 @@ data class ValidationResult(
 
 ### 6.2 In-use check on delete
 
-`DELETE /api/v1/datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline references this name. The error response includes the list of pipelines using it (`DeleteResult.referencingPipelines`), so the operator can clean up.
+`DELETE /api/v1/datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline
+references this name **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED
+alike. Pipeline versions are immutable and executable by explicit version
+([Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)), so a reference living only in a released
+v1 that a later v2 dropped is a live reference: deleting the datasource out from under it fails
+that version's next execution at connect.
+
+This is the **any-version** scan, and it is deliberately not the one the pipelines listing uses.
+The two questions are different and 040 already split them for templates:
+
+| Question | Scan | Reads |
+|---|---|---|
+| "Which pipelines am I looking at?" (the listing's datasource filter) | working version | each pipeline's current version |
+| "Would deleting this break anything?" (this guard) | **any version ever** | every stored version of every live pipeline |
+
+Conflating them is how the guard under-reports. It did: the delete guard read `current_version`
+only until 2026-09-03, so a released pipeline whose older version pinned the datasource was
+invisible and the delete succeeded.
+
+The error response carries the distinct pipeline names AND one entry per referencing node with
+the pipeline version and that version's status — the shape `template.in_use` uses — because the
+version is what tells the operator which body to go and change.
 
 ### 6.3 Cache
 
@@ -511,6 +559,34 @@ Or on failure:
 
 Note: connection test failure is **not** an HTTP error. The caller asked "can I connect?" and got an honest answer. HTTP 200 always (provided the datasource exists). The `data` object is the wire form of `TestResult` (§6.1).
 
+### 8.1B The last test's outcome is stored, and listed
+
+A connection test writes its outcome to the datasource row: `last_test_at`, `last_test_ok` and
+`last_test_message` (metadata-db §4.10, migration V9). Every read path projects them as the
+additive `last_test` object (§3.2), and the datasources screen renders them as a column — an
+`ok` / `failed` badge, the timestamp, and the driver's message.
+
+**Why this exists.** Listing a datasource does not connect to it. On 2026-09-02 every
+multi-node demo pipeline failed at CONNECT with `password authentication failed for user
+"dp_demo_ro"` while the datasources screen showed `sample-trips` as fine — there was no surface
+on which a datasource could be *wrong*, only surfaces on which it could be *silent*. This is the
+column that would have said "auth failed since 2026-08-30".
+
+Three paths write it, all through the same probe (§8.1): `POST /datasources/{name}/test`, the
+UI's Test button, and the §8A.3 rule-3 bootstrap credential check. `last_test_message` carries
+the driver's own sentence on failure (the DEEPEST cause with text — HikariCP's "Connection is
+not available, request timed out" names no database and diagnoses nothing) and the server
+version on success. It is redaction-scrubbed at the probe like every other `TestResult` message,
+so it is safe on the wire and on the screen.
+
+**The write is an observation, not an edit.** It touches those three columns and nothing else —
+in particular it does **not** move `updated_at`. That is the single documented exception to
+metadata-db §2's "every UPDATE sets `updated_at`", and it exists so §8A.3 rule 1's promise (an
+operator's row survives a boot byte-untouched) stays a mechanical check rather than a claim.
+
+This is **not** a health poller. It records the outcome of tests that already happen; the
+scheduled polling of §8.3 remains v1.1+.
+
 ### 8.2 Pre-execution check
 
 Before pipeline execution begins, the executor pre-checks that every datasource referenced by the pipeline's nodes is configured and reachable. Failures here abort before any node runs, with error code `pipeline.execution.datasource_unreachable` (registered in the central catalog, [Pipeline Contract §13.8](pipeline-contract.md#138-datasource) — HTTP 502).
@@ -605,6 +681,33 @@ actor is resolved, before the server accepts traffic. `created_by` is that actor
 - **One entry at a time, fail-fast.** Entries are applied in file order, each fully validated and
   written before the next is attempted. The first failure refuses startup: a half-registered demo
   is worse than a loud one, and create-if-absent makes the operator's retry idempotent.
+- **Rule 3 — a credential desync is reconciled by CONNECTING, never by preferring a source**
+  (added 2026-09-03). For an entry whose row already exists AND whose file credential **differs**
+  from the stored one — equal credentials are the ordinary boot and nothing is probed:
+
+  | Probe result | What happens |
+  |---|---|
+  | the STORED credential authenticates | the row is left **byte-untouched**. Rule 1 stands: the operator's edit works, so it is kept |
+  | stored fails, the FILE's authenticates | **the credential alone is updated** — not the name, the display name, the URL, the properties, the readonly flag or the binding — the pool is evicted, and a WARN names the datasource |
+  | neither authenticates | the row is left alone and an ERROR names the datasource and the environment variable an operator would change |
+  | the stored ciphertext cannot be DECRYPTED | the row is left alone and an ERROR names the encryption key. A credential that could not be READ is not one that failed a LOGIN, and overwriting it would paper over a key problem every other datasource shares |
+
+  A **soft-deleted** row is never reconciled: rule 1 promises a deleted datasource never
+  resurrects, and writing its credential back would be a resurrection in all but the flag.
+
+  Startup does **not** fail on a broken credential — the app has to boot for an operator to be
+  able to fix the row — so the ERROR line is the loud part. Every branch that probed records its
+  outcome on the row (§8.1B), which is what puts the answer on the screen.
+
+  **Why this is not "always update".** Always-update would revert an operator's edit on every
+  boot, which is exactly what rule 1 exists to prevent. Rule 3's narrowness is entirely in the
+  fact that a *probe*, not a *preference*, decides: it fires only on a difference, writes only on
+  a proven failure paired with a proven success, and writes only one column.
+
+  **The incident it closes.** `sample-trips` was registered on 2026-08-30.
+  `SAMPLE_PG_PASSWORD` later changed; the sample database's role got the new password at the next
+  load, the stored row kept the old one, and nothing compared them. A clean-machine rehearsal
+  cannot see this class of defect at all — it exists only on the upgrade path.
 
 Failures here are startup refusals, not API errors — nobody submitted a request — so they carry no
 `datasource.validation.*` response code of their own. An entry that fails §9 raises that rule's
@@ -815,3 +918,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-27 | v2.14 | workspaces readonly slice | New **§5.7 Readonly datasources** (workspaces design 2026-08-16 §6, D6/D10): the `is_readonly` V4 column's semantics — the three forbidden write shapes, the save-time code (`pipeline.validation.datasource_readonly`, contract §12.5), the live-registry executor backstop (`pipeline.node.datasource_readonly`, contract §13.4, past the §6.3 cache), the Hikari `readOnly` pool flag as defense in depth, and the normative SELECT-only-user deployment guidance. §5.6: `readOnly` joins the server-managed refusal set — refused in BOTH directions and both carriers. Flag writes/payload fields explicitly deferred to the surfaces slice. |
 | 2026-08-28 | v2.15 | sample data, slice A | **§8A new:** bootstrap registration — the `datapipelines.bootstrap.datasources-file` mechanism (§8A.1 file shape incl. the required-and-true `global` flag and `readonly`, §8A.2 `${ENV_VAR}` resolution against the process environment, §8A.3 create-if-absent / never-update / full-§9-validation-per-entry / fail-fast, §8A.4 the xerial `open_mode: "1"` read-only key verified against pinned 3.49.1.0). `is_readonly` is now written on INSERT (from the entity, which the REST bind still never sets — flag writes over the API remain deferred to the surfaces slice); UPDATE still never touches it |
 | 2026-09-02 | v2.16 | 020 fix-cycle (044) — the backstop goes fail-closed | §5.7: the executor backstop's **null semantics made normative** — no live row refuses as `pipeline.node.datasource_not_found` (the D10 soft-delete channel), a metadata-DB failure during the live read refuses as `pipeline.execution.aborted` naming the METADATA database (never the healthy target), both replacing 020's "null = no signal" fail-open. **Layer 1 reads live** (`getVisibleLive`/`getLive`, past the §6.3 cache — 020 F4's both-directions stale-save window closed); **layer 2's read is flag-only** (`isReadonlyLive`, one indexed `SELECT is_readonly` — no ciphertext, no properties parse; 020 F7) and a readonly write-back target is refused at CONNECT, before the source query (020 F9); **layer 3's pool-staleness window documented** (no TTL; row-level flips leave the pre-flip pool — M3's within-one-JVM twin, fix deferred to M3's owner decision; 020 F5). §6.1: the interface sketch gains the three live reads; `getLive`/`isReadonlyLive` are abstract (020 F6 — a cached default was the hole). §6.1's registry KDoc wiring example corrected to the `describe`/`DatasourceFacts` SAM (020 F10 — the old `dialectOf` example no longer compiled, verified). |
+| 2026-09-03 | v2.17 | 061 — datasource credentials and references | **§8A.3 gains rule 3** (T84): a bootstrap entry whose FILE credential differs from the STORED one is reconciled by connection-testing both — stored-works keeps the row byte-untouched (rule 1 intact), stored-fails-and-file-works replaces the credential ALONE with a WARN, neither-works and undecryptable both leave the row and log ERROR naming the env key / the encryption key, and a soft-deleted row is never touched. Startup never fails on it. **New §8.1B** (T84): the last connection test's outcome is stored (`last_test_at`/`last_test_ok`/`last_test_message`, V9) and surfaced as the additive `last_test` field (§3.2) and a datasources-screen column — because listing never connects, and on 2026-09-02 the screen said "fine" while every execution failed at CONNECT. That write touches the three columns only and does NOT move `updated_at` (the one documented exception to metadata-db §2), which is what keeps rule 1's byte-untouched guarantee checkable. **§6.2 rewritten** (T79): the delete guard reads the ANY-VERSION reference scan, not the current-version one — a released v1 pinning a datasource that v2 dropped is a live reference (immutable, executable by explicit version) and used to be invisible, so the delete succeeded and v1's next execution failed at connect; the 409 now carries the referencing nodes with their pipeline versions, the way `template.in_use` does. |

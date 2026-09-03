@@ -235,6 +235,73 @@ class PipelineRepositoryIntegrationTest {
         repository.findAllByDatasource(WORKSPACE_ID, "nonexistent") shouldContainExactly emptyList()
     }
 
+    /**
+     * 061/T79 — the delete-guard miss, reproduced mechanically then closed.
+     *
+     * A pipeline released at v1 against `pg-retired`, then released at v2 without it. v1 is
+     * immutable and still executable by explicit version, so its reference is live — but the
+     * listing scan joins `current_version` only and reports NOTHING, which is what let a
+     * delete succeed and that version's next execution fail at connect.
+     *
+     * The two assertions are the whole finding: the same fixture, the old scan blind and the
+     * new one seeing it, with the version the operator has to go and edit.
+     */
+    @Test
+    fun `a datasource referenced ONLY by a historical version is invisible to the listing scan and visible to the any-version scan`() {
+        val v1 = Fixtures.pipeline(name = "retiring", nodes = listOf(Fixtures.node(id = "extract", source = "pg-retired")))
+        val record = repository.create(WORKSPACE_ID, NewPipeline.from(v1, owner), serializer.write(v1), owner)
+        val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id)).bodyHash
+        val v2 = v1.copy(nodes = listOf(Fixtures.node(id = "extract", source = "pg-current")))
+        val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), releasedHash, owner))
+        checkNotNull(
+            repository.releaseDraft(WORKSPACE_ID, record.id, v2.name, v2.displayName, v2.description, draft.bodyHash, owner),
+        )
+
+        // RED on the current join: the guard that shipped saw nothing here and allowed the delete.
+        repository.findAllByDatasource(WORKSPACE_ID, "pg-retired") shouldContainExactly emptyList()
+
+        // GREEN on the any-version scan: the reference, the node, and the version carrying it.
+        val refs = repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-retired")
+        refs.map { it.pipelineName to it.pipelineVersion to it.nodeId } shouldContainExactly
+            listOf("retiring" to 1 to "extract")
+        refs.single().versionStatus shouldBe PipelineVersionStatus.RELEASED
+    }
+
+    /**
+     * The any-version scan sees the two node shapes the listing scan knows — a node's `source`
+     * and a node's `output.datasource` — across every stored version, and excludes soft-deleted
+     * pipelines for the same reason the template scan does: they can no longer execute, so
+     * their references are inert.
+     */
+    @Test
+    fun `the any-version datasource scan covers source and output, every version, live pipelines only`() {
+        val reader = Fixtures.pipeline(name = "reader", nodes = listOf(Fixtures.node(id = "n1", source = "pg-prod")))
+        val writer =
+            Fixtures.pipeline(
+                name = "writer",
+                nodes =
+                    listOf(
+                        Fixtures.node(
+                            id = "n1",
+                            source = "tempdb",
+                            output = NodeOutput.Datasource("pg-prod", "cache", WriteMode.REPLACE),
+                        ),
+                    ),
+            )
+        val gone = Fixtures.pipeline(name = "gone", nodes = listOf(Fixtures.node(id = "n1", source = "pg-prod")))
+        repository.create(WORKSPACE_ID, NewPipeline.from(reader, owner), serializer.write(reader), owner)
+        repository.create(WORKSPACE_ID, NewPipeline.from(writer, owner), serializer.write(writer), owner)
+        val goneRecord = repository.create(WORKSPACE_ID, NewPipeline.from(gone, owner), serializer.write(gone), owner)
+        repository.softDelete(WORKSPACE_ID, goneRecord.id)
+
+        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-prod").map { it.pipelineName } shouldContainExactly
+            listOf("reader", "writer")
+        // `tempdb` is the reserved literal, not a datasource — it can never match one by name.
+        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "tempdb").map { it.pipelineName } shouldContainExactly
+            listOf("writer")
+        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "never-used") shouldContainExactly emptyList()
+    }
+
     @Test
     fun `findAllByDatasource respects limit and offset`() {
         val a = Fixtures.pipeline(name = "a", nodes = listOf(Fixtures.node(source = "pg-prod")))
