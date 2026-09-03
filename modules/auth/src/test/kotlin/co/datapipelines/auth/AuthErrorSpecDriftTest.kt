@@ -50,6 +50,7 @@ class AuthErrorSpecDriftTest {
                 AuthErrorCodes.LOGIN_LOCKED to 403,
                 AuthErrorCodes.PASSWORD_CHANGE_REQUIRED to PasswordChangeRequiredException().status,
                 AuthErrorCodes.SESSION_REQUIRED to SessionRequiredException("create-local-user").status,
+                AuthErrorCodes.PROMOTION_KEY_INVALID to PromotionKeyInvalidException().status,
             )
         exceptionStatus.forEach { (code, status) ->
             (code to status) shouldBe (code to docStatus.getValue(code))

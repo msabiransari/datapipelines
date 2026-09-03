@@ -18,12 +18,15 @@ import org.junit.jupiter.api.assertAll
  */
 class ApiErrorCatalogGatewayCodesTest {
     @Test
-    fun `gateway codes are exactly the deliberate three`() {
+    fun `gateway codes are exactly the deliberate four`() {
         ApiErrorCatalog.GATEWAY_CODES shouldContainExactly
             setOf(
                 PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                 PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
                 PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                // 055: the promotion target did not answer. WARN without a stack — the
+                // operator's own peer deployment being down is not a defect in this one.
+                PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
             )
     }
 
@@ -35,6 +38,7 @@ class ApiErrorCatalogGatewayCodesTest {
                     setOf(
                         PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                         PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
+                        PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
                     )
             },
             { ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN.all { it in ApiErrorCatalog.GATEWAY_CODES } shouldBe true },

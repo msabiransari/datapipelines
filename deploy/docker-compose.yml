@@ -27,7 +27,12 @@ services:
   datapipelines:
     image: ghcr.io/datapipelines/datapipelines:1.0.0
     ports:
-      - "8080:8080"
+      # APP_HOST_PORT is the LANE knob, not app config (hence no DATAPIPELINES_
+      # prefix — compose-env-audit.sh scopes that namespace to keys the app binds).
+      # A second isolated project (APP_COMPOSE_PROJECT) needs its own host port or
+      # it collides with the first on 8080; deployment.md §6.3A promotion rehearsal
+      # is the case that needs it. The container port never moves.
+      - "${APP_HOST_PORT:-8080}:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
       SPRING_DATASOURCE_USERNAME: datapipelines
@@ -146,6 +151,12 @@ services:
       DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}
       DATAPIPELINES_DEPLOYMENT_NAME: ${DATAPIPELINES_DEPLOYMENT_NAME:-}
       DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:-true}
+      # versioning §10.6 — the promotion peer credential. Both are BEARER SECRETS: keep
+      # them in deploy/.env like every other secret, never inline here. Empty server-key
+      # means this deployment refuses promotion (fail closed).
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:-}
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:-}
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:-}
 
       # The credentials the bootstrap datasources file names as ${...} placeholders.
       # They belong HERE, on the app, not only on the loader: that file is runtime

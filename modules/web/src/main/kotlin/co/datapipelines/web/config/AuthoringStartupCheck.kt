@@ -16,13 +16,12 @@ import org.springframework.core.env.Environment
  *   [DeploymentNameBranchingGuardTest]) is logged once beside the authoring state, so a
  *   deployment's posture is visible in its own logs. That is the name's ONLY consumer this
  *   round; it is deliberately not on `/info`, which is permitAll.
- * - **WARN — the receiver that also authors** (C5, currently ONE-SIDED): a deployment with
+ * - **WARN — the receiver that also authors** (C5, BOTH-SIDED since 055): a deployment with
  *   a promotion `server-key` configured — meaning it RECEIVES — AND authoring enabled is
- *   D7's violation stated in config. Only the authoring half of the combination is this
- *   round's to implement (the promotion block is reserved, versioning §10.6's fenced
- *   sample); [promotionServerKeyPresent] is the seam the promotion round wires, unchanged,
- *   and until then it answers "no key" and the WARN cannot fire. It does not fail startup —
- *   a one-box deployment may legitimately be both.
+ *   D7's violation stated in config. [promotionServerKeyPresent] is the seam; `DomainConfiguration`
+ *   wires it to `PromotionProperties.receives`, and the default `{ false }` survives only for
+ *   the unit tests that drive the check directly. It does not fail startup — a one-box
+ *   deployment may legitimately be both.
  * - **Refusal — drafts on an authoring-disabled deployment** (C8): a receiver holding
  *   drafts means someone authored there, and version alignment may already be broken
  *   (§9.3: local numbers collide with future dev releases). Better found at boot, naming

@@ -2,8 +2,16 @@ package co.datapipelines.auth
 
 import java.util.UUID
 
-/** How a principal proved its identity (auth.md §3). */
-enum class AuthMethod { OIDC, API_KEY }
+/**
+ * How a principal proved its identity (auth.md §3).
+ *
+ * [PROMOTION] is not a human and not a key a human issued: it is the pre-shared server key of
+ * a peer DEPLOYMENT (versioning §10.6), resolved onto R7's system service account. It is
+ * carried here rather than folded into [API_KEY] so that every `authMethod` check in the
+ * system states its intent explicitly — a promotion peer must not be mistaken for an agent's
+ * key at a rule written for one of them.
+ */
+enum class AuthMethod { OIDC, API_KEY, PROMOTION }
 
 /**
  * The internal principal both auth paths resolve to (auth.md §3).

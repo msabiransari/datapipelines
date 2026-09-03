@@ -24,7 +24,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * scope matrix through [ScopeInterceptor].
  *
  * Filter order, as actually assembled: Spring's `CsrfFilter` (registered at its own
- * position in the chain, ahead of everything added below) → [LoginRateLimitFilter] →
+ * position in the chain, ahead of everything added below) → [PromotionServerKeyFilter] →
+ * [LoginRateLimitFilter] →
  * [ApiKeyFilter] → [JwtAuthenticationFilter] → [WorkspaceResolutionFilter] → OAuth2
  * login → authorization, and then
  * [ScopeInterceptor] on the MVC pipeline once a handler has been resolved. The three
@@ -72,7 +73,11 @@ class SecurityConfig(
                 // SPA sends back.
                 csrf.csrfTokenRepository(csrfTokenRepository())
                 csrf.csrfTokenRequestHandler(CsrfTokenRequestAttributeHandler())
-                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher())
+                // The promotion route joins the exemption on the SAME grounds (§10.6): its
+                // credential is a request header a hostile browser context cannot forge, and
+                // no cookie authenticates there — PromotionServerKeyFilter refuses the route
+                // outright without a valid server key, session or no session.
+                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher())
                 // 027 (024 T41's browser family): Spring's default composite includes
                 // CsrfAuthenticationStrategy, written for server-side session
                 // repositories — it ROTATES the token, and DELETES the cookie when
@@ -138,6 +143,11 @@ class SecurityConfig(
             .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
+            // versioning §10.6 — the promotion peer's gate, ahead of every credential filter:
+            // on its own route it is the ONLY way through (an API key or a session cookie does
+            // not open a deployment-to-deployment channel), and off that route it is inert, so
+            // the server key authenticates nothing anywhere else.
+            .addFilterBefore(filters.promotionServerKey, LoginRateLimitFilter::class.java)
             // Workspace resolution (design §5) runs once a credential has authenticated:
             // after the JWT filter, before OAuth2 login / authorization.
             .addFilterAfter(filters.workspaceResolution, JwtAuthenticationFilter::class.java)

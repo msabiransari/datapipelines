@@ -445,6 +445,41 @@ class ConfigValidatorTest {
         report.violations.single().shouldContain("is not one of")
     }
 
+    // ------------------------------------------------------------------ §7 (055) promotion target
+
+    @Test
+    fun `a promotion target without its key refuses startup, naming both keys`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(promotionTargetBaseUrl = "https://uat.example.com", promotionTargetKeySet = false),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.deployment.promotion.target.base-url")
+        report.violations.single().shouldContain("datapipelines.deployment.promotion.target.server-key")
+    }
+
+    @Test
+    fun `a promotion target WITH its key is clean`() {
+        ConfigValidator
+            .validate(validSnapshot().copy(promotionTargetBaseUrl = "https://uat.example.com", promotionTargetKeySet = true))
+            .violations
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `a receiver - a key with no target - is not a violation`() {
+        // §10.6: a deployment may hold either half, both, or neither. The receiver half alone
+        // is the COMMON case, and the receiver-that-also-authors combination is a WARN that
+        // belongs to AuthoringStartupCheck (it needs the repositories), not here.
+        listOf(null, "  ").forEach { baseUrl ->
+            ConfigValidator
+                .validate(validSnapshot().copy(promotionTargetBaseUrl = baseUrl, promotionTargetKeySet = false))
+                .violations
+                .shouldBeEmpty()
+        }
+    }
+
     // ------------------------------------------------------------------ §7 (048 F8) reserved names
 
     @Test
@@ -507,6 +542,33 @@ class ConfigValidatorTest {
 
         report.violations.shouldHaveSize(1)
         report.violations.single().shouldContain("reserved")
+    }
+
+    @Test
+    fun `system is reserved too - the system service account's whole safety argument is that no identity can link to it`() {
+        // auth.md §4.5 / R7: `users.provider = 'system'` marks the non-human actor every
+        // promoted row and every scheduled write is stamped with. An OIDC provider named
+        // `system` would let a real person's identity land on that row through §4.2's linking
+        // step — and the account's only defence against login is that nothing can link to it.
+        listOf("system", " System ", "SYSTEM").forEach { name ->
+            val report =
+                ConfigValidator.validate(
+                    validSnapshot().copy(
+                        oidcProviders =
+                            listOf(
+                                OidcProviderSnapshot(
+                                    name = name,
+                                    clientId = "id",
+                                    clientSecret = "secret",
+                                    issuerUri = "https://idp.example.com",
+                                ),
+                            ),
+                    ),
+                )
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("reserved")
+        }
     }
 
     @Test

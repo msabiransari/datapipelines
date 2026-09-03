@@ -816,6 +816,7 @@ Defined and described in [Auth §9](auth.md#9-auth-errors); cataloged here as th
 | `auth.login.locked` | 403 | Local login rejected: account locked after consecutive failures ([Auth §5A.3](auth.md#5a3-lockout)) |
 | `auth.password.change_required` | 403 | Session principal must change password before any other operation ([Auth §5A.4](auth.md#5a4-forced-password-change)) |
 | `auth.session.required` | 403 | An API-key principal reached a credential-minting operation (admin local-account create, password reset, `disable-local`, `unlock`, self-service password change); a key that mints an interactive credential escalates itself into an unpinned session that outlives its own revocation ([Auth §5A.7](auth.md#5a7-credential-minting-is-session-only)) |
+| `auth.promotion.key_invalid` | 401 | The promotion peer credential was absent, malformed, or did not match the receiver's configured promotion server key. The SAME code answers a receiver that has no key configured at all — promotion is disabled there and fail-closed, and one code keeps the response from telling a wrong key apart from a disabled receiver ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
 ### 13.8 Datasource
 
@@ -919,6 +920,9 @@ entry, Versioning is the semantics).
 | `pipeline.release.template_not_released` | 409 | Pipeline release blocked: the draft pins template version(s) still in DRAFT — release those templates first (Versioning §5.3 precondition 2) |
 | `pipeline.promotion.not_released` | 409 | Promotion selected a pipeline whose candidate version is not RELEASED — drafts are never promoted (Versioning §10.3 guard 1) |
 | `pipeline.promotion.not_newer` | 409 | Promotion push of a version not greater than the target environment's current version for that pipeline — same-version pushes are a bug, not a no-op (Versioning §10.3 guard 2) |
+| `pipeline.promotion.missing_datasources` | 409 | Promotion pre-validation (Versioning §10.5): one or more datasource names the batch references do not exist on the target. Reported ONCE for the whole batch, `details.missing_datasources` naming every absent one, before anything is pushed — the target is left byte-unchanged rather than failing mid-batch |
+| `pipeline.promotion.target_is_authoring` | 409 | Promotion into a target whose `authoring-enabled` is true — dev is where drafts live, and a receiver never authors (Versioning D7/§10.1). Raised by the receiver, so a misconfigured sender cannot push into an authoring deployment |
+| `pipeline.promotion.target_unreachable` | 502 | The promotion target did not answer, timed out, or answered something that is not this API — a transport failure on the SENDER, never a refusal by the receiver (a receiver's refusal is re-raised with the receiver's OWN code). `details` carries `target` and, when there was one, `target_status`. Logged WARN without a stack: the operator's own peer deployment being down is not a defect in this one |
 | `pipeline.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — a promotion receiver never authors (Versioning D7/§5.5). Reads, execution and import are unaffected. The template mirror is `template.authoring.disabled` (§13.9) |
 
 ---

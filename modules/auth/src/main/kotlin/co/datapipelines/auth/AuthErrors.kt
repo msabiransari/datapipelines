@@ -47,6 +47,14 @@ object AuthErrorCodes {
     const val SESSION_REQUIRED = "auth.session.required"
 
     /**
+     * versioning §10.6 — the promotion peer credential. Absent, malformed, mismatched,
+     * and "this receiver configured no key at all" all answer with this ONE code: the
+     * response must not tell a wrong key apart from a receiver that has promotion
+     * disabled.
+     */
+    const val PROMOTION_KEY_INVALID = "auth.promotion.key_invalid"
+
+    /**
      * The single system-wide rate-limit code ([Pipeline Contract §13.11]). It is
      * deliberately NOT part of [ALL]: auth.md §9 is explicit that there is no
      * auth-layer rate-limit code, and [ALL] tracks the §13.7 auth registry exactly.
@@ -69,6 +77,7 @@ object AuthErrorCodes {
             LOGIN_LOCKED,
             PASSWORD_CHANGE_REQUIRED,
             SESSION_REQUIRED,
+            PROMOTION_KEY_INVALID,
         )
 
     /**
@@ -111,6 +120,24 @@ class ApiKeyInvalidException(
         HTTP_UNAUTHORIZED,
         reason,
         "That API key is not valid. Generate a new one from the API Keys page.",
+    )
+
+/**
+ * The promotion peer credential was refused (versioning §10.6, auth.md §9).
+ *
+ * ONE code for every refusal on that route — header absent, header malformed, key
+ * mismatched, and no `server-key` configured on this receiver at all. A caller must not be
+ * able to tell "your key is wrong" from "this deployment does not accept promotion", and a
+ * receiver that never configured a key refuses everything (fail closed).
+ *
+ * The key itself never reaches the message, the details, or a log line.
+ */
+class PromotionKeyInvalidException :
+    AuthException(
+        AuthErrorCodes.PROMOTION_KEY_INVALID,
+        HTTP_UNAUTHORIZED,
+        "Promotion peer credential not accepted",
+        "This deployment did not accept the promotion request.",
     )
 
 class ApiKeyExpiredException :

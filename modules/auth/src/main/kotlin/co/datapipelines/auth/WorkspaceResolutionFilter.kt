@@ -95,6 +95,14 @@ class WorkspaceResolutionFilter(
                 SecurityContextHolder.getContext().authentication =
                     UsernamePasswordAuthenticationToken(principal.copy(workspace = resolved), null, authentication.authorities)
             }
+
+            AuthMethod.PROMOTION -> {
+                // versioning §10.6: the promotion credential pins NO workspace. A promotion
+                // payload names its own target workspace and the receiver resolves it there
+                // (by name, globally unique), so there is nothing for this filter to stamp —
+                // and a `DP-Workspace` header would be meaningless rather than dangerous. The
+                // branch is explicit so the exhaustive `when` keeps forcing this decision.
+            }
         }
         filterChain.doFilter(request, response)
     }

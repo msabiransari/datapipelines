@@ -56,6 +56,10 @@
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null">Executions</a>
         <a th:href="@{/workspaces}" class="app-nav-link"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null">Workspaces</a>
+        <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
+             reach it — there is no MCP tool and no schedule. -->
+        <a th:href="@{/promotion}" class="app-nav-link"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null">Promotion</a>
         <a th:href="@{/settings}" class="app-nav-link"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/settings')} ? 'active' : null">Settings</a>
         <a th:href="@{/docs}" class="app-nav-link"

@@ -235,7 +235,19 @@ The deployment-role settings ([Versioning §5.5](versioning.md#55-drafts-are-a-d
 | `datapipelines.deployment.name` | `DATAPIPELINES_DEPLOYMENT_NAME` | (empty) | The deployment's label (e.g. `dev`, `prod`). No behaviour depends on it — its only consumer is the startup posture log line. A later round may surface it to signed-in users in the UI banner |
 | `datapipelines.deployment.authoring-enabled` | `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` | `true` | The authoring **capability**. When `false`, every pipeline/template authoring write (create, update/draft, release, discard, delete) is refused with `pipeline.authoring.disabled` / `template.authoring.disabled` — fail-closed, naming the reason. Reads, execution and **import are unaffected** (promotion imports RELEASED versions; that is the one writer a receiver must accept). Startup REFUSES if drafts still exist while this is `false` (§7) |
 
-The `datapipelines.deployment.promotion.*` sub-block (the receiver's `server-key` and the sender's `target.{base-url, server-key}`) is **reserved but not shipped** — it lands with promotion itself ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01) keeps the shape in a fenced sample). This document is the authority for shipped keys only.
+#### Promotion (the deployment-to-deployment channel)
+
+Promotion is one deployment writing RELEASED content into exactly one configured higher environment ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). The credential is a **pre-shared server key, not a principal** ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)): no `users` row for the credential, no scope-matrix entry, no API key. A deployment may hold the receiver half, the sender half, both, or neither.
+
+| YAML path | Env var | Default | Description |
+|---|---|---|---|
+| `datapipelines.deployment.promotion.server-key` | `DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY` | (empty) | **Receiver half.** The pre-shared secret an inbound promotion must present in the `DP-Promotion-Key` header. **Empty means promotion is REFUSED** — fail closed; a deployment that never configured a key must not silently accept pushes. Compared in constant time; never logged. Consulted on `/api/v1/promotion/**` and nowhere else, and it grants no read access outside that pair |
+| `datapipelines.deployment.promotion.target.base-url` | `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL` | (empty) | **Sender half.** The single higher environment's base URL (e.g. `https://uat.example.com`). Empty = this deployment promotes nowhere and the promotion screen says so. Exactly one target — multi-target promotion is deliberately not a feature |
+| `datapipelines.deployment.promotion.target.server-key` | `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY` | (empty) | **Sender half.** The SAME secret the target holds under its own `server-key`. A `base-url` set without this key refuses startup (§7): the pair is meaningless apart |
+
+Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set it, identically, on both sides. Rotation is: set the new value on both, restart both; no user account is involved, so offboarding a human can never break production promotion.
+
+**Both keys are bearer secrets.** They are never logged, never in an error message, never in an audit `details` map, and never in a `toString()`. A receiver records only a truncated SHA-256 fingerprint of the key a push presented, so two keys are distinguishable across a rotation without either being carried.
 
 ---
 
@@ -353,6 +365,11 @@ datapipelines:
   deployment:
     name: ${DATAPIPELINES_DEPLOYMENT_NAME:}
     authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
+    promotion:
+      server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:}
+      target:
+        base-url: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:}
+        server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:}
 
   workspaces:
     provisioning-mode: ${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}
@@ -475,10 +492,11 @@ On startup, the app validates:
 - Every `datapipelines.auth.trusted-proxies` entry parses as a CIDR (a bare IP is a host CIDR); anything else refuses startup at the auth module's resolver construction — a typo'd range must not silently widen proxy trust.
 - `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
 - `datapipelines.bootstrap.examples-file` is not set while `datapipelines.workspaces.provisioning-mode` is anything but `auto-per-user` (§3.18) — the violation names both keys. Only `auto-per-user` provisions the personal workspace the examples are seeded into, so any other mode (the shipped default included) leaves the configured file permanently unseeded. A mode that is misspelled is reported by the mode check alone, not twice.
-- No OIDC provider is **named** `bootstrap` or `local`. Those are the `users.provider` values the system writes for identities it creates itself (§6.1 bootstrap actor, §5A local accounts), and a provider's configured name is written to that column verbatim — an external provider under either name would be indistinguishable from them. The reservation is case-insensitive and applies to an entry with a blank `client-id` too.
+- No OIDC provider is **named** `bootstrap`, `local` or `system`. Those are the `users.provider` values the system writes for identities it creates itself (§6.1 bootstrap actor, §5A local accounts, [Auth §4.5](auth.md#45-the-system-service-account-r7) system service account), and a provider's configured name is written to that column verbatim — an external provider under any of them would be indistinguishable from them, and for `system` that indistinguishability is the whole of the account's safety argument. The reservation is case-insensitive and applies to an entry with a blank `client-id` too.
 - **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
-- **Deployment posture (§3.19):** the deployment `name` and the authoring state are logged once at boot (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. **This check is currently one-sided**: the promotion sub-block is reserved, so its half wires in when promotion ships. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
+- `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
+- **Deployment posture (§3.19):** the deployment `name` and the authoring state are logged once at boot (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
 The validator's own test suite must assert that the documented dev setup (env vars from `.env.local`) passes the **production** rules — so a broken dev value gets fixed at the data, never by weakening the check.
 

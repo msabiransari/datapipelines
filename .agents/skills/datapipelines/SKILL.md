@@ -177,6 +177,26 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
   failure.
 - `/mcp` and `/api/v1` share a per-user rate limiter — back off on `429`.
 
+## Promotion is not yours to trigger
+
+Moving released content from one deployment to another (dev → uat → prod) is **promotion**,
+and it is a **human action from the UI, deliberately**. There is no MCP tool for it, there is
+no schedule that runs it, and there is no REST endpoint you can call for it: the promotion
+route accepts only a pre-shared key that one deployment holds for another, never an API key
+and never a session. This is a design decision, not a gap — a release reaching production is
+a decision a person makes.
+
+What that means in practice:
+
+- **Never offer to promote, and never claim you did.** If asked, say what promotion is and
+  point at the Promotion screen in the UI.
+- **A "hotfix on prod" is not a thing here.** A receiver deployment refuses every authoring
+  write with `pipeline.authoring.disabled` / `template.authoring.disabled` — that refusal is
+  the system working. The fix is a new release in the authoring environment, promoted like
+  any other change. If you meet that code, you are pointed at the wrong deployment.
+- **What you CAN do is make a release promotable**: author, render, execute the draft, and
+  tell the human it is ready to release. Release itself is also theirs.
+
 ## Error handling
 
 Every failure is structured — REST envelopes and MCP tool results (`isError: true`)

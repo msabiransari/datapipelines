@@ -47,7 +47,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 15
+        internal const val CHECK_COUNT = 16
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -60,10 +60,16 @@ class ConfigValidator(
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
-         * `LOCAL_PROVIDER`). An OIDC provider may not be NAMED one of these — see
-         * [checkReservedProviderNames].
+         * `LOCAL_PROVIDER`, `SYSTEM_PROVIDER`). An OIDC provider may not be NAMED one of these
+         * — see [checkReservedProviderNames].
+         *
+         * Spelled as literals, not imported: `auth` is not on this module's test compile
+         * classpath, and a validator rule reads better as the literal an operator would type.
+         * `SystemActorProvisioningIntegrationTest` asserts the row's stored `provider` against
+         * `UserService.SYSTEM_PROVIDER`, and `ConfigValidatorTest` asserts this set refuses
+         * that same spelling — the two meet at the string, which is the thing that matters.
          */
-        private val RESERVED_PROVIDER_NAMES = setOf("bootstrap", "local")
+        private val RESERVED_PROVIDER_NAMES = setOf("bootstrap", "local", "system")
 
         /** §3.10 — the directory the UI theme is validated against, on the classpath. */
         internal const val THEME_ROOT = "static/vendor/design-system"
@@ -85,6 +91,7 @@ class ConfigValidator(
             checkExamplesSeederReachable(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
+            checkPromotionTarget(snapshot, violations)
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkRedisAuthWarning(snapshot, warnings)
@@ -389,8 +396,10 @@ class ConfigValidator(
          *
          * `OidcSuccessHandler` writes the provider's configured NAME (the Spring registration
          * id) verbatim into `users.provider`, and the system writes two placeholder values of
-         * its own there: `bootstrap` for the pre-provisioned admin (§6.1) and `local` for an
-         * admin-created password account (§5A). A provider named either one makes external
+         * its own there: `bootstrap` for the pre-provisioned admin (§6.1), `local` for an
+         * admin-created password account (§5A), and `system` for the system service account
+         * (§4.5, R7) — whose entire safety argument is that no external identity can link to
+         * it. A provider named any one of them makes external
          * identities land on rows the system labels system-created — the two become
          * indistinguishable in `users`, in the audit trail and in the `(provider,
          * provider_subject)` uniqueness the schema enforces. Nothing else reserves the names
@@ -413,6 +422,36 @@ class ConfigValidator(
                         "system creates itself (users.provider = '$name'); an external provider under that name " +
                         "would be indistinguishable from them. Rename the provider."
                 }
+            }
+        }
+
+        /**
+         * §7 / §3.19 — the SENDER half of promotion: a target named without its key.
+         *
+         * `datapipelines.deployment.promotion.target.base-url` without
+         * `…target.server-key` is a promotion that cannot authenticate: every push would be
+         * refused by the receiver with `auth.promotion.key_invalid`, at the end of a UI action
+         * a human took, with nothing in the sender's own configuration to point at. The pair
+         * is meaningless apart, so startup names both keys.
+         *
+         * The reverse is NOT a violation: a `server-key` with no target is an ordinary
+         * RECEIVER, which is the common case ([Versioning §10.6](versioning.md) — a deployment
+         * may receive, send, both, or neither). The receiver-that-also-authors combination is
+         * a WARN, and it belongs to `AuthoringStartupCheck`, which can read the repositories.
+         *
+         * Presence, never values: the key is a bearer secret and must not reach a violation
+         * message (the §7 report is logged).
+         */
+        private fun checkPromotionTarget(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            if (snapshot.promotionTargetBaseUrl.isNullOrBlank()) return
+            if (!snapshot.promotionTargetKeySet) {
+                violations +=
+                    "datapipelines.deployment.promotion.target.base-url is set but " +
+                    "datapipelines.deployment.promotion.target.server-key is not (§3.19): the target's pre-shared " +
+                    "key is what authenticates the push, so every promotion would be refused. Set both, or neither."
             }
         }
 
@@ -504,6 +543,11 @@ class ConfigValidator(
                 // 050/R2 §7 — the executor concurrency alias pair (raw values; presence is the signal).
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
+                // §3.19 promotion (055). The base-url is an ordinary value; both keys are
+                // bearer secrets and are carried as PRESENCE only — the §7 report is logged.
+                promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
+                promotionTargetKeySet =
+                    !environment.getProperty("datapipelines.deployment.promotion.target.server-key").isNullOrBlank(),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -628,6 +672,10 @@ internal data class ConfigSnapshot(
     /** §3.2/§7 — raw values; ALIAS presence is the deprecation signal (050/R2). */
     val executorMaxConcurrentGlobal: String? = null,
     val executorMaxConcurrentPerInstance: String? = null,
+    /** §3.19 (055) — the promotion SENDER's target, if any. */
+    val promotionTargetBaseUrl: String? = null,
+    /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
+    val promotionTargetKeySet: Boolean = false,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,

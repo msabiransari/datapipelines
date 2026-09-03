@@ -1,5 +1,7 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.auth.PromotionProperties
+import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
@@ -89,7 +91,7 @@ class DomainConfiguration {
      * The §7 boot checks around that capability (configuration.md §3.19): the deployment
      * posture line (the `name` label's ONLY consumer — no code branches on it, pinned by
      * [DeploymentNameBranchingGuardTest]), the receiver-also-authors WARN — currently
-     * ONE-SIDED, its promotion half a seam the promotion round wires — and the refusal
+     * now BOTH-SIDED (055 wired the promotion half through [PromotionProperties]) — and the refusal
      * when an authoring-disabled deployment still holds drafts, naming them.
      */
     @Bean
@@ -97,7 +99,17 @@ class DomainConfiguration {
         environment: Environment,
         pipelines: PipelineRepository,
         templates: TemplateRepository,
-    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates)
+        promotionProperties: PromotionProperties,
+    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates) { promotionProperties.receives }
+
+    /**
+     * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it
+     * is a referential precondition of the schema — `created_by` / `triggered_by` are NOT NULL
+     * — not a feature an operator opts into, and its absence would surface as a foreign-key
+     * violation inside a promotion or a scheduled job.
+     */
+    @Bean
+    fun systemActorSeeder(userService: UserService): SystemActorSeeder = SystemActorSeeder(userService)
 
     /**
      * The AES-256-GCM encryptor for stored datasource passwords (datasources §6).
