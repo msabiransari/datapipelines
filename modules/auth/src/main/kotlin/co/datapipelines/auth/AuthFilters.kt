@@ -28,4 +28,6 @@ data class AuthFilters(
     val jwt: JwtAuthenticationFilter,
     val loginRateLimit: LoginRateLimitFilter,
     val workspaceResolution: WorkspaceResolutionFilter,
+    /** versioning §10.6 — the promotion peer's credential gate, scoped to its own route. */
+    val promotionServerKey: PromotionServerKeyFilter,
 )

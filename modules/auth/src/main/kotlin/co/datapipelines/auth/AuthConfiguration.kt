@@ -25,7 +25,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * behavior is proven at the wire by `AuthHttpBoundaryTest`.
  */
 @Configuration
-@EnableConfigurationProperties(WorkspacesProperties::class)
+@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
 class AuthConfiguration {
     @Bean
     fun userRepository(jdbc: NamedParameterJdbcTemplate): UserRepository = UserRepository(jdbc)
@@ -186,11 +186,20 @@ class AuthConfiguration {
         workspaceService: WorkspaceService,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
         clientAddressResolver: ClientAddressResolver,
+        promotionProperties: PromotionProperties,
     ): AuthFilters =
         AuthFilters(
             apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
             jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver),
             loginRateLimit = LoginRateLimitFilter(clientAddressResolver, authProperties, authErrorWriter),
+            promotionServerKey =
+                PromotionServerKeyFilter(
+                    promotionProperties,
+                    userService,
+                    authErrorWriter,
+                    auditLogger,
+                    clientAddressResolver,
+                ),
             workspaceResolution =
                 WorkspaceResolutionFilter(
                     workspaceService,

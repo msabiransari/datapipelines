@@ -445,6 +445,37 @@ class ConfigValidatorTest {
         report.violations.single().shouldContain("is not one of")
     }
 
+    // ------------------------------------------------------------------ §7 (055) promotion target
+
+    @Test
+    fun `a promotion target without its key refuses startup, naming both keys`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(promotionTargetBaseUrl = "https://uat.example.com", promotionTargetKeySet = false),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.deployment.promotion.target.base-url")
+        report.violations.single().shouldContain("datapipelines.deployment.promotion.target.server-key")
+    }
+
+    @Test
+    fun `a promotion target WITH its key is clean`() {
+        ConfigValidator
+            .validate(validSnapshot().copy(promotionTargetBaseUrl = "https://uat.example.com", promotionTargetKeySet = true))
+            .violations
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `a receiver - a key with no target - is not a violation`() {
+        // §10.6: a deployment may hold either half, both, or neither. The receiver half alone
+        // is the COMMON case, and the receiver-that-also-authors combination is a WARN that
+        // belongs to AuthoringStartupCheck (it needs the repositories), not here.
+        ConfigValidator.validate(validSnapshot().copy(promotionTargetBaseUrl = null, promotionTargetKeySet = false)).violations.shouldBeEmpty()
+        ConfigValidator.validate(validSnapshot().copy(promotionTargetBaseUrl = "  ", promotionTargetKeySet = false)).violations.shouldBeEmpty()
+    }
+
     // ------------------------------------------------------------------ §7 (048 F8) reserved names
 
     @Test

@@ -176,12 +176,22 @@ datapipelines:
   # whose pipeline/template authoring writes (create, update/draft, release, discard,
   # delete) refuse with `*.authoring.disabled`. Reads, execution and import are
   # unaffected. Startup REFUSES when authoring is disabled while drafts still exist (§7).
-  # The `promotion` sub-block is RESERVED (versioning §10.6's fenced sample) and ships
-  # with promotion itself — configuration.md declares only shipped keys, so it is
-  # deliberately absent here.
+  # The `promotion` sub-block (versioning §10.6, shipped by 055) is the deployment-to-
+  # deployment channel, and BOTH halves default to empty:
+  #   - `server-key` is the RECEIVER's. Empty means promotion is REFUSED — a deployment
+  #     that never configured a key must not silently accept pushes (fail closed).
+  #   - `target.*` is the SENDER's: exactly one higher environment (§10), its base URL and
+  #     the SAME secret. A base-url without a key refuses startup (§7).
+  # Both keys are bearer secrets: never logged, never in an error message, compared in
+  # constant time. A deployment may hold either half, both, or neither.
   deployment:
     name: ${DATAPIPELINES_DEPLOYMENT_NAME:}
     authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
+    promotion:
+      server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:}
+      target:
+        base-url: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:}
+        server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:}
 
   # §3.17 — workspace provisioning (design 2026-08-16-workspaces §7). `auto-per-user`
   # mints a personal workspace on first OIDC login; `self-serve` lets any authenticated
