@@ -382,7 +382,10 @@ class PromotionServiceTest {
             }
         val pipelineNode =
             child?.let {
-                """{"id": "run_child", "type": "PIPELINE", "pipeline": {"name": "${it.first}", "version": ${it.second}}, "depends_on": []}"""
+                """
+                {"id": "run_child", "type": "PIPELINE",
+                 "pipeline": {"name": "${it.first}", "version": ${it.second}}, "depends_on": []}
+                """.trimIndent()
             }
         val nodes = (dql + listOfNotNull(pipelineNode)).joinToString(",\n")
         return """
