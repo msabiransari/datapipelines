@@ -146,6 +146,12 @@ services:
       DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}
       DATAPIPELINES_DEPLOYMENT_NAME: ${DATAPIPELINES_DEPLOYMENT_NAME:-}
       DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:-true}
+      # versioning §10.6 — the promotion peer credential. Both are BEARER SECRETS: keep
+      # them in deploy/.env like every other secret, never inline here. Empty server-key
+      # means this deployment refuses promotion (fail closed).
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:-}
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:-}
+      DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:-}
 
       # The credentials the bootstrap datasources file names as ${...} placeholders.
       # They belong HERE, on the app, not only on the loader: that file is runtime

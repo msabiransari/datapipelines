@@ -472,8 +472,12 @@ class ConfigValidatorTest {
         // §10.6: a deployment may hold either half, both, or neither. The receiver half alone
         // is the COMMON case, and the receiver-that-also-authors combination is a WARN that
         // belongs to AuthoringStartupCheck (it needs the repositories), not here.
-        ConfigValidator.validate(validSnapshot().copy(promotionTargetBaseUrl = null, promotionTargetKeySet = false)).violations.shouldBeEmpty()
-        ConfigValidator.validate(validSnapshot().copy(promotionTargetBaseUrl = "  ", promotionTargetKeySet = false)).violations.shouldBeEmpty()
+        listOf(null, "  ").forEach { baseUrl ->
+            ConfigValidator
+                .validate(validSnapshot().copy(promotionTargetBaseUrl = baseUrl, promotionTargetKeySet = false))
+                .violations
+                .shouldBeEmpty()
+        }
     }
 
     // ------------------------------------------------------------------ §7 (048 F8) reserved names

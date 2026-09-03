@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Promotion</h1>
+    <span th:if="${hasTarget}" class="ds-badge" th:text="${targetBaseUrl}">https://uat.example.com</span>
+  </div>
+
+  <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack (§5.1). -->
+
+  <!-- State 1: this deployment promotes nowhere. A config change, not a promotion. -->
+  <div th:unless="${hasTarget}" class="ds-empty">
+    <p class="ds-empty-title">No promotion target configured</p>
+    <p class="ds-empty-description">
+      This deployment has no higher environment to promote to. Set
+      <code>datapipelines.deployment.promotion.target.base-url</code> and
+      <code>datapipelines.deployment.promotion.target.server-key</code> — the same secret the
+      target holds — and restart.
+    </p>
+  </div>
+
+  <th:block th:if="${hasTarget}">
+    <!-- State 3: the target refused or could not be reached. The CODE is shown, because the
+         operator's next step depends on which refusal it was. -->
+    <div th:if="${planError}" class="ds-empty">
+      <p class="ds-empty-title">Could not read the target</p>
+      <p class="ds-empty-description">
+        <code th:text="${planError}">pipeline.promotion.target_unreachable</code>
+        <span th:text="${planErrorMessage}"></span>
+      </p>
+    </div>
+
+    <th:block th:if="${plan != null}">
+      <p style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-lg);">
+        Promoting workspace <code th:text="${plan.workspace}">acme</code>
+        to <strong th:text="${plan.targetDeployment}">uat</strong>
+        at <code th:text="${plan.targetBaseUrl}">https://uat.example.com</code>.
+        Only <strong>released</strong> pipelines whose version is newer than the target's are listed.
+      </p>
+
+      <!-- versioning D7: dev is where drafts live. A target that authors is a misconfiguration
+           the operator must fix on the TARGET, so say so instead of offering a doomed button. -->
+      <div th:if="${plan.targetAuthoringEnabled}" class="ds-empty" style="margin-bottom: var(--gap-lg);">
+        <p class="ds-empty-title">That target has authoring enabled</p>
+        <p class="ds-empty-description">
+          A promotion receiver never authors. Set
+          <code>datapipelines.deployment.authoring-enabled=false</code> on
+          <strong th:text="${plan.targetDeployment}">uat</strong> before promoting to it.
+        </p>
+      </div>
+
+      <!-- State 2: reachable, nothing to promote. Says "in sync", not "broken". -->
+      <div th:if="${#lists.isEmpty(plan.promotable)}" class="ds-empty">
+        <p class="ds-empty-title">Nothing to promote</p>
+        <p class="ds-empty-description">
+          All <span th:text="${plan.examined}">0</span> pipelines in this workspace are already at
+          the target's version, or have no released version yet. Drafts are never promoted.
+        </p>
+      </div>
+
+      <form th:unless="${#lists.isEmpty(plan.promotable)}"
+            th:action="@{/promotion/promote}" method="post">
+        <table class="ds-table">
+          <thead>
+            <tr>
+              <th style="width: 3rem;">Send</th>
+              <th>Pipeline</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotable}">
+              <td>
+                <input type="checkbox" name="name" th:value="${candidate.name}"
+                       th:id="'promote-' + ${candidate.name}" checked>
+              </td>
+              <td>
+                <label th:for="'promote-' + ${candidate.name}">
+                  <span style="font-weight: var(--weight-medium);" th:text="${candidate.displayName}">Daily revenue</span>
+                  <span style="color: var(--text-secondary); font-size: var(--text-sm);"
+                        th:text="${candidate.name}">daily_revenue</span>
+                </label>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">4</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">3</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="display: flex; gap: var(--gap-md); align-items: center; margin-top: var(--gap-lg);">
+          <button type="submit" class="ds-button ds-button-primary"
+                  th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
+          <span style="color: var(--text-secondary); font-size: var(--text-xs);">
+            The templates each pipeline pins and the child pipelines it runs are sent with it,
+            in dependency order. The target applies the whole batch or none of it.
+          </span>
+        </div>
+      </form>
+    </th:block>
+  </th:block>
+</th:block>
+</html>

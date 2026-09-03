@@ -112,6 +112,7 @@ class PromotionTargetClient(
      * A `2xx` body is `{schema_version, correlation_id, data}` (rest-api §4.1); anything else
      * is `{..., error: {code, message, details}}` (§4.2) and the code is re-raised as-is.
      */
+    @Suppress("ThrowsCount") // a boundary: each distinct way the target's answer can be wrong is its own catalogued refusal
     private fun <T> read(
         response: HttpResponse<String>,
         type: Class<T>,

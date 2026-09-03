@@ -270,6 +270,44 @@ shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
 `application.yml`'s placeholders and fails on a missing pass-through or a diverged
 default.
 
+### 6.3A Promotion: a receiver deployment (055)
+
+A second deployment that receives released content from the first ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). Both sides are the same image in different postures — there is no separate build.
+
+**On the RECEIVER (e.g. uat):**
+
+```bash
+DATAPIPELINES_DEPLOYMENT_NAME=uat
+DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=false          # a receiver never authors (D7)
+DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY=<the shared secret>
+```
+
+**On the SENDER (e.g. dev):**
+
+```bash
+DATAPIPELINES_DEPLOYMENT_NAME=dev
+DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL=https://uat.example.com
+DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY=<the same shared secret>
+```
+
+Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/.env` with the rest of the secrets, never inline in a compose file or a chart's values.
+
+What each setting buys, and what goes wrong without it:
+
+| Setting | Consequence if wrong |
+|---|---|
+| `authoring-enabled: false` on the receiver | With it `true`, promotion into it is **refused** (`pipeline.promotion.target_is_authoring`) — deliberately, because drafts belong in the authoring environment. Startup also REFUSES on a receiver that already holds drafts, naming them ([Configuration §7](configuration.md#7-config-validation)) |
+| `server-key` on the receiver | **Absent means promotion is refused, always.** Fail closed: a deployment that never configured a key does not silently accept pushes |
+| `target.base-url` + `target.server-key` on the sender | A base-url without a key **refuses startup**, naming both. A key that does not match the receiver's gets `401 auth.promotion.key_invalid` at push time |
+| Matching workspace NAMES on both | Promotion addresses workspaces by name (names are a global namespace; ids are not). A workspace that does not exist on the receiver is `404 workspace.not_found` — create it there first |
+| The datasources the promoted pipelines reference, registered on the receiver | Pre-validated before anything is pushed; a missing one fails the whole batch with `pipeline.promotion.missing_datasources` and leaves the receiver untouched. **Register them with the receiver's own credentials** — a pipeline body never carries environment-specific connection details |
+
+**Rotation** is: set the new value on both sides, restart both. No user account is involved, so offboarding a human can never break production promotion, and revoking the key revokes nothing else.
+
+**Direction is one-way by construction.** The receiver validates; it never calls the sender. A compromised receiver cannot reach back into the authoring environment.
+
+**Running two stacks on one machine** (a rehearsal, or CI): `APP_COMPOSE_PROJECT` gives `./app.sh` a second isolated compose project with its own image tag, volumes and containers. Give each project its own host port and its own `deploy/.env`-supplied secrets.
+
 ### 6.4 Kubernetes (recommended for production)
 
 Reference Helm chart in `deploy/helm/`. Includes:

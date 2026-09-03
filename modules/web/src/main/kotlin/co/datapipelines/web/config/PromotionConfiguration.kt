@@ -82,8 +82,7 @@ class PromotionConfiguration {
         )
 
     @Bean
-    fun promotionTargetClient(promotionProperties: PromotionProperties): PromotionTargetClient =
-        PromotionTargetClient(promotionProperties)
+    fun promotionTargetClient(promotionProperties: PromotionProperties): PromotionTargetClient = PromotionTargetClient(promotionProperties)
 
     @Bean
     fun promotionService(

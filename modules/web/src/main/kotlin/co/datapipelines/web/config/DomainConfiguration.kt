@@ -100,8 +100,7 @@ class DomainConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         promotionProperties: PromotionProperties,
-    ): AuthoringStartupCheck =
-        AuthoringStartupCheck(environment, pipelines, templates) { promotionProperties.receives }
+    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates) { promotionProperties.receives }
 
     /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it

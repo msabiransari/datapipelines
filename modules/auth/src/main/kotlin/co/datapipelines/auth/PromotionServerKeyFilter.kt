@@ -93,7 +93,11 @@ class PromotionServerKeyFilter(
         auditLogger.log(
             event = AUDIT_REJECTED,
             sourceIp = client,
-            details = mapOf("path" to request.requestURI, "reason" to if (promotionProperties.receives) "key_mismatch" else "no_key_configured"),
+            details =
+                mapOf(
+                    "path" to request.requestURI,
+                    "reason" to if (promotionProperties.receives) "key_mismatch" else "no_key_configured",
+                ),
         )
         log.info(
             "event=$AUDIT_REJECTED path={} client={} receiver_configured={} " +

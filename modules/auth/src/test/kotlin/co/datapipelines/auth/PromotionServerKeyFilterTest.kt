@@ -175,7 +175,12 @@ class PromotionServerKeyFilterTest {
     fun `the granted authority is author and nothing above it`() {
         filter(configuredKey = KEY).doFilter(promotionRequest(header = KEY), MockHttpServletResponse(), MockFilterChain())
 
-        val authorities = SecurityContextHolder.getContext().authentication?.authorities?.map { it.authority }
+        val authorities =
+            SecurityContextHolder
+                .getContext()
+                .authentication
+                ?.authorities
+                ?.map { it.authority }
         authorities shouldBe listOf("SCOPE_author")
     }
 
@@ -217,7 +222,9 @@ class PromotionServerKeyFilterTest {
 
         details.captured["reason"] shouldBe "key_mismatch"
         details.captured["path"] shouldBe PROMOTION_PATH
-        details.captured.values.joinToString().shouldNotContain(PRESENTED)
+        details.captured.values
+            .joinToString()
+            .shouldNotContain(PRESENTED)
     }
 
     // -------------------------------------------------------------------- helpers
@@ -237,7 +244,11 @@ class PromotionServerKeyFilterTest {
         }
 
     private fun errorCodeOf(response: MockHttpServletResponse): String =
-        ObjectMapper().readTree(response.contentAsString).path("error").path("code").asText()
+        ObjectMapper()
+            .readTree(response.contentAsString)
+            .path("error")
+            .path("code")
+            .asText()
 
     /** The envelope minus its per-request correlation id — everything a prober could compare. */
     private fun bodyWithoutCorrelationId(response: MockHttpServletResponse): String {
@@ -248,6 +259,7 @@ class PromotionServerKeyFilterTest {
 
     private companion object {
         const val PROMOTION_PATH = "/api/v1/promotion/push"
+
         /** Fixtures, deliberately low-entropy — see PromotionServerKeysTest's note. */
         const val KEY = "promotion-fixture-key-not-a-real-secret"
         const val PRESENTED = "promotion-fixture-wrong-key-also-not-a-secret"

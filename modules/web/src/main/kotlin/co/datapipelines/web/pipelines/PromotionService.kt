@@ -219,6 +219,7 @@ class PromotionService(
          * skip rule instead — a child pinned at an old version is not "not newer", it is the
          * version the parent actually runs.
          */
+        @Suppress("ThrowsCount") // §10.3's guards: each refusal is its own catalogued code, named at the point it is decided
         fun addRoot(
             name: String,
             inventory: PromotionWire.Inventory,
@@ -245,6 +246,7 @@ class PromotionService(
         }
 
         /** Walks children first, then templates, then records this pipeline (§10.4 order). */
+        @Suppress("ThrowsCount") // every absent dependency in the closure is its own 404/409, not one merged failure
         private fun addPipeline(
             id: UUID,
             name: String,
