@@ -90,6 +90,7 @@ tasks.named<ProcessResources>("processResources") {
             "semantic-layer-research.md",
             "SPEC-REVIEW-2026-08.md",
             "ARCH-AUDIT-2026-08.md",
+            "TEST-GAP-2026-09.md",
             // Not-yet-normative design docs: they propose schema and contract that does not
             // exist yet, so shipping them in-product would describe a version nobody runs.
             "template-hierarchy-design.md",
