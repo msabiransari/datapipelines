@@ -227,11 +227,15 @@
     });
     // <details> toggle does not bubble; the capture phase still sees it, so one listener
     // keeps every folder summary's aria-expanded truthful without per-node handlers.
+    // Closing a folder whose CHILD was selected moves the selection to the folder: the
+    // child is now invisible (closed levels do not render), and a hidden selection is
+    // both unreadable and unannounceable.
     document.addEventListener("toggle", function (event) {
       var t = event.target;
       if (t.tagName === "DETAILS" && t.classList.contains("tpl-folder")) {
         var s = t.querySelector(":scope > summary");
         if (s) s.setAttribute("aria-expanded", t.open ? "true" : "false");
+        if (!t.open && s && t.querySelector('[aria-selected="true"]')) select(s, false);
       }
     }, true);
     // Rows that arrive in an htmx swap (a level, a search, a filter refresh) join the

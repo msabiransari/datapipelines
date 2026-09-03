@@ -40,12 +40,17 @@
   min-height: 0;
 }
 
-/* The tree pane. `overflow: auto` is also what arms the native resizer — and each level
-   swaps INSIDE it, so the pane (and the detail pane beside it) never move. */
+/* The tree pane. The width is viewport-based (clamped to ~30% of the app's 1600px canvas),
+   NOT a percentage of the grid track — an auto track sizes itself from this width, so a
+   percentage resolves against its own track and collapses into the floor (measured at
+   1280: a 260px pane and 81px of dead space between the panes). The resize ceiling is
+   derived from the canvas token, not the track, for the same reason. `overflow: auto` is
+   also what arms the native resizer — and each level swaps INSIDE it, so the pane (and
+   the detail pane beside it) never move. */
 .tplx-tree {
-  width: 30%;
+  width: clamp(260px, 30vw, 480px);
   min-width: 260px;
-  max-width: 60%;
+  max-width: calc(var(--app-content-max, 1600px) * 0.6);
   min-height: 0;
   overflow: auto;
   resize: horizontal;
