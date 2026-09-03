@@ -317,6 +317,19 @@ class PipelineExecutor(
         // context and rendered SQL at the failure site; the recorder fills anything still
         // missing and adds the exception detail under `error-detail=full`.
         val failure = completeRecord(mapped, node, ctx, cause)
+        // The log half of the page↔log pair: one ERROR line whose correlation id is the
+        // join key the screen now shows, and whose throwable prints the SAME chain the
+        // record transports. A streamed failure previously logged nothing at all — the
+        // record was in the event and error_json only, so grepping the log by the
+        // correlation id the UI displayed found silence (found on the 057 gate stack).
+        LOG.error(
+            "node {} failed ({}) execution_id={} correlation_id={}",
+            node.id,
+            failure.code,
+            run.executionId,
+            run.request.correlationId,
+            cause.cause ?: cause,
+        )
         emit(NodeFailed(run.executionId, node.id, failure, run.stats.snapshot(listOf(node.id)).first()))
         return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause, failure)
     }
