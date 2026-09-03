@@ -196,7 +196,4 @@ class SystemActorProvisioningIntegrationTest {
         )
 
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
-
-    private companion object {
-    }
 }

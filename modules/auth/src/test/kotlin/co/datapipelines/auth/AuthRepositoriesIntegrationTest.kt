@@ -294,9 +294,6 @@ class AuthRepositoriesIntegrationTest {
     }
 
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
-
-    private companion object {
-    }
 }
 
 /** The V4-seeded `default` workspace (metadata-db §4.11) — a legitimate test pin: these suites seed the default world. */
