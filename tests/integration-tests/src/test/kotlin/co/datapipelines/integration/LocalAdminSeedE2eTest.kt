@@ -13,9 +13,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.util.Base64
@@ -39,7 +36,6 @@ import java.util.Base64
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 class LocalAdminSeedE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -260,7 +256,6 @@ class LocalAdminSeedE2eTest {
             .get(path)
 
     companion object {
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
         private const val ADMIN_EMAIL = "seed-admin@datapipelines.test"
         private const val CREATED_EMAIL = "created-user@datapipelines.test"
@@ -276,20 +271,10 @@ class LocalAdminSeedE2eTest {
         /** Generated per run — no literal secret in any test fixture (HIGH-2). */
         private val SEED_PASSWORD = "e2e-seed-" + (1..24).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String =
             Base64
@@ -306,10 +291,10 @@ class LocalAdminSeedE2eTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             // Generated per run — no literal secret in any test fixture (HIGH-2).
             registry.add("datapipelines.jwt.secret") { randomSecret() }

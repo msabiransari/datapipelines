@@ -7,9 +7,6 @@ import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -28,7 +25,6 @@ import java.util.UUID
  * dependency stays in `app`, module-structure §3.1 rule 2): V1→V3, then pre-existing rows in
  * the pre-V4 shape, then V4. Every assertion below is raw SQL against the result.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class WorkspacesRekeyMigrationTest {
     private val userOne = UUID.randomUUID()
@@ -234,7 +230,7 @@ class WorkspacesRekeyMigrationTest {
             }
         }
 
-    private fun connection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+    private fun connection(): Connection = DriverManager.getConnection(db.jdbcUrl, db.username, db.password)
 
     private companion object {
         const val DEFAULT_WORKSPACE_ID = "defa0000-0000-0000-0000-000000000001"
@@ -258,12 +254,12 @@ class WorkspacesRekeyMigrationTest {
             error("$relativePath not found walking up from ${File("").absolutePath}")
         }
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /**
+         * A scratch database on the module's shared container: this suite builds the schema
+         * PART-WAY on purpose (V1–V3, pre-V4 rows, then the V4 rekey) — it must not see the
+         * fully-migrated database the other suites run against, because the rekey boundary
+         * is the subject.
+         */
+        val db = SharedE2e.scratchDatabase("pre_v4_rekey")
     }
 }

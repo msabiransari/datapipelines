@@ -18,7 +18,6 @@ import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.net.URI
@@ -315,14 +314,13 @@ class DatasourcePoolInvalidationE2eTest {
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000002"
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-key", arrayOf("admin"))
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared Postgres — migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
+        // OWN Redis, deliberately not the shared one: this suite's subject is cross-instance
+        // pub/sub, and Spring's context cache keeps EARLIER suites' contexts (and their
+        // subscriptions) alive until JVM exit — a shared Redis would deliver this suite's
+        // invalidations to stale listeners of suites that already finished.
         @Container
         @JvmStatic
         private val redis =

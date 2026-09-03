@@ -19,9 +19,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -58,7 +55,6 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TracerBulletE2eTest {
     @LocalServerPort
@@ -69,6 +65,12 @@ class TracerBulletE2eTest {
     @Test
     @Order(1)
     fun `the DEVELOPMENT §8 walkthrough end to end`() {
+        // The walkthrough's subject is a FRESH deployment: its `pg-local` datasource and
+        // `active_users` content are the §8 doc examples, names earlier suites (PipelineShapes
+        // registers its own `pg-local`) legitimately reuse — so the walkthrough resets the
+        // shared database to the freshly-migrated state before it starts, exactly what its
+        // former per-suite container guaranteed.
+        E2eClean.beforeSeeding()
         seedAuthRows()
         registerDatasourceAndProbe()
         createTemplate()
@@ -93,7 +95,7 @@ class TracerBulletE2eTest {
         // The JDBC URL is built clean: the container's `jdbcUrl` carries `?loggerLevel=OFF`,
         // and `loggerLevel` is a datasources §5.6 refused key — the fail-closed validator
         // is right to reject it.
-        val sourceJdbcUrl = "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb"
+        val sourceJdbcUrl = source.jdbcUrl
         given()
             .port(port)
             .contentType(ContentType.JSON)
@@ -422,7 +424,7 @@ class TracerBulletE2eTest {
                 statement.execute(
                     """
                     INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)
-                    VALUES ('$ADMIN_USER_ID', 'e2e-admin@datapipelines.test', 'E2E Admin', 'test', 'e2e-admin-sub', TRUE, TRUE)
+                    VALUES ('$ADMIN_USER_ID', 'tracer-e2e-admin@datapipelines.test', 'E2E Admin', 'test', 'e2e-admin-sub', TRUE, TRUE)
                     """.trimIndent(),
                 )
             }
@@ -446,7 +448,6 @@ class TracerBulletE2eTest {
 
     companion object {
         private const val REDIS_PORT = 6379
-        private const val POSTGRES_PORT = 5432
         private const val SECRET_BYTES = 32
         private const val REQUESTED_TTL_SECONDS = 120L
         private const val SSE_BUDGET_MINUTES = 2L
@@ -465,28 +466,17 @@ class TracerBulletE2eTest {
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("admin"))
         private val READ_ONLY_KEY = E2eAuth.generateKey("e2e-read-key", arrayOf("read"))
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val source =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("testdb")
-                .withUsername("postgres")
-                .withPassword("postgres")
+        /**
+         * The pipeline's SOURCE database: a scratch database on the shared container — its
+         * orders/users fixture tables are this suite's own schema, deliberately separate
+         * from the migrated metadata database.
+         */
+        private val source = SharedE2e.scratchDatabase("tracer_source")
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String =
             Base64
@@ -505,10 +495,10 @@ class TracerBulletE2eTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             // Generated per run — no literal secret in any test fixture (HIGH-2).
             registry.add("datapipelines.jwt.secret") { randomSecret() }

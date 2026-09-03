@@ -373,7 +373,6 @@ class SampleDataBootstrapE2eTest {
     private fun <T> scalar(sql: String): T = rows(sql).single().values.first() as T
 
     companion object {
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
         private const val ADMIN_EMAIL = "bootstrap-e2e-admin@example.com"
@@ -467,6 +466,10 @@ class SampleDataBootstrapE2eTest {
 
         private fun randomSecret(): String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
+        // OWN Postgres, deliberately not the shared one: the bootstrap this suite verifies
+        // runs AT CONTEXT BOOT — before any test method could clean — and the suite's
+        // assertions count whole tables (users, admin_granted audit rows). A database that
+        // starts empty and stays owned by one suite is the honest fixture for both.
         @Container
         @JvmStatic
         private val postgres =
@@ -475,12 +478,7 @@ class SampleDataBootstrapE2eTest {
                 .withUsername("datapipelines")
                 .withPassword("datapipelines")
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private val oidc = OidcDiscoveryStub()
 
@@ -494,10 +492,10 @@ class SampleDataBootstrapE2eTest {
                 "spring.datasource.username" to postgres.username,
                 "spring.datasource.password" to postgres.password,
                 "spring.data.redis.host" to redis.host,
-                "spring.data.redis.port" to redis.getMappedPort(REDIS_PORT).toString(),
+                "spring.data.redis.port" to SharedE2e.redisPort.toString(),
                 "spring.data.redis.password" to "",
                 "datapipelines.redis.host" to redis.host,
-                "datapipelines.redis.port" to redis.getMappedPort(REDIS_PORT).toString(),
+                "datapipelines.redis.port" to SharedE2e.redisPort.toString(),
                 "datapipelines.jwt.secret" to jwtSecret,
                 "datapipelines.db.encryption-key" to encryptionKey,
                 "datapipelines.auth.oidc.providers[0].name" to "google",

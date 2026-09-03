@@ -17,9 +17,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.util.Base64
@@ -47,7 +44,6 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TemplateAddressingE2eTest {
     @LocalServerPort
@@ -338,7 +334,6 @@ class TemplateAddressingE2eTest {
             }
         }
 
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
@@ -366,20 +361,10 @@ class TemplateAddressingE2eTest {
                 SeededKey(name = "e2e-043-key", scopes = arrayOf("admin"), id = id, plaintext = plaintext, hash = argon2Hash(plaintext))
             }
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String =
             Base64
@@ -398,10 +383,10 @@ class TemplateAddressingE2eTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

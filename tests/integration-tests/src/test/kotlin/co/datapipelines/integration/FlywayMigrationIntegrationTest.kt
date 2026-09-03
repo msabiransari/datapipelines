@@ -13,9 +13,6 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.sql.ResultSet
 import java.sql.SQLException
@@ -40,7 +37,6 @@ import javax.sql.DataSource
  * against metadata-db.md §4 line by line.
  */
 @SpringBootTest(classes = [DatapipelinesApplication::class])
-@Testcontainers
 class FlywayMigrationIntegrationTest {
     @Autowired
     private lateinit var dataSource: DataSource
@@ -671,22 +667,11 @@ class FlywayMigrationIntegrationTest {
         }
 
     companion object {
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
         /** The seeded `default` workspace (metadata-db §4.11, R2) the V4 assertions pin against. */
@@ -734,10 +719,10 @@ class FlywayMigrationIntegrationTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             // Generated per run — no literal secret in any test fixture (HIGH-2).
             registry.add("datapipelines.jwt.secret") { randomSecret() }
