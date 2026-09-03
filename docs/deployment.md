@@ -306,7 +306,14 @@ What each setting buys, and what goes wrong without it:
 
 **Direction is one-way by construction.** The receiver validates; it never calls the sender. A compromised receiver cannot reach back into the authoring environment.
 
-**Running two stacks on one machine** (a rehearsal, or CI): `APP_COMPOSE_PROJECT` gives `./app.sh` a second isolated compose project with its own image tag, volumes and containers. Give each project its own host port and its own `deploy/.env`-supplied secrets.
+**Running two stacks on one machine** (a rehearsal, or CI): `APP_COMPOSE_PROJECT` gives `./app.sh` a second isolated compose project with its own image tag, volumes and containers, and `APP_HOST_PORT` moves its published port off the first one's 8080 (the container port never moves). Both are lane knobs, not app config — that is why neither carries the `DATAPIPELINES_` prefix.
+
+```bash
+./app.sh --start                                             # dev, the sender, on :8080
+APP_COMPOSE_PROJECT=uat APP_HOST_PORT=8081 ./app.sh --start  # uat, the receiver, on :8081
+```
+
+The sender reaches the receiver from INSIDE its container, so `target.base-url` is not the `localhost` URL your browser uses: on Docker Desktop it is `http://host.docker.internal:8081`, and on Linux it is the host's address on the docker bridge. Two compose projects are two networks; a service name from one does not resolve in the other.
 
 ### 6.4 Kubernetes (recommended for production)
 
