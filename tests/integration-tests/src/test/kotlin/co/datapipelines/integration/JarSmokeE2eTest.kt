@@ -212,6 +212,11 @@ class JarSmokeE2eTest {
     private fun appEnvironment(): Map<String, String> =
         mapOf(
             "SERVER_PORT" to appPort.toString(),
+            // The jar's actuator would otherwise bind application.yml's fixed 9090. Serially that
+            // was always free; under org.gradle.parallel another module's app-booting suite can hold
+            // it at the same instant ("Port 9090 was already in use", 2026-09-03). 0 = ephemeral;
+            // nothing here reads the management port — health goes through the app port.
+            "MANAGEMENT_SERVER_PORT" to "0",
             "SPRING_DATASOURCE_URL" to postgres.jdbcUrl,
             "SPRING_DATASOURCE_USERNAME" to postgres.username,
             "SPRING_DATASOURCE_PASSWORD" to postgres.password,
