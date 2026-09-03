@@ -9,6 +9,11 @@
   <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
   <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
   <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+  <!-- 059 §reference route 1: HTML cards overlaid on the Cytoscape nodes. Its label
+       container is pointer-events:none and carries the pan/zoom transform, so the
+       cards scale WITH the canvas and the canvas keeps every interaction (031's
+       selection/state/a11y machinery is untouched). -->
+  <script th:src="@{/vendor/cytoscape/cytoscape-node-html-label.js}"></script>
 
   <script type="application/json" id="pipeline-data" th:utext="${pipelineJson}"></script>
   <!-- The draft lifecycle state the editor is showing (versioning §3.5/§7): draft.js reads
@@ -115,6 +120,27 @@
       <section class="pe-main" aria-label="Pipeline graph">
         <div class="pe-canvas-container" id="cy-container">
           <div id="cy-canvas" role="img" aria-label="Pipeline DAG visualization"></div>
+        </div>
+
+        <!-- View controls (059 §B): fit with a readable floor, reset, zoom in/out.
+             Native buttons — keyboard reachable by tab, no shortcut layer to own. -->
+        <div class="pe-graph-controls" role="toolbar" aria-label="Graph view controls">
+          <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                  @click="graph && graph.fitToView()" title="Fit graph to view" aria-label="Fit graph to view">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
+          </button>
+          <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                  @click="graph && graph.resetView()" title="Reset zoom (100%)" aria-label="Reset zoom to 100 percent">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
+          </button>
+          <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                  @click="graph && graph.zoomBy(1.25)" title="Zoom in" aria-label="Zoom in">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-in"></use></svg>
+          </button>
+          <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                  @click="graph && graph.zoomBy(0.8)" title="Zoom out" aria-label="Zoom out">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-out"></use></svg>
+          </button>
         </div>
 
         <!-- Accessible node list -->

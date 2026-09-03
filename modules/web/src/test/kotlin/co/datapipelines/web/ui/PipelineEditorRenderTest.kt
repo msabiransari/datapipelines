@@ -43,6 +43,24 @@ class PipelineEditorRenderTest {
         render() shouldContain "/js/pipeline-editor/sql-highlight.js"
     }
 
+    /**
+     * 059 §reference/§B: the card overlay's vendored script, the icon sprite the cards
+     * and controls draw from, and the keyboard-reachable view controls. If any of these
+     * disappears from the template the graph degrades to the empty-box look the owner
+     * rejected — this pins the wiring, not the visual.
+     */
+    @Test
+    fun `the card overlay script, the icon sprite and the view controls are wired`() {
+        val html = render()
+
+        html shouldContain "/vendor/cytoscape/cytoscape-node-html-label.js"
+        html shouldContain "lucide-sprite.svg#maximize"
+        html shouldContain "lucide-sprite.svg#zoom-in"
+        html shouldContain "aria-label=\"Graph view controls\""
+        html shouldContain "graph.fitToView()"
+        html shouldContain "graph.resetView()"
+    }
+
     @Test
     fun `the result grid renders on the shared table with the frozen pager bindings`() {
         val html = render()

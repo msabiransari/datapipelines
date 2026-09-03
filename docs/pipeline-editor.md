@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.4 (revised — see Change Log)
+**Status:** v1.6 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-09-03
 
 ---
 
@@ -429,21 +429,22 @@ class PipelineGraph {
         return [...nodes, ...edges];
     }
 
-    // The layout options actually passed (v1.3). nodeDimensionsIncludeLabels is
-    // MANDATORY with the label below the shape (§5.3): at its cytoscape-dagre
-    // default of false, dagre lays out on the node box alone and one rank's labels
-    // collide with the next. marginX/marginY are NOT cytoscape-dagre options (they
-    // belong to grid/cose and are silently ignored) — padding is the edge clearance,
-    // and `fit` defaults to true, so there is no manual cy.fit() call.
+    // The layout options actually passed (v1.6, retuned for cards — 059 §B): a 264px
+    // card needs wider ranks and more breathing room than the 120×44 box ever did.
+    // fit is FALSE — fitToView() owns the fit so it can apply padding AND the
+    // readable-minimum floor ("three nodes should fill the pane"). marginX/marginY
+    // are NOT cytoscape-dagre options (they belong to grid/cose and are silently
+    // ignored); padding is the edge clearance.
     layoutOptions() {
         return {
             name: 'dagre',
             rankDir: 'LR',                      // left-to-right
-            nodeSep: 50,                        // vertical spacing between nodes at same rank
-            rankSep: 100,                       // horizontal spacing between ranks
+            nodeSep: 64,                        // vertical spacing between nodes at same rank
+            rankSep: 176,                       // horizontal spacing between ranks (card + curve)
             edgeSep: 12,
-            padding: 30,
-            nodeDimensionsIncludeLabels: true,  // labels are part of a node's box
+            padding: 40,
+            fit: false,                         // fitToView() applies the min-zoom floor
+            nodeDimensionsIncludeLabels: true,  // the card box IS the node's whole box
         };
     }
 }
@@ -463,91 +464,66 @@ Alternatives if dagre doesn't fit a specific pipeline's shape:
 
 v1 ships with dagre LR. The layout choice is configurable per pipeline in a future version.
 
-### 5.3 Graph stylesheet
+### 5.3 Graph stylesheet — the node CARD (revised 2026-09-02)
 
 The Cytoscape stylesheet reads design system tokens at init time via `readDesignTokens()` (§3.4) and uses them throughout. No hardcoded hex values in the JS — every value resolves through a `--node-*` / `--edge-*` custom property that `app.css` maps onto design-system variables with a hex fallback. When the theme changes, `updateTheme()` re-reads the tokens and re-applies the stylesheet without a page reload.
 
-Three visual channels, deliberately non-overlapping (ratified 2026-08-31): **shape carries TYPE, colour carries STATE, the ring carries SELECTION.** No channel competes with another for the same pixels, and shape survives greyscale, colour-blindness and theme swaps on its own.
+Three visual channels, deliberately non-overlapping: **the icon badge carries TYPE, colour carries STATE, the ring carries SELECTION.** No channel competes with another for the same pixels, and each survives greyscale, colour-blindness and theme swaps on its own.
 
-Two deliberate changes from earlier revisions of this section, both from the operator contract (*"label contained below, not inside"*, *"a shape for select"*):
+**The 2026-09-02 reversal (owner, on the live product):** the 2026-08-31 contract — *"label contained below, not inside"* — is reversed. What shipped under it (a 120×44 round-rectangle with the name exiled beneath) read on screen as **an empty box with a caption**. The new contract: *"I want to display total node execution time, dialect, template name and datasource name. It should be INSIDE the box"* — a card large enough to hold the name AND the facts. The per-type SHAPES (round-diamond / round-tag / hexagon) are retired with it: a card with text in it wants to be a rectangle, and TYPE moves to an icon badge.
 
-1. **The label renders BELOW the shape**, full text (stylesheet-side ellipsis at `text-max-width: 160px`) — not truncated at 20 characters inside an 80×40 box. Earlier revisions specified `text-valign: center` with the label inside the shape; the dagre layout must compensate, see `nodeDimensionsIncludeLabels` in §5.1.
-2. **Execution state is an accent border, not a background fill.** The card keeps its neutral `--node-surface` in every state; the earlier `--node-*-bg` / `--node-*-text` background/text pairs are superseded by the `--node-*-accent` tokens (§6.2).
+Every node is a rectangular card. Inside it, top to bottom:
+
+1. **Name** — the title: body size, semibold, wrapping to at most two lines, ellipsis only after that (a `-webkit-line-clamp: 2` block); the full name always rides on the element's `title`.
+2. **Type badge + glyph** — `DQL` / `DML` / `DDL` / `PIPELINE` as a badge beside a type glyph from the vendored Lucide sprite (`db` / `table` / `boxes` / `workflow`; ISC; subset only, `vendor-manifest.json`, no CDN). Engine glyphs are generic too — `db` for server dialects, `file` for file-embedded ones (SQLITE, DUCKDB) — never a vendor logo.
+3. **Datasource · dialect** — e.g. `sample-trips · POSTGRES`; for a PIPELINE node, the child pipeline's name; for a tempdb source, `tempdb · H2` (the engine from `settings.tempdb`, default H2). The dialect is resolved client-side from the workspace's datasource listing (`GET /api/v1/datasources`) — the pipeline body is portable across environments (contract §11.1) and carries only names — and the line upgrades in place when the listing lands; a failure degrades to the bare source name.
+4. **Template@version** — e.g. `sample_trips_daily.sql @ v1`, truncated from the LEFT for long hierarchical paths so the LEAF stays visible (043 made names paths); the full reference rides on `title`.
+5. **Run line, after execution** — elapsed and rows from `node_completed`'s flat `duration_ms` / `rows_out` (the projection carries them at the top level, not as a nested `stats` object; `NOT_MEASURED` is `-1`): `1.2 s · 366 rows`. On failure, the state accent plus a corner ✕ (the detail lives in 057's inspector). **Before any execution the line is absent, not a placeholder.**
+
+Beside the border accents, a **corner status dot** (✓ / ✕ / spinner / –) makes a static screenshot read without the legend, and **ports** — a dot on the card's right and left edges — are where edges plug in.
+
+**How it renders — the HTML overlay (route 1, decided):** Cytoscape text cannot carry icons, per-line styling or the run line, so the card's content is an HTML overlay supplied by `cytoscape-node-html-label` (1.2.2, vendored + pinned like everything else). The extension's label container is `pointer-events: none` and carries the pan/zoom transform (both verified against its source), so cards scale WITH the canvas and Cytoscape keeps every interaction — pan, zoom, tap-select, dagre, and §14's a11y machinery untouched. The **canvas still paints the card chrome** — surface, muted 1px border, state accent (§6.2), the caller double border (§9), the selection ring + halo — under a transparent overlay, which keeps one theme-swap path (`updateTheme` re-reads tokens and re-styles the canvas; the overlay's text colours are custom properties and re-theme with the stylesheet swap alone). The overlay re-renders on Cytoscape `data`/`style` events, which is exactly how state dots and run lines arrive: `setNodeState()`/`setNodeStats()` write `data.state` / `data.run`. Card geometry is one source: `--pe-card-w` / `--pe-card-h` (264×164 — five lines at body size without shrinking type), read by `readDesignTokens()` for the canvas box and used by `pipeline-editor.css` for the overlay div.
 
 ```javascript
 function buildStylesheet(t) {        // t = readDesignTokens() output
+    const cardW = t.cardW || 264, cardH = t.cardH || 164;
     return [
-        // Node card — neutral surface, label BELOW the shape
-        {
-            selector: 'node',
-            style: {
-                'background-color': t.nodeSurface,       // --node-surface
-                'color': t.nodeLabelText,                // --node-label-text
-                'label': 'data(label)',
-                'text-valign': 'bottom',
-                'text-halign': 'center',
-                'text-margin-y': 8,
-                'font-size': '12px',
-                'text-wrap': 'ellipsis',
-                'text-max-width': '160px',
-                'width': 120,
-                'height': 44,
-                'shape': 'round-rectangle',
-                'border-width': 1,
-                'border-color': t.nodeBorder,            // --node-border
-            }
-        },
-        // TYPE channel — per-type shapes (DQL keeps the round-rectangle above)
-        { selector: 'node.type-dml', style: { 'shape': 'round-diamond' } },   // side-effects
-        { selector: 'node.type-ddl', style: { 'shape': 'round-tag' } },       // schema changes
-        // STATE channel — accent borders, never a background fill (§6.2)
+        // The card BOX: chrome only — the text is the HTML overlay (route 1 above).
+        { selector: 'node', style: {
+            'background-color': t.nodeSurface,          // --node-surface
+            'width': cardW, 'height': cardH,            // --pe-card-w / --pe-card-h
+            'shape': 'round-rectangle',
+            'border-width': 1, 'border-color': t.nodeBorder,
+        } },
+        // STATE channel — accent borders, never a background fill (§6.2). Unchanged.
         { selector: 'node.running', style: { 'border-color': t.nodeRunningAccent, 'border-width': 2 } },
         { selector: 'node.success', style: { 'border-color': t.nodeSuccessAccent, 'border-width': 2 } },
         { selector: 'node.failed',  style: { 'border-color': t.nodeFailedAccent,  'border-width': 2 } },
         { selector: 'node.aborted', style: { 'border-color': t.nodeAbortedAccent, 'border-width': 2, 'opacity': 0.5 } },
-        // Caller node (resolves to output.target: caller) — distinct visual marker.
-        // Applied in buildElements() (§5.1). At most one node carries it; a pure-ETL
-        // pipeline has none. Ordered AFTER the state accents so the double border
-        // survives a state change — the accent colour shows on the double border
-        // itself. See [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node).
+        // Caller node (output.target: caller) — the double border survives state
+        // changes because it is ordered AFTER the accents.
         { selector: 'node.caller', style: { 'border-style': 'double', 'border-width': 5 } },
-        // Composition (§7): a PIPELINE node runs another pipeline as a child execution.
-        { selector: 'node.pipeline-node', style: { 'shape': 'hexagon' } },
-        // SELECTION channel — Cytoscape's :selected PSEUDO-CLASS, not a .selected
-        // class: init.js/a11y.js already drive cyNode.select() (§5.4). Ring +
-        // underlay halo (underlay paints BEHIND the node; an overlay would dim the
-        // label). Ordered last so selection wins the border while it holds.
-        {
-            selector: 'node:selected',
-            style: {
-                'border-width': 3,
-                'border-color': t.nodeSelectedRing,      // --node-selected-ring
-                'underlay-color': t.nodeSelectedHalo,    // --node-selected-halo
-                'underlay-opacity': 0.18,
-                'underlay-padding': 6,
-            }
-        },
-        // Edges
-        {
-            selector: 'edge',
-            style: {
-                'width': 1.5,
-                'line-color': t.edgeIdleStroke,          // --edge-idle-stroke
-                'target-arrow-color': t.edgeIdleStroke,
-                'target-arrow-shape': 'triangle',
-                'arrow-scale': 1.2,
-                'curve-style': 'bezier',
-            }
-        },
-        // Active edge (downstream of a running/success node)
-        {
-            selector: 'edge.active',
-            style: {
-                'width': 2.5,
-                'line-color': t.edgeActiveStroke,        // --edge-active-stroke
-                'target-arrow-color': t.edgeActiveStroke,
-            }
-        },
+        // SELECTION channel — the :selected pseudo-class, ring + underlay halo.
+        { selector: 'node:selected', style: {
+            'border-width': 3, 'border-color': t.nodeSelectedRing,
+            'underlay-color': t.nodeSelectedHalo, 'underlay-opacity': 0.18, 'underlay-padding': 6,
+        } },
+        // Edges — unbundled-bezier with per-edge control points computed once after
+        // layout (applyEdgeCurves): the curve LEAVES the source port horizontally and
+        // ENTERS the target port horizontally. Small arrowheads.
+        { selector: 'edge', style: {
+            'width': 1.5, 'line-color': t.edgeIdleStroke,
+            'target-arrow-color': t.edgeIdleStroke, 'target-arrow-shape': 'triangle', 'arrow-scale': 0.9,
+            'curve-style': 'unbundled-bezier',
+            'source-endpoint': (cardW / 2) + 'px 0px',   // the card's RIGHT edge
+            'target-endpoint': -(cardW / 2) + 'px 0px',  // the card's LEFT edge
+        } },
+        { selector: 'edge.active', style: {
+            'width': 2.5, 'line-color': t.edgeActiveStroke, 'target-arrow-color': t.edgeActiveStroke,
+        } },
+        // Reserved for future secondary relationships (template imports) — defined,
+        // unused. The day it lights up it is a class toggle, not a styling decision.
+        { selector: 'edge.secondary', style: { 'line-style': 'dashed' } },
     ];
 }
 ```
@@ -1285,7 +1261,7 @@ The accessible surface is therefore a **parallel DOM structure mirroring the gra
 | `Enter` / `Space` | node list | Select the focused node, opening its details panel |
 | `Escape` | anywhere | Close details panel → result panel → error modal (topmost first) |
 
-The `+`/`−`/`F`/`R` graph-control shortcuts this table once listed were removed (034 F1): the graph controls they name do not exist in the UI, so the rows were spec requirements the code ignored. They return with the round that builds zoom/fit controls.
+The `+`/`−`/`F`/`R` graph-control shortcuts this table once listed were removed (034 F1) because the controls did not exist. The controls exist since 059 §B — Fit / Reset / Zoom in / Zoom out as REAL buttons in a `role="toolbar"` on the canvas corner (`.pe-graph-controls`), keyboard-reachable by `Tab` + `Enter`, no shortcut layer to own. The single-key shortcuts did not return: the canvas is still not a focus target (§14), and buttons are the honest surface.
 
 Selection is bidirectional and single-sourced: `Enter`/`Space` (or a click) on a list item calls `selectNodeById()` (§5.4), which calls `cyNode.select()` on the canvas node — the `node:selected` pseudo-class the §5.3 stylesheet styles — and sets `aria-selected="true"`, `tabindex="0"` and focus on the matching `<li>` (roving tabindex). Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
 
@@ -1482,8 +1458,8 @@ The pipeline editor defines **app-specific semantic tokens** in `app.css` that d
 ```css
 :root {
     /* ============================================================
-       Graph node cards (§5.3) — neutral card; TYPE is shape, STATE
-       is an accent border, SELECTION is the ring
+       Graph node cards (§5.3) — neutral card; TYPE is the icon badge,
+       STATE is an accent border, SELECTION is the ring
        ============================================================ */
     --node-surface:        var(--surface-raised);
     --node-border:         var(--border-default);
@@ -1494,6 +1470,12 @@ The pipeline editor defines **app-specific semantic tokens** in `app.css` that d
     --node-success-accent: var(--accent-success);
     --node-failed-accent:  var(--accent-danger);
     --node-aborted-accent: var(--accent-warning);
+
+    /* Card geometry (059 §A): one source for the canvas box and the HTML
+       overlay — readDesignTokens() parses these for the Cytoscape style;
+       pipeline-editor.css uses them for the overlay div. */
+    --pe-card-w:           264px;
+    --pe-card-h:           164px;
 
     /* ============================================================
        Banner state fills (pipeline-editor.css .pe-banner) — the
@@ -1594,6 +1576,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-03 | v1.6 | graph node cards (059) | **§5.3 rewritten for the CARD, reversing the 2026-08-31 label-below contract** (the operator reviewed the 031 result on the live product, 2026-09-02: an empty box with a caption — *"I want to display total node execution time, dialect, template name and datasource name. It should be INSIDE the box"*). The five lines are specified: name (two-line clamp, `title` carries the full), type badge + vendored Lucide glyph (the per-type SHAPES are RETIRED — the icon badge carries TYPE), datasource · dialect (resolved client-side from `GET /api/v1/datasources`, the body is portable and carries only names; `tempdb · H2` from settings; a PIPELINE card names the child pipeline), template@version LEFT-truncated so the leaf survives (043), and the run line from `node_completed`'s FLAT `duration_ms`/`rows_out` — absent, not a placeholder, before any execution. Rendering: **route 1 decided** — `cytoscape-node-html-label` 1.2.2 vendored (pointer-events:none container, pan/zoom transform — verified against its source) paints the content OVER a canvas that still paints the chrome (state accents §6.2, caller double border, selection ring); state dots and run lines arrive as `data.state`/`data.run` writes the overlay re-renders on. Corner status dot (✓/✕/spinner/–) and edge PORTS specified. Card geometry is one token source (`--pe-card-w/h`). **§B:** the canvas fills the main pane (041 height math), `fitToView()` fits with padding then enforces a readable minimum zoom, dagre retuned (`nodeSep` 64, `rankSep` 176, `fit: false` — §5.1 updated), Fit/Reset/Zoom buttons keyboard-reachable (§14.1 note updated: controls exist, single-key shortcuts did not return). Edges: unbundled-bezier, endpoints on the card's right/left edges, per-edge horizontal control points computed post-layout (no `control-point-positions` in Cytoscape 3.34); a DASHED `edge.secondary` style is defined and deliberately unused (future template-import links). §6.2 unchanged. Appendix A gains the card geometry tokens. |
 | 2026-08-31 | v1.5 | recurrence defect round (034) | §14.1 reconciled with the code: `Home`/`End` (first/last option, roving tabindex) and `Escape` (topmost-first close — error modal, result panel, details panel; one surface per press, unconsumed when nothing is open) are now IMPLEMENTED in `a11y.js` and pinned by `a11y.test.mjs`; the `+`/`−`, `F`, `R` rows were REMOVED — the graph zoom/fit controls they name do not exist, so they were spec requirements the code ignored. They return with the round that builds those controls. |
 | 2026-08-31 | v1.4 | execute page redesign (032) | **§8 rewritten around the SQL section.** New §8.3: "show the SQL for a node" is a resolution problem, not a display problem — SQL lives in template entities (contract §2.3), so the new `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (scope `READ_RESOURCES`; the author-scoped free-form template render endpoint deliberately NOT reused) resolves the node's PINNED `{id, version}` and renders against the pipeline's own parameter context. Wire format is §6.3 JSON built by the page's own `coerceValue` — one coercion path for execute and preview. Three context outcomes documented: bound / sampled (`sampleContext()`, labelled) / rejected (named parameter, NO SQL — SQL from a value the executor would refuse is worse than none). PIPELINE nodes show the child-pipeline state, not an empty block. §8.1: SQL row added; the last-execution-stats and per-node error rows marked **not implemented in v1** (they previously read as shipped); long-value wrapping specified. §8.2's route fixed to `/templates/{id}/editor` — the spec previously named `/templates/{id}/versions/{version}/editor`, which does not exist. §8 panel regrouped into Identity / SQL / Configuration / Runtime sections; template is now a real link; Output renders "returns result to caller (default)" instead of `undefined`. **§9.3 new:** terminal SSE events split — `pipeline_failed` keeps the modal; `pipeline_completed` / `execution_aborted` report as toasts via `DpToast.show` (Shape D — the one client-side builder, for events with no HTTP response); all three gain the `announceStatus` call they lacked (an addition, not a preservation). **§10:** the result grid moved onto the shared `.ds-table` (the bespoke `.pe-result-table` styles deleted); §10.2 records that the 027b paging arithmetic is frozen — restyled, not rewired. §4.2/§12.1: the new partial and `sql-highlight.js` join the page structure. The SQL copy confirmation is deliberately NOT a toast (live region + 1.5s label swap) — §8.3 says why. |
 | 2026-08-31 | v1.3 | graph design (031) | §5.3 rewritten to the shipped stylesheet: node cards with the label BELOW the shape (was `text-valign: center` inside an 80×40 box, truncated at 20 chars — genuine change, operator contract), per-TYPE shapes (`type-dml` round-diamond, `type-ddl` round-tag, `pipeline-node` hexagon; classes renamed from the never-implemented `nodeTypeDQL` form), the `node.caller` marker (double border, contract §9) now actually emitted and styled, and SELECTION as the `node:selected` PSEUDO-CLASS with ring + underlay halo (was a `.selected` class the code never had; §5.4 corrected to match — selection is `cyNode.select()`, driven by init.js/a11y.js). State becomes an accent border via new `--node-*-accent` tokens (§6.2), superseding the `--node-*-bg/text` fill pairs — the second genuine change; the fill pairs remain only for the `.pe-banner` fills. §6.2: the unimplemented `failed` "brief flash" requirement WITHDRAWN; the running pulse specified honestly as a JS-driven `ele.animate` loop gated on `window.matchMedia("(prefers-reduced-motion: reduce)")` (canvas — CSS media queries cannot reach it). §5.1: layout options recorded as shipped — `edgeSep`, `padding`, and `nodeDimensionsIncludeLabels: true` (mandatory once labels sit below shapes); `marginX`/`marginY` noted as non-dagre options. §14.1/§14.2: node list corrected to roving tabindex (the previous markup gave `<li>`s no `tabindex` — the keyboard path was dead) and the `data-state` execution-state mirror. §3.4 bridge listing and Appendix A token map updated to the shipped token names. |

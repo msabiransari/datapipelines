@@ -3,12 +3,20 @@
 
 :root {
   --pe-sidebar-width: 280px;
-  --pe-details-width: 320px;
+  /* The inspector rail keeps 041's shared detail width (059 §B) — the template
+     editor's rail and this one are the same rail token, not two coincidences. */
+  --pe-details-width: var(--app-detail-width, 320px);
   --pe-toolbar-height: 48px;
   --pe-banner-height: auto;
   --pe-gap: var(--gap-md, 16px);
   --pe-radius: var(--radius-md, 8px);
   --pe-transition: 200ms ease;
+  /* Node card geometry (059 §A): ONE source for the box the canvas paints and the
+     HTML overlay that carries the text — graph.js reads these (with the numeric
+     fallbacks repeated there) so the Cytoscape node and the overlay div can never
+     disagree. Five lines at body size fit without shrinking type. */
+  --pe-card-w: 264px;
+  --pe-card-h: 164px;
   /* SQL highlight accents (032) — token references only; hex lives in the fallback slot. */
   --pe-sql-keyword: var(--accent-primary, #2563eb);
   --pe-sql-string: var(--accent-success, #16a34a);
@@ -21,7 +29,12 @@
 .pe-root {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--pe-toolbar-height) - 120px);
+  /* Full height below the sticky nav — the 041 math verbatim (059 §B): layouts/
+     default.html gives <main> padding-block var(--gap-lg), the nav adds its 1px
+     border; the floor keeps short screens usable. The old `100vh - toolbar - 120px`
+     approximation left dead bands above and below the canvas. */
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  min-height: 540px;
 }
 
 /* ---- Toolbar ---- */
@@ -216,6 +229,194 @@
 #cy-canvas {
   width: 100%;
   height: 100%;
+  /* cytoscape-node-html-label appends its overlay container INSIDE this element
+     (absolute, z-index 10, pointer-events none) — it must position against the
+     canvas's own box, not whichever ancestor happens to be positioned. */
+  position: relative;
+}
+
+/* ---- Node CARDS (059 §A) — the HTML overlay cytoscape-node-html-label renders ----
+ * The canvas paints the chrome (surface, border, state accent, caller double border,
+ * selection ring) under this overlay; the overlay is transparent and carries only the
+ * facts: name, type badge, datasource · dialect, template@version, run line, ports,
+ * status dot. Every value is a token, so the nine themes (dark included) re-skin the
+ * cards with the stylesheet swap alone — nothing here knows a colour. */
+.pe-card {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--pe-card-w);
+  height: var(--pe-card-h);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs, 4px);
+  padding: var(--gap-sm, 8px) var(--gap-md, 16px);
+  border-radius: var(--radius-md, 8px);
+  color: var(--node-label-text, var(--text-primary, #111827));
+  font-size: var(--text-sm, 0.875rem);
+  line-height: var(--leading-snug, 1.375);
+}
+
+/* 1. Name — the title: body size, semibold, AT MOST two lines, ellipsis only after
+ *    that (the clamp); the full name always rides on `title`. */
+.pe-card-title {
+  font-size: var(--text-base, 1rem);
+  font-weight: var(--weight-semibold, 600);
+  line-height: var(--leading-snug, 1.375);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* 2. Type badge — TYPE moved here from the retired per-type shapes (059 amends §5.3):
+ *    a card with text in it wants to be a rectangle; the badge + glyph say the kind. */
+.pe-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+}
+
+.pe-card-badge {
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-medium, 500);
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-inset, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+}
+
+.pe-card-type-icon,
+.pe-card-engine-icon {
+  color: var(--text-muted, #9ca3af);
+}
+
+/* 3–4. Datasource · dialect and template@version — secondary, muted, one line each.
+ *    The template line's text is already LEFT-truncated in JS (the leaf stays
+ *    visible); the ellipsis here is the right-edge safety net only. */
+.pe-card-line {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+  color: var(--text-secondary, #6b7280);
+  font-size: var(--text-sm, 0.875rem);
+  min-width: 0;
+}
+
+.pe-card-line span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-card-template {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+}
+
+/* 5. Run line — ABSENT before any execution (no placeholder); muted, mono for the
+ *    numbers, the elapsed time first ("1.2 s · 366 rows"). */
+.pe-card-run {
+  margin-top: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-secondary, #6b7280);
+}
+
+/* Status dot (059 §reference, "Type vs. state"): a corner badge so a static
+ * screenshot reads without the legend, BESIDE §6.2's accent border (which the
+ * canvas paints) — state is never colour-alone. */
+.pe-card-dot {
+  position: absolute;
+  top: calc(-1 * var(--space-2, 8px));
+  right: calc(-1 * var(--space-2, 8px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5, 20px);
+  height: var(--space-5, 20px);
+  border-radius: var(--radius-full, 50%);
+  background: var(--surface-default, #fff);
+  border: 1.5px solid var(--border-default, #e5e7eb);
+}
+
+.pe-card-dot .ds-icon {
+  /* The glyph is one size smaller than the dot so it sits centered with room. */
+  --icon-size: var(--icon-xs, 12px);
+}
+
+.pe-card-dot-success {
+  border-color: var(--node-success-accent, var(--accent-success, #16a34a));
+  color: var(--node-success-accent, var(--accent-success, #16a34a));
+}
+
+.pe-card-dot-failed {
+  border-color: var(--node-failed-accent, var(--accent-danger, #dc2626));
+  color: var(--node-failed-accent, var(--accent-danger, #dc2626));
+}
+
+.pe-card-dot-aborted {
+  border-color: var(--node-aborted-accent, var(--accent-warning, #f59e0b));
+  color: var(--node-aborted-accent, var(--accent-warning, #f59e0b));
+}
+
+/* Running: the spinner reuses motion.css's ds-spin keyframes, drawn small; under
+ * prefers-reduced-motion it is a still ring in the running accent. */
+.pe-card-dot-running {
+  border-color: var(--node-running-accent, var(--accent-primary, #2563eb));
+  border-top-color: transparent;
+  animation: ds-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-card-dot-running {
+    animation: none;
+    border-top-color: var(--node-running-accent, var(--accent-primary, #2563eb));
+  }
+}
+
+/* Ports (059 §reference): the dots edges plug into — out on the right edge, in on
+ * the left. The edges END at these points (source-endpoint/target-endpoint); the
+ * dots make the landing place visible. */
+.pe-card-port {
+  position: absolute;
+  top: 50%;
+  width: var(--space-2, 8px);
+  height: var(--space-2, 8px);
+  margin-top: calc(-1 * var(--space-1, 4px));
+  border-radius: var(--radius-full, 50%);
+  background: var(--surface-default, #fff);
+  border: 1.5px solid var(--border-default, #e5e7eb);
+}
+
+.pe-card-port-out {
+  right: calc(-1 * var(--space-1, 4px));
+}
+
+.pe-card-port-in {
+  left: calc(-1 * var(--space-1, 4px));
+}
+
+/* ---- Graph view controls (059 §B) — fit, reset, zoom in/out, keyboard reachable ---- */
+.pe-graph-controls {
+  position: absolute;
+  top: var(--gap-sm, 8px);
+  right: var(--gap-sm, 8px);
+  display: flex;
+  gap: var(--gap-xs, 4px);
+  padding: var(--gap-xs, 4px);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-overlay, #fff);
+  border: 1px solid var(--border-default, #e5e7eb);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.06));
+  z-index: var(--z-dropdown, 100);
+}
+
+.pe-graph-controls .ds-button {
+  /* Icon-only buttons: square, padding-free, the glyph centred. */
+  padding: var(--gap-xs, 4px);
+  line-height: 1;
 }
 
 /* ---- Accessible node list ---- */
