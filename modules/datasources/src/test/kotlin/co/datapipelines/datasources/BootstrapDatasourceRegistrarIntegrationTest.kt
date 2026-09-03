@@ -16,9 +16,6 @@ import org.junit.jupiter.api.io.TempDir
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.writeText
@@ -41,7 +38,6 @@ import kotlin.io.path.writeText
  * `initializationFailTimeout = -1`, so the pool is constructed and closed without connecting —
  * the validation being proved here is the pool BUILD, and the driver must be loadable for it.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class BootstrapDatasourceRegistrarIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -52,10 +48,10 @@ class BootstrapDatasourceRegistrarIntegrationTest {
     @TempDir
     lateinit var tempDir: Path
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -263,10 +259,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
             ),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private companion object {
         const val PASSWORD = "bootstrap-file-secret"
@@ -293,13 +286,5 @@ class BootstrapDatasourceRegistrarIntegrationTest {
                 readonly: false
                 global: true
             """.trimIndent()
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

@@ -10,9 +10,6 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.URI
@@ -53,7 +50,6 @@ import javax.crypto.spec.SecretKeySpec
  * behaviors stay with the unit/E2E layers. The jar is rebuilt by the `bootJar` dependency
  * wired onto the integration test task, so the smoke always runs the CURRENT tree.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JarSmokeE2eTest {
     private val http: HttpClient = HttpClient.newHttpClient()
@@ -220,8 +216,8 @@ class JarSmokeE2eTest {
             "SPRING_DATASOURCE_URL" to postgres.jdbcUrl,
             "SPRING_DATASOURCE_USERNAME" to postgres.username,
             "SPRING_DATASOURCE_PASSWORD" to postgres.password,
-            "DATAPIPELINES_REDIS_HOST" to redis.host,
-            "DATAPIPELINES_REDIS_PORT" to redis.getMappedPort(REDIS_PORT).toString(),
+            "DATAPIPELINES_REDIS_HOST" to SharedE2e.redisHost,
+            "DATAPIPELINES_REDIS_PORT" to SharedE2e.redisPort.toString(),
             "DATAPIPELINES_JWT_SECRET" to jwtSecret,
             "DATAPIPELINES_DB_ENCRYPTION_KEY" to encryptionKey,
             "DATAPIPELINES_AUTH_BASE_URL" to "http://127.0.0.1:$appPort",
@@ -402,20 +398,10 @@ class JarSmokeE2eTest {
 
         val random = SecureRandom()
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — the jar's Flyway finds the schema already migrated (or migrates it first). */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         // Known-to-the-test credentials: the session JWT is signed over the secret, and the
         // encryption key is 32 decoded bytes (§7). Generated per run; no literals (HIGH-2).

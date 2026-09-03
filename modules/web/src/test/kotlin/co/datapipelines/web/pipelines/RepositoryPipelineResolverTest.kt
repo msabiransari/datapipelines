@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRepoFiles
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -18,9 +19,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -29,7 +27,6 @@ import java.util.UUID
  * and the D7 rule — a soft-deleted pipeline still resolves for EXISTING references, flagged
  * `deleted`, so save-time validation can block only the new ones.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RepositoryPipelineResolverTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -37,15 +34,10 @@ class RepositoryPipelineResolverTest {
 
     private val userId = UUID.randomUUID()
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
-        jdbc =
-            NamedParameterJdbcTemplate(
-                DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-                    setDriverClassName(postgres.driverClassName)
-                },
-            )
-        TestRepoFiles.migrationPaths().forEach { path -> jdbc.jdbcTemplate.execute(TestRepoFiles.read(path)) }
+    fun connect() {
+        jdbc = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
     }
 
     @BeforeEach
@@ -129,13 +121,5 @@ class RepositoryPipelineResolverTest {
     private companion object {
         /** The V4-seeded `default` workspace every repository call in this suite is scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

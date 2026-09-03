@@ -13,9 +13,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 
 /**
@@ -35,12 +32,11 @@ import java.sql.DriverManager
  * all — so an H2-mapped run produces a `type_mapping.unknown_source_type` warning per column. The
  * warning list is therefore a direct read-out of which mapper actually ran.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PostgresSourceIntegrationTest {
     @BeforeAll
     fun seed() {
-        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+        DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
                     """
@@ -144,7 +140,7 @@ class PostgresSourceIntegrationTest {
         runBlocking<Unit> {
             // F13: `writeback_failed` end to end, triggered by a real NOT NULL violation rather than
             // a simulated one — and the transaction must roll back, leaving the target untouched.
-            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
                 connection.createStatement().use { statement ->
                     statement.execute("DROP TABLE IF EXISTS wb_target")
                     statement.execute("CREATE TABLE wb_target (id bigint, note text NOT NULL)")
@@ -168,7 +164,7 @@ class PostgresSourceIntegrationTest {
                 }.errorCode shouldBe PipelineErrorCodes.Node.WRITEBACK_FAILED
             }
 
-            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
                 connection.createStatement().use { statement ->
                     statement.executeQuery("SELECT COUNT(*) FROM wb_target").use { rs ->
                         rs.next()
@@ -184,20 +180,19 @@ class PostgresSourceIntegrationTest {
             name = DATASOURCE,
             displayName = DATASOURCE,
             dialect = Dialect.POSTGRES,
-            jdbcUrl = postgres.jdbcUrl,
-            username = postgres.username,
-            password = postgres.password,
+            jdbcUrl = db.jdbcUrl,
+            username = db.username,
+            password = db.password,
         )
 
     private companion object {
         const val DATASOURCE = "pg_orders"
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("sourcedb")
-                .withUsername("dp")
-                .withPassword("dp")
+        /**
+         * A scratch database on the module's shared container: the pipeline's SOURCE —
+         * the `orders` table is this suite's own fixture, not shipped schema, so it must
+         * not see the migrated database the other suites use.
+         */
+        val db = SharedPostgres.scratchDatabase("source_orders")
     }
 }

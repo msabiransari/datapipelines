@@ -35,9 +35,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 import java.sql.ResultSet
 import java.time.Instant
@@ -56,7 +53,6 @@ import java.util.UUID
  *  - [ResultCursor] over a real [RedisResultStore]: the stored result pages through
  *    `ResultStore.keyFor` (carry-forward #7).
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class WebPersistenceIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -68,17 +64,12 @@ class WebPersistenceIntegrationTest {
     private lateinit var userId: UUID
     private lateinit var pipelineId: UUID
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
-        jdbc =
-            NamedParameterJdbcTemplate(
-                DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-                    setDriverClassName(postgres.driverClassName)
-                },
-            )
-        // The shipped migrations in version order — V1 alone would miss the §4.6 lineage
-        // columns (V3) ExecutionRepository.create now writes.
-        TestRepoFiles.migrationPaths().forEach { path -> jdbc.jdbcTemplate.execute(TestRepoFiles.read(path)) }
+    fun connect() {
+        jdbc = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
+        // (The shared container's migrations include the §4.6 lineage columns (V3)
+        // ExecutionRepository.create now writes.)
     }
 
     @BeforeEach
@@ -268,13 +259,5 @@ class WebPersistenceIntegrationTest {
     private companion object {
         /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

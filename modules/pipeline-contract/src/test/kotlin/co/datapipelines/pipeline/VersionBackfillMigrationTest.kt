@@ -9,9 +9,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -32,7 +29,6 @@ import java.util.UUID
  * `TemplateRepositoryIntegrationTest` mirrors the template half of the backfill with the
  * real `TemplateRepository`.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class VersionBackfillMigrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -42,7 +38,7 @@ class VersionBackfillMigrationTest {
 
     @BeforeAll
     fun createPreV6SchemaThenMigrate() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(DriverManagerDataSource(db.jdbcUrl, db.username, db.password))
         // V1–V5 only, by version number: the state a live deployment was in before V6.
         val dir = Fixtures.repoDirectory("modules/app/src/main/resources/db/migration")
         val preV6 = ShippedMigrations.migrations(dir).filter { it.first < 6 }
@@ -52,6 +48,10 @@ class VersionBackfillMigrationTest {
         insertPreV6Pipeline("legacy_pipeline", """{"schema_version":1,"name":"legacy_pipeline"}""")
         insertPreV6Pipeline("second_legacy", """{"schema_version":1,"name":"second_legacy"}""")
         insertPreV6Pipeline("third_legacy", """{"schema_version":1,"name":"third_legacy"}""")
+        // Owns the A2 proof's draft: that test LEAVES a version-2 DRAFT behind (the same
+        // reason third_legacy exists — JUnit order is not fixed, and the RELEASED-rows test
+        // below counts legacy_pipeline's versions unfiltered).
+        insertPreV6Pipeline("precondition_legacy", """{"schema_version":1,"name":"precondition_legacy"}""")
 
         // …and then V6, exactly as Flyway would apply it to a deployment holding those rows.
         val v6 = ShippedMigrations.paths().first { it.contains("V6__") }
@@ -82,7 +82,7 @@ class VersionBackfillMigrationTest {
 
     @Test
     fun `a pre-migration row passes its first precondition check - the A2 proof`() {
-        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "legacy_pipeline"))
+        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "precondition_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
 
         // The hash the migration stored is the hash the runtime's own expression computes…
@@ -95,7 +95,7 @@ class VersionBackfillMigrationTest {
             repository.createDraft(
                 WORKSPACE_ID,
                 record.id,
-                serializer.write(Fixtures.pipeline(name = "legacy_pipeline")),
+                serializer.write(Fixtures.pipeline(name = "precondition_legacy")),
                 detail.bodyHash,
                 owner,
             )
@@ -186,20 +186,15 @@ class VersionBackfillMigrationTest {
             ),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
     private companion object {
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        /**
+         * A scratch database on the module's shared container: this suite builds the schema
+         * PART-WAY on purpose (V1–V5, then V6), so it must not see the fully-migrated
+         * database the rest of the module runs against — the backfill's whole subject is
+         * the before/after boundary.
+         */
+        val db = SharedPostgres.scratchDatabase("pre_v6_backfill")
     }
 }

@@ -20,9 +20,6 @@ import org.junit.jupiter.api.io.TempDir
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.writeText
@@ -55,7 +52,6 @@ import kotlin.io.path.writeText
  * behaviour of the pre-rule-3 registrar: see the row, skip it, do nothing. Running it first is
  * what makes "the fix fixes something" a measurement rather than a claim.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class BootstrapCredentialResyncIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -67,10 +63,10 @@ class BootstrapCredentialResyncIntegrationTest {
     @TempDir
     lateinit var tempDir: Path
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -462,10 +458,7 @@ class BootstrapCredentialResyncIntegrationTest {
             ),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private companion object {
         const val NAME = "sample-trips"
@@ -486,12 +479,7 @@ class BootstrapCredentialResyncIntegrationTest {
 
         const val V9_COLUMNS = ", last_test_at, last_test_ok, last_test_message"
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        /** The shared container — this suite grants its demo role CONNECT on the real database. */
+        val postgres get() = SharedPostgres.postgres
     }
 }

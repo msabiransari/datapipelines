@@ -11,9 +11,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Instant
 import java.util.UUID
 
@@ -26,7 +23,6 @@ import java.util.UUID
  * cross-workspace isolation proof by `WorkspaceIsolationIntegrationTest`
  * (tests/integration-tests); this suite pins what the database actually stores.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class WorkspaceProvisioningIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -38,9 +34,8 @@ class WorkspaceProvisioningIntegrationTest {
     private lateinit var admin: User
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -146,21 +141,5 @@ class WorkspaceProvisioningIntegrationTest {
         svc.memberships(admin.id).map { it.workspaceName }.toSet() shouldBe setOf("zeta", "alpha")
     }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource().apply {
-            setDriverClassName("org.postgresql.Driver")
-            url = postgres.jdbcUrl
-            username = postgres.username
-            password = postgres.password
-        }
-
-    private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }

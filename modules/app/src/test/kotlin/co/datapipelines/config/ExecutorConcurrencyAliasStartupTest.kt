@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.SharedPostgres
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -13,10 +14,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -35,7 +32,6 @@ import java.util.Base64
  * appenders added before it, while an initializer runs after logging settles and before any
  * bean — exactly around the validator's `@PostConstruct`.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ExecutorConcurrencyAliasStartupTest {
     @Test
@@ -91,11 +87,11 @@ class ExecutorConcurrencyAliasStartupTest {
             "--spring.datasource.url=${postgres.jdbcUrl}",
             "--spring.datasource.username=${postgres.username}",
             "--spring.datasource.password=${postgres.password}",
-            "--spring.data.redis.host=${redis.host}",
-            "--spring.data.redis.port=${redis.getMappedPort(REDIS_PORT)}",
+            "--spring.data.redis.host=${SharedRedis.host}",
+            "--spring.data.redis.port=${SharedRedis.port}",
             "--spring.data.redis.password=",
-            "--datapipelines.redis.host=${redis.host}",
-            "--datapipelines.redis.port=${redis.getMappedPort(REDIS_PORT)}",
+            "--datapipelines.redis.host=${SharedRedis.host}",
+            "--datapipelines.redis.port=${SharedRedis.port}",
             "--datapipelines.jwt.secret=$SECRET",
             "--datapipelines.db.encryption-key=$SECRET",
             "--datapipelines.auth.local.enabled=true",
@@ -124,24 +120,10 @@ class ExecutorConcurrencyAliasStartupTest {
         }
     }
 
-    companion object {
-        private const val REDIS_PORT = 6379
-
+    private companion object {
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) })
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
-
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedPostgres.postgres
     }
 }

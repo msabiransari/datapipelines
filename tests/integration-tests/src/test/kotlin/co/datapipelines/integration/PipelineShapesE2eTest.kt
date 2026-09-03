@@ -17,9 +17,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.URI
@@ -36,7 +33,6 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 class PipelineShapesE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -50,7 +46,7 @@ class PipelineShapesE2eTest {
         ensureAuthSeeded()
         seedSourceUsers()
 
-        val sourceJdbcUrl = "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb"
+        val sourceJdbcUrl = source.jdbcUrl
         registerDatasource(sourceJdbcUrl)
         createDagTemplates()
 
@@ -138,7 +134,7 @@ class PipelineShapesE2eTest {
     @Test
     fun `write-back pipeline with zero caller nodes completes without data_ready`() {
         ensureAuthSeeded()
-        val sourceJdbcUrl = "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb"
+        val sourceJdbcUrl = source.jdbcUrl
         registerDatasource(sourceJdbcUrl)
 
         DriverManager.getConnection(source.jdbcUrl, source.username, source.password).use { connection ->
@@ -212,7 +208,7 @@ class PipelineShapesE2eTest {
     @Test
     fun `cancellation aborts a running execution with execution_aborted event`() {
         ensureAuthSeeded()
-        val sourceJdbcUrl = "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb"
+        val sourceJdbcUrl = source.jdbcUrl
         registerDatasource(sourceJdbcUrl)
         seedSourceUsers()
 
@@ -270,7 +266,7 @@ class PipelineShapesE2eTest {
     @Test
     fun `admin scope sees other users executions, read scope does not`() {
         ensureAuthSeeded()
-        val sourceJdbcUrl = "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb"
+        val sourceJdbcUrl = source.jdbcUrl
         registerDatasource(sourceJdbcUrl)
         seedSourceUsers()
 
@@ -401,7 +397,7 @@ class PipelineShapesE2eTest {
     private fun seedSourceUsers() {
         DriverManager
             .getConnection(
-                "jdbc:postgresql://${source.host}:${source.getMappedPort(POSTGRES_PORT)}/testdb",
+                source.jdbcUrl,
                 source.username,
                 source.password,
             ).use { connection ->
@@ -417,13 +413,17 @@ class PipelineShapesE2eTest {
                         )
                         """.trimIndent(),
                     )
+                    // The seed OWNS this table: three tests call this helper and the old
+                    // ON CONFLICT DO NOTHING was a no-op (email carries no unique
+                    // constraint), so a shuffled order stacked 3 rows per call and the
+                    // DAG test counted 6 active where it asserts 2. Truncate, then seed.
+                    statement.execute("TRUNCATE users")
                     statement.execute(
                         """
                         INSERT INTO users (email, name, is_active, created_at) VALUES
                             ('${ACTIVE_EMAILS[1]}', 'Older Active', TRUE,  NOW() - INTERVAL '2 days'),
                             ('inactive@datapipelines.test', 'Inactive', FALSE, NOW() - INTERVAL '1 day'),
                             ('${ACTIVE_EMAILS[0]}', 'Newer Active', TRUE,  NOW())
-                        ON CONFLICT DO NOTHING
                         """.trimIndent(),
                     )
                 }
@@ -606,8 +606,6 @@ class PipelineShapesE2eTest {
     // ---------------------------------------------------------------- companion
 
     companion object {
-        private const val REDIS_PORT = 6379
-        private const val POSTGRES_PORT = 5432
         private const val SECRET_BYTES = 32
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val CANCEL_SLEEP_SECONDS = 15
@@ -634,28 +632,17 @@ class PipelineShapesE2eTest {
         private var authSeeded = false
         private val authLock = Any()
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val source =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("testdb")
-                .withUsername("postgres")
-                .withPassword("postgres")
+        /**
+         * The pipeline's SOURCE database: a scratch database on the shared container — its
+         * orders/users fixture tables are this suite's own schema, deliberately separate
+         * from the migrated metadata database.
+         */
+        private val source = SharedE2e.scratchDatabase("shapes_source")
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String =
             Base64
@@ -674,10 +661,10 @@ class PipelineShapesE2eTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

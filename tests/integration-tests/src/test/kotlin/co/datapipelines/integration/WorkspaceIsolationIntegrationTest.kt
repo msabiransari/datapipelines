@@ -12,9 +12,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.time.Instant
@@ -48,7 +45,6 @@ import javax.crypto.spec.SecretKeySpec
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-@Testcontainers
 class WorkspaceIsolationIntegrationTest {
     @LocalServerPort
     private var port: Int = 0
@@ -257,7 +253,6 @@ class WorkspaceIsolationIntegrationTest {
         private const val SESSION_COOKIE = "dp_session"
         private const val CSRF_COOKIE = "dp_csrf"
         private const val CSRF_HEADER = "DP-CSRF-Token"
-        private const val REDIS_PORT = 6379
         private const val SECRET_BYTES = 32
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
@@ -325,6 +320,10 @@ class WorkspaceIsolationIntegrationTest {
             if (seeded) return
             seeded = true
 
+            // This suite's world (acme/globex, alice/bob/carol) is the SAME fixture
+            // vocabulary two other suites seed — plain INSERTs that must find an empty
+            // database, exactly as their former per-suite container guaranteed.
+            E2eClean.beforeSeeding()
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 seedRows(connection)
                 seedContent(connection)
@@ -423,20 +422,10 @@ class WorkspaceIsolationIntegrationTest {
                 }
         }
 
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
+        /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
+        private val postgres get() = SharedE2e.postgres
 
-        @Container
-        @JvmStatic
-        private val redis =
-            GenericContainer("redis:7-alpine")
-                .withCommand("redis-server", "--maxmemory-policy", "noeviction")
-                .withExposedPorts(REDIS_PORT)
+        private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String =
             Base64
@@ -455,10 +444,10 @@ class WorkspaceIsolationIntegrationTest {
             registry.add("spring.datasource.password") { postgres.password }
 
             registry.add("spring.data.redis.host") { redis.host }
-            registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("spring.data.redis.port") { SharedE2e.redisPort }
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
-            registry.add("datapipelines.redis.port") { redis.getMappedPort(REDIS_PORT) }
+            registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             registry.add("datapipelines.jwt.secret") { jwtSecret }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

@@ -16,19 +16,16 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
  * [TemplateRepository] against a real Postgres running the **shipped** schema.
  *
- * Executes `app`'s real migrations off disk in version order rather than running Flyway — the
- * same discipline `PipelineRepositoryIntegrationTest` documents: module-structure §3.1 rule 2
- * keeps the Flyway dependency in `app` only, so a domain module never gains a schema-creation
- * tool, yet the test still runs the exact DDL the application migrates with (including the D3
- * `no params_schema` column shape and the V4 surrogate-key re-key).
+ * Runs against the shipped schema — `app`'s real migrations in version order, applied once
+ * per JVM by [SharedPostgres]: module-structure §3.1 rule 2 keeps the Flyway dependency in
+ * `app` only, so a domain module never gains a schema-creation tool, yet the test runs the
+ * exact DDL the application migrates with (including the D3 `no params_schema` column shape
+ * and the V4 surrogate-key re-key).
  *
  * `LargeClass` is suppressed for the same reason `PipelineRepositoryIntegrationTest`
  * suppresses it: the version-lifecycle round made this suite the repository's contract in
@@ -36,7 +33,6 @@ import java.util.UUID
  * schema — and splitting it would scatter one table's invariants across files.
  */
 @Suppress("LargeClass")
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemplateRepositoryIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -46,10 +42,10 @@ class TemplateRepositoryIntegrationTest {
     /** The V4-seeded `default` workspace this suite re-seeds after every truncate — a pinned literal, not a guess. */
     private val workspaceId: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText()) }
     }
 
     @BeforeEach
@@ -813,26 +809,5 @@ class TemplateRepositoryIntegrationTest {
     private fun existsRows(table: String): Int =
         checkNotNull(jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
-    private companion object {
-        /**
-         * The shipped migrations in version order — DERIVED from the migration directory
-         * (`ShippedMigrations`), never hand-copied: this list said "V1–V4" for two migrations
-         * after V4 landed (035/H), and a hand-maintained copy re-acquires exactly that drift
-         * the moment the next migration ships.
-         */
-        val MIGRATION_PATHS: List<String> = ShippedMigrations.paths()
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }

@@ -15,16 +15,12 @@ import org.junit.jupiter.api.TestInstance
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 
 /**
  * The first-admin seed (auth.md §5A.2) against a real Postgres: create-if-absent,
  * idempotent across restarts, hash form stored verbatim, plaintext form hashed and
  * never logged, and the still-pending one-time credential visible as a startup WARN.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LocalAdminSeederTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -34,9 +30,8 @@ class LocalAdminSeederTest {
     private lateinit var hasher: RecordingHasher
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -167,10 +162,7 @@ class LocalAdminSeederTest {
             jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE event = '$event'", emptyMap<String, Any>(), Int::class.java),
         ) { "COUNT(*) returned no row" }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     /** Records hash calls so the hash-form seed can prove the server never hashes (or sees) anything. */
     private class RecordingHasher : SecretHasher {
@@ -191,13 +183,5 @@ class LocalAdminSeederTest {
         const val ADMIN_EMAIL = "admin@datapipelines.test"
         const val SEED_PASSWORD = "one-time-seed-password-123"
         const val PRECOMPUTED_HASH = "\$argon2id\$v=19\$m=19456,t=2,p=1\$c2VlZA\$precomputed"
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

@@ -10,9 +10,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 
 /**
  * The §4.5 system service account (R7) against a real database — the sibling of
@@ -33,16 +30,14 @@ import org.testcontainers.junit.jupiter.Testcontainers
  * the invariant is "this row never produces a grant event", and only counting rows can show
  * that a call is absent rather than merely unstubbed.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SystemActorProvisioningIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var users: UserRepository
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -200,18 +195,5 @@ class SystemActorProvisioningIntegrationTest {
             emptyMap<String, Any>(),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
-    private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }

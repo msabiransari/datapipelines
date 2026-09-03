@@ -850,6 +850,7 @@ datapipelines:
 - Cross-module suite runs on `./gradlew integrationTest` (delegates to `:tests:integration-tests:test`); module-local ones run with the module's normal `test` task.
 - Slower; use real databases (Testcontainers), real H2, real HTTP layer.
 - Cover: end-to-end pipeline execution, MCP tool calls, REST endpoints, SSE streams.
+- **One container per module per test JVM, not one per suite** (round 060): each module's suites share a `SharedPostgres`/`SharedRedis` singleton started and reset on first touch; `app` and the E2E module migrate through the first context's Flyway, the domain modules apply the shipped migrations once over JDBC (§3.1 rule 2 keeps the Flyway dependency in `app`). Sharing is safe by rule, and the rule is load-bearing: **each spec cleans the tables it touches** (`TRUNCATE ... CASCADE` + re-seed), seeds carry suite-unique identities, suites with global or exact-set assertions reset via the module's clean helper before seeding, and partial-migration suites take a scratch *database* on the shared container. Suites that legitimately need isolated deployments keep their own containers (the promotion E2E pair). Verified by shuffled-method-order runs (two seeds, `DEVELOPMENT.md` §9.3); adding a suite that relies on a fresh container instead of cleaning will fail those runs.
 
 ### 9.3 Smoke tests
 

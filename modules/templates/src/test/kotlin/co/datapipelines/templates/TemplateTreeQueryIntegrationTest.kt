@@ -2,19 +2,18 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -39,13 +38,14 @@ import java.util.UUID
  * (600 names where 200 are expected) and on `no level request returns the whole list`. A
  * guard that cannot go red on the change it guards is not a guard.
  *
- * Schema and container discipline mirror [TemplateRepositoryIntegrationTest]: the shipped
- * migrations are applied off disk in version order through plain JDBC, because Flyway lives
- * in `app` alone (module-structure §3.1 rule 2).
+ * Schema and container discipline mirror [TemplateRepositoryIntegrationTest]: the shared
+ * [SharedPostgres] container arrives already migrated (Flyway lives in `app` alone,
+ * module-structure §3.1 rule 2), so this class pays no container start and no migration
+ * run — its time is the fixture and the reads.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemplateTreeQueryIntegrationTest {
+    private lateinit var dataSource: HikariDataSource
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var repository: TemplateRepository
     private lateinit var actor: UUID
@@ -56,11 +56,26 @@ class TemplateTreeQueryIntegrationTest {
     /**
      * The fixture is built ONCE for the class: 602 rows through the real write path is the
      * expensive part, and every test here is a pure read.
+     *
+     * The template is bound to a small **pooled** DataSource for this class only: 600+
+     * `create()` calls over the module's default unpooled source pay a fresh physical
+     * connection per statement, which is ~8 s of pure handshake on an otherwise idle box
+     * (measured, round 060) — the reads this suite exists for are unaffected by pooling,
+     * and the concurrency suites that NEED per-call connections use their own unpooled
+     * sources. The pool is closed in [AfterAll].
      */
     @BeforeAll
     fun seed() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
-        MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(TemplateFixtures.repoFile(it).readText()) }
+        val pool = SharedPostgres.dataSource()
+        val config =
+            HikariConfig().apply {
+                jdbcUrl = pool.url
+                username = pool.username
+                password = pool.password
+                maximumPoolSize = 4
+            }
+        dataSource = HikariDataSource(config)
+        jdbc = NamedParameterJdbcTemplate(dataSource)
         repository = TemplateRepository(jdbc)
         jdbc.jdbcTemplate.execute("TRUNCATE templates, users CASCADE")
         jdbc.jdbcTemplate.execute(
@@ -90,6 +105,12 @@ class TemplateTreeQueryIntegrationTest {
         create("axb/decoy")
         // §5.3: an html template carries no dialect. The type filter must see it.
         create("acme/finance/report.html", type = TemplateType.HTML)
+    }
+
+    /** Releases the fixture pool; the shared container outlives this class. */
+    @AfterAll
+    fun closePool() {
+        dataSource.close()
     }
 
     @Test
@@ -216,14 +237,7 @@ class TemplateTreeQueryIntegrationTest {
         body = if (type == TemplateType.SQL) "SELECT 1" else "<p>hi</p>",
     )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
     private companion object {
-        val MIGRATION_PATHS: List<String> = ShippedMigrations.paths()
-
         val FOLDERS = listOf("f1", "f2", "f3")
         const val LEAVES_PER_FOLDER = 200
 
@@ -232,13 +246,5 @@ class TemplateTreeQueryIntegrationTest {
 
         /** Zero-padded so `name`-ordering and numeric ordering agree and the assertions can be literal. */
         fun leafName(i: Int): String = "leaf_%03d".format(i)
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

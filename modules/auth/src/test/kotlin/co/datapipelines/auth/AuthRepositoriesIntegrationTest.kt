@@ -14,9 +14,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Instant
 
 /**
@@ -26,7 +23,6 @@ import java.time.Instant
  * domain modules carry no Flyway dependency (module-structure §3.1 rule 2), the same
  * discipline as the sibling `PipelineRepositoryIntegrationTest`.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuthRepositoriesIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -35,9 +31,8 @@ class AuthRepositoriesIntegrationTest {
     private lateinit var audit: AuditLogger
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -298,20 +293,7 @@ class AuthRepositoriesIntegrationTest {
         credential.lockedUntil.shouldBeNull()
     }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
-    private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }
 
 /** The V4-seeded `default` workspace (metadata-db §4.11) — a legitimate test pin: these suites seed the default world. */

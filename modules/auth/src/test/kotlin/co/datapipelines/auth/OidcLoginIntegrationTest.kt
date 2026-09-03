@@ -4,7 +4,6 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
@@ -14,7 +13,6 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.utility.MountableFile
 import java.net.URI
@@ -50,12 +48,6 @@ class OidcLoginIntegrationTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(20))
             .build()
-
-    @BeforeAll
-    fun createSchema() {
-        // V1 + V4: the login/session path now resolves workspaces (slice 2).
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
-    }
 
     @Test
     fun `a full OIDC code flow issues dp_session and provisions the bootstrap admin`() {
@@ -196,16 +188,11 @@ class OidcLoginIntegrationTest {
         @JvmStatic
         val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
 
-        // Started explicitly in the init block below — NOT via @Testcontainers/@Container.
-        // With @SpringBootTest, the context (and its @DynamicPropertySource) can load before
-        // the Testcontainers extension's beforeAll runs, so the mapped ports would not yet
-        // exist; a static-init start guarantees both containers are up first. Ryuk reaps them.
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        // The module's shared, already-started container: any @DynamicPropertySource
+        // supplier resolves it lazily, so no explicit static-init ordering is needed for
+        // the database. Keycloak stays this suite's own container and keeps the explicit
+        // start below — the provider is the test's subject and nothing else uses it.
+        val postgres get() = SharedPostgres.postgres
 
         @JvmStatic
         val keycloak: GenericContainer<*> =
@@ -215,6 +202,10 @@ class OidcLoginIntegrationTest {
                     MountableFile.forClasspathResource("keycloak/realm-datapipelines.json"),
                     "/opt/keycloak/data/import/realm-datapipelines.json",
                 ).withCommand("start-dev", "--import-realm")
+                // Reuse-declared like the shared containers (DEVELOPMENT.md): a no-op
+                // unless the local opt-in is set, and a ~40 s Keycloak boot saved when
+                // it is. The realm import re-runs nothing on reuse — the realm persists.
+                .withReuse(true)
                 .waitingFor(
                     Wait
                         .forHttp("/realms/datapipelines/.well-known/openid-configuration")
@@ -226,7 +217,6 @@ class OidcLoginIntegrationTest {
                 )
 
         init {
-            postgres.start()
             keycloak.start()
         }
 

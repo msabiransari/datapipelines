@@ -13,9 +13,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Instant
 import java.util.UUID
 
@@ -26,7 +23,6 @@ import java.util.UUID
  * (module-structure §3.1 rule 2). Proves the metadata round-trip metadata-db §4.10 defines,
  * including the `BYTEA` credential and the `JSONB` `properties_json`.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DatasourceRepositoryIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -35,12 +31,10 @@ class DatasourceRepositoryIntegrationTest {
 
     private val encryptor = CredentialEncryptor.fromBase64Key(test32ByteKeyBase64())
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        // The shipped migrations in version order — the ONE shared list (ShippedMigrations),
-        // so a new migration lands in every suite that applies them, never a stale copy.
-        ShippedMigrations.paths().forEach { path -> jdbc.jdbcTemplate.execute(TestFiles.repoFile(path).readText()) }
     }
 
     @BeforeEach
@@ -356,18 +350,5 @@ class DatasourceRepositoryIntegrationTest {
             ),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
-    private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }

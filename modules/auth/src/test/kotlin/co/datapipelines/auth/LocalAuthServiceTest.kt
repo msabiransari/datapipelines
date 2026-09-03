@@ -12,9 +12,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 
 /**
  * The local-login security contract (auth.md §5A) against a real Postgres: the
@@ -27,7 +24,6 @@ import org.testcontainers.junit.jupiter.Testcontainers
  * path must burn exactly one Argon2 verification against the dummy hash, or
  * response timing enumerates valid emails (§5A.5).
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LocalAuthServiceTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -46,9 +42,8 @@ class LocalAuthServiceTest {
         )
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -169,10 +164,7 @@ class LocalAuthServiceTest {
             jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE event = '$event'", emptyMap<String, Any>(), Int::class.java),
         ) { "COUNT(*) returned no row" }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     /**
      * Records every encoded hash it is asked to verify against — the observable that
@@ -200,13 +192,5 @@ class LocalAuthServiceTest {
         const val WRONG_PASSWORD = "wrong-password"
         const val IP = "10.0.0.9"
         const val AGENT = "LocalAuthServiceTest/1.0"
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

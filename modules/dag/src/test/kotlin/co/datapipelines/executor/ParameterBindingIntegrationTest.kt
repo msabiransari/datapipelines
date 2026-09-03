@@ -16,9 +16,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
@@ -40,7 +37,6 @@ import java.util.UUID
  *    the save-time rule is what stops new ones. See `ParameterBindingValidationTest` /
  *    the `ReferenceRules` tests for the refusal side.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ParameterBindingIntegrationTest {
     @BeforeAll
@@ -226,23 +222,22 @@ class ParameterBindingIntegrationTest {
             name = DATASOURCE,
             displayName = DATASOURCE,
             dialect = Dialect.POSTGRES,
-            jdbcUrl = postgres.jdbcUrl,
-            username = postgres.username,
-            password = postgres.password,
+            jdbcUrl = db.jdbcUrl,
+            username = db.username,
+            password = db.password,
         )
 
-    private fun jdbc() = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+    private fun jdbc() = DriverManager.getConnection(db.jdbcUrl, db.username, db.password)
 
     private companion object {
         const val DATASOURCE = "pg_injection"
         const val TEMPLATE_ID = "inj.sql"
 
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("injectiondb")
-                .withUsername("dp")
-                .withPassword("dp")
+        /**
+         * A scratch database on the module's shared container: this suite builds its own
+         * ad-hoc `secrets`/`tokens`/`drop_target` schema, which the shipped migrations do
+         * not create, so it must not see the migrated database the other suites use.
+         */
+        val db = SharedPostgres.scratchDatabase("injection")
     }
 }

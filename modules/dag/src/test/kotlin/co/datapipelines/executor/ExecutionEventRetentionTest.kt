@@ -11,9 +11,6 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -30,7 +27,6 @@ import java.util.UUID
  *   one whose events were just deleted. `execution_events` is disposable history;
  *   `pipeline_executions` is the durable record.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ExecutionEventRetentionTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -38,10 +34,10 @@ class ExecutionEventRetentionTest {
     private lateinit var userId: UUID
     private lateinit var pipelineId: UUID
 
+    /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.migrationPaths().forEach { path -> jdbc.jdbcTemplate.execute(RepoFiles.read(path)) }
     }
 
     @BeforeEach
@@ -205,18 +201,5 @@ class ExecutionEventRetentionTest {
             )
         }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
-
-    companion object {
-        @Container
-        @JvmStatic
-        private val postgres =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("datapipelines")
-                .withPassword("datapipelines")
-    }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }
