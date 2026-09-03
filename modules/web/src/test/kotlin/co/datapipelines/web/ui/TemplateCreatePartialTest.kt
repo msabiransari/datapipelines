@@ -183,11 +183,12 @@ class TemplateCreatePartialTest {
     fun `the versions fragment derives DRAFT from the one draft pointer`() {
         authenticate()
         every { repository.listVersions(any(), "acme/x") } returns emptyList()
+        every { repository.findLatest(any(), "acme/x") } returns null
         every { repository.findDraftDetail(any(), "acme/x") } returns null
         every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), "acme/x") } returns emptyMap()
 
         val model = ExtendedModelMap()
-        controller.versions(model, "acme/x") shouldBe "partials/template-versions"
+        controller.versions(model, "acme/x") shouldBe "partials/template-detail"
 
         model["templateId"] shouldBe "acme/x"
         model["draftVersion"] shouldBe null

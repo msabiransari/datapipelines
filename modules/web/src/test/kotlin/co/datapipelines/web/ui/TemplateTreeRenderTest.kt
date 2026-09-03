@@ -108,13 +108,20 @@ class TemplateTreeRenderTest {
         val html = render("partials/template-search") { fillSearch() }
 
         html shouldContain "id=\"template-list-wrapper\""
-        html shouldContain "<table class=\"ds-table\">"
+        // 058: the flat list renders IN THE LEFT PANE — a listbox of full-path rows, not the
+        // full-width seven-column table the accordion screen carried. Still flat, still full
+        // paths: the §9.2 rule is about the SHAPE (no pruned tree), not the table element.
+        html shouldContain "role=\"listbox\""
+        html shouldContain "class=\"tpl-result\""
         // Full paths, each also on `title` — the search result is where a path is longest.
         html shouldContain "acme/finance/monthly_revenue"
         html shouldContain "title=\"acme/finance/monthly_revenue\""
+        // A result SELECTS like a tree leaf: the detail pane fills, the pane itself stands.
+        html shouldContain "hx-target=\"#template-detail\""
         // No tree machinery reaches the search presentation.
         html shouldNotContain "hx-trigger=\"click once\""
         html shouldNotContain "prefix="
+        html shouldNotContain "tpl-tree"
         // The pager keeps every active filter, including 046's `type`.
         html shouldContain "q=revenue"
         html shouldContain "type=sql"
@@ -126,8 +133,9 @@ class TemplateTreeRenderTest {
         val searching = render("partials/templates") { fillSearch() }
 
         browsing shouldContain "hx-trigger=\"click once\""
-        browsing shouldNotContain "<table class=\"ds-table\">"
-        searching shouldContain "<table class=\"ds-table\">"
+        browsing shouldContain "tpl-tree"
+        browsing shouldNotContain "tpl-results"
+        searching shouldContain "tpl-results"
         searching shouldNotContain "hx-trigger=\"click once\""
         // One stable swap root in BOTH presentations (ui-screens.md §4.5).
         browsing shouldContain "id=\"template-list-wrapper\""

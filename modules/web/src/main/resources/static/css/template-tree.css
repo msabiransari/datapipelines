@@ -1,16 +1,87 @@
-/* The templates screen's tree chrome (template-hierarchy-design §9.2).
+/* The templates screen's chrome: the 058 EXPLORER layout plus the tree rows
+ * (template-hierarchy-design §9.2).
  *
  * Structure and truncation only: every colour, size, radius and gap is a design-system
  * token (CLAUDE.md rule 3 / §9.1's last row), and the rows themselves are built from the
  * existing .ds-badge / .ds-button primitives. Nothing here styles a folder as an object —
  * a folder is a name prefix with no identity (§3.1), so there is no folder chrome to own.
  *
- * Expansion is native <details>/<summary>; these rules only replace the default marker with
- * a rotating disclosure triangle and lay the summary out as one line.
+ * The layout follows the app's two-pane precedent (041's template editor): full height
+ * below the sticky nav with --header-height math, a LEFT pane and a RIGHT remainder,
+ * every dimension a token. The left pane is user-resizable with the browser's own
+ * `resize` (the one cheap, dependency-free way to offer it); its floor and ceiling keep
+ * the detail pane usable.
+ *
+ * Folder expansion is native <details>/<summary>; these rules only replace the default
+ * marker with a rotating disclosure triangle and lay the summary out as one line.
  */
+
+/* ------------------------------------------------------------------ the panes */
+
+.tplx-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: var(--gap-md);
+  /* Full height below the sticky nav, the 041 math verbatim: layouts/default.html gives
+     <main> padding-block: var(--gap-lg), hence twice that; the nav's 1px border-bottom is
+     chrome too, so --space-px covers it. The floor keeps short screens usable: below it
+     the page scrolls instead of crushing the panes. */
+  height: calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2));
+  min-height: 640px;
+}
+
+/* Tree LEFT (~30%), the selected template RIGHT taking the remainder. The LEFT track is
+   content-sized (auto), which is what lets the pane's native `resize` move the divider;
+   the floor and ceiling live on the pane itself. */
+.tplx-body {
+  display: grid;
+  grid-template-columns: minmax(260px, auto) minmax(0, 1fr);
+  gap: var(--gap-lg);
+  min-height: 0;
+}
+
+/* The tree pane. The width is viewport-based (clamped to ~30% of the app's 1600px canvas),
+   NOT a percentage of the grid track — an auto track sizes itself from this width, so a
+   percentage resolves against its own track and collapses into the floor (measured at
+   1280: a 260px pane and 81px of dead space between the panes). The resize ceiling is
+   derived from the canvas token, not the track, for the same reason. `overflow: auto` is
+   also what arms the native resizer — and each level swaps INSIDE it, so the pane (and
+   the detail pane beside it) never move. */
+.tplx-tree {
+  width: clamp(260px, 30vw, 480px);
+  min-width: 260px;
+  max-width: calc(var(--app-content-max, 1600px) * 0.6);
+  min-height: 0;
+  overflow: auto;
+  resize: horizontal;
+}
+
+/* The detail pane scrolls inside itself; the versions table can be long. */
+.tplx-detail {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The quiet nothing-selected state sits centered in an otherwise empty pane. */
+.tplx-detail-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------------ the rows */
 
 .tpl-tree,
 .tpl-tree .tpl-level .tpl-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tpl-results {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -59,6 +130,43 @@ details[open] > .tpl-summary::before {
   background: var(--surface-hover);
 }
 
+/* A leaf or a search result: one selectable row. The button reset is deliberate — the
+   row is the control, and it must inherit the pane's typography, not the browser's. */
+.tpl-leaf,
+.tpl-result {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  padding: var(--gap-sm) var(--gap-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tpl-leaf:hover,
+.tpl-result:hover {
+  background: var(--surface-hover);
+}
+
+/* The selected row — selection state is aria-selected, owned by template-explorer.js,
+   the same pattern the pipeline editor's node list uses. */
+.tpl-leaf[aria-selected="true"],
+.tpl-result[aria-selected="true"] {
+  background: var(--surface-selected);
+}
+
+.tpl-leaf:focus-visible,
+.tpl-result:focus-visible,
+.tpl-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: calc(-1 * var(--space-px));
+}
+
 /* The label is one line and truncates; the FULL path always rides on the element's title,
    so the truncated text is never the only copy of it (§9.4). */
 .tpl-label,
@@ -81,36 +189,78 @@ details[open] > .tpl-summary::before {
 }
 
 .tpl-path {
-  display: inline-block;
-  max-width: 100%;
-  vertical-align: bottom;
+  flex: 1 1 auto;
   font-family: var(--font-mono);
+}
+
+/* Search rows carry no badges of importance worth crowding a pane; the badges shrink to
+   their content and the path flexes. */
+.tpl-result .ds-badge {
+  flex: 0 0 auto;
 }
 
 .tpl-count {
   flex: 0 0 auto;
 }
 
-.tpl-open {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
-/* A level or version list that has not loaded yet is just the spinner's room. */
+/* A level that has not loaded yet is just the spinner's room. */
 .tpl-level-pending {
   padding: var(--gap-sm);
-}
-
-.tpl-versions {
-  padding: var(--gap-xs) 0 var(--gap-sm) var(--gap-lg);
-}
-
-.tpl-versions-table {
-  font-size: var(--text-xs);
 }
 
 .tpl-overflow {
   margin: var(--gap-sm) 0 0 0;
   color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------- the detail pane's content */
+
+.tplx-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding-bottom: var(--gap-md);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--gap-md);
+}
+
+.tplx-detail-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.tplx-detail-meta {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.tplx-detail-description {
+  margin-left: var(--gap-sm);
+}
+
+.tplx-detail-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.tplx-detail-open {
+  margin-left: auto;
+}
+
+/* The versions table lives in the detail pane now (058); the inline-expansion indent it
+   carried as a leaf's drop-down does not apply — it is the pane's only table. */
+.tpl-versions {
+  padding: 0;
+}
+
+.tpl-versions-table {
   font-size: var(--text-xs);
 }
