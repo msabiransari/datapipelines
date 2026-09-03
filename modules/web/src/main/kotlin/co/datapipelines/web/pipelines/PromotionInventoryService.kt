@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceNotFoundException
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceRegistry
@@ -50,8 +51,19 @@ class PromotionInventoryService(
     }
 
     /** The workspace id behind [workspaceName], for callers that then read it directly. */
-    fun workspaceIdOf(workspaceName: String): UUID =
-        workspaces.findByName(workspaceName)?.id ?: throw WorkspaceNotFoundException(workspaceName)
+    fun workspaceIdOf(workspaceName: String): UUID = contextFor(workspaceName).id
+
+    /**
+     * The resolved workspace, as the context a principal carries.
+     *
+     * The receiver stamps this onto the promotion principal for the duration of an import
+     * (see [PromotionReceiveService]) — several resolvers on the write path read the ACTIVE
+     * workspace off the principal rather than taking it as a parameter, and a promotion
+     * payload's workspace is the honest answer for them.
+     */
+    fun contextFor(workspaceName: String): WorkspaceContext =
+        workspaces.findByName(workspaceName)?.let { WorkspaceContext(it.id, it.name) }
+            ?: throw WorkspaceNotFoundException(workspaceName)
 
     /**
      * One entry per live pipeline. The per-pipeline version read is a second query each — the

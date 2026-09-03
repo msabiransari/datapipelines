@@ -1,13 +1,17 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.AuditLogger
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.UserService
+import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.slf4j.LoggerFactory
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.transaction.support.TransactionTemplate
 
 /**
@@ -57,15 +61,17 @@ class PromotionReceiveService(
 
     fun apply(batch: PromotionWire.Batch): PromotionWire.Applied {
         refuseIfAuthoring()
-        val workspaceId = inventory.workspaceIdOf(batch.workspace)
+        val workspace = inventory.contextFor(batch.workspace)
         val actor = userService.systemActor()
 
-        transactionTemplate.executeWithoutResult {
-            if (batch.templates.isNotEmpty()) {
-                templateImportService.import(templatesPayload(batch), workspaceId, actor.id)
-            }
-            batch.pipelines.forEach { pipeline ->
-                pipelineImportService.import(pipeline.toString(), workspaceId, actor.id)
+        withActiveWorkspace(workspace) {
+            transactionTemplate.executeWithoutResult {
+                if (batch.templates.isNotEmpty()) {
+                    templateImportService.import(templatesPayload(batch), workspace.id, actor.id)
+                }
+                batch.pipelines.forEach { pipeline ->
+                    pipelineImportService.import(pipeline.toString(), workspace.id, actor.id)
+                }
             }
         }
 
@@ -93,6 +99,40 @@ class PromotionReceiveService(
             actor.id,
         )
         return PromotionWire.Applied(batch.workspace, batch.sourceEnv, batch.templates.size, batch.pipelines.size)
+    }
+
+    /**
+     * Stamps the batch's target workspace onto the promotion principal for the duration of
+     * [block], then restores whatever was there.
+     *
+     * The import services take `workspaceId` explicitly — but not everything on the write path
+     * does. `contractDatasourceRegistry` (the port `PipelineValidator` asks "is this datasource
+     * registered?") resolves through **the principal's ACTIVE workspace**, and falls back to
+     * GLOBAL-ONLY visibility when there is none. The promotion credential pins no workspace, so
+     * without this every workspace-BOUND datasource on the receiver read as unregistered and
+     * the whole batch was refused `pipeline.import.missing_datasource` — found by the
+     * two-deployment E2E, and by nothing smaller: a single-context test shares one principal
+     * and never sees it.
+     *
+     * The payload's workspace is the honest value here: it is the one the import writes into,
+     * resolved by name against this deployment's own rows, and it is restored on the way out so
+     * nothing leaks into the request's later handling.
+     */
+    private fun <T> withActiveWorkspace(
+        workspace: WorkspaceContext,
+        block: () -> T,
+    ): T {
+        val context = SecurityContextHolder.getContext()
+        val previous = context.authentication
+        val principal = previous?.principal as? AuthenticatedPrincipal
+        if (principal == null) return block()
+        context.authentication =
+            UsernamePasswordAuthenticationToken(principal.copy(workspace = workspace), null, previous.authorities)
+        return try {
+            block()
+        } finally {
+            context.authentication = previous
+        }
     }
 
     /**

@@ -13,6 +13,7 @@ import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -305,7 +306,7 @@ class PromotionService(
                 if (target != null && target.currentVersion == ref.version && target.bodyHash == stored.bodyHash) {
                     null
                 } else {
-                    MAPPER.valueToTree(stored)
+                    templatePayloadOf(stored)
                 }
             }
         }
@@ -323,6 +324,41 @@ class PromotionService(
                     payloadOf(pinned, releasedAt)
                 }
             }
+        }
+
+        /**
+         * One template version, built FIELD BY FIELD rather than serialized wholesale.
+         *
+         * Two reasons, and the first is a bug this replaced: `Template` carries `created_at` as
+         * an `Instant`, and the pipeline module's mapper has no JSR-310 module, so
+         * `valueToTree` threw at push time — a defect only an end-to-end push could reach.
+         * The second reason outlives the first: `created_at` and `created_by` are the SOURCE
+         * deployment's, and neither means anything on the target. The import path reads exactly
+         * the fields below (a `TemplateDraft` plus §9.2's `version` and `body_hash`), so
+         * sending exactly those is both correct and honest about what crosses.
+         */
+        private fun templatePayloadOf(stored: Template): JsonNode {
+            val node = MAPPER.createObjectNode()
+            node.put("schema_version", stored.schemaVersion)
+            node.put("id", stored.id)
+            node.put("engine", stored.engine)
+            node.put("type", stored.type.wire)
+            stored.dialect?.let { node.put("dialect", it.wire) }
+            node.put("display_name", stored.displayName)
+            node.put("description", stored.description)
+            node.put("body", stored.body)
+            node.put("is_library", stored.isLibrary)
+            node.put("version", stored.version)
+            node.put("body_hash", stored.bodyHash)
+            val imports = node.putArray("imports")
+            stored.imports.forEach { imported ->
+                imports
+                    .addObject()
+                    .put("id", imported.id)
+                    .put("version", imported.version)
+                    .put("alias", imported.alias)
+            }
+            return node
         }
 
         /**
