@@ -28,7 +28,6 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.ResponseBody
-import org.testcontainers.containers.PostgreSQLContainer
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -145,8 +144,8 @@ class AuthHttpBoundaryTest {
 
     @BeforeAll
     fun seed() {
-        // V1 + V4: apiKeyService.issue writes api_keys.workspace_id (the V4 pin).
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
+        // The shared container arrives migrated; apiKeyService.issue writes
+        // api_keys.workspace_id (the V4 pin).
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = false)
         // Keys pin the seeded `default` workspace; the ADMIN creator scope bypasses the
         // membership check (D4), so no workspace_members row is needed for this user.
@@ -563,21 +562,11 @@ class AuthHttpBoundaryTest {
         /** Pinned login rate limit for the filter-once test — see [props]. */
         const val LOGIN_LIMIT = 4
 
-        // Started in the static initializer, not via @Testcontainers: with @SpringBootTest
-        // the context (and @DynamicPropertySource) can load before the extension's
-        // beforeAll would run, so the mapped port would not yet exist. Ryuk reaps it.
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
+        // The module's shared container: already started and migrated by the time any
+        // @DynamicPropertySource supplier resolves (first touch starts it).
+        val postgres get() = SharedPostgres.postgres
 
         val discovery = OidcDiscoveryStub()
-
-        init {
-            postgres.start()
-        }
 
         @JvmStatic
         @DynamicPropertySource

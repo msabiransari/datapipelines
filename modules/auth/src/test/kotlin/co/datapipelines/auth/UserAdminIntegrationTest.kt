@@ -14,9 +14,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -25,7 +22,6 @@ import java.util.UUID
  * and each mutation evicts the liveness cache so a deactivated user is dead on the
  * next request rather than at TTL expiry.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class UserAdminIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -36,10 +32,9 @@ class UserAdminIntegrationTest {
     private val actorId = UUID.randomUUID()
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
         // V1 + V4: the login/session path now resolves workspaces (slice 2).
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -157,18 +152,8 @@ class UserAdminIntegrationTest {
         again.provider shouldBe "okta"
     }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private companion object {
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

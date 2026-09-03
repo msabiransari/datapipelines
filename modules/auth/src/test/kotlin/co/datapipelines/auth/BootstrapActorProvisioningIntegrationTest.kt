@@ -10,9 +10,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 
 /**
  * The §6.1 bootstrap actor, and the §4.2 linking amendment, against a real database.
@@ -30,16 +27,14 @@ import org.testcontainers.junit.jupiter.Testcontainers
  * at row **creation** — so the tests below check the three moments that could quietly re-fire it
  * (a restart, the completing login, an ordinary re-login) and count zero extra events at each.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class BootstrapActorProvisioningIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var users: UserRepository
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -215,22 +210,11 @@ class BootstrapActorProvisioningIntegrationTest {
             emptyMap<String, Any>(),
         )
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private companion object {
         /** Configured mixed-case on purpose: §4.2 normalization applies to the config value too. */
         const val ADMIN_EMAIL_MIXED_CASE = "Sample-Admin@Example.com"
         const val ADMIN_EMAIL = "sample-admin@example.com"
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }

@@ -13,9 +13,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.util.UUID
 
 /**
@@ -24,7 +21,6 @@ import java.util.UUID
  * create (through the single §4.4 creation path), reset (one-time, clears
  * lockout), disable, unlock — each audited with the actor.
  */
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LocalPasswordServiceTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -35,9 +31,8 @@ class LocalPasswordServiceTest {
     private val hasher = Argon2SecretHasher()
 
     @BeforeAll
-    fun createSchema() {
+    fun connect() {
         jdbc = NamedParameterJdbcTemplate(dataSource())
-        RepoFiles.MIGRATION_PATHS.forEach { jdbc.jdbcTemplate.execute(RepoFiles.read(it)) }
     }
 
     @BeforeEach
@@ -280,22 +275,11 @@ class LocalPasswordServiceTest {
             jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE event = '$event'", emptyMap<String, Any>(), Int::class.java),
         ) { "COUNT(*) returned no row" }
 
-    private fun dataSource(): DriverManagerDataSource =
-        DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
-            setDriverClassName(postgres.driverClassName)
-        }
+    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 
     private companion object {
         val ACTOR: UUID = UUID.randomUUID()
         const val OLD_PASSWORD = "the-old-password-1"
         const val NEW_PASSWORD = "the-new-password-1"
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> =
-            PostgreSQLContainer("postgres:16-alpine")
-                .withDatabaseName("datapipelines")
-                .withUsername("dp")
-                .withPassword("dp")
     }
 }
