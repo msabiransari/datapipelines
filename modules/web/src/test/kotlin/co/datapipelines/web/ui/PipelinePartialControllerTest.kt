@@ -28,7 +28,10 @@ import java.util.UUID
  */
 class PipelinePartialControllerTest {
     private val pipelines = mockk<PipelineRepository>()
-    private val controller = PipelinePartialController(pipelines)
+
+    // 056 made the controller a thin caller of PipelineService; the mock repository still drives
+    // it, wrapped in the real service the way every other post-056 web test does (TestSupport).
+    private val controller = PipelinePartialController(co.datapipelines.web.pipelineServiceOver(pipelines))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
