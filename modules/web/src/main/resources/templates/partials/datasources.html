@@ -35,6 +35,7 @@
           <th>Workspace</th>
           <th>URL</th>
           <th>Username</th>
+          <th>Last test</th>
           <th class="num">Actions</th>
         </tr>
       </thead>
@@ -55,6 +56,25 @@
           </td>
           <td th:text="${ds.jdbcUrl}"></td>
           <td th:text="${ds.username}"></td>
+          <!-- §8.1B (061/T84): the outcome of the LAST connection test, on the screen that
+               said "fine" on 2026-09-02 while every execution failed at connect — listing a
+               datasource never connects to it, so without this column the row cannot be
+               wrong, only silent. The driver's message rides in the title attribute
+               (already redaction-scrubbed at the probe: no password, no credential-bearing
+               URL) so a failing row explains itself on hover without widening the table. -->
+          <td style="white-space: nowrap;">
+            <th:block th:if="${ds.lastTest} == null">
+              <span class="ds-badge ds-badge-default" title="No connection test has been run against this datasource yet">never tested</span>
+            </th:block>
+            <th:block th:if="${ds.lastTest} != null">
+              <span th:if="${ds.lastTest.ok}" class="ds-badge ds-badge-success"
+                    th:title="${ds.lastTest.message} ?: 'The last connection test succeeded'">ok</span>
+              <span th:unless="${ds.lastTest.ok}" class="ds-badge ds-badge-danger"
+                    th:title="${ds.lastTest.message} ?: 'The last connection test failed'">failed</span>
+              <span style="color: var(--text-tertiary); font-size: var(--text-xs);"
+                    th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
+            </th:block>
+          </td>
           <td class="num" style="white-space: nowrap;">
             <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
               <!-- Result goes to the #toast stack; the row and table are never

@@ -28,6 +28,28 @@ app containers sharing one metadata Postgres and one Redis:
   compose file's `MI_IMAGE` override; transcript
   `gate-logs/050-pool-invalidation.log`).
 
+## Last verified
+
+**2026-09-03 (round 061/T78): `run.sh` runs GREEN against `main` unmodified** —
+`drain test: PASS`, `sweep test: PASS`, exit 0, transcript in
+`gate-logs/036-two-instance.log`. The 061 brief carried a ledger claim that the
+login dance was "stale against current main (email field + confirmPassword)";
+that claim is **wrong**, and the measurement is what says so. The harness was
+written on 2026-09-01, after every auth change it depends on (the login screen
+landed 2026-08-29, `UserSettingsController`'s last change 2026-08-31), and its
+`email` / `currentPassword` / `newPassword` / `confirmPassword` field names are
+byte-identical to `login.html`, `settings/password.html` and
+`UserSettingsController` as they stand. Nothing was changed to make it run.
+
+One real drift DOES exist here and is deliberately left alone: the
+`x-app-common` block in `docker-compose.two-instance.yml` carries ~12 of the
+base service's environment keys, while `deploy/docker-compose.yml` now passes
+~45 (the T32 pass-through contract). The missing keys fall back to the
+`application.yml` defaults the bind-mount supplies, which is why the harness is
+green — but the "any change to the base service's contract must be mirrored
+here" note below is not currently true. Mirroring them is a change to a working
+harness with no failing symptom, so it is reported rather than made.
+
 ## Run
 
 ```bash

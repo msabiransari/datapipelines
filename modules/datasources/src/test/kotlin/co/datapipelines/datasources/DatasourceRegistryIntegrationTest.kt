@@ -49,6 +49,13 @@ class DatasourceRegistryIntegrationTest {
         owner = insertUser()
     }
 
+    /** One any-version reference (061/T79) — the delete guard's unit is the NODE, with its version. */
+    private fun reference(
+        pipeline: String,
+        version: Int = 1,
+        nodeId: String = "n1",
+    ) = DatasourceReference(pipelineName = pipeline, pipelineVersion = version, versionStatus = "RELEASED", nodeId = nodeId)
+
     private fun registry(
         references: DatasourceReferences = DatasourceReferences.NONE,
         auditSink: DatasourceAuditSink = DatasourceAuditSink.NONE,
@@ -219,6 +226,62 @@ class DatasourceRegistryIntegrationTest {
         result.latencyMs.shouldNotBeNull()
     }
 
+    /**
+     * §8.1B (061/T84), gate 4: the probe RECORDS its outcome, so a datasource whose credential
+     * has stopped working says so on the list screen with no execution having run. That is the
+     * hole the 2026-09-02 incident fell through — the list showed `sample-trips` as fine
+     * because listing does not connect.
+     *
+     * The §6.3 cache is invalidated by the write: a badge a minute out of date on the screen
+     * an operator opened BECAUSE something is wrong is the wrong kind of stale.
+     */
+    @Test
+    fun `testConnection records its outcome on the row and refreshes the cached read`() {
+        val registry = registry()
+        val repository = DatasourceRepository(jdbc)
+        registry.save(Fixtures.h2(name = "recorded", password = "pw"), owner)
+        // Warm the cache so the assertion below cannot pass on a cold read by accident.
+        registry
+            .get("recorded")
+            .shouldNotBeNull()
+            .lastTest
+            .shouldBeNull()
+
+        registry.testConnection("recorded").shouldNotBeNull().connected shouldBe true
+
+        checkNotNull(checkNotNull(repository.findByName("recorded")).lastTest).ok shouldBe true
+        registry
+            .get("recorded")
+            .shouldNotBeNull()
+            .lastTest
+            .shouldNotBeNull()
+            .ok shouldBe true
+    }
+
+    /**
+     * The failing probe is the one that has to reach the screen, and the row must carry
+     * exactly what the probe said — the scrubbed message, unedited.
+     *
+     * Which message that is, is decided by `rootMessage`: the DEEPEST cause with text, because
+     * HikariCP wraps a rejected login in its own "Connection is not available, request timed
+     * out", which names no database and diagnoses nothing. An unreachable HOST has no deeper
+     * sentence to find and keeps the pool's, honestly; the login case — where the driver's
+     * `FATAL: password authentication failed` is two causes down — is proven in
+     * [BootstrapCredentialResyncIntegrationTest], against a real rejected login.
+     */
+    @Test
+    fun `a failed probe records the failure and the row carries the probe's own message`() {
+        val registry = registry()
+        registry.save(Fixtures.postgres(name = "unreachable", jdbcUrl = "jdbc:postgresql://192.0.2.1:5432/nope"), owner)
+
+        val result = registry.testConnection("unreachable").shouldNotBeNull()
+        result.connected shouldBe false
+
+        val recorded = checkNotNull(checkNotNull(DatasourceRepository(jdbc).findByName("unreachable")).lastTest)
+        recorded.ok shouldBe false
+        recorded.message shouldBe result.error
+    }
+
     @Test
     fun `testConnection on an unknown name is null, not a synthetic failed result`() {
         // §6.1 (v1.4): null = no such datasource, which the web layer maps to 404. The previous
@@ -287,7 +350,7 @@ class DatasourceRegistryIntegrationTest {
 
     @Test
     fun `delete is blocked while a pipeline references the datasource`() {
-        val registry = registry(references = { name -> if (name == "used") listOf("pipeline_a") else emptyList() })
+        val registry = registry(references = { name -> if (name == "used") listOf(reference("pipeline_a")) else emptyList() })
         registry.save(Fixtures.h2(name = "used", password = "pw"), owner)
 
         val result = registry.delete("used")
@@ -476,7 +539,10 @@ class DatasourceRegistryIntegrationTest {
     fun `delete publishes - and a refused or no-op delete publishes nothing`() {
         val publisher = RecordingPublisher()
         val usedUp =
-            registry(invalidation = publisher, references = { name -> if (name == "guarded") listOf("p1") else emptyList() })
+            registry(
+                invalidation = publisher,
+                references = { name -> if (name == "guarded") listOf(reference("p1")) else emptyList() },
+            )
         usedUp.save(Fixtures.h2(name = "guarded", password = "pw"), owner)
         usedUp.delete("guarded")
         publisher.published.shouldBeEmpty()

@@ -60,6 +60,25 @@ data class BootstrapDatasourcesFile(
 )
 
 /**
+ * One resolved bootstrap entry: the entity to register, plus the ENVIRONMENT VARIABLE its
+ * `password` field named before resolution (061/T84).
+ *
+ * The env key exists on this type because [BootstrapDatasourceFileReader] resolves `${VAR}`
+ * placeholders away — by the time an entry is a [Datasource] the reference is gone, and §8A.3
+ * rule 3's ERROR line has to name the key an operator would go and change. On 2026-09-02 the
+ * answer was `SAMPLE_PG_PASSWORD` in `deploy/.env.demo`, and a log line saying "the stored
+ * credential and the file's both fail" without naming it would have sent the operator hunting.
+ *
+ * Null when the entry's password is a literal rather than a placeholder — the SQLite sample
+ * entry is exactly that case (there is no login to have a credential for), and a literal has
+ * no env key to name.
+ */
+data class BootstrapDatasource(
+    val datasource: Datasource,
+    val passwordEnvKey: String?,
+)
+
+/**
  * Reads, resolves and validates the bootstrap datasources file (sample-data design §6,
  * datasources.md §8A). Pure: no database, no pool, no logging — [BootstrapDatasourceRegistrar]
  * owns the side effects, and keeping the parse pure is what lets every rule below be unit-tested
@@ -90,7 +109,7 @@ class BootstrapDatasourceFileReader(
      * them would trade the sentence that tells them what to fix for a statement-count rule.
      */
     @Suppress("ThrowsCount")
-    fun read(path: Path): List<Datasource> {
+    fun read(path: Path): List<BootstrapDatasource> {
         val text =
             try {
                 Files.readString(path)
@@ -119,8 +138,32 @@ class BootstrapDatasourceFileReader(
                     "datapipelines.bootstrap.datasources-file to turn the feature off instead.",
             )
         }
-        return file.datasources.map { it.toDatasource(path) }
+        // Index-paired with the RAW tree, not name-matched: the resolver rebuilds the tree in
+        // place, so entry i of the parsed file is entry i of the raw array — and a name that
+        // is itself a placeholder would make name-matching wrong in the one case it matters.
+        val envKeys = passwordEnvKeys(tree)
+        return file.datasources.mapIndexed { index, entry ->
+            BootstrapDatasource(entry.toDatasource(path), envKeys.getOrNull(index))
+        }
     }
+
+    /**
+     * The `${VAR}` name each entry's `password` field references, positionally, read off the
+     * UNRESOLVED tree — null for an entry whose password is a literal. Only the first
+     * placeholder in the value is reported: a composite password is a shape nobody writes, and
+     * the first variable is the one an operator would look at.
+     */
+    private fun passwordEnvKeys(tree: JsonNode): List<String?> =
+        tree
+            .get("datasources")
+            ?.takeIf { it.isArray }
+            ?.map { entry ->
+                entry
+                    .get("password")
+                    ?.takeIf { it.isTextual }
+                    ?.textValue()
+                    ?.let { PLACEHOLDER.find(it)?.groupValues?.get(1) }
+            }.orEmpty()
 
     /**
      * Returns [node] with every `${VAR}` in every string expanded — a rebuilt tree, not a mutated

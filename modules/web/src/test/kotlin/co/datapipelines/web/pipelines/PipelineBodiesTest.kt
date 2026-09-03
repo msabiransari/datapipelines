@@ -1,7 +1,9 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.DatasourceRef
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -67,12 +69,21 @@ class PipelineBodiesTest {
         scan.matchesQuery(rec, "unrelated") shouldBe false
     }
 
+    /**
+     * 061/T79 — the delete guard's scan is the ANY-VERSION one, not `findAllByDatasource`.
+     * The mock proves the delegation; `PipelineRepositoryDatasourceRefsIntegrationTest` proves
+     * the SQL actually sees a historical version, which is the part that was broken.
+     */
     @Test
-    fun `pipelinesReferencing delegates to findAllByDatasource`() {
-        val a = record("a")
-        val b = record("b")
-        every { repository.findAllByDatasource(any(), "pg-prod") } returns listOf(a, b)
+    fun `anyVersionReferences delegates to findAnyVersionDatasourceRefs, never the current-version join`() {
+        val refs =
+            listOf(
+                DatasourceRef(UUID.randomUUID(), "a", 1, PipelineVersionStatus.RELEASED, "n1"),
+                DatasourceRef(UUID.randomUUID(), "b", 3, PipelineVersionStatus.DRAFT, "n2"),
+            )
+        every { repository.findAnyVersionDatasourceRefs(workspaceId, "pg-prod") } returns refs
 
-        bodies.pipelinesReferencing(workspaceId, "pg-prod") shouldBe listOf("a", "b")
+        bodies.anyVersionReferences(workspaceId, "pg-prod") shouldBe refs
+        verify(exactly = 0) { repository.findAllByDatasource(any(), "pg-prod", any(), any(), any()) }
     }
 }

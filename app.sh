@@ -303,9 +303,23 @@ start() {
     || die "stack is up but $HEALTH_URL is not answering"
   echo "==> UP — ${APP_URL}"
   if ((DEMO)); then
+    # T81: print what the ENV FILES actually hold, not the scaffold's defaults. An
+    # operator who set DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL (or the local
+    # bootstrap password) in deploy/.env before the first start gets a demo whose
+    # login is theirs — and used to be handed `demo-admin@demo.local / demo-admin`
+    # anyway, which is simply a wrong instruction. deploy/.env wins over the
+    # scaffolded demo file, the same precedence compose applies.
+    local demo_email demo_password
+    demo_email=$(env_get "$DEPLOY_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL)
+    [[ -n $demo_email ]] || demo_email=$(env_get "$DEMO_ENV" DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL)
+    demo_password=$(env_get "$DEPLOY_ENV" DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD)
+    [[ -n $demo_password ]] || demo_password=$(env_get "$DEMO_ENV" DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD)
+    # A hash-only deployment sets no plaintext seed (auth.md §5A.3): say so rather
+    # than printing an empty credential, which reads as "the password is blank".
+    [[ -n $demo_password ]] || demo_password="<the password behind DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD_HASH>"
     cat <<EOM
 ==> demo data loaded. Log in at ${APP_URL} with the LOCAL account
-    demo-admin@demo.local / demo-admin — no OIDC client needed; you'll be asked
+    ${demo_email} / ${demo_password} — no OIDC client needed; you'll be asked
     to set a new password on first sign-in (auth.md §5A). (An OIDC provider from
     deploy/.env works too, if you configured one.) Your personal workspace is
     provisioned with the example pipelines. To point an agent at it: log in ->

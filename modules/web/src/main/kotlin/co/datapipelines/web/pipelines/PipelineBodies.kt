@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.DatasourceRef
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import java.util.UUID
@@ -23,10 +24,19 @@ class PipelineBodies(
         datasourceName: String? = null,
     ): Scan = Scan(repository, workspaceId, ownerId, datasourceName)
 
-    fun pipelinesReferencing(
+    /**
+     * The `datasource.in_use` delete guard's scan (061/T79): every node of every stored
+     * version — not just `current_version` — of every live pipeline in the workspace that
+     * references [datasourceName].
+     *
+     * The listing filter above keeps the working-version scan
+     * ([PipelineRepository.findAllByDatasource]); this is the second, deliberately different
+     * one. Two questions, two scans, exactly as 040 split them for templates.
+     */
+    fun anyVersionReferences(
         workspaceId: UUID,
         datasourceName: String,
-    ): List<String> = repository.findAllByDatasource(workspaceId, datasourceName).map { it.name }
+    ): List<DatasourceRef> = repository.findAnyVersionDatasourceRefs(workspaceId, datasourceName)
 
     class Scan(
         private val repository: PipelineRepository,

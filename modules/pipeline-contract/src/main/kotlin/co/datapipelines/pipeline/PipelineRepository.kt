@@ -40,6 +40,23 @@ data class TemplatePin(
 )
 
 /**
+ * One pipeline node's reference to a datasource, from ONE stored pipeline version (061/T79) —
+ * the datasource twin of [TemplatePin], and deliberately the same shape.
+ *
+ * `pipelineVersion` is the load-bearing field: it says WHICH stored body carries the
+ * reference, which is the whole difference between the delete guard that shipped and the one
+ * that works. A pipeline released at v1 against datasource `X` and re-released at v2 without
+ * it still executes v1 on demand, so v1's reference is live.
+ */
+data class DatasourceRef(
+    val pipelineId: UUID,
+    val pipelineName: String,
+    val pipelineVersion: Int,
+    val versionStatus: PipelineVersionStatus,
+    val nodeId: String,
+)
+
+/**
  * Persistence for `pipelines` and `pipeline_versions` (metadata-db §4.4/§4.5/§6,
  * versioning §5/§9).
  *
@@ -211,6 +228,35 @@ class PipelineRepository(
             MAPPER,
         )
     }
+
+    /**
+     * **Is it safe to remove datasource [datasourceName]?** (061/T79 — the datasource half of
+     * the two-scan split 040 made for templates.)
+     *
+     * Scans **every version, ever** — DRAFT, RELEASED and DISCARDED alike — of every live
+     * pipeline in the workspace, and returns one [DatasourceRef] per node whose `source` or
+     * whose `output.datasource` names it. This is what the `datasource.in_use` delete guard
+     * must read.
+     *
+     * [findAllByDatasource] answers the OTHER question — "which pipelines am I looking at
+     * right now?" — and joins `current_version` only, which is correct for a listing and
+     * wrong for a delete: a pipeline released at v1 pinning `X` and re-released at v2 without
+     * it is invisible to that join, so the delete succeeded and v1's next execution failed at
+     * connect. That defect was reported as a 040 finding (see [findAnyVersionTemplatePins]'s
+     * KDoc, which names it) and is closed here. Two scans, two questions — never one.
+     *
+     * Soft-deleted pipelines are excluded, the same predicate and the same reason as both
+     * neighbours: they can no longer be executed, so their references are inert.
+     */
+    fun findAnyVersionDatasourceRefs(
+        workspaceId: UUID,
+        datasourceName: String,
+    ): List<DatasourceRef> =
+        jdbc.query(
+            ANY_DATASOURCE_REFS_SQL,
+            mapOf("workspaceId" to workspaceId, "datasourceName" to datasourceName),
+            DATASOURCE_REF_MAPPER,
+        )
 
     /** Count of live pipelines in the workspace. */
     fun countAll(workspaceId: UUID): Int =
@@ -442,9 +488,10 @@ class PipelineRepository(
      * delete guard under-reports and lets a still-pinned version be removed.
      *
      * Deliberately NOT the [findAllByDatasource] shape: that scan joins `current_version`
-     * only, so a reference living solely in a historical version is invisible to it — a
-     * latent defect in the datasource delete path (reported as a 040 finding, out of that
-     * round's fence to fix). Do not copy that join into a delete guard.
+     * only, so a reference living solely in a historical version is invisible to it — which
+     * was a live defect in the datasource delete path, reported as a 040 finding and out of
+     * that round's fence. It is closed by [findAnyVersionDatasourceRefs] (061/T79), the
+     * datasource sibling of this method. Do not copy that join into a delete guard.
      */
     fun findAnyVersionTemplatePins(
         workspaceId: UUID,
@@ -1137,6 +1184,44 @@ class PipelineRepository(
                AND node->'template'->>'id' = :templateId
              GROUP BY 1
             """.trimIndent()
+
+        /**
+         * 061/T79 — every version ever, any node referencing this datasource.
+         *
+         * The two node shapes are the ones [findAllByDatasource] already knows: a node's
+         * `source` (the datasource it reads from) and a node's `output.datasource` (the one it
+         * writes to). Expressed as `->>` comparisons over the lateral-expanded node rather
+         * than the containment `@>` that scan uses, because the lateral is already open here
+         * for `node->>'id'` — one pass, and the node id the refusal needs comes out of the
+         * same row.
+         *
+         * `source` is compared as text, so the reserved literal `tempdb` simply never matches
+         * a real datasource name (it is not one, contract §6), and a node whose `source` is a
+         * nested object rather than a string yields SQL NULL and is skipped.
+         */
+        val ANY_DATASOURCE_REFS_SQL =
+            """
+            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
+                   v.status AS version_status, node->>'id' AS node_id
+              FROM pipelines p
+              JOIN pipeline_versions v ON v.pipeline_id = p.id
+             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
+             WHERE p.workspace_id = :workspaceId AND p.is_deleted = FALSE
+               AND (node->>'source' = :datasourceName
+                    OR node->'output'->>'datasource' = :datasourceName)
+             ORDER BY p.name, v.version DESC, node->>'id'
+            """.trimIndent()
+
+        val DATASOURCE_REF_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                DatasourceRef(
+                    pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                    pipelineName = rs.getString("pipeline_name"),
+                    pipelineVersion = rs.getInt("pipeline_version"),
+                    versionStatus = PipelineVersionStatus.fromWire(rs.getString("version_status")),
+                    nodeId = rs.getString("node_id"),
+                )
+            }
 
         val PIN_MAPPER =
             RowMapper { rs: ResultSet, _: Int ->

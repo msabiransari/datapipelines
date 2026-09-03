@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -19,7 +20,7 @@ import java.util.UUID
  * — [DatasourceRegistry] decrypts them only at pool build (§7.4), and no read path ever
  * surfaces them. `properties_json` is materialized back into [DatasourceProperties].
  *
- * `LongParameterList` is suppressed because the `datasources` table has 15 columns and this
+ * `LongParameterList` is suppressed because the `datasources` table has 18 columns and this
  * object is its 1:1 row projection. Grouping them into sub-objects to satisfy the threshold
  * would put a shape in the code that does not exist in the schema, and the `RowMapper` would
  * then have to translate twice. The rule targets wide *behavioural* constructors; a table row
@@ -42,6 +43,12 @@ class DatasourceRow(
     val workspaceId: UUID?,
     /** The bound workspace's name, joined at read time; null exactly when [workspaceId] is null. */
     val workspaceName: String?,
+    /**
+     * The V9 last-connection-test outcome (§8.1B), or null when never probed — which is what
+     * every pre-V9 row is, and the only reason this one row field carries a default: an
+     * observation nobody has made yet has no value to state.
+     */
+    val lastTest: DatasourceTestOutcome? = null,
     val isDeleted: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -73,6 +80,7 @@ class DatasourceRow(
             isReadonly = isReadonly,
             workspaceId = workspaceId,
             workspaceName = workspaceName,
+            lastTest = lastTest,
         )
 }
 
@@ -223,6 +231,61 @@ class DatasourceRepository(
         return jdbc.query(sql, params, mapper()).singleOrNull()
     }
 
+    /**
+     * Records the outcome of a connection test on the live row (V9; §8.1B, 061/T84). False
+     * when no live row has this name.
+     *
+     * **`updated_at` is deliberately NOT touched.** A test outcome is an observation ABOUT the
+     * datasource, not a change TO it — and §8A.3 rule 1 promises an operator's row survives a
+     * restart byte-untouched, a promise that stays mechanically checkable only while the
+     * definition columns (`updated_at` among them) hold still when a probe runs. The three
+     * `last_test_*` columns are the single, documented exception to "every UPDATE sets
+     * updated_at" (metadata-db §2), for exactly that reason.
+     *
+     * Nothing here can leak a credential: [DatasourceTestOutcome.message] arrives already
+     * scrubbed from the probe (`DefaultDatasourceRegistry.failedProbe`).
+     */
+    fun recordTestOutcome(
+        name: String,
+        outcome: DatasourceTestOutcome,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE datasources
+               SET last_test_at = :testedAt, last_test_ok = :ok, last_test_message = :message
+             WHERE name = :name AND is_deleted = FALSE
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("name", name)
+                .addValue("testedAt", OffsetDateTime.ofInstant(outcome.testedAt, ZoneOffset.UTC))
+                .addValue("ok", outcome.ok)
+                .addValue("message", outcome.message),
+        ) > 0
+
+    /**
+     * Replaces ONLY the stored credential of the live row (§8A.3 rule 3, 061/T84). False when
+     * no live row has this name.
+     *
+     * The narrowness is the contract, not an optimization: rule 3 exists inside rule 1's
+     * "never update" guarantee, so the one column whose staleness broke the demo is the one
+     * column it may write. Display name, URL, username, properties, timeouts, the readonly
+     * flag and the workspace binding are the operator's, and a resync does not get to have an
+     * opinion about them. `updated_at` DOES move here — unlike [recordTestOutcome], this is a
+     * real change to the datasource.
+     */
+    fun updateCredential(
+        name: String,
+        passwordEncrypted: ByteArray,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE datasources
+               SET password_encrypted = :passwordEncrypted, updated_at = NOW()
+             WHERE name = :name AND is_deleted = FALSE
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("name", name).addValue("passwordEncrypted", passwordEncrypted),
+        ) > 0
+
     /** Soft-deletes [name]; false when nothing live existed. The row (and its name) survive. */
     fun softDelete(name: String): Boolean =
         jdbc.update(
@@ -282,12 +345,29 @@ class DatasourceRepository(
                 isReadonly = rs.getBoolean("is_readonly"),
                 workspaceId = rs.getObject("workspace_id", UUID::class.java),
                 workspaceName = rs.getString("workspace_name"),
+                lastTest = readLastTest(rs),
                 isDeleted = rs.getBoolean("is_deleted"),
                 createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                 updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
                 createdBy = rs.getObject("created_by", UUID::class.java),
             )
         }
+
+    /**
+     * The V9 last-test triple as one value, or null when the datasource has never been probed
+     * (§8.1B). `last_test_at` is the discriminator: the three columns are written together in
+     * one statement, so a row with a timestamp has an outcome and a row without has none —
+     * `last_test_message` is legitimately NULL on a success with no server version, which is
+     * why it cannot be the discriminator.
+     */
+    private fun readLastTest(rs: ResultSet): DatasourceTestOutcome? {
+        val testedAt = rs.getObject("last_test_at", OffsetDateTime::class.java) ?: return null
+        return DatasourceTestOutcome(
+            testedAt = testedAt.toInstant(),
+            ok = rs.getBoolean("last_test_ok"),
+            message = rs.getString("last_test_message"),
+        )
+    }
 
     /**
      * The §7A allowlist as stored: the `[]` column default (metadata-db §4.10) reads as the
@@ -336,7 +416,9 @@ class DatasourceRepository(
         const val COLUMNS =
             "d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted, " +
                 "d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json, " +
-                "d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by"
+                "d.is_readonly, d.workspace_id, w.name AS workspace_name, " +
+                "d.last_test_at, d.last_test_ok, d.last_test_message, " +
+                "d.is_deleted, d.created_at, d.updated_at, d.created_by"
 
         /** Every read joins `workspaces` for the additive `workspace` name (LEFT — global rows have NULL). */
         const val SELECT_COLUMNS =
@@ -367,11 +449,14 @@ class DatasourceRepository(
                      CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :workspaceId, :createdBy)
                 RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
                     properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                    is_readonly, workspace_id, is_deleted, created_at, updated_at, created_by
+                    is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
+                    is_deleted, created_at, updated_at, created_by
             )
             SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
                    d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
-                   d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by
+                   d.is_readonly, d.workspace_id, w.name AS workspace_name,
+                   d.last_test_at, d.last_test_ok, d.last_test_message,
+                   d.is_deleted, d.created_at, d.updated_at, d.created_by
               FROM inserted d LEFT JOIN workspaces w ON w.id = d.workspace_id
             """.trimIndent()
 
@@ -403,11 +488,14 @@ class DatasourceRepository(
                      WHERE name = :name AND is_deleted = FALSE
                     RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
                         properties_json, query_timeout_seconds, introspection_include_schemas_json,
-                        is_readonly, workspace_id, is_deleted, created_at, updated_at, created_by
+                        is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
+                        is_deleted, created_at, updated_at, created_by
                 )
                 SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
                        d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
-                       d.is_readonly, d.workspace_id, w.name AS workspace_name, d.is_deleted, d.created_at, d.updated_at, d.created_by
+                       d.is_readonly, d.workspace_id, w.name AS workspace_name,
+                       d.last_test_at, d.last_test_ok, d.last_test_message,
+                       d.is_deleted, d.created_at, d.updated_at, d.created_by
                   FROM updated d LEFT JOIN workspaces w ON w.id = d.workspace_id
                 """.trimIndent()
         }

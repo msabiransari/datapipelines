@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceTestOutcome
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -13,6 +14,7 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
+import java.time.Instant
 
 /**
  * Render-level guard for the 028 datasources SPA table + toast notifications.
@@ -61,6 +63,49 @@ class DatasourcesTemplateRenderTest {
         // The migration is only done when the inline table styles are GONE.
         html shouldNotContain "border-collapse: collapse"
         html shouldNotContain "padding: var(--gap-sm) var(--gap-md); text-align: left"
+    }
+
+    /**
+     * 061/T84 gate 4 — the column that would have made the 2026-09-02 incident visible.
+     * A datasource whose last probe FAILED renders `failed`, the timestamp, and the driver's
+     * message, with no execution having run; one that has never been probed says so rather
+     * than implying health. This is the render half; the recording half is
+     * `DatasourceTestOutcomeIntegrationTest`.
+     */
+    @Test
+    fun `the last-test column renders ok, failed with its message, and never-tested`() {
+        val html =
+            engine().process(
+                "partials/datasources",
+                context().apply {
+                    fillListModel()
+                    setVariable(
+                        "datasources",
+                        listOf(
+                            datasource("pg-prod", lastTest = DatasourceTestOutcome(Instant.parse("2026-08-30T09:15:00Z"), true, "16.2")),
+                            datasource(
+                                "sample-trips",
+                                lastTest =
+                                    DatasourceTestOutcome(
+                                        Instant.parse("2026-08-30T09:15:00Z"),
+                                        false,
+                                        "FATAL: password authentication failed for user \"dp_demo_ro\"",
+                                    ),
+                            ),
+                            datasource("never-probed"),
+                        ),
+                    )
+                },
+            )
+
+        html shouldContain "<th>Last test</th>"
+        html shouldContain "ds-badge ds-badge-success"
+        html shouldContain "ds-badge ds-badge-danger"
+        html shouldContain ">failed<"
+        html shouldContain ">never tested<"
+        // The driver's own sentence is what ends the investigation, so it is on the row.
+        html shouldContain "password authentication failed"
+        html shouldContain "2026-08-30"
     }
 
     @Test
@@ -185,6 +230,7 @@ class DatasourcesTemplateRenderTest {
     private fun datasource(
         name: String,
         isReadonly: Boolean = false,
+        lastTest: DatasourceTestOutcome? = null,
     ) = Datasource(
         name = name,
         displayName = name,
@@ -193,6 +239,7 @@ class DatasourcesTemplateRenderTest {
         jdbcUrl = "jdbc:postgresql://db:5432/app",
         username = "readonly",
         isReadonly = isReadonly,
+        lastTest = lastTest,
     )
 
     private fun context(): WebContext =

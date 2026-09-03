@@ -78,6 +78,22 @@ data class Datasource(
      * itself.
      */
     val introspectionIncludeSchemas: List<String> = emptyList(),
+    /**
+     * The outcome of the LAST connection test against this datasource (V9 `last_test_at` /
+     * `last_test_ok` / `last_test_message`; datasources.md §8.1B, 061/T84) — null when the
+     * datasource has never been probed.
+     *
+     * **An observation, not configuration.** It is the one field of this entity nobody
+     * supplies: it is written by [DatasourceRegistry.testConnection] and by the §8A.3 rule-3
+     * bootstrap credential probe, and that write deliberately leaves `updated_at` and every
+     * other column alone. It exists because LISTING a datasource does not connect to it — on
+     * 2026-09-02 the screen said `sample-trips` was fine while every execution failed at
+     * CONNECT with `password authentication failed`, and no surface disagreed.
+     *
+     * [DatasourceTestOutcome.message] is redaction-scrubbed at the probe (never a password,
+     * never a credential-bearing URL), so it is safe on the wire and on the screen.
+     */
+    val lastTest: DatasourceTestOutcome? = null,
 ) {
     companion object {
         /**

@@ -16,6 +16,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -238,6 +239,109 @@ class DatasourceRepositoryIntegrationTest {
 
         checkNotNull(repository.findByName("dirty")).introspectionIncludeSchemas shouldBe listOf("apex", "sales")
     }
+
+    // ------------------------------------------------- V9: the last connection test's outcome
+
+    /**
+     * §8.1B (061/T84): the outcome round-trips, and NULL across all three columns reads back
+     * as "never tested" — which is what every pre-V9 row is. `last_test_message` cannot be the
+     * discriminator (a success with no server version leaves it NULL), so `last_test_at` is.
+     */
+    @Test
+    fun `a recorded test outcome round-trips, and an unprobed row reads back as never-tested`() {
+        repository.create(Fixtures.h2(name = "probed"), encryptor.encrypt("p", "probed"), owner)
+
+        checkNotNull(repository.findByName("probed")).lastTest.shouldBeNull()
+
+        val at = Instant.parse("2026-08-30T09:15:00Z")
+        repository.recordTestOutcome("probed", DatasourceTestOutcome(at, ok = false, message = "password authentication failed")) shouldBe
+            true
+
+        val stored = checkNotNull(checkNotNull(repository.findByName("probed")).lastTest)
+        stored.testedAt shouldBe at
+        stored.ok shouldBe false
+        stored.message shouldBe "password authentication failed"
+
+        // A success with no server version: the message is legitimately NULL and the outcome
+        // is still an outcome.
+        repository.recordTestOutcome("probed", DatasourceTestOutcome(at, ok = true)) shouldBe true
+        checkNotNull(checkNotNull(repository.findByName("probed")).lastTest).let {
+            it.ok shouldBe true
+            it.message.shouldBeNull()
+        }
+    }
+
+    /**
+     * The one documented exception to metadata-db §2's "every UPDATE sets `updated_at`": a
+     * test outcome is an observation ABOUT the datasource, not a change TO it. §8A.3 rule 1
+     * promises an operator's row survives a boot byte-untouched, and that promise stays
+     * mechanically checkable only while a probe leaves the definition columns alone.
+     */
+    @Test
+    fun `recording an outcome moves NOTHING else - updated_at included`() {
+        repository.create(Fixtures.h2(name = "still"), encryptor.encrypt("p", "still"), owner)
+        val before = definitionRow("still")
+
+        repository.recordTestOutcome("still", DatasourceTestOutcome(Instant.parse("2026-09-03T00:00:00Z"), ok = true))
+
+        definitionRow("still") shouldBe before
+    }
+
+    /**
+     * §8A.3 rule 3's write is the credential and nothing else — and `updated_at` DOES move,
+     * because unlike an outcome this is a real change to the datasource.
+     */
+    @Test
+    fun `updateCredential replaces the credential alone and moves updated_at`() {
+        repository.create(Fixtures.h2(name = "resync"), encryptor.encrypt("old", "resync"), owner)
+        val before = definitionRow("resync")
+        val oldCipher = passwordHexOf("resync")
+
+        repository.updateCredential("resync", encryptor.encrypt("new", "resync")) shouldBe true
+
+        val after = definitionRow("resync")
+        // Everything the operator owns is untouched — the two columns a resync is ALLOWED to
+        // move are excluded and asserted separately below.
+        val moved = setOf("pw", "updated_at")
+        after.filterKeys { it !in moved } shouldBe before.filterKeys { it !in moved }
+        // ...updated_at moved, and the credential is the new one.
+        after["updated_at"] shouldNotBe before["updated_at"]
+        passwordHexOf("resync") shouldNotBe oldCipher
+        encryptor.decrypt(checkNotNull(repository.findByName("resync")).passwordEncrypted, "resync") shouldBe "new"
+
+        repository.updateCredential("absent", ByteArray(1)) shouldBe false
+    }
+
+    /** A soft-deleted row accepts neither write — rule 1's "a deleted datasource never resurrects". */
+    @Test
+    fun `neither V9 write touches a soft-deleted row`() {
+        repository.create(Fixtures.h2(name = "gone"), encryptor.encrypt("p", "gone"), owner)
+        repository.softDelete("gone") shouldBe true
+
+        repository.recordTestOutcome("gone", DatasourceTestOutcome(Instant.EPOCH, ok = true)) shouldBe false
+        repository.updateCredential("gone", encryptor.encrypt("other", "gone")) shouldBe false
+    }
+
+    /** The definition columns of one row, credential included — the "nothing moved" unit. */
+    private fun definitionRow(name: String): Map<String, Any?> =
+        jdbc
+            .queryForList(
+                "SELECT name, display_name, description, dialect, jdbc_url, username," +
+                    " encode(password_encrypted, 'hex') AS pw, properties_json::text AS props, query_timeout_seconds," +
+                    " introspection_include_schemas_json::text AS incl, is_readonly, workspace_id, is_deleted," +
+                    " created_at, updated_at, created_by" +
+                    " FROM datasources WHERE name = :n",
+                mapOf("n" to name),
+            ).single()
+
+    private fun passwordHexOf(name: String): String =
+        checkNotNull(
+            jdbc.queryForObject(
+                "SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = :n",
+                mapOf("n" to name),
+                String::class.java,
+            ),
+        )
 
     private fun insertUser(): UUID =
         checkNotNull(
