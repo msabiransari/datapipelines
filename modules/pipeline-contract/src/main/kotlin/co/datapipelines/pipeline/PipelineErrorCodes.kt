@@ -535,6 +535,14 @@ object PipelineErrorCodes {
         const val PROMOTION_TARGET_IS_AUTHORING = "pipeline.promotion.target_is_authoring"
 
         /**
+         * §13.13 / versioning §10 — the SENDER could not reach its target, or the target
+         * answered something that is not this API. A transport failure, never a refusal: a
+         * receiver that refuses does so with its own §13 code, which the sender re-raises
+         * verbatim rather than flattening into this one.
+         */
+        const val PROMOTION_TARGET_UNREACHABLE = "pipeline.promotion.target_unreachable"
+
+        /**
          * §13.13 / versioning §5.5 — an authoring write (create, update/draft, release,
          * discard, delete) on a deployment with `datapipelines.deployment.authoring-enabled=false`. Drafts
          * are a capability of authoring environments; a promotion receiver never authors

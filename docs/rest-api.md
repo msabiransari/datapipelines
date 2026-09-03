@@ -78,6 +78,7 @@ All datapipelines custom headers use the `DP-` prefix:
 | `DP-Correlation-Id` | both | Log/trace correlation (§3.4) |
 | `DP-CSRF-Token` | request | CSRF token for cookie-authenticated state-changing requests ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)) |
 | `DP-Result-TTL-Seconds` | request | Client-requested result TTL, clamped by the server (§7.4) |
+| `DP-Promotion-Key` | request | The promotion peer's pre-shared server key, on `/api/v1/promotion/**` and nowhere else (§18, [Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
 Standard headers used as-is: `Idempotency-Key`, `Retry-After`, `RateLimit-*` (§12), `Authorization` (Bearer on `/mcp` only — [Auth §8.5](auth.md#85-mcp-endpoint-mcp)).
 
@@ -1341,6 +1342,98 @@ Owner or global admin. Removing a member with the `owner` role is refused with `
 
 ---
 
+## 18. Promotion Endpoints (receiver)
+
+The RECEIVER half of promotion ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). Two endpoints, and they are the only routes under `/api/v1/promotion/`.
+
+**Authentication is different here, and deliberately narrower.** These routes are gated by the pre-shared server key of §10.6, presented as `DP-Promotion-Key`. The key is read on this prefix and no other, so it authenticates nothing anywhere else and grants no read access outside this pair. The converse also holds: an API key or a session cookie does **not** open these routes — promotion is a deployment-to-deployment channel, not a privileged human one. A receiver with no `datapipelines.deployment.promotion.server-key` configured refuses every request here (fail closed, [Configuration §3.19](configuration.md#319-deployment)).
+
+Every refusal on this prefix — missing header, malformed header, wrong key, and "no key configured on this deployment" — is the same `401 auth.promotion.key_invalid` with the same body, so a caller cannot tell a wrong key from a receiver that has promotion disabled.
+
+There is **no MCP twin** for either endpoint and no schedule that calls them ([Versioning §10.1](versioning.md#101-policy) D8: promotion is a human action).
+
+### 18.1 Promotion inventory
+
+```
+GET /promotion/inventory?workspace={name}
+```
+
+What this deployment already holds in `{name}` — the sender's whole delta input (§10.2) and the datasource set §10.5 pre-validates against, in one round trip.
+
+```json
+{
+  "schema_version": 1,
+  "correlation_id": "...",
+  "data": {
+    "deployment": "uat",
+    "authoring_enabled": false,
+    "workspace": "acme",
+    "pipelines": [
+      { "name": "daily_revenue", "current_version": 3, "body_hash": "sha256-..." }
+    ],
+    "templates": [
+      { "name": "finance/revenue.sql", "current_version": 2, "body_hash": "sha256-..." }
+    ],
+    "datasources": ["sales_db", "warehouse"]
+  }
+}
+```
+
+`current_version` needs no status filter: by the version lifecycle's invariant it IS the latest RELEASED version (a draft never moves it), so its hash is the hash of what this deployment serves. `authoring_enabled` lets a sender refuse a misconfigured target before building a batch instead of after pushing one.
+
+Workspaces are addressed by **name**, because names are a global namespace and ids are not — a name is the one identifier that means the same thing on both deployments. An unknown name is `404 workspace.not_found`, not the no-oracle `403` an ordinary caller gets (§17): the peer is a trusted deployment, and "you do not have that workspace" is the answer its operator needs.
+
+| Error | HTTP | When |
+|---|---|---|
+| `auth.promotion.key_invalid` | 401 | Any credential failure on this prefix, including no key configured here |
+| `workspace.not_found` | 404 | This deployment has no workspace with that name |
+
+### 18.2 Promotion push
+
+```
+POST /promotion/push
+```
+
+Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-order-dependency-closure)): the receiver applies the batch in a single transaction, so a mid-batch failure cannot leave pipelines whose template pins or child pipelines do not resolve.
+
+```json
+{
+  "source_env": "dev",
+  "key_fingerprint": "sha256:1a2b3c4d5e6f",
+  "workspace": "acme",
+  "templates": [ { "id": "finance/revenue.sql", "version": 2, "body_hash": "...", "body": "...", "...": "..." } ],
+  "pipelines": [ { "id": "…uuid…", "version": 4, "body_hash": "...", "name": "daily_revenue", "nodes": [] } ]
+}
+```
+
+`templates` and `pipelines` arrive **in push order** — template versions in the transitive `imports_json` closure first, then child pipelines, then their parents (children before parents) — and are applied in the order given. The receiver does not re-derive the closure: the sender owns that rule (§10.4), and a second implementation of it here would be a second thing to keep correct. Entries already present at the same version and hash are omitted by the sender and are an idempotent no-op if sent anyway.
+
+Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-import-with-preserved-versions) lifecycle fields (`version`, `body_hash`, `released_at`), so the receiver's preserved-version import path applies unchanged: version numbers are honored, never renumbered; `body_hash` is recomputed and must match; a local DRAFT is never clobbered; a same-hash re-import is a no-op.
+
+`source_env` is the sender's `deployment.name` and `key_fingerprint` a truncated SHA-256 of the key it presented — **never the key**. Both are recorded by the receiver against the import (`auth.promotion.accepted`), so a promoted row's provenance survives in the audit trail. Every promoted row is stamped with the receiver's own system service account ([Auth §4.5](auth.md#45-the-system-service-account-r7)) — the payload carries no user id that would mean anything locally.
+
+```json
+{
+  "schema_version": 1,
+  "correlation_id": "...",
+  "data": { "workspace": "acme", "source_env": "dev", "templates": 1, "pipelines": 2 }
+}
+```
+
+| Error | HTTP | When |
+|---|---|---|
+| `auth.promotion.key_invalid` | 401 | Any credential failure on this prefix |
+| `workspace.not_found` | 404 | This deployment has no workspace with that name |
+| `pipeline.promotion.target_is_authoring` | 409 | This deployment has `authoring-enabled: true` — dev is where drafts live (§10.1 D7) |
+| `pipeline.import.missing_datasource` | 400 | A pushed pipeline references a datasource not registered here. The sender pre-validates (§10.5) and refuses with `pipeline.promotion.missing_datasources` before pushing; this is the receiver's own end of the same guard |
+| `pipeline.import.missing_template` | 400 | A pushed pipeline pins a template version not present here and not in the batch |
+| `pipeline.import.hash_mismatch` | 400 | A declared `body_hash` does not match its body — transfer corruption or canonicalization drift |
+| `pipeline.import.version_conflict` | 409 | That version exists here with different content, as a local DRAFT, or was DISCARDED (§9.2's table) |
+
+The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring` — happen before the request is made and never reach this endpoint.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
@@ -1363,5 +1456,6 @@ Owner or global admin. Removing a member with the `owner` role is refused with `
 | 2026-08-16 | v1.14 | pipeline composition | §10.2: `triggered_via` gains `"PIPELINE"` — a child execution spawned by a parent's PIPELINE node appears in execution history like any other row (enums §18, metadata-db §4.6 V3 lineage columns). |
 | 2026-08-17 | v1.15 | pipeline composition | §6.4.3: a PIPELINE node's `node_completed` carries `child_execution_id` (absent for all other node types); the same value appears in the terminal events' `node_stats` entries. §10.1's history surfaces render the lineage: a child row shows its `parent_execution_id` link. |
 | 2026-08-28 | v1.16 | workspaces surfaces | New **§17 workspace endpoints** (list-own/read/create per mode/update/delete with `workspace.in_use`/members sub-resource with `open-join`) — §13.12's CRUD codes go live. §9 re-grounded on the workspaces model: §9.1 binding fields (`global` admin-only, `workspace` accessible-to-caller, default = ACTIVE workspace) + `readonly`; §9.2 listing is workspace-scoped with exact totals; §9.3 gains additive `workspace`+`readonly` fields; §9.4/§9.5 D8 gates (member CUD behind `member-datasources-enabled`, global CUD admin-only) with pool-rebuilding flag writes; by-name access to another workspace's datasource is not-found. T23: template duplicate name is `409 template.validation.duplicate_name`. T31: unauthenticated HTML-accepting requests 302 to `/login`; `/api/**`+`/mcp` keep the exact 401 JSON envelope. |
+| 2026-09-02 | v2.2 | 055 promotion | New **§18 promotion endpoints** (receiver): `GET /promotion/inventory?workspace=` and `POST /promotion/push`, additive under v2.0. Authenticated ONLY by the §10.6 pre-shared server key on the `DP-Promotion-Key` header (§3.6's registry gains it) — read on that prefix and no other, and an API key or session cookie does not open the routes. The push is one transaction on the receiver; entries carry §9.2's preserved-version fields and arrive in §10.4 push order. No MCP twin and no schedule (§10.1 D8). |
 | 2026-09-02 | v2.1 | 046 typed templates | Additive: §8.1's create gains optional `type` (`sql` \| `html`, default `sql`, fixed at creation — an `html` template takes no `dialect`); every template response echoes it; §8.5's list gains the `type` filter. No route changes. Per Templates §11.2's amended clause, the `dialect` conditional-requirement relaxation is claimed here explicitly: no existing payload becomes invalid (every stored template backfills to `sql` with its dialect intact). |
 | 2026-09-02 | v2.0 | 043 template addressing | **BREAKING — one addressing form (template-hierarchy-design §9.6).** §8's eight `/{id}` path-addressed template routes are REMOVED and replaced by name-in-query/name-in-body forms (`GET /templates?name=`, `GET /templates/versions?name=&version=`, `PUT /templates` with `id` in the body, `POST /templates/release` + `POST /templates/draft/discard` with `name` in the body, `DELETE /templates?name=`, `POST /templates/render` with `name`+`version` in the body). Measured reason: on the pinned Tomcat an encoded `%2F` in the path is refused `400` below routing and below the security chain, so a hierarchical name (`acme/finance/report`, legal since this round's §4.1 grammar) cannot travel in a path segment at all. `GET /templates` now answers two shapes on one route (single-resource + `404 template.not_found` with `name`, paged list without). Sanctioned break of the v1.4 freeze: the owner confirmed zero callers outside this repo (2026-09-01), so the promise was protecting a population of zero. Datasources and pipelines keep path addressing — their names cannot contain `/`. |

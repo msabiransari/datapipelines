@@ -107,12 +107,12 @@ class ApiErrorCatalogSpecDriftTest {
          * landed in the SAME commit as its constant and catalog row. Re-derived from the
          * merged document's own parse.
          *
-         * 107 → 110 with 055 (promotion): §13.7 gains `auth.promotion.key_invalid` and §13.13
-         * gains `pipeline.promotion.missing_datasources` + `pipeline.promotion.target_is_authoring`,
-         * landed in the SAME commit as their constants and catalog rows. Re-derived from the
-         * merged document's own parse.
+         * 107 → 111 with 055 (promotion): §13.7 gains `auth.promotion.key_invalid` and §13.13
+         * gains `pipeline.promotion.missing_datasources`, `.target_is_authoring` and
+         * `.target_unreachable`, each landed in the SAME commit as its constant and catalog
+         * row. Re-derived from the merged document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 110
+        const val SECTION_13_ROW_COUNT = 111
 
         /** §12's distinct validation codes on 2026-09-02 (046 added §12.6's template_type_mismatch). */
         const val SECTION_12_CODE_COUNT = 48

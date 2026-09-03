@@ -874,7 +874,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — `workspace
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request (§5.6) |
 
-The same `audit_log` table also carries the **datasource decryption events** ([Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)) and the **MCP tool events** — `mcp.tool.called` for every tool call, `mcp.tool.write` for every mutating one — emitted by the MCP dispatcher through the same sink ([MCP §14](mcp-server.md#14-audit); both registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)).
+The same `audit_log` table also carries the **promotion events** — `auth.promotion.rejected` when the peer-credential gate refuses a request, `auth.promotion.accepted` when a batch is applied ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) — the **datasource decryption events** ([Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)) and the **MCP tool events** — `mcp.tool.called` for every tool call, `mcp.tool.write` for every mutating one — emitted by the MCP dispatcher through the same sink ([MCP §14](mcp-server.md#14-audit); both registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)).
 
 ### 10.2 Log shape
 

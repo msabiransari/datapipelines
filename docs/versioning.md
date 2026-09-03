@@ -573,9 +573,10 @@ diverges, and with receivers that never author, the price is never paid.
 
 ## 10. Promotion (UI-Driven, Separate Use Case)
 
-Against exactly **one configured higher environment** (base URL + API key; config keys
-defined in [configuration.md](configuration.md) at implementation — not restated here, per
-that doc's sole-authority rule).
+Against exactly **one configured higher environment** (base URL + the pre-shared server key of
+§10.6; the keys themselves are defined in [configuration.md §3.19](configuration.md#319-deployment),
+not restated here, per that doc's sole-authority rule). Shipped by 055; the receiver's two
+endpoints are specified in [REST API §18](rest-api.md#18-promotion-endpoints-receiver).
 
 ### 10.1 Policy
 
@@ -592,8 +593,11 @@ that doc's sole-authority rule).
 > entries are never listed.
 
 The delta is computed from the target's inventory: the promotion orchestrator reads the
-target's per-pipeline `(id, current_version, body_hash)` (a read API addition on the
-receiver, specified in rest-api.md at implementation) and compares:
+target's per-pipeline and per-template `(name, current_version, body_hash)`
+([REST API §18.1](rest-api.md#181-promotion-inventory)) and compares. **By name, not by id**
+(the shipped correction to this paragraph's first draft): workspace and template names are a
+global namespace and pipeline ids are globally unique but locally opaque, so a name is the one
+identifier that means the same thing on both deployments. The comparison is:
 
 - Same `body_hash` ⇒ nothing to push (version for humans, hash for machines).
 - Different hash or absent ⇒ the pipeline is promotable; **only its latest RELEASED body is
@@ -640,7 +644,8 @@ import service's combined `missing_datasources` report) rather than failing mid-
 §10.1 said "base URL + API key", which was under-specified: an API key here is workspace-pinned
 and user-owned, and neither property is right for one deployment writing to another.
 
-**Ratified shape (operator, 2026-09-01): a pre-shared server key, not a principal.** The
+**Ratified shape (operator, 2026-09-01): a pre-shared server key, not a principal.** Shipped
+2026-09-02 (055). The
 RECEIVER holds a long secret in configuration; the SENDER holds that same secret alongside the
 target's base URL and presents it on the promotion call; the receiver validates it before
 accepting any payload. No service account, no `users` row for the credential itself, no scope
@@ -657,12 +662,11 @@ was more machinery than the problem needs.
 | Direction | Receiver validates; receiver never calls the sender | A compromised receiver cannot reach back into dev. |
 | Rotation | Change both sides; no user account is involved | The property a user-owned key could not give: rotation and revocation touch no human's account, and offboarding cannot break production promotion. |
 
-The configuration shape, named here so the implementing round does not invent a second
-spelling. It lives inside the `datapipelines.deployment` block (§5.5's amendment — the
-deployment-role settings are grouped, and the reserved `promotion` sub-block mirrors the
-inbound/outbound split this section draws). It is **not yet in `configuration.md`** — that
-doc is the operator-facing authority for SHIPPED keys, and declaring an unimplemented one
-there is the same defect the architecture audit records as M11:
+The configuration shape. It lives inside the `datapipelines.deployment` block (§5.5's
+amendment — the deployment-role settings are grouped, and the `promotion` sub-block mirrors
+the inbound/outbound split this section draws). It is now **shipped and documented in
+[configuration.md §3.19](configuration.md#319-deployment)**, which is the operator-facing
+authority; the sample below is retained as this section's own illustration:
 
 ```yaml
 # receiver (e.g. uat) — absent means promotion is refused
@@ -686,28 +690,36 @@ datapipelines:
 The implementing round adds the block to `configuration.md` in the commit that makes it
 real.
 
-**The one gap this shape does not close, and it needs a decision before implementation.**
+**The gap this shape did not close, and how it was closed (R7, ratified 2026-09-02).**
 `pipeline_versions.created_by` and `pipeline_executions.triggered_by` are
 `NOT NULL REFERENCES users(id)`. A payload authenticated by a server key carries no user, and
 the source deployment's user ids are meaningless on the receiver — different `users` table. So
-an imported row still needs an actor that exists locally. Three options, none free:
+an imported row still needs an actor that exists locally.
 
-1. **A single reserved non-interactive `users` row** created by migration (no password, no OIDC
-   identity, cannot log in), used as `created_by` for every promoted row. Cheapest; the
-   receiver's history then attributes all promoted versions to "promotion", with the releasing
-   human recoverable from the artifact's own `released_by`.
-2. **Make the column nullable** plus a CHECK that exactly one of `created_by` /
-   `promoted_from` is set. Cleaner modelling, a migration on a hot table, and every reader of
-   `created_by` must handle null.
-3. **Map by email** — carry the source's releasing user's email and resolve it locally. Rejected
-   here: it silently creates or mis-attributes when the human has no account on the receiver.
+Three options were weighed: a reserved non-interactive `users` row; making the column nullable
+with a CHECK; and mapping by email (rejected outright — it silently creates or mis-attributes
+when the human has no account on the receiver).
 
-**Recommendation: (1)**, and note it is NOT the service principal an earlier draft of this
-section proposed — it is a row that exists solely to satisfy a foreign key and to name the actor
-in history, with no credential attached to it at all. The machine-auth note's F10 defers to this
-section; **F2's service-account question remains open there**, because an application EXECUTING a
-pipeline is a different problem from a deployment PROMOTING one, and D16's own headline is that
-execution is blocked by the SSE contract before auth is even reached.
+**The ruling took the first option's shape but not its mechanism:** a **system service account
+provisioned at first boot**, not created by a migration, and used for promotion AND for every
+other non-user-bound write the system makes now or later — the retention job, the
+stale-execution sweeper, anything automated that comes after. It is provisioned through the
+same `createUser` path the bootstrap admin uses, with the same create-if-absent and
+insert-race semantics, and read back through ONE well-known lookup so nobody mints a second
+actor. Login is disabled by construction: its provider name is reserved at startup validation,
+its address is under RFC 2606's unresolvable `.invalid` TLD, and the local-password paths
+refuse it. The full contract is [Auth §4.5](auth.md#45-the-system-service-account-r7).
+
+The FKs therefore stay `NOT NULL` and no schema change was needed. Every promoted row is
+stamped with that actor, and the receiver's audit event carries the provenance the row itself
+cannot: `source_env` (the sender's `deployment.name`) and a truncated fingerprint of the key
+that authorised the push — never the key. The releasing human stays recoverable from the
+artifact's own `released_by` on the source deployment.
+
+The machine-auth note's F10 defers to this section; **F2's service-account question is
+answered only for the ACTOR half** — an application EXECUTING a pipeline is a different
+problem from a deployment PROMOTING one, and D16's own headline is that execution is blocked
+by the SSE contract before auth is even reached (R9).
 
 ## 11. Schema Changes (Amendment for Implementation)
 

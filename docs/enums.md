@@ -313,6 +313,13 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `datasource.connection_test` | Explicit connection test (`POST .../test`) |
 | `datasource.key_rotation` | Master-key rotation re-encryption pass |
 
+**Promotion audit events** (same `audit_log` table, defined in [Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)):
+
+| Value | Trigger |
+|---|---|
+| `auth.promotion.rejected` | A request on `/api/v1/promotion/**` was refused by the peer-credential gate — wrong key, missing key, or no key configured on this receiver. `details` carries the path and a `reason` of `key_mismatch` or `no_key_configured`; it never carries the credential ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
+| `auth.promotion.accepted` | A promotion batch was applied by the receiver, in one transaction. The rejected/accepted pair is the promotion CHANNEL's two outcomes, which is why both sit in the auth domain beside the credential that gates them. `details` carries `source_env` (the sender's `deployment.name`), `key_fingerprint` (a truncated SHA-256 of the key presented, never the key), the target workspace, and the template/pipeline counts. The actor is the system service account every promoted row is stamped with ([Auth §4.5](auth.md#45-the-system-service-account-r7)) |
+
 **MCP audit events** (same `audit_log` table, defined in [MCP §14](mcp-server.md#14-audit)):
 
 | Value | Trigger |

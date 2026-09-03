@@ -141,6 +141,9 @@ object ApiErrorCatalog {
             // so each code owns a row rather than being absorbed by the default (025 A2).
             PipelineErrorCodes.Versioning.PROMOTION_MISSING_DATASOURCES to HttpStatus.CONFLICT,
             PipelineErrorCodes.Versioning.PROMOTION_TARGET_IS_AUTHORING to HttpStatus.CONFLICT,
+            // §13.13 (055) — a transport failure reaching the target: 502, against the
+            // promotion family's 409. It is the one promotion code that is not a refusal.
+            PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE to HttpStatus.BAD_GATEWAY,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
@@ -190,16 +193,18 @@ object ApiErrorCatalog {
             .toSet()
 
     /**
-     * The only codes whose 5xx status is demoted to WARN without a stack: both mean the
-     * downstream the CALLER pointed us at (their own database) is down — not an operator
-     * incident. Membership is a deliberate per-code decision; a status alone proves nothing
-     * (`query_execution_failed` is also 502 and stays at ERROR with the stack). Kept beside
+     * The codes whose 5xx status is demoted to WARN without a stack: a machine somebody ELSE
+     * operates is down — the caller's own database, or (055) the operator's own promotion
+     * peer — which is not an incident in THIS process. Membership is a deliberate per-code
+     * decision; a status alone proves nothing (`query_execution_failed` is also 502 and stays
+     * at ERROR with the stack, because the rendered SQL can be the defect). Kept beside
      * [GATEWAY_CODES] so the coupling test can hold the two sets together.
      */
     val CALLER_DOWNSTREAM_DOWN: Set<String> =
         setOf(
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
+            PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
         )
 
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
