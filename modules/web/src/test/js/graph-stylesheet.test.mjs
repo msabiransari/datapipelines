@@ -41,13 +41,22 @@ const TOKENS = {
   edgeIdleStroke: "#f0a", edgeActiveStroke: "#f0b",
 };
 
-test("the node label renders BELOW the shape, not inside it", () => {
-  const style = styleFor(loadGraph().buildStylesheet(TOKENS), "node");
-  assert.equal(style["text-valign"], "bottom");
-  assert.ok(style["text-margin-y"] > 0, "the label needs clearance from the shape");
-  // The 80x40 box the redesign replaces.
+test("the node is a CARD sized for five lines of facts — the text is the HTML overlay, not canvas text", () => {
+  const sheet = loadGraph().buildStylesheet(TOKENS);
+  const style = styleFor(sheet, "node");
+  // 059 (2026-09-02) reverses the 2026-08-31 label-below contract: the facts render
+  // INSIDE the box as an HTML card (cytoscape-node-html-label), because Cytoscape
+  // text cannot carry icons, per-line styling or the run line. The canvas box carries
+  // the chrome only — so it must NOT emit a canvas label to fight the overlay.
+  assert.equal(style["label"], undefined, "no canvas label — the HTML overlay owns the text");
+  assert.equal(style["text-valign"], undefined);
+  assert.ok(style.width >= 240, "a card wide enough for the longest line at body size");
+  assert.ok(style.height >= 140, "a card tall enough for five lines without shrinking type");
+  // The 80x40 box the 031 redesign replaced, and the 120x44 label-below box after it.
   assert.notEqual(style.width, 80);
   assert.notEqual(style.height, 40);
+  assert.notEqual(style.width, 120);
+  assert.notEqual(style.height, 44);
 });
 
 test("a long display name survives buildElements un-truncated", () => {

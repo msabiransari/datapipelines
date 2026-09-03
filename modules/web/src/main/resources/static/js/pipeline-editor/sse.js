@@ -187,6 +187,17 @@
           editor.graph.setEdgesToNodeActive(payload.node_id, true);
           editor.graph.setEdgesFromNodeActive(payload.node_id, true);
         }
+        // 059 §A line 5: the event carries the node's stats FLAT (SseEventProjection:
+        // duration_ms / rows_out / bytes_out — not a nested stats object) and the
+        // completion branch used to drop them. One hand-off populates the card's run
+        // line ("1.2 s · 366 rows"); rows_out is NOT_MEASURED (-1) on a no-row node,
+        // which formatRunLine renders as the elapsed time alone.
+        if (editor.graph && editor.graph.setNodeStats) {
+          editor.graph.setNodeStats(payload.node_id, {
+            duration_ms: payload.duration_ms,
+            rows_out: payload.rows_out,
+          });
+        }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "success";
         editor.announceStatus("Node " + payload.node_id + " completed");
         break;

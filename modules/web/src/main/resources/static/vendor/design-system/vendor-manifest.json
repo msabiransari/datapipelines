@@ -47,9 +47,30 @@
   "cytoscape-dagre": {
     "version": "2.5.0",
     "file": "vendor/cytoscape/cytoscape-dagre.js",
-    "sha256": "bf70fe402991dcbff33e05a7e4a5271c78020bb75e85d1c80ab7538e4157112e",
+    "sha256": "bf70fe402991dcbff33e05a7a4a5271c78020bb75e85d1c80ab7538e4157112e",
     "source": "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js",
     "license": "MIT"
+  },
+  "cytoscape-node-html-label": {
+    "version": "1.2.2",
+    "file": "vendor/cytoscape/cytoscape-node-html-label.js",
+    "sha256": "ea4b3acc5c0ab4d4429707b62a7b3eb3ff99cf683f6212265962683b877d951e",
+    "source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.js",
+    "license": "MIT",
+    "note": "059 — HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
+  },
+  "lucide-sprite": {
+    "package": "lucide-static",
+    "version": "1.39.0",
+    "file": "vendor/icons/lucide-sprite.svg",
+    "sha256": "8a4d00074a128b7f3b0e6541f3429809cce47f9d2af755e06f18aad844e405c7",
+    "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
+    "license": "ISC",
+    "subset": [
+      "db", "table", "boxes", "workflow", "file", "check", "x", "minus",
+      "zoom-in", "zoom-out", "maximize", "rotate-ccw"
+    ],
+    "note": "059 — subset ONLY (12 glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks)."
   },
   "dagre": {
     "version": "0.8.5",

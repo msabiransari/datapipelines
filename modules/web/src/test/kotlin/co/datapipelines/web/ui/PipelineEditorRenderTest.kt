@@ -43,6 +43,32 @@ class PipelineEditorRenderTest {
         render() shouldContain "/js/pipeline-editor/sql-highlight.js"
     }
 
+    /**
+     * 059 §reference/§B: the card overlay's vendored script, the icon sprite the cards
+     * and controls draw from, and the keyboard-reachable view controls. If any of these
+     * disappears from the template the graph degrades to the empty-box look the owner
+     * rejected — this pins the wiring, not the visual.
+     *
+     * 059b: icons.css joins the wiring pins. The card/toolbar svgs always carried the
+     * .ds-icon size classes, but the page never loaded the stylesheet that gives them
+     * meaning — every svg rendered at the 300×150 replaced-element default ("the icons
+     * are the size of the canvas"). The link is load-bearing, not decorative.
+     */
+    @Test
+    fun `the card overlay script, the icon sprite and the view controls are wired`() {
+        val html = render()
+
+        html shouldContain "/vendor/cytoscape/cytoscape-node-html-label.js"
+        html shouldContain "lucide-sprite.svg#maximize"
+        html shouldContain "lucide-sprite.svg#zoom-in"
+        html shouldContain "aria-label=\"Graph view controls\""
+        html shouldContain "graph.fitToView()"
+        html shouldContain "graph.resetView()"
+        // 059b: the icon system's stylesheet, and the toolbar row at md (20px).
+        html shouldContain "/vendor/design-system/icons.css"
+        html shouldContain "ds-icon ds-icon-md"
+    }
+
     @Test
     fun `the result grid renders on the shared table with the frozen pager bindings`() {
         val html = render()

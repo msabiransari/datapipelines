@@ -18,6 +18,15 @@
 
 /* ------------------------------------------------------------------ the panes */
 
+/* C′2 (059, 2026-09-02): the explorer's grid is the VIEWPORT's width. The owner has
+   asked three times for the real estate; at 1920 the app's centered 1600px canvas
+   left a 300px gap between the panes and 470px dead on the right. The un-cap is
+   scoped to the one <main> that hosts an explorer — every other screen keeps the
+   canvas. The container's padding-inline stays: that IS the design system's gutter. */
+.app-container:has(> .tplx-page) {
+  max-width: none;
+}
+
 .tplx-page {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -60,6 +69,18 @@
 .tplx-detail {
   min-height: 0;
   overflow-y: auto;
+}
+
+/* C′1 (059, 2026-09-02): the SELECTED template renders at the TOP, aligned with the
+   tree's first row. #template-detail carries the empty state's centered-flex classes
+   for its whole life (a selection swaps innerHTML only), so the quiet states center
+   while real content must not: the partial's own root stretches to fill the flex
+   container, which cancels BOTH centres — the 300px hole between the panes and the
+   header floating at y=550 of 1080 were this rule missing. */
+.tplx-detail-content {
+  align-self: stretch;
+  width: 100%;
+  min-height: 100%;
 }
 
 /* The quiet nothing-selected state sits centered in an otherwise empty pane. */
