@@ -117,6 +117,10 @@ webjars-bootstrap = "5.3.8"
 htmx = "2.0.10"
 # MCP SDK — GATE G1 CLOSED, see [libraries] below.
 mcp-sdk = "2.0.0"
+# Playwright for Java — the browser suite's driver AND pinned browser set
+# (a Playwright release pins its bundled chromium build). Current stable on
+# Maven Central, verified 2026-09-03.
+playwright = "1.52.0"
 
 [libraries]
 # --- Spring Boot starters (version from the BOM) -----------------------------
@@ -242,6 +246,8 @@ testcontainers-mysql = { module = "org.testcontainers:mysql" }
 testcontainers-mssqlserver = { module = "org.testcontainers:mssqlserver" }
 testcontainers-oracle-xe = { module = "org.testcontainers:oracle-xe" }
 rest-assured = { module = "io.rest-assured:rest-assured" }                  # rest-assured-bom 5.5.7
+# The browser suite (tests/browser-tests, module-structure §5.12). TEST-only.
+playwright = { module = "com.microsoft.playwright:playwright", version.ref = "playwright" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
