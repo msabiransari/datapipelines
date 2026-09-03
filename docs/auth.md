@@ -813,6 +813,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
 | `auth.scope.insufficient` | 403 | Principal lacks required scope (§7.6 matrix) |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
+| `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
 Rate limiting uses the single system-wide `rate_limit.exceeded` code ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — there is no separate auth-layer rate-limit code. The login rate limit is `datapipelines.auth.rate-limit.login-per-minute` ([Configuration §3.4](configuration.md#34-auth)).
 

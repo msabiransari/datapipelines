@@ -338,6 +338,14 @@ object PipelineErrorCodes {
         const val LOGIN_LOCKED = "auth.login.locked"
         const val PASSWORD_CHANGE_REQUIRED = "auth.password.change_required"
         const val SESSION_REQUIRED = "auth.session.required"
+
+        /**
+         * §13.7 / versioning §10.6 — the promotion peer's pre-shared server key was absent,
+         * malformed, or did not match. The SAME code answers a receiver with no key
+         * configured: promotion is disabled there, fail-closed, and one code keeps the
+         * response from distinguishing a wrong key from a disabled receiver.
+         */
+        const val PROMOTION_KEY_INVALID = "auth.promotion.key_invalid"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */
@@ -511,6 +519,20 @@ object PipelineErrorCodes {
 
         /** §13.13 / versioning §10.3 — push of a version not newer than the target's current. */
         const val PROMOTION_NOT_NEWER = "pipeline.promotion.not_newer"
+
+        /**
+         * §13.13 / versioning §10.5 — the batch references datasource names the target does
+         * not have. Collected across the WHOLE batch and reported once, before anything is
+         * pushed, so a missing name never leaves the target half-promoted.
+         */
+        const val PROMOTION_MISSING_DATASOURCES = "pipeline.promotion.missing_datasources"
+
+        /**
+         * §13.13 / versioning §10.1 (D7) — promotion into a deployment whose authoring
+         * capability is ON. Dev is where drafts live; a receiver never authors. Raised by the
+         * RECEIVER, so a misconfigured sender cannot push into an authoring deployment.
+         */
+        const val PROMOTION_TARGET_IS_AUTHORING = "pipeline.promotion.target_is_authoring"
 
         /**
          * §13.13 / versioning §5.5 — an authoring write (create, update/draft, release,

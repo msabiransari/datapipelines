@@ -72,6 +72,9 @@ object ApiErrorCatalog {
             "pipeline.authoring." to HttpStatus.FORBIDDEN,
             "template.authoring." to HttpStatus.FORBIDDEN,
             "auth.api_key." to HttpStatus.UNAUTHORIZED,
+            // versioning §10.6 — the promotion peer credential. Not a principal and not an
+            // API key, so it gets its own family rather than borrowing `auth.api_key.`.
+            "auth.promotion." to HttpStatus.UNAUTHORIZED,
             "auth.session." to HttpStatus.UNAUTHORIZED,
             "auth.scope." to HttpStatus.FORBIDDEN,
             "auth.csrf." to HttpStatus.FORBIDDEN,
@@ -134,6 +137,12 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
+            // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
+            // so each code owns a row rather than being absorbed by the default (025 A2).
+            PipelineErrorCodes.Versioning.PROMOTION_MISSING_DATASOURCES to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Versioning.PROMOTION_TARGET_IS_AUTHORING to HttpStatus.CONFLICT,
+            // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
+            PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
             // not the family's 403: it answers "not authenticated", not "forbidden".
             PipelineErrorCodes.Auth.LOGIN_BAD_CREDENTIALS to HttpStatus.UNAUTHORIZED,
@@ -204,6 +213,7 @@ object ApiErrorCatalog {
         linkedMapOf(
             "pipeline.validation." to "This pipeline isn't valid yet. Check the highlighted problem and try again.",
             "pipeline.import." to "This pipeline couldn't be imported into this environment.",
+            "pipeline.promotion." to "This item couldn't be promoted to the target environment.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
