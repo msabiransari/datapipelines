@@ -53,8 +53,8 @@ class PromotionConfiguration {
 
     /**
      * The receiver. Its `TransactionTemplate` is built over the injected
-     * **`PlatformTransactionManager`** — Spring Boot's auto-configured
-     * `DataSourceTransactionManager` for the metadata `DataSource`, which is the manager both
+     * **`PlatformTransactionManager`** — since 056 the explicitly declared
+     * `metadataTransactionManager` (`app`'s `TransactionConfiguration`), the manager both
      * import services' `NamedParameterJdbcTemplate` writes through. Named here because §10.4's
      * all-or-nothing rule is only true if this is the right manager.
      *

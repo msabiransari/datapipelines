@@ -173,3 +173,27 @@ class CapturingSseEmitter : SseEmitter(0L) {
         val ID_REGEX = Regex("""id: ?(\d+)""")
     }
 }
+
+/**
+ * A REAL [co.datapipelines.pipeline.PipelineService] over a suite's own mocked collaborators
+ * (056).
+ *
+ * The pipeline controllers take the service rather than the repository now. Building it here from
+ * the SAME mocks a suite already stubs is what kept the round's promise that no REST or UI test
+ * assertion changed: `every { repository.findById(…) } returns …` still fires, because the service
+ * is a thin composition over exactly those repository calls.
+ */
+fun pipelineServiceOver(
+    pipelines: co.datapipelines.pipeline.PipelineRepository,
+    validator: co.datapipelines.pipeline.PipelineValidator = io.mockk.mockk(),
+    authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(true),
+    templateVersions: co.datapipelines.pipeline.TemplateVersionStatuses =
+        co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null },
+): co.datapipelines.pipeline.PipelineService =
+    co.datapipelines.pipeline.PipelineService(
+        pipelines = pipelines,
+        validator = validator,
+        drafts = co.datapipelines.pipeline.PipelineDraftService(pipelines, authoring),
+        releases = co.datapipelines.pipeline.PipelineReleaseService(pipelines, templateVersions, validator, authoring),
+        authoring = authoring,
+    )

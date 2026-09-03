@@ -50,6 +50,7 @@ datapipelines/
 │   ├── staging/                         # [Staging spec]
 │   ├── dag/                             # [DAG Executor spec]
 │   ├── auth/                            # [Auth spec]
+│   ├── application/                     # cross-aggregate use cases (§5.13)
 │   ├── mcp-server/                      # [MCP Server spec]
 │   ├── web/                             # REST API, SSE, Thymeleaf UI
 │   └── app/                             # Spring Boot entry point, assembles everything
@@ -70,6 +71,7 @@ datapipelines/
 | `staging` | [staging.md](staging.md) | H2 lifecycle, staging interface, type-aware batch inserts. | — (tempdb is per-execution, never persisted) |
 | `dag` | [dag-executor.md](dag-executor.md) | DAG data structure, executor (coroutines), node runner, SSE event emitter interface, Redis-backed result store. | `ExecutionRepository` → `pipeline_executions`; `ExecutionEventRepository` → `execution_events`; Redis keys for results / idempotency / cancel flags |
 | `auth` | [auth.md](auth.md) | Users, workspaces + membership (resolution, provisioning, CRUD/member rules — 019's recorded placement: the workspace is an identity concept, membership-checked on every authenticated request exactly like `users`), API keys, JWT sessions, scopes, audit log. | `UserRepository` → `users`; `WorkspaceRepository` → `workspaces`, `workspace_members` (metadata-db §4.11/§4.12); `ApiKeyRepository` → `api_keys`; `AuditLogger` → `audit_log` |
+| `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
 | `app` | (this spec) | Spring Boot `main()`, assembles all modules, configuration, runnable JAR, **Flyway dependency + migration scripts**. | Owns schema *creation* (Flyway), not data access |
@@ -114,16 +116,21 @@ This diagram is a **rendering of the normative table in §4.2** — it carries n
                └──────┬──────┘                               │
                       │                                      │
                ┌──────▼──────┐                               │
-               │  mcp-server │ ◄─────────────────────────────┘        layer 4
-               │             │  ← + typesystem, pipeline-contract,
+               │ application │ ◄─────────────────────────────┤        layer 4
+               │ (use cases) │  ← + typesystem, pipeline-contract,
                └──────┬──────┘    templates, datasources
+                      │                                      │
+               ┌──────▼──────┐                               │
+               │  mcp-server │ ◄─────────────────────────────┘        layer 5
+               │             │  ← + typesystem, pipeline-contract,
+               └──────┬──────┘    templates, datasources, application
                       │
                ┌──────▼──────┐
-               │     web     │  ← + every module in layers 0–3          layer 5
+               │     web     │  ← + every module in layers 0–4          layer 6
                └──────┬──────┘    (declared explicitly, not transitively)
                       │
                ┌──────▼──────┐
-               │     app     │  ← web only                              layer 6
+               │     app     │  ← web only                              layer 7
                └─────────────┘
 ```
 
@@ -142,8 +149,9 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
 | `dag` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging` |
-| `mcp-server` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
-| `web` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `mcp-server` |
+| `application` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
+| `mcp-server` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
+| `web` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -153,7 +161,8 @@ Notes on the shape (explanatory, not additional rules):
 - The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
-- `app` lists `web` only. It contains `main()`, configuration, logback config, and the Flyway migrations (§3.1) — no domain code.
+- `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
+- `app` lists `web` only. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
@@ -506,6 +515,58 @@ Codifies the ad-hoc `.playwright-mcp` dev loop as a re-runnable gate.
 - **Out of scope for v1:** multi-browser matrix, visual regression pixel-diffing,
   accessibility scans.
 
+### 5.13 `application`
+
+**Added by round 056 (ARCH-AUDIT-2026-08 S1–S5, ruling R6).** The number is append-order, not
+layer-order: `web` is §5.9 and `app` is §5.10, and renumbering them would break every inbound
+anchor in the spec set and the code. Layer position is §4.1's job; this heading is an address.
+
+**Dependencies (internal):** `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`,
+`auth`. Declared in the build file only as they are actually used at compile time (§4.2) — slice A
+uses `typesystem`, `pipeline-contract`, `dag` and `auth`.
+
+**Dependencies (external):** `jackson-module-kotlin`, `slf4j-api`.
+
+**Purpose:** the use cases that need MORE THAN ONE aggregate, so they belong to no single domain
+module — and, before this module existed, ended up in `web` because nowhere else could hold them.
+That was S4's finding: `mcp-server` cannot depend on `web` (the arrow runs the other way), so any
+use case parked in `web` is invisible to the MCP surface and gets reimplemented there. Eight of
+them had been (S2's D1–D8), and one of the copies had a real behavioural difference.
+
+**The placement rule, in one sentence:**
+
+> **Cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate
+> that owns them.**
+
+So `PipelineService` lives in `pipeline-contract` (it needs only the pipeline aggregate) and
+`ExecutionLauncher` lives here (it needs the pipeline aggregate AND `dag`'s reservation store).
+
+**Public API (slice A):**
+- `ExecutionLauncher` — parameter binding + the idempotency reservation, shared by
+  `POST /pipelines/{id}/execute` and the `pipelines_execute` MCP tool. Sharing it is what gave MCP
+  execute idempotency support, which it had never had (S2's D6).
+- `ExecutionLaunch`, `LaunchDecision`, `IdempotencyMetrics` — its request, its answer, and the
+  counter port `web` adapts onto `WebMetrics`.
+
+**Constraints:**
+- **No web or MCP types, ever.** No `HttpStatus`, no `ResponseEntity`, no `ApiResponse`, no MCP
+  wire type. The mapping to a status code stays in `ApiErrorCatalog`; the mapping to an MCP error
+  stays in the tool. `ArchitectureGuardTest` fails the build on an offending import, so the rule
+  cannot decay into a convention.
+- **`DatapipelinesException` with catalogued codes is the error contract**, as everywhere else.
+- **Every workspace-scoped operation takes `workspaceId` explicitly** — `TemplateRepository`'s
+  "no default anywhere: a missed caller is a compile error" rule applies to services too.
+- It ships **no Spring configuration of its own**: `web` is the aggregation layer (§5.9) and
+  declares the beans, exactly as it already does for `pipeline-contract`'s repository.
+
+**Tests:** unit tests over the use cases with the domain modules' own fixtures. The surfaces' own
+tests shrink to "the controller/tool calls it and maps the result".
+
+**Coming in slices B and C:** the import services, 055's promotion orchestrator, and the
+`ExecutionService`/`TemplateService`/`DatasourceService` split of the remaining D3–D8 rows.
+
+---
+
 ---
 
 ## 6. Version Catalog
@@ -744,11 +805,21 @@ Konsist tests (pinned in the catalog, TEST dependency only):
   - no DI stereotypes — no class, interface, or `object` carries `@Service`,
     `@Component`, or `@Repository` (zero allowlist; every bean is an explicit
     `@Bean` method, §8.4);
-  - no declarative transactions — `@Transactional` is banned on classes,
-    interfaces, `object`s, AND functions; the sanctioned mechanism for a
-    multi-statement unit of work is an injected `TransactionTemplate` (§8.4);
-  - the production scope itself is non-empty (a guard scanning nothing
-    proves nothing).
+  - **every `@Transactional` names the metadata transaction manager** (056,
+    §8.5) — a bare one fails the build. This replaced the pre-056 outright ban,
+    which was correct while there was no transaction manager at all. The check
+    is a source text scan rather than an annotation walk, so it can name file
+    and line and cannot be satisfied by a constant that reads as bare on the
+    page; it asserts non-vacuity first, because a scan that finds nothing would
+    otherwise pass forever;
+  - **nothing below the surfaces imports a web or MCP type** (056, §5.13):
+    `application` and every domain module are refused
+    `co.datapipelines.web.*` / `co.datapipelines.mcp.*` imports. Gradle's
+    `verifyModuleDependencies` enforces the declared EDGES; this enforces the
+    source-level rule, names the offending import, and would still fire on a
+    type reached through some future transitive edge;
+  - the production scope itself is non-empty, and the layering scan actually
+    covers `modules/application` (a guard scanning nothing proves nothing).
 
 Konsist lives in existing test source sets only — no dedicated Gradle module.
 
@@ -859,15 +930,47 @@ datapipelines:
   configurations (`@Configuration` / `@AutoConfiguration`),
   `@ConfigurationProperties`, and the web edge (`@Controller`, `@RestController`,
   `@ControllerAdvice`). Enforced by `ArchitectureGuardTest` (§7.8).
-- **Transactions:** `@Transactional` is banned in production sources (guard,
-  §7.8). First-choice atomicity is a single data-modifying CTE (the
-  `PipelineRepository` stance); a future unit of work that genuinely cannot be
-  one statement takes an injected `TransactionTemplate` (Boot auto-configures
-  it from the metadata `DataSource`) — propagation `REQUIRED` by default, any
-  exception escaping the lambda rolls back, void work uses
-  `executeWithoutResult`. No CGLIB open-class trap, no self-invocation trap.
+- **Transactions:** see §8.5 — `@Transactional` is allowed since 056 and must
+  always NAME its manager.
 - **Open classes**: Spring's `kotlin-spring` plugin opens `@Configuration`
-  classes that need CGLIB proxying. No manual `open` keyword required.
+  classes and `@Transactional` ones that need CGLIB proxying. No manual `open`
+  keyword required — and §8.5 explains why that is not a detail.
+
+### 8.5 Transactions (056, ARCH-AUDIT S3 / ruling R6)
+
+**One transaction, one database.** There is exactly ONE Spring transaction
+manager, `metadataTransactionManager` (declared in `app`'s
+`TransactionConfiguration`, over the metadata `DataSource`), and N Hikari pools
+for CUSTOMER databases which are not Spring transaction resources and must
+never become one. No XA, no JTA, no two-phase commit. The full consistency
+model, including what a partially-failed pipeline leaves behind, is
+[dag-executor §16](dag-executor.md#16-consistency-model).
+
+Four rules, each mechanical:
+
+1. **The manager is always named:**
+   `@Transactional("metadataTransactionManager")`, never bare. A bare one binds
+   to whichever manager Spring finds — correct by accident with one manager, a
+   trap with two, and silent about which database it means either way.
+   `ArchitectureGuardTest` (§7.8) fails the build on a bare one.
+2. **Transactions live on the service layer**, never on a repository or a
+   controller. First-choice atomicity is still a single data-modifying CTE (the
+   `PipelineRepository` stance, unchanged); the annotation is for a unit of
+   work that genuinely spans statements. Two writes that are ALTERNATIVES
+   selected by a caught constraint violation are not such a unit — see
+   `PipelineService.discard` and `PipelineService.update`, both deliberately
+   un-annotated with the reasoning on their KDoc.
+3. **No customer-datasource I/O inside a metadata transaction.**
+   `ConnectionLease` refuses to lease while a transaction is active on the
+   thread, with the catalogued `datasource.lease_in_transaction`.
+4. **Rollback is proven, not assumed.** `@Transactional` needs a CGLIB proxy; a
+   Kotlin class is final unless `kotlin("plugin.spring")` opens it, and an
+   advice that cannot be applied produces **no error and no transaction**.
+   `TransactionRollbackE2eTest` asserts two writes plus a throw persist nothing,
+   with a commit control beside it so the assertion cannot pass vacuously.
+
+`PromotionReceiveService`'s explicit `TransactionTemplate` (055) remains valid:
+it is the same manager, demarcated in code rather than by annotation.
 
 ---
 

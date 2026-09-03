@@ -365,6 +365,13 @@ object PipelineErrorCodes {
         const val IN_USE = "datasource.in_use"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
+
+        /**
+         * A customer-database connection was requested while a METADATA transaction was open on
+         * the thread — refused by design (056 §E.2; the model is dag-executor §16). A server
+         * fault, not a caller error: nothing a caller sends can produce it.
+         */
+        const val LEASE_IN_TRANSACTION = "datasource.lease_in_transaction"
     }
 
     /** §13.9 — template. Defined in templates.md §7; cataloged here (D5). */

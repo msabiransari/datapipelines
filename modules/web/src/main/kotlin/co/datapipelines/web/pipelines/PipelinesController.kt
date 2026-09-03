@@ -2,14 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
-import co.datapipelines.pipeline.AuthoringGuard
-import co.datapipelines.pipeline.NewPipeline
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineDraftService
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
-import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
@@ -46,21 +39,23 @@ import java.util.UUID
  * `If-Match` header (§4.2). It never appends a released version. `POST` still lands v1
  * RELEASED and immediately executable (creation is not modification).
  *
- * Bodies are accepted as raw JSON (`String`) and bound by [PipelineDeserializer] rather than by a
- * Spring DTO: the pipeline body is the frozen pipeline-contract shape, and its deserializer is the
- * single place the wire rules (unknown fields, `type`/`output` enums, schema version) live.
+ * Bodies are accepted as raw JSON (`String`) and bound by the pipeline deserializer rather than by
+ * a Spring DTO: the pipeline body is the frozen pipeline-contract shape, and its deserializer is
+ * the single place the wire rules (unknown fields, `type`/`output` enums, schema version) live.
+ *
+ * ## Thin since 056
+ *
+ * Every rule this class used to hold — the deserialize→validate→canonical triple (D1), the
+ * owner/datasource/`q` filter (D2), the draft-pointer branch of a no-op PUT — is
+ * [PipelineService]'s, shared with the MCP tools that each had their own copy. What is left is
+ * genuinely REST: the `If-Match` header parse, pagination, the §4.2 envelope, and turning an
+ * absent row into [ApiErrors.pipelineNotFound]. A handler that reads more than that is a handler
+ * that has started re-implementing the service.
  */
 @RestController
 @RequestMapping("/api/v1/pipelines")
 class PipelinesController(
-    private val pipelines: PipelineRepository,
-    private val validator: PipelineValidator,
-    private val bodies: PipelineBodies,
-    private val drafts: PipelineDraftService,
-    private val releases: PipelineReleaseService,
-    private val authoring: AuthoringGuard,
-    private val deserializer: PipelineDeserializer = PipelineDeserializer(),
-    private val serializer: PipelineSerializer = PipelineSerializer(),
+    private val pipelines: PipelineService,
 ) {
     /** §5.1 — create; the server assigns id, version 1 (RELEASED), owner and timestamps. */
     @PostMapping
@@ -69,18 +64,9 @@ class PipelinesController(
     fun create(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
-        // §5.5: creation is authoring — a promotion receiver refuses it (the guard names
-        // the reason; update/release/discard are guarded inside the lifecycle services).
-        authoring.requirePipelineAuthoring()
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
-        val (pipeline, canonical) = validated(body, workspaceId)
-        val record =
-            pipelines.create(workspaceId, NewPipeline.from(pipeline, ownerId = principal.userId), canonical, principal.userId)
-        // Read back the row the database stored (its hash included) — a hand-built detail is
-        // how a default or CHECK becomes invisible (metadata-db §6.1).
-        val version = pipelines.findCurrentVersionDetail(workspaceId, record.id)
-        return ApiResponse.of(PipelineResponses.full(record, canonical, version))
+        val saved = pipelines.create(principal.requireWorkspace().id, body, principal.userId)
+        return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version))
     }
 
     /**
@@ -92,27 +78,17 @@ class PipelinesController(
      * version (the execute-default pointer, unmoved), and the `draft` pointer is present
      * whenever one exists.
      */
-    @Suppress("ThrowsCount") // the miss paths each throw the same catalogued 404 for a different absent read
     @GetMapping("/{id}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val draft = pipelines.findDraftDetail(workspaceId, record.id)
-        val version =
-            draft
-                ?: pipelines.findCurrentVersionDetail(workspaceId, record.id)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val body =
-            pipelines.findVersionBody(workspaceId, record.id, version.version)
-                ?: throw ApiErrors.pipelineNotFound(id.toString())
-        return ApiResponse.of(PipelineResponses.full(record, body, version, draft))
+        val loaded = pipelines.findWorking(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        return ApiResponse.of(PipelineResponses.full(loaded.record, loaded.bodyJson, loaded.version, loaded.draft))
     }
 
     /** §5.3 — a specific version. */
-    @Suppress("ThrowsCount") // as `get` above
     @GetMapping("/{id}/versions/{version}")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun getVersion(
@@ -120,14 +96,11 @@ class PipelinesController(
         @PathVariable version: Int,
     ): ApiResponse<JsonNode> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val body =
-            pipelines.findVersionBody(workspaceId, id, version)
+        val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val loaded =
+            pipelines.findVersion(workspaceId, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
-        val detail =
-            pipelines.findVersionDetail(workspaceId, id, version)
-                ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
-        return ApiResponse.of(PipelineResponses.full(record, body, detail))
+        return ApiResponse.of(PipelineResponses.full(record, loaded.bodyJson, loaded.version))
     }
 
     /** §5.4 — version metadata, newest first; no bodies. */
@@ -137,7 +110,7 @@ class PipelinesController(
         @PathVariable id: UUID,
     ): ApiResponse<List<Map<String, Any?>>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(pipelines.listVersions(workspaceId, id).map(PipelineResponses::versionSummary))
     }
 
@@ -160,27 +133,15 @@ class PipelinesController(
         // participate in the hash protocol at all should not burn validation first.
         val expectedHash = IfMatchHeader.required(ifMatch)
         val principal = currentPrincipal()
-        val workspaceId = principal.requireWorkspace().id
-        val (pipeline, canonical) = validated(body, workspaceId)
-        val written =
-            drafts.write(
-                workspaceId = workspaceId,
+        val saved =
+            pipelines.update(
+                workspaceId = principal.requireWorkspace().id,
                 pipelineId = id,
-                pipeline = pipeline,
-                canonical = canonical,
+                bodyJson = body,
                 expectedHash = expectedHash,
                 actor = principal.userId,
             )
-        // A no-op write (written.version.status == RELEASED, versioning §5.1) reports the
-        // current state and must NOT carry a draft pointer: the usual `?: written.version`
-        // fallback would paint a "draft" pointer onto the released row it just reported.
-        val draft =
-            if (written.version.status == PipelineVersionStatus.RELEASED) {
-                null
-            } else {
-                pipelines.findDraftDetail(workspaceId, id) ?: written.version
-            }
-        return ApiResponse.of(PipelineResponses.full(written.record, written.bodyJson, written.version, draft))
+        return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version, saved.draft))
     }
 
     /**
@@ -197,7 +158,7 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released = releases.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId)
+        val released = pipelines.release(workspaceId, id, IfMatchHeader.required(ifMatch), principal.userId)
         return ApiResponse.of(PipelineResponses.full(released.record, released.bodyJson, released.version))
     }
 
@@ -213,7 +174,7 @@ class PipelinesController(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ) {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        releases.discard(workspaceId, id, IfMatchHeader.required(ifMatch))
+        pipelines.discard(workspaceId, id, IfMatchHeader.required(ifMatch))
     }
 
     /** §5.6 — soft delete. Historical executions remain queryable. */
@@ -223,17 +184,15 @@ class PipelinesController(
     fun delete(
         @PathVariable id: UUID,
     ) {
-        // §5.5: deleting authored content is authoring — a receiver's sole writer is promotion.
-        authoring.requirePipelineAuthoring()
         val workspaceId = currentPrincipal().requireWorkspace().id
-        if (!pipelines.softDelete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
+        if (!pipelines.delete(workspaceId, id)) throw ApiErrors.pipelineNotFound(id.toString())
     }
 
     /**
      * §5.7 — the listing, with the `owner` / `datasource` / `q` filters.
      *
-     * Datasource filtering is pushed down to SQL via [PipelineBodies]; the `q` search remains
-     * in-memory. [PipelineRepository.findAllByDatasource] is the root fix (carry-forward #6).
+     * The filter itself is [PipelineService.list] (D2, shared with `pipelines_list`); what stays
+     * here is the offset/limit pagination contract, which the two surfaces genuinely differ on.
      */
     @GetMapping
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -247,21 +206,9 @@ class PipelinesController(
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val scan = bodies.scan(workspaceId, owner, datasource)
-        val filtered =
-            scan.records
-                .filter { q == null || scan.matchesQuery(it, q) }
+        val filtered = pipelines.list(workspaceId, ownerId = owner, datasourceName = datasource, query = q)
         val items = filtered.drop(page).take(size).map(PipelineResponses::listEntry)
         val pagination = Pagination.of(page, size, filtered.size.toLong(), items.size)
         return ApiResponse.of(PagedData(items, pagination))
-    }
-
-    /** Deserialize → §12 validate → canonical JSON; the one save path (pipeline-contract §17.2). */
-    private fun validated(
-        body: String,
-        workspaceId: UUID,
-    ): Pair<co.datapipelines.pipeline.Pipeline, String> {
-        val pipeline = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
-        return pipeline to serializer.write(pipeline)
     }
 }

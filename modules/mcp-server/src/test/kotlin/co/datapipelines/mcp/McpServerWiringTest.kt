@@ -11,9 +11,7 @@ import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
-import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
@@ -48,29 +46,23 @@ class McpServerWiringTest {
     private val authoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
     private fun tools(): List<McpTool> {
-        val deserializer = PipelineDeserializer()
         val validator = mockk<PipelineValidator>()
         val templateValidator = mockk<TemplateValidator>()
         val engines = mockk<WorkspaceTemplateEngines>()
         val introspector = mockk<SchemaIntrospector>()
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
+        val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
         return listOf(
-            PipelinesListTool(pipelines),
-            PipelinesGetTool(pipelines, usage),
-            PipelineExecuteTool(pipelines, executor, resultStore, resultUrls, deserializer),
+            PipelinesListTool(service),
+            PipelinesGetTool(service, usage),
+            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
             PipelinesExecuteNodeTool(
                 co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
                 datasources,
                 co.datapipelines.datasources.SqlRunner(datasources),
             ),
-            PipelinesCreateTool(pipelines, authoringGuard, deserializer, validator, PipelineSerializer()),
-            PipelinesUpdateTool(
-                pipelines,
-                co.datapipelines.pipeline.PipelineDraftService(pipelines, authoringGuard),
-                deserializer,
-                validator,
-                PipelineSerializer(),
-            ),
+            PipelinesCreateTool(service),
+            PipelinesUpdateTool(service),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesUsedByTool(usage),

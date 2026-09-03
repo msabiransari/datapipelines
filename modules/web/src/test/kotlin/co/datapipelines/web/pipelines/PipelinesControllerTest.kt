@@ -4,10 +4,13 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -34,14 +37,20 @@ class PipelinesControllerTest {
     private val validator = mockk<PipelineValidator>()
     private val drafts = mockk<PipelineDraftService>()
     private val releases = mockk<PipelineReleaseService>()
+
+    // 056: the controller takes the SERVICE, built here over the very same mocks this suite
+    // already stubbed — so every `every { repository… }` / `every { drafts… }` below still fires
+    // unchanged and not one assertion in this file moved.
     private val controller =
         PipelinesController(
-            pipelines = repository,
-            validator = validator,
-            bodies = PipelineBodies(repository),
-            drafts = drafts,
-            releases = releases,
-            authoring = co.datapipelines.pipeline.AuthoringGuard(true),
+            pipelines =
+                PipelineService(
+                    pipelines = repository,
+                    validator = validator,
+                    drafts = drafts,
+                    releases = releases,
+                    authoring = AuthoringGuard(true),
+                ),
         )
 
     private val userId = UUID.randomUUID()
@@ -290,12 +299,14 @@ class PipelinesControllerTest {
         authenticate()
         val receiver =
             PipelinesController(
-                pipelines = repository,
-                validator = validator,
-                bodies = PipelineBodies(repository),
-                drafts = drafts,
-                releases = releases,
-                authoring = co.datapipelines.pipeline.AuthoringGuard(false),
+                pipelines =
+                    PipelineService(
+                        pipelines = repository,
+                        validator = validator,
+                        drafts = drafts,
+                        releases = releases,
+                        authoring = AuthoringGuard(false),
+                    ),
             )
 
         val body =

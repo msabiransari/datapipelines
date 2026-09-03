@@ -1,13 +1,5 @@
-package co.datapipelines.web.pipelines
+package co.datapipelines.pipeline
 
-import co.datapipelines.pipeline.DiscardOutcome
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.PipelineVersionDetail
-import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -23,17 +15,24 @@ import java.util.UUID
  * The release/discard service's §5.3 preconditions over mocked repositories: the not-draft
  * refusal, the §6 templates-lock-first pin rule, and the stale-hash conflict — the guard
  * ordering the repository cannot express on its own.
+ *
+ * Moved here from `modules/web` by 056 with the service itself: release is a PIPELINE-aggregate
+ * use case and belongs in the module that owns the aggregate. The only wiring change is that
+ * `templates` is now the [TemplateVersionStatuses] port rather than `TemplateRepository`
+ * directly — `pipeline-contract` cannot depend on `templates` (the arrow runs the other way), so
+ * the aggregation layer supplies the one fact the release gate asks for. Not one assertion
+ * changed.
  */
 class PipelineReleaseServiceTest {
     private val pipelines = mockk<PipelineRepository>()
-    private val templates = mockk<TemplateRepository>()
+    private val templates = mockk<TemplateVersionStatuses>()
     private val validator = mockk<PipelineValidator>()
-    private val service = PipelineReleaseService(pipelines, templates, validator, co.datapipelines.pipeline.AuthoringGuard(true))
+    private val service = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true))
 
     @Test
     fun `release and discard refuse when authoring is disabled`() {
         // versioning §5.5: release and discard are authoring actions — a receiver refuses.
-        val receiver = PipelineReleaseService(pipelines, templates, validator, co.datapipelines.pipeline.AuthoringGuard(false))
+        val receiver = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(false))
 
         val release =
             shouldThrow<DatapipelinesException> {
@@ -103,7 +102,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.findVersionStatus(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.DRAFT
+        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.DRAFT
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "draft-hash", userId) }
 
@@ -119,7 +118,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.findVersionStatus(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
             pipelines.releaseDraft(workspaceId, pipelineId, "monthly_revenue", "M", "d", "draft-hash", userId)
         } returns
@@ -149,7 +148,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail("current-hash")
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.findVersionStatus(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any()) } returns null
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "stale", userId) }

@@ -381,6 +381,8 @@ class CommonConventionsPlugin : Plugin<Project> {
             ":modules:datasources" to 94,
             ":modules:staging" to 93,
             ":modules:auth" to 95,
+            // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
+            ":modules:application" to 84,
             ":modules:dag" to 90,
             ":modules:mcp-server" to 94,
             ":modules:web" to 72,

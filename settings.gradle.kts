@@ -30,6 +30,7 @@ include(
     ":modules:staging",
     ":modules:dag",
     ":modules:auth",
+    ":modules:application",
     ":modules:mcp-server",
     ":modules:web",
     ":modules:app",

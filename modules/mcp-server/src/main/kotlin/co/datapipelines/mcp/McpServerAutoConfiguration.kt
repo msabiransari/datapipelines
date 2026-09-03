@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
@@ -11,11 +12,8 @@ import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.AuthoringGuard
-import co.datapipelines.pipeline.PipelineDeserializer
-import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
-import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
@@ -52,6 +50,7 @@ class McpServerAutoConfiguration {
     @ConditionalOnMissingBean
     fun mcpTools(
         pipelines: PipelineRepository,
+        pipelineService: PipelineService,
         templates: TemplateRepository,
         datasources: DatasourceRegistry,
         introspector: SchemaIntrospector,
@@ -60,7 +59,6 @@ class McpServerAutoConfiguration {
         resultStore: ResultStore,
         resultUrls: ResultUrlFactory,
         executorConfig: ExecutorConfig,
-        pipelineValidator: PipelineValidator,
         templateValidator: TemplateValidator,
         templateEngines: WorkspaceTemplateEngines,
         environment: org.springframework.core.env.Environment,
@@ -69,12 +67,16 @@ class McpServerAutoConfiguration {
         // in a bare module context the tool falls back to the shared executor (records
         // nothing); see McpExecutionRunner.
         executionRunner: ObjectProvider<McpExecutionRunner>,
+        // 056/D6: the shared launch decision. A provider for the same reason as above — the
+        // bean exists where the engine is fully wired; without it the execute tool runs every
+        // call, its pre-056 behaviour.
+        launcher: ObjectProvider<ExecutionLauncher>,
     ): List<McpTool> {
-        val deserializer = PipelineDeserializer()
-        val serializer = PipelineSerializer()
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
-        // flag is immutable configuration, so two instances cannot disagree.
+        // flag is immutable configuration, so two instances cannot disagree. The PIPELINE
+        // write tools no longer need it: PipelineService checks it (056), which is the point
+        // of a service layer. The template tools still do, until slice B.
         val authoring = AuthoringGuard.from(environment)
         // 037's two data-visibility services, built from collaborators already in this method:
         // stateless, so inline construction adds no wiring (the 037 fence touched no `app` bean).
@@ -84,20 +86,21 @@ class McpServerAutoConfiguration {
         // configuration declares the bean `web` consumes; this module builds its own).
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         return listOf(
-            PipelinesListTool(pipelines),
-            PipelinesGetTool(pipelines, usage),
+            PipelinesListTool(pipelineService),
+            PipelinesGetTool(pipelineService, usage),
             PipelineExecuteTool(
-                pipelines,
-                executor,
-                resultStore,
-                resultUrls,
-                deserializer,
-                executorConfig.result,
-                executionRunner.getIfAvailable(),
+                pipelines = pipelineService,
+                executor = executor,
+                executions = executions,
+                resultStore = resultStore,
+                resultUrls = resultUrls,
+                launcher = launcher.getIfAvailable(),
+                resultConfig = executorConfig.result,
+                executionRunner = executionRunner.getIfAvailable(),
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
-            PipelinesCreateTool(pipelines, authoring, deserializer, pipelineValidator, serializer),
-            PipelinesUpdateTool(pipelines, PipelineDraftService(pipelines, authoring), deserializer, pipelineValidator, serializer),
+            PipelinesCreateTool(pipelineService),
+            PipelinesUpdateTool(pipelineService),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),
             TemplatesUsedByTool(usage),

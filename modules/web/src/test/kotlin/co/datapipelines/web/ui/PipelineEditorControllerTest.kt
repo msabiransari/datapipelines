@@ -22,7 +22,7 @@ import java.util.UUID
 class PipelineEditorControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = PipelineEditorController(repository, themeResolver)
+    private val controller = PipelineEditorController(co.datapipelines.web.pipelineServiceOver(repository), themeResolver)
 
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

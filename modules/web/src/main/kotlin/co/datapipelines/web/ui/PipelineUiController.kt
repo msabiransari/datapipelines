@@ -2,8 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
-import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
 import jakarta.servlet.http.HttpServletRequest
@@ -15,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam
 
 @Controller
 class PipelineUiController(
-    private val pipelines: PipelineRepository,
+    private val pipelines: PipelineService,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/pipelines")
@@ -28,47 +27,18 @@ class PipelineUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
         model.addAttribute("scopes", scopes())
-        val page = maxOf(0, offset ?: 0)
-        val size = PAGE_SIZE
-        val query = q?.trim()?.takeIf { it.isNotEmpty() }
+        val offsetRows = maxOf(0, offset ?: 0)
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val items: List<PipelineRecord>
-        val total: Int
-        val hasMore: Boolean
-        if (query == null) {
-            val pageRows = pipelines.findAll(workspaceId, null, size + 1, page)
-            items = pageRows.take(size)
-            // The truthful total (034 E3) — the old estimate ("rows so far + 1 if more")
-            // rendered "Showing 25 of 26" on a 100-row workspace.
-            total = pipelines.countAll(workspaceId)
-            hasMore = pageRows.size > size
-        } else {
-            val all = filter(pipelines.findAll(workspaceId), query)
-            items = all.drop(page).take(size)
-            total = all.size
-            hasMore = all.size > page + size
-        }
-        model.addAttribute("pipelines", items)
-        // versioning §7: the pending-release badge — same source as the partial controller.
-        model.addAttribute("drafts", pipelines.findDrafts(workspaceId, items.map { it.id }))
+        // D2: the paging, the truthful total and the draft badges are PipelineService.page's —
+        // this screen, its HTMX partial, the REST listing and `pipelines_list` had four copies.
+        val page = pipelines.page(workspaceId, q, offsetRows, PAGE_SIZE)
+        model.addAttribute("pipelines", page.items)
+        model.addAttribute("drafts", page.drafts)
         model.addAttribute("q", q ?: "")
-        model.addAttribute("offset", page)
-        model.addAttribute("hasMore", hasMore)
-        model.addAttribute("total", total)
+        model.addAttribute("offset", offsetRows)
+        model.addAttribute("hasMore", page.hasMore)
+        model.addAttribute("total", page.total)
         return "pipelines/list"
-    }
-
-    private fun filter(
-        records: List<PipelineRecord>,
-        query: String?,
-    ): List<PipelineRecord> {
-        if (query == null) return records
-        val lower = query.lowercase()
-        return records.filter { r ->
-            r.name.lowercase().contains(lower) ||
-                r.displayName.lowercase().contains(lower) ||
-                r.description.lowercase().contains(lower)
-        }
     }
 
     private fun scopes(): Set<String> {

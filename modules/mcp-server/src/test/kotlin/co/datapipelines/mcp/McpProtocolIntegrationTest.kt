@@ -39,12 +39,14 @@ class McpProtocolIntegrationTest {
     private val events = mockk<ExecutionEventRepository>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
 
+    private val service = McpFixtures.pipelineService(pipelines)
+
     private val transport = CapturingTransport()
 
     init {
         McpServerFactory.server(
             transport = transport,
-            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(pipelines, usage), PipelinesListTool(pipelines)), auditLogger),
+            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(service, usage), PipelinesListTool(service)), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
             reader = McpResourceReader(pipelines, templates, datasources, executions, events),

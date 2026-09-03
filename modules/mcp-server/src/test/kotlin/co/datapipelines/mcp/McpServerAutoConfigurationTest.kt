@@ -110,6 +110,11 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun pipelineValidator(): PipelineValidator = mockk()
 
+        // 056: the pipeline tools take the SERVICE, which `web`'s PipelineLifecycleConfiguration
+        // declares in the assembled application. Mocked here like every other collaborator —
+        // this suite is about the registration beans, not about what a tool does.
+        @Bean fun pipelineService(): co.datapipelines.pipeline.PipelineService = mockk()
+
         @Bean fun templateValidator(): TemplateValidator = mockk()
 
         @Bean fun workspaceTemplateEngines(): WorkspaceTemplateEngines = mockk()

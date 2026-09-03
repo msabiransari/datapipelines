@@ -3,11 +3,9 @@ package co.datapipelines.mcp
 import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.Pipeline
-import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidationException
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -53,9 +51,9 @@ class PipelineAuthoringToolsTest {
 
     private val guard = co.datapipelines.pipeline.AuthoringGuard(true)
 
-    private fun createTool() = PipelinesCreateTool(pipelines, guard, PipelineDeserializer(), validator, PipelineSerializer())
+    private fun createTool() = PipelinesCreateTool(McpFixtures.pipelineService(pipelines, validator, guard))
 
-    private fun updateTool() = PipelinesUpdateTool(pipelines, drafts, PipelineDeserializer(), validator, PipelineSerializer())
+    private fun updateTool() = PipelinesUpdateTool(McpFixtures.pipelineService(pipelines, validator, guard, drafts = drafts))
 
     /** The §7 draft answer shape an update returns since the lifecycle round. */
     private fun draftDetail(version: Int = 2) =
@@ -191,11 +189,7 @@ class PipelineAuthoringToolsTest {
         // agent gets the same catalogued refusal, not a silent success.
         val tool =
             PipelinesCreateTool(
-                pipelines,
-                co.datapipelines.pipeline.AuthoringGuard(false),
-                PipelineDeserializer(),
-                validator,
-                PipelineSerializer(),
+                McpFixtures.pipelineService(pipelines, validator, co.datapipelines.pipeline.AuthoringGuard(false)),
             )
 
         val error =

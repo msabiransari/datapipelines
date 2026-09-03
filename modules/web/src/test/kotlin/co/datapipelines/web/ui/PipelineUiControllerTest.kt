@@ -6,6 +6,7 @@ import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.web.pipelineServiceOver
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -21,7 +22,7 @@ import java.util.UUID
 class PipelineUiControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = PipelineUiController(repository, themeResolver)
+    private val controller = PipelineUiController(pipelineServiceOver(repository), themeResolver)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -161,7 +162,7 @@ class PipelineUiControllerTest {
         every { repository.countAll(any()) } returns 3
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
-        val partialController = PipelinePartialController(repository)
+        val partialController = PipelinePartialController(pipelineServiceOver(repository))
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = partialController.list(model, null, null)
 
@@ -179,7 +180,7 @@ class PipelineUiControllerTest {
         every { repository.countAll(any()) } returns 30
         every { repository.findDrafts(any(), any()) } returns emptyMap()
 
-        val partialController = PipelinePartialController(repository)
+        val partialController = PipelinePartialController(pipelineServiceOver(repository))
         val model: ExtendedModelMap = ExtendedModelMap()
         partialController.list(model, null, 25)
 

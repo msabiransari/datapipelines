@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.auth.LastUsedWorkspaceStore
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
@@ -25,9 +26,10 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
-import co.datapipelines.web.pipelines.ExecutionLauncher
+import co.datapipelines.web.pipelines.ExecutionStreamLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
 import co.datapipelines.web.pipelines.SubPipelineExecutionRunner
+import co.datapipelines.web.pipelines.WebIdempotencyMetrics
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionStreamRegistry
@@ -195,9 +197,29 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
         )
 
-    @Suppress("LongParameterList")
+    /**
+     * The cross-aggregate launch decision (056/D6): resolve the version, bind the parameters,
+     * settle the idempotency reservation. Declared here because `modules/application` ships no
+     * Spring configuration of its own — `web` is the aggregation layer (§5.9) — and consumed by
+     * BOTH surfaces: [executionStreamLauncher] below and, through `mcp-server`'s
+     * autoconfiguration, the `pipelines_execute` tool. That shared bean is what makes MCP execute
+     * idempotent; before 056 the tool had no reservation at all (ARCH-AUDIT S2/D6).
+     */
     @Bean
     fun executionLauncher(
+        idempotencyStore: IdempotencyStore,
+        idempotency: IdempotencyProperties,
+        metrics: WebMetrics,
+    ): ExecutionLauncher =
+        ExecutionLauncher(
+            idempotencyStore = idempotencyStore,
+            idempotencyTtlSeconds = idempotency.ttlSeconds,
+            metrics = WebIdempotencyMetrics(metrics),
+        )
+
+    @Suppress("LongParameterList")
+    @Bean
+    fun executionStreamLauncher(
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -216,13 +238,11 @@ class WebSurfaceConfiguration {
         streamer: SseLogStreamer,
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
-        idempotencyStore: IdempotencyStore,
-        idempotency: IdempotencyProperties,
-        metrics: WebMetrics,
+        launcher: ExecutionLauncher,
         scope: CoroutineScope,
         subPipelineRunner: SubPipelineRunner,
-    ): ExecutionLauncher =
-        ExecutionLauncher(
+    ): ExecutionStreamLauncher =
+        ExecutionStreamLauncher(
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
@@ -241,11 +261,9 @@ class WebSurfaceConfiguration {
             streamer = streamer,
             eventRepository = eventRepository,
             executionRepository = executionRepository,
-            idempotencyStore = idempotencyStore,
-            idempotency = idempotency,
-            // Feeds ExecutionStream too (ExecutionLauncher:249) — same reason as above.
+            launcher = launcher,
+            // Feeds ExecutionStream too — same reason as above.
             mapper = SseJson.mapper,
-            metrics = metrics,
             scope = scope,
             subPipelineRunner = subPipelineRunner,
         )
@@ -254,7 +272,7 @@ class WebSurfaceConfiguration {
      * The recording execution path for MCP-originated runs (P7). `mcp-server`'s autoconfiguration
      * picks this up through its own [McpExecutionRunner] port — `web` depends on `mcp-server`,
      * never the reverse, so the port lives there and the implementation here. Shares every engine
-     * collaborator with [executionLauncher]; what it deliberately lacks is anything stream-shaped.
+     * collaborator with [executionStreamLauncher]; what it deliberately lacks is anything stream-shaped.
      */
     @Suppress("LongParameterList")
     @Bean

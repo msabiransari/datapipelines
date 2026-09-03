@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate
  * resolve, which is worse than holding nothing.
  *
  * The transaction is an explicit `TransactionTemplate` over the **`transactionManager`** bean
- * (Spring Boot's auto-configured `DataSourceTransactionManager` for the metadata `DataSource`;
+ * (since 056 the explicitly declared `metadataTransactionManager` for the metadata `DataSource`;
  * named here because this is the first transaction boundary in the codebase and an unnamed
  * "the" manager is a claim nobody can check). Both import services write through the SAME
  * `NamedParameterJdbcTemplate` on that `DataSource`, so they enlist in this transaction

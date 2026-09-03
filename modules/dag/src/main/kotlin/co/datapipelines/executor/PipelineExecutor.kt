@@ -538,7 +538,7 @@ class PipelineExecutor(
      * exceeded its deadline. Cancellation is not failure (§8.3), so the outcome is `ABORTED`.
      *
      * A root reaches here by the same route whenever the scope that launched it is cancelled from
-     * outside (`ExecutionLauncher`'s `scope` at shutdown) — the path was never child-specific, only
+     * outside (`ExecutionStreamLauncher`'s `scope` at shutdown) — the path was never child-specific, only
      * child-*reachable* in normal operation, which is why the handler lives on the shared path
      * rather than in the composition runner.
      *

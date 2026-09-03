@@ -139,6 +139,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Datasource.IN_USE,
                 PipelineErrorCodes.Datasource.NOT_FOUND,
                 PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED,
+                // 056 §E.2 — the datasource domain has no entity dimension, same shape as its siblings.
+                PipelineErrorCodes.Datasource.LEASE_IN_TRANSACTION,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,

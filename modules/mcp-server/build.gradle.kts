@@ -1,5 +1,5 @@
 // module-structure.md §5.8 — allowed internal deps: typesystem, pipeline-contract,
-// templates, datasources, dag, auth. `web` is NOT a dependency and must not become
+// templates, datasources, dag, auth, application. `web` is NOT a dependency and must not become
 // one: mcp-server is a thin adapter over the same service layer, never over HTTP.
 plugins { id("datapipelines.common-conventions") }
 
@@ -10,6 +10,7 @@ dependencies {
     implementation(project(":modules:datasources"))
     implementation(project(":modules:dag"))
     implementation(project(":modules:auth"))
+    implementation(project(":modules:application"))
 
     // GATE G1 CLOSED 2026-08-07 — official Java MCP SDK. mcp-core carries the
     // Streamable HTTP servlet transport (HttpServletStreamableServerTransportProvider),

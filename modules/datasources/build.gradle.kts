@@ -5,7 +5,11 @@ dependencies {
     implementation(project(":modules:typesystem")) // IngressTypeMapper per dialect
 
     implementation(libs.hikaricp)
-    implementation(libs.spring.boot.starter.jdbc) // DatasourceRepository (§8.1)
+    // DatasourceRepository (§8.1), and — since 056 §E.2 — spring-tx's
+    // TransactionSynchronizationManager, which ConnectionLease reads to refuse a customer
+    // lease taken inside a metadata transaction. Both arrive with this one starter; no new
+    // artifact enters the build.
+    implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.jackson.module.kotlin) // properties_json (de)serialization (§4.10)
     // Bootstrap datasources file (§8A). Same Jackson stack, YAML backend — already on the
     // runtime classpath via spring-boot-starter; declared here because this module now

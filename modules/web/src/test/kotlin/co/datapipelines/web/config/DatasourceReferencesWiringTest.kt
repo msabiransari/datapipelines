@@ -90,6 +90,13 @@ class DatasourceReferencesWiringTest {
     /**
      * The guard must never fall back to the working-version scan: that join sees
      * `current_version` only, which is the defect this wiring exists to close.
+     *
+     * **Assertion changed by 056, and this is the round's ONE such change.** It used to read
+     * `verify(exactly = 0) { bodies.scan(...) }`. `PipelineBodies.scan` no longer exists — the
+     * listing it served is `PipelineService.list` now — so the old line names a method that is
+     * gone. The intent is preserved and made stronger: `confirmVerified` asserts that
+     * `anyVersionReferences` is the ONLY call the guard makes on `PipelineBodies`, which would
+     * also catch a future working-version scan added under a different name.
      */
     @Test
     fun `the guard never reads the working-version listing scan`() {
@@ -98,7 +105,8 @@ class DatasourceReferencesWiringTest {
 
         references.referencesTo("any")
 
-        verify(exactly = 0) { bodies.scan(any(), any(), any()) }
+        verify(exactly = 1) { bodies.anyVersionReferences(wsA.id, "any") }
+        io.mockk.confirmVerified(bodies)
     }
 
     private fun ref(pipeline: String) = DatasourceRef(UUID.randomUUID(), pipeline, 1, PipelineVersionStatus.RELEASED, "n1")

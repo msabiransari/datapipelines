@@ -1,14 +1,20 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
 
-/** `pipelines_list` (mcp-server.md §6.2.1). Scope: `read`. */
+/**
+ * `pipelines_list` (mcp-server.md §6.2.1). Scope: `read`.
+ *
+ * The owner/datasource/`q` filter is [PipelineService.list] (056, ARCH-AUDIT S2/D2) — this tool
+ * and `GET /pipelines` had separate implementations of the same three rules. What stays here is
+ * the tool's own contract: its `limit` truncation and its metadata projection.
+ */
 class PipelinesListTool(
-    private val pipelines: PipelineRepository,
+    private val pipelines: PipelineService,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -36,31 +42,18 @@ class PipelinesListTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
-        val workspaceId = ctx.principal.requireWorkspace().id
-        val owner = args.uuid("owner")
-        val query = args.string("q")?.lowercase()
-        val datasource = args.string("datasource")
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
-
-        val records =
-            if (datasource != null) {
-                pipelines.findAllByDatasource(workspaceId, datasource, owner)
-            } else {
-                pipelines.findAll(workspaceId, owner)
-            }
-
-        return records
-            .asSequence()
-            .filter { query == null || it.matches(query) }
+        return pipelines
+            .list(
+                workspaceId = ctx.principal.requireWorkspace().id,
+                ownerId = args.uuid("owner"),
+                datasourceName = args.string("datasource"),
+                query = args.string("q"),
+            ).asSequence()
             .take(limit)
             .map { it.toMetadata() }
             .toList()
     }
-
-    private fun PipelineRecord.matches(query: String): Boolean =
-        name.lowercase().contains(query) ||
-            displayName.lowercase().contains(query) ||
-            description.lowercase().contains(query)
 
     private fun PipelineRecord.toMetadata(): Map<String, Any?> =
         mapOf(
@@ -101,7 +94,7 @@ class PipelinesListTool(
  * (`pipelines_update`) and stays the caller's decision.
  */
 class PipelinesGetTool(
-    private val pipelines: PipelineRepository,
+    private val pipelines: PipelineService,
     private val usage: co.datapipelines.templates.TemplateUsageService,
 ) : McpTool {
     override val definition: McpSchema.Tool =
@@ -134,30 +127,31 @@ class PipelinesGetTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
-        val record = pipelines.findById(workspaceId, id) ?: throw McpNotFound.pipeline(id)
+        val record = pipelines.findRecord(workspaceId, id) ?: throw McpNotFound.pipeline(id)
         // The explicit argument is validated and wins BEFORE any working-version lookup
         // (B3) — then the working version (§7): the draft if one exists, else
         // current_version. Derived, never stored — current_version keeps meaning
         // "latest released" everywhere else.
         val explicit = args.version()
-        val version = explicit ?: pipelines.findDraftDetail(workspaceId, id)?.version ?: record.currentVersion
-        return body(workspaceId, id, version)
+        val version = explicit ?: pipelines.findDraft(workspaceId, id)?.version ?: record.currentVersion
+        return body(workspaceId, record, version)
     }
 
     private fun body(
         workspaceId: UUID,
-        id: UUID,
+        record: PipelineRecord,
         version: Int,
     ): JsonNode {
-        val json = pipelines.findVersionBody(workspaceId, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
-        val detail =
-            pipelines.findVersionDetail(workspaceId, id, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val id = record.id
+        val loaded = pipelines.findVersion(workspaceId, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val json = loaded.bodyJson
+        val detail = loaded.version
         val tree = McpTools.readTree(json) as? com.fasterxml.jackson.databind.node.ObjectNode ?: error("body of $id is not an object")
         tree.put("version", detail.version)
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)
         val draftPointer = tree.putObject("draft")
-        val draft = pipelines.findDraftDetail(workspaceId, id)
+        val draft = pipelines.findDraft(workspaceId, id)
         if (draft != null) {
             draftPointer
                 .put("version", draft.version)

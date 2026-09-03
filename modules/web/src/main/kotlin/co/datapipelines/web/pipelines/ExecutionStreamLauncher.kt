@@ -1,5 +1,8 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.ExecutionLaunch
+import co.datapipelines.application.ExecutionLauncher
+import co.datapipelines.application.LaunchDecision
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.events.EventEmitter
@@ -15,9 +18,6 @@ import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorDispatcher
 import co.datapipelines.executor.ExecutorMetrics
-import co.datapipelines.executor.IdempotencyKeys
-import co.datapipelines.executor.IdempotencyOutcome
-import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.PipelineConcurrencyLimitException
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
@@ -25,7 +25,6 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
-import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.StagingFactory
@@ -33,8 +32,6 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
-import co.datapipelines.web.config.IdempotencyProperties
-import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamRegistry
@@ -63,11 +60,32 @@ data class ExecuteLaunch(
     val correlationId: UUID,
     val resultTtlSeconds: Long?,
     val idempotencyKey: String?,
-)
+) {
+    /** The surface-free half this launch carries into `application` (056/D6). */
+    internal fun toLaunch(): ExecutionLaunch =
+        ExecutionLaunch(
+            pipelineId = pipelineId,
+            pipelineVersion = pipelineVersion,
+            pipeline = pipeline,
+            userId = principal.userId,
+            parameters = parameters,
+            parametersJson = parametersJson,
+            idempotencyKey = idempotencyKey,
+        )
+}
 
 /**
  * Starts pipeline executions for the SSE endpoint (rest-api.md §6) — the one place the servlet
  * world meets the coroutine engine.
+ *
+ * ## What 056 moved out, and what stayed
+ *
+ * The version resolution, the parameter binding and the idempotency reservation were the half of
+ * this class the MCP execute tool needed and could not reach, so they are now
+ * [co.datapipelines.application.ExecutionLauncher] in `modules/application` — the decision is
+ * taken once and both surfaces obey it. What remains here is genuinely servlet-shaped and stays:
+ * the SSE emitter, the per-user stream cap, the per-run recording emitter, the follow-the-log
+ * attach, and the coroutine hand-off. A class that returns an `SseEmitter` is a web class.
  *
  * ## Why a per-run [PipelineExecutor]
  * The executor takes its [EventEmitter] at construction, and the emitter captures per-execution
@@ -78,11 +96,11 @@ data class ExecuteLaunch(
  * going through [McpRecordingExecutionRunner]'s per-run pair instead (P7).
  *
  * ## Idempotency (§3.5)
- * `IdempotencyStore.reserve` is claimed **before** executing (that is the whole point of the
- * `SET NX`). The reservation's execution id is passed directly to the executor via
- * `ExecuteRequest.executionId`, so the idempotency store maps directly to the real execution id
- * with no alias layer. A retry resolves the existing reservation and follows the original's
- * events from the log ([SseLogStreamer.follow]) instead of re-executing.
+ * The reservation is [co.datapipelines.application.ExecutionLauncher]'s and is claimed **before**
+ * executing (that is the whole point of the `SET NX`). Its execution id is passed straight to the
+ * executor via `ExecuteRequest.executionId`, so the idempotency store maps directly to the real
+ * execution id with no alias layer. A retry comes back as [LaunchDecision.Attach] and follows the
+ * original's events from the log ([SseLogStreamer.follow]) instead of re-executing.
  *
  * ## Failure semantics
  * Parameter binding runs **before** anything is reserved or streamed, so a bad request is a 400
@@ -92,7 +110,7 @@ data class ExecuteLaunch(
  * exception completes the emitter with error and the `@ControllerAdvice` renders the envelope.
  */
 @Suppress("LongParameterList")
-class ExecutionLauncher(
+class ExecutionStreamLauncher(
     private val templateEngines: WorkspaceTemplateEngines,
     private val datasourceRegistry: DatasourceRegistry,
     private val stagingFactory: StagingFactory,
@@ -111,10 +129,9 @@ class ExecutionLauncher(
     private val streamer: SseLogStreamer,
     private val eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
-    private val idempotencyStore: IdempotencyStore,
-    private val idempotency: IdempotencyProperties,
+    /** The cross-aggregate decision: resolve, bind, reserve (056/D6). */
+    private val launcher: ExecutionLauncher,
     private val mapper: ObjectMapper,
-    private val metrics: WebMetrics,
     private val scope: CoroutineScope,
     /**
      * Test seam: builds the per-run executor. Null in production wiring, where [newExecutor]
@@ -129,7 +146,7 @@ class ExecutionLauncher(
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
 ) {
-    private val log = LoggerFactory.getLogger(ExecutionLauncher::class.java)
+    private val log = LoggerFactory.getLogger(ExecutionStreamLauncher::class.java)
 
     /** Starts — or attaches to — the execution, returning the SSE emitter to serve. */
     fun launch(request: ExecuteLaunch): SseEmitter {
@@ -139,52 +156,11 @@ class ExecutionLauncher(
         if (streams.atStreamLimit(request.principal.userId)) {
             throw ApiErrors.streamLimitExceeded(streams.maxStreamsPerUser)
         }
-        // Bind parameters up front (pipeline-contract §7.1): deterministic, and a rejected
+        // Parameter binding and the reservation are the launcher's, in that order: a rejected
         // parameter is a 400 with no execution, no reservation and no stream.
-        ParameterBinder(request.pipeline.parameters).bindOrThrow(request.parameters)
-
-        val candidate = request.idempotencyKey?.let { reserve(it, request) }
-        if (candidate is Reservation.Attach) {
-            metrics.idempotencyHit()
-            return attachToOriginal(candidate.candidateId)
-        }
-
-        return startFresh(request, (candidate as? Reservation.Reserved)?.candidateId)
-    }
-
-    private sealed interface Reservation {
-        data class Reserved(
-            val candidateId: UUID,
-        ) : Reservation
-
-        data class Attach(
-            val candidateId: UUID,
-        ) : Reservation
-    }
-
-    private fun reserve(
-        key: String,
-        request: ExecuteLaunch,
-    ): Reservation {
-        val hash = IdempotencyKeys.requestHash(request.pipelineId, request.pipelineVersion, request.parametersJson)
-        val candidate = UUID.randomUUID()
-        return try {
-            when (
-                val outcome =
-                    idempotencyStore.reserve(
-                        request.principal.userId,
-                        key,
-                        hash,
-                        candidate,
-                        idempotency.ttlSeconds,
-                    )
-            ) {
-                is IdempotencyOutcome.Reserved -> Reservation.Reserved(outcome.executionId)
-                is IdempotencyOutcome.Existing -> Reservation.Attach(outcome.executionId)
-            }
-        } catch (e: DatapipelinesException) {
-            if (e.code == PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED) metrics.idempotencyConflict()
-            throw e
+        return when (val decision = launcher.decide(request.toLaunch())) {
+            is LaunchDecision.Attach -> attachToOriginal(decision.executionId)
+            is LaunchDecision.Start -> startFresh(request, decision.executionId)
         }
     }
 

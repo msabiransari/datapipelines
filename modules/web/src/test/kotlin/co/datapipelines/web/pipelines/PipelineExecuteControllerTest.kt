@@ -25,12 +25,12 @@ import java.util.UUID
 /**
  * §6.1 request handling over a mocked launcher: body parsing, version default/pin, the unknown
  * (or soft-deleted) pipeline 404, and the parameters/result-TTL/idempotency plumbing. The
- * pre-stream parameter-binding 400 with no reservation is covered in ExecutionLauncherTest.
+ * pre-stream parameter-binding 400 with no reservation is covered in ExecutionStreamLauncherTest.
  */
 class PipelineExecuteControllerTest {
     private val pipelines = mockk<PipelineRepository>()
-    private val launcher = mockk<ExecutionLauncher>()
-    private val controller = PipelineExecuteController(pipelines, launcher)
+    private val launcher = mockk<ExecutionStreamLauncher>()
+    private val controller = PipelineExecuteController(co.datapipelines.web.pipelineServiceOver(pipelines), launcher)
 
     private val userId = UUID.randomUUID()
     private val pipelineId = UUID.randomUUID()
