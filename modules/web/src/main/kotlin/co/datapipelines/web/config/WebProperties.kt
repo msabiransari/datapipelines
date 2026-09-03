@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.executor.ErrorDetail
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 /**
@@ -171,6 +172,14 @@ data class ExecutionsProperties(
      * job (`RetentionSchedulingConfiguration`) deletes exactly these rows, never executions.
      */
     val eventRetentionDays: Long = 7,
+    /**
+     * `error-detail` (057/T85) — how much of a failure's detail travels to every surface
+     * (SSE `error` objects, `error_json`, the editor's failure panel, MCP). `full` (the
+     * default: a self-hosted product whose users are engineers) carries the exception chain
+     * with stack frames and the rendered SQL in `:name` form; `structured` omits both for
+     * deployments whose pipeline authors are not trusted to see driver internals.
+     */
+    val errorDetail: ErrorDetail = ErrorDetail.FULL,
 ) {
     init {
         require(staleTimeoutMinutes > 0) { "datapipelines.executions.stale-timeout-minutes must be > 0" }

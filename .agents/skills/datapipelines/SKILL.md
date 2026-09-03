@@ -203,6 +203,28 @@ Codes you will meet most often:
 Rule of thumb: validation errors are your bug — fix the document, don't retry.
 Reachability and TTL errors are the world's state — probe, then retry once.
 
+## When an execution fails
+
+`executions_get` (and `pipelines_execute`'s own failure result) carries the FULL
+failure record in `error` — the same object the UI shows and `error_json` stores.
+Read it in this order:
+
+1. `error.code` — the catalogued code (the table above says what to do with it).
+2. `error.exception.caused_by` — the ROOT CAUSE IS THE **LAST** ENTRY of the chain
+   (the wire is outermost-first). Quote `class` + `message` from that entry.
+3. `error.sql` — the rendered SQL in `:name` form, exactly as it failed
+   (bound values are never in it; they are in the execution's `parameters`).
+
+`error.node` names the datasource, dialect and pinned template; `error.correlation_id`
+is the one field that joins this failure to the server log — QUOTE IT whenever you
+escalate to a human. On this server `error-detail=full` (the default), the exception
+chain and stack frames travel with the error; a deployment may set `structured`, in
+which case `error.exception` and `error.sql` are absent and you have the code,
+message, node context and correlation id to work with.
+
+An agent that reports "the pipeline failed" without the root cause is doing what
+the UI did on 2026-09-02 (T85): the answer was in the event all along.
+
 ## Best practices (trouble-free authoring)
 
 1. **Render before you create.** `templates_render` with representative values catches

@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.pipeline.NodeOutput
@@ -159,15 +160,53 @@ class NodeRunner(
                 )
         }
         val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
-        // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
-        // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
-        // never on a statement that half-executed with a silent null.
-        val bound = phase(NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
-        return when (node.source) {
-            is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
-            is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
+        // 057: everything from the translator on is a failure AT OR AFTER RENDER — the
+        // rendered SQL exists and belongs on the failure record. The wrapper only fills
+        // facts still missing: a signal the datasource path already decorated (dialect in
+        // hand) passes through untouched, same as [asNodeFailure] re-labels nothing.
+        return try {
+            // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
+            // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
+            // never on a statement that half-executed with a silent null.
+            val bound = phase(NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
+            when (node.source) {
+                is NodeSource.Tempdb -> runOnTempdb(node, bound, ctx, startedAt)
+                is NodeSource.Datasource -> runOnDatasource(node, node.source.name, bound, ctx, startedAt)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw decorateFailure(e, node, ctx, sql)
         }
     }
+
+    /**
+     * The outer 057 decorator: stamps the failure record's node context (dialect: the tempdb
+     * engine's for a tempdb source, else whatever the datasource path attached) and the
+     * rendered SQL onto an escaping signal — [MappedError.withNodeFacts] fills only what is
+     * still null, so an inner decoration always wins.
+     */
+    private fun decorateFailure(
+        error: Exception,
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        sql: String,
+    ): Exception =
+        when (error) {
+            is NodeFailedSignal ->
+                NodeFailedSignal(
+                    error.error.withNodeFacts(node, tempdbDialectOf(node, ctx), sql, config.errorDetail),
+                    error.cause ?: error,
+                )
+            else -> error
+        }
+
+    private fun tempdbDialectOf(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+    ): String? = if (node.source is NodeSource.Tempdb) ctx.tempdbDialect.name else null
 
     /**
      * The per-execution output budget is passed explicitly (§6.1): letting the engine-wide
@@ -406,6 +445,28 @@ class NodeRunner(
             phase(NodePhase.CONNECT, node.id) {
                 datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
             }
+        // 057: from resolution on, the failure record can name the DIALECT — the one fact only
+        // this leg holds. This wrapper decorates first (inner), so [decorateFailure] above
+        // keeps whatever it attached. Everything a failed CONNECT can report — the T85 shape:
+        // registry resolved, pool init failed — happens inside this block.
+        return try {
+            runOnResolvedDatasource(node, datasource, bound, ctx, startedAt)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw decorateWithDialect(e, node, datasource.dialect)
+        }
+    }
+
+    private suspend fun runOnResolvedDatasource(
+        node: ExecutableNode,
+        datasource: Datasource,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult {
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
         // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
         // node execution time, so a datasource flagged readonly after this version was saved
@@ -420,7 +481,7 @@ class NodeRunner(
         // metadata-DB failure during the read refuses naming the METADATA db (carried code
         // `pipeline.execution.aborted`), never the healthy target. See [ReadonlyBackstop].
         if (node.type == NodeType.DML || node.type == NodeType.DDL) {
-            phase(NodePhase.CONNECT, node.id) { enforceSourceReadonly(name, node) }
+            phase(NodePhase.CONNECT, node.id) { enforceSourceReadonly(datasource.name, node) }
         }
         // A DQL node whose output is a datasource target is a write too (the third §5.7 shape),
         // and its refusal must not wait for the SOURCE query to finish (020 F9): during a flip
@@ -454,6 +515,25 @@ class NodeRunner(
             }
         }
     }
+
+    /**
+     * The inner 057 decorator: stamps the resolved dialect onto the failure record's node
+     * context, filling the whole context when the signal carries none yet. Rebuilding the
+     * signal (not mutating it — [MappedError] is immutable by design) preserves the original
+     * cause chain, which [PipelineExecutor.failNode] unwraps for the exception detail.
+     */
+    private fun decorateWithDialect(
+        error: Exception,
+        node: ExecutableNode,
+        dialect: Dialect,
+    ): Exception =
+        when (error) {
+            is NodeFailedSignal -> {
+                val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
+                NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
+            }
+            else -> error
+        }
 
     /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */
     private fun enforceSourceReadonly(

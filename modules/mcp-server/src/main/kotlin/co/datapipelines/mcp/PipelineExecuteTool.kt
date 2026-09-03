@@ -82,7 +82,9 @@ class PipelineExecuteTool(
                 "Execute a pipeline with the given input parameters. Returns execution events (node start/complete/fail) " +
                     "and the final result data. The result's schema describes column types; BIGINTEGER and BIGDECIMAL " +
                     "columns serialize as JSON strings — preserve them as strings when displaying or persisting to avoid " +
-                    "precision loss.",
+                    "precision loss. When the execution FAILS, the error result carries the full failure record " +
+                    "(node context, rendered SQL, exception chain with the root cause last in caused_by) — the same " +
+                    "object executions_get returns; quote its correlation_id when escalating.",
             schema =
                 """
                 {

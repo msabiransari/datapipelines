@@ -150,6 +150,49 @@ class WebEventEmitterTest {
         }
 
     @Test
+    fun `error_json is the same error object the wire carried - record, catalog fields and correlation id`() =
+        runTest {
+            // 057: the stored copy is the PROJECTED error (user_message/doc_url included), so
+            // GET /executions/{id}, the detail page and MCP executions_get read exactly what the
+            // live stream showed — one object, not two shapes to keep in step.
+            every { executionRepository.create(any()) } answers { firstArg() }
+            every { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns true
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+
+            val record =
+                co.datapipelines.executor.MappedError(
+                    code = "pipeline.node.datasource_connection_failed",
+                    message = "Failed to initialize pool",
+                    details = mapOf("phase" to "connect"),
+                    node = co.datapipelines.executor.NodeErrorContext("n1", "DQL", "sample-trips", "POSTGRES", "t.sql", 1),
+                    sql = "SELECT 1",
+                    exception = co.datapipelines.executor.ExceptionDetail("java.lang.RuntimeException", "boom"),
+                )
+            val event =
+                co.datapipelines.events.PipelineFailed(
+                    executionId, pipelineId, 3, NOW, NOW.plusMillis(50), 50, "n1", record, emptyList(),
+                )
+
+            emitter().emit(event)
+
+            val errorJson = slot<String>()
+            verify(exactly = 1) {
+                executionRepository.complete(executionId, ExecutionStatus.FAILED, any(), any(), any(), "n1", capture(errorJson), any(), any())
+            }
+            val stored = SseJson.mapper.readTree(errorJson.captured)
+            stored["code"].asText() shouldBe "pipeline.node.datasource_connection_failed"
+            stored["message"].asText() shouldBe "Failed to initialize pool"
+            stored["user_message"].asText() shouldBe "We couldn't reach the database this step uses. Check that it is online and reachable from this server."
+            stored["correlation_id"].asText() shouldBe correlationId.toString()
+            stored["node"]["datasource"].asText() shouldBe "sample-trips"
+            stored["node"]["dialect"].asText() shouldBe "POSTGRES"
+            stored["node"]["template_version"].asInt() shouldBe 1
+            stored["sql"].asText() shouldBe "SELECT 1"
+            stored["exception"]["class"].asText() shouldBe "java.lang.RuntimeException"
+        }
+
+    @Test
     fun `the durable payload carries the correlation id on every event`() =
         runTest {
             every { executionRepository.create(any()) } answers { firstArg() }

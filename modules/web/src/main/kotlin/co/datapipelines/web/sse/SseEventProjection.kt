@@ -166,15 +166,26 @@ class SseEventProjection(
      * `jdbc_url`, password or raw connection string appears there, and the executor's
      * `ErrorCodeMapper` already builds it to that rule. Re-filtering here would imply the producer
      * cannot be trusted while doing nothing to make it so.
+     *
+     * 057: `correlation_id` and the failure record (`node`, `sql`, `exception`) ship with the
+     * error wherever the error goes — the SSE payload, and (via [WebEventEmitter]) `error_json`,
+     * which serializes this same map. `correlation_id` is stamped from the same single source as
+     * the top-level one, so the two can never disagree. The 057 fields are omitted (not null)
+     * when the record does not carry them: a `structured` deployment must not render an empty
+     * panel, and a null is a value a client has to special-case.
      */
-    private fun errorPayload(error: MappedError): Map<String, Any?> =
-        mapOf(
-            "code" to error.code,
-            "message" to error.message,
-            "user_message" to ApiErrorCatalog.userMessageFor(error.code),
-            "details" to error.details,
-            "doc_url" to ApiErrorCatalog.docUrl(error.code),
-        )
+    internal fun errorPayload(error: MappedError): Map<String, Any?> =
+        buildMap {
+            put("code", error.code)
+            put("message", error.message)
+            put("user_message", ApiErrorCatalog.userMessageFor(error.code))
+            put("details", error.details)
+            put("doc_url", ApiErrorCatalog.docUrl(error.code))
+            put(CORRELATION_ID, correlationId)
+            error.node?.let { put("node", it) }
+            error.sql?.let { put("sql", it) }
+            error.exception?.let { put("exception", it) }
+        }
 
     private companion object {
         const val EXECUTION_ID = "execution_id"

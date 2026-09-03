@@ -97,12 +97,9 @@
   <th:block th:if="${record.status.name() == 'FAILED' && errorJson != null}">
     <div class="ds-card" style="border-color: var(--accent-danger); margin-bottom: var(--gap-lg);">
       <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-sm); color: var(--accent-danger);">Error</h2>
-      <div style="font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-sm);">
-        <span style="color: var(--text-muted);">Failed node:</span>
-        <code th:text="${failedNodeId ?: 'unknown'}">node</code>
-      </div>
-      <pre style="background: var(--surface-inset); padding: var(--gap-md); border-radius: var(--radius-base); font-size: var(--text-xs); font-family: var(--font-mono); overflow-x: auto; white-space: pre-wrap;"
-           th:text="${errorJson.toPrettyString()}">error</pre>
+      <!-- 057: the structured failure record (code, message, correlation id, node context,
+           rendered SQL, exception chain root-first) — not a raw JSON dump. -->
+      <div th:replace="~{partials/execution-error :: error}">error</div>
     </div>
   </th:block>
 

@@ -146,16 +146,37 @@ class PipelineExecuteToolTest {
     }
 
     @Test
-    fun `a node failure surfaces with the node's catalogued code`() {
+    fun `a node failure surfaces with the node's catalogued code and the full record`() {
         storedPipeline()
+        // 057: the record the executor completed at the failure site rides the exception, so
+        // the error envelope (McpErrorPayload.of) carries what executions_get would return —
+        // the agent that just failed a run needs no second call to see the root cause.
+        val record =
+            co.datapipelines.executor.MappedError(
+                code = PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                message = "boom",
+                details = mapOf("sql_state" to "42P01"),
+                node = co.datapipelines.executor.NodeErrorContext("fetch", "DQL", "trips", "POSTGRES", "t.sql", 2),
+                sql = "SELECT 1",
+                exception = co.datapipelines.executor.ExceptionDetail("java.sql.SQLException", "relation missing"),
+            )
         coEvery { executor.execute(any()) } throws
-            PipelineExecutionFailed("fetch", PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED, mapOf("sql_state" to "42P01"))
+            PipelineExecutionFailed("fetch", PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED, mapOf("sql_state" to "42P01"), record)
 
         val error = shouldThrow<DatapipelinesException> { tool.call(args, ctx) }
         assertAll(
             { error.code shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED },
             { error.details["failed_node_id"] shouldBe "fetch" },
         )
+        val envelope = McpErrorPayload.of(error).toMap()
+        envelope["node"] shouldBe record.node
+        envelope["sql"] shouldBe "SELECT 1"
+        envelope["exception"] shouldBe record.exception
+        // No record, no 057 fields — every other error's envelope stays exactly its old shape.
+        val plain = McpErrorPayload.of(DatapipelinesException(code = error.code, message = "m")).toMap()
+        plain.containsKey("node") shouldBe false
+        plain.containsKey("sql") shouldBe false
+        plain.containsKey("exception") shouldBe false
     }
 
     @Test

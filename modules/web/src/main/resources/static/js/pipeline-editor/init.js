@@ -12,34 +12,51 @@
    * The SQL is read from the button's data-sql attribute, falling back to the
    * code element's textContent — NEVER from the highlighted innerHTML, which
    * carries <span> markup.
+   *
+   * 057: the same delegated listener serves the failure record's Copy button —
+   * any .pe-copy with a data-copy attribute. One copy channel for the editor,
+   * not two to keep in step.
    */
   function wireSqlCopy(editor) {
     document.addEventListener("click", function (evt) {
       var target = evt.target;
       var btn = target && target.closest ? target.closest(".pe-sql-copy") : null;
-      if (!btn) return;
-      var sql = btn.getAttribute("data-sql");
-      if (sql === null) {
-        var block = btn.closest(".pe-sql-block");
-        var code = block && block.querySelector("code.pe-sql-code");
-        sql = code ? code.textContent : "";
+      if (btn) {
+        copyFrom(btn, sqlOf(btn));
+        return;
       }
-      var done = function () {
-        editor.announceStatus("SQL copied to clipboard");
-        var label = btn.textContent;
-        btn.textContent = "Copied";
-        setTimeout(function () {
-          btn.textContent = label;
-        }, 1500);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(sql).then(done, function () {
-          legacyCopy(sql, done);
-        });
-      } else {
-        legacyCopy(sql, done);
-      }
+      var generic = target && target.closest ? target.closest(".pe-copy") : null;
+      if (generic) copyFrom(generic, generic.getAttribute("data-copy") || "");
     });
+  }
+
+  function sqlOf(btn) {
+    var sql = btn.getAttribute("data-sql");
+    if (sql === null) {
+      var block = btn.closest(".pe-sql-block");
+      var code = block && block.querySelector("code.pe-sql-code");
+      sql = code ? code.textContent : "";
+    }
+    return sql;
+  }
+
+  function copyFrom(btn, text) {
+    var what = btn.getAttribute("data-copy-label") || "SQL";
+    var done = function () {
+      editor.announceStatus(what + " copied to clipboard");
+      var label = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(function () {
+        btn.textContent = label;
+      }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {
+        legacyCopy(text, done);
+      });
+    } else {
+      legacyCopy(text, done);
+    }
   }
 
   /* Non-secure-context fallback: the async clipboard API requires one. */
@@ -68,6 +85,9 @@
       paramKeys: [],
       parameterOverrides: {},
       nodeStates: {},
+      /* 057: node_id → the wire error object from that node's node_failed (the inspector
+         renders it while the node's runtime state is "failed"). */
+      nodeErrors: {},
       selectedNode: null,
       isExecuting: false,
       executionId: null,
@@ -75,6 +95,7 @@
       resultPanel: {
         visible: false,
         data: null,
+        failure: null,
         columns: [],
         rows: [],
         page: 1,
@@ -256,6 +277,23 @@
         if (this.resultPanelInstance) {
           this.resultPanelInstance.showData(payload);
         }
+      },
+
+      /* 057/T85: pipeline_failed opens the result panel's failure mode with the full
+         record, plus the modal's one-line summary. Reporting "the pipeline failed"
+         without the root cause is what the UI did the night of T85. */
+      handlePipelineFailed: function (payload) {
+        if (this.resultPanelInstance) {
+          this.resultPanelInstance.showFailure(payload);
+        }
+        var err = payload && payload.error;
+        this.showError((err && (err.user_message || err.message)) || "Pipeline execution failed");
+      },
+
+      /* The inspector/result-panel failure renderer (details.js) — plain so Alpine
+         expressions stay small and node --test can drive it. */
+      failureView: function (error) {
+        return window.PEErrorDetails ? window.PEErrorDetails.build(error) : null;
       },
 
       showError: function (msg) {

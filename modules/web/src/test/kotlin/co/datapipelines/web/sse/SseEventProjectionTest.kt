@@ -9,7 +9,9 @@ import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.executor.AbortReason
+import co.datapipelines.executor.ExceptionDetail
 import co.datapipelines.executor.MappedError
+import co.datapipelines.executor.NodeErrorContext
 import co.datapipelines.executor.NodeStats
 import co.datapipelines.executor.NodeStatus
 import io.kotest.matchers.shouldBe
@@ -124,6 +126,56 @@ class SseEventProjectionTest {
         val event = NodeCompleted(executionId, "revenue", stats(NodeStatus.SUCCESS).copy(childExecutionId = childExecutionId))
 
         projection.payload(event)["child_execution_id"] shouldBe childExecutionId
+    }
+
+    @Test
+    fun `the failure record rides the error object - node, sql, exception, correlation_id`() {
+        // 057/T85: the record the executor completed at the failure site, as the wire carries it.
+        val record =
+            MappedError(
+                code = "pipeline.node.datasource_connection_failed",
+                message = "Failed to initialize pool",
+                details = mapOf("phase" to "connect", "node_id" to "stage_daily_trips"),
+                node = NodeErrorContext("stage_daily_trips", "DQL", "sample-trips", "POSTGRES", "sample_trips_daily.sql", 1),
+                sql = "SELECT * FROM trips WHERE borough = :borough",
+                exception =
+                    ExceptionDetail(
+                        className = "java.lang.RuntimeException",
+                        message = "Failed to initialize pool",
+                        frames = listOf("Boom.f0(Boom.kt:1)"),
+                        causedBy =
+                            listOf(
+                                ExceptionDetail(
+                                    className = "org.postgresql.util.PSQLException",
+                                    message = "FATAL: password authentication failed for user \"dp_demo_ro\"",
+                                    frames = listOf("org.postgresql.util.PSQLException.parseServerError(PSQLException.java:285)"),
+                                ),
+                            ),
+                    ),
+            )
+        val event = NodeFailed(executionId, "stage_daily_trips", record, stats(NodeStatus.FAILED))
+        val payload = projection.payload(event)
+
+        @Suppress("UNCHECKED_CAST")
+        val error = payload["error"] as Map<String, Any?>
+        error["node"] shouldBe record.node
+        error["sql"] shouldBe "SELECT * FROM trips WHERE borough = :borough"
+        error["exception"] shouldBe record.exception
+        // Same single source as the top-level stamp — the two cannot disagree.
+        error["correlation_id"] shouldBe correlationId
+        payload["correlation_id"] shouldBe correlationId
+    }
+
+    @Test
+    fun `a record without 057 facts omits them - absent, never null`() {
+        // The structured deployment's shape: no exception, no sql, and NO empty-panel keys.
+        val event = NodeFailed(executionId, "n", MappedError("c", "m"), stats(NodeStatus.FAILED))
+        @Suppress("UNCHECKED_CAST")
+        val error = projection.payload(event)["error"] as Map<String, Any?>
+        error.containsKey("node") shouldBe false
+        error.containsKey("sql") shouldBe false
+        error.containsKey("exception") shouldBe false
+        error["correlation_id"] shouldBe correlationId
     }
 
     private fun stats(status: NodeStatus) =

@@ -1,8 +1,15 @@
-<th:block xmlns:th="http://www.thymeleaf.org">
-  <div class="ds-card-flat" style="text-align: center; padding: var(--gap-lg);">
-    <div class="ds-empty">
-      <div class="ds-empty-title">Result unavailable</div>
-      <div class="ds-empty-description" th:text="'Error: ' + ${error}">error</div>
-    </div>
+<!-- 057: when the controller can name the execution's failure (result.execution_failed), the
+     full structured record renders here — the same fragment the detail page's Error card
+     uses. The bare card survives for the states that genuinely have no record (expired,
+     not found). -->
+<div class="ds-empty" th:if="${errorCode == null}">
+  <div class="ds-empty-title">Result unavailable</div>
+  <div class="ds-empty-description" th:text="'Error: ' + ${error}">error</div>
+</div>
+<th:block th:if="${errorCode != null}">
+  <div class="ds-empty">
+    <div class="ds-empty-title">Execution failed — no result to show</div>
+    <div class="ds-empty-description">The failure detail below is the record the run produced.</div>
   </div>
+  <div style="margin-top: var(--gap-md);" th:replace="~{partials/execution-error :: error}">error</div>
 </th:block>

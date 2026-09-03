@@ -88,6 +88,8 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.executions.stale-timeout-minutes") shouldBe props.staleTimeoutMinutes.toString()
         // Bound since 050/T60 — the retention job enforces it hourly.
         documented.getValue("datapipelines.executions.event-retention-days") shouldBe props.eventRetentionDays.toString()
+        // 057: the failure record's detail level — enum, so the wire value IS the documented one.
+        documented.getValue("datapipelines.executions.error-detail") shouldBe props.errorDetail.wire
     }
 
     private companion object {

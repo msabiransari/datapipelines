@@ -211,7 +211,11 @@ class WebEventEmitter(
                 }
 
                 is PipelineFailed -> {
-                    Triple(ExecutionStatus.FAILED, event.failedNodeId, SseJson.mapper.writeValueAsString(event.error))
+                    // 057: error_json is the SAME error object the wire carried — the projected
+                    // map, not a bare serialization of the executor's record — so `GET
+                    // /executions/{id}`, the detail page and MCP `executions_get` all read what
+                    // the live stream showed, `user_message`/`doc_url`/`correlation_id` included.
+                    Triple(ExecutionStatus.FAILED, event.failedNodeId, SseJson.mapper.writeValueAsString(projection.errorPayload(event.error)))
                 }
 
                 is ExecutionAborted -> {

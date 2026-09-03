@@ -154,6 +154,7 @@ Limits are **per user** (an API key inherits its owner's budget — minting more
 
 | YAML path | Default | Description |
 |---|---|---|
+| `datapipelines.executions.error-detail` | `full` | How much of a failure's detail travels to every surface that carries an error (the SSE `node_failed`/`pipeline_failed` `error` objects, `pipeline_executions.error_json`, the editor's failure panel, MCP). `full` includes the exception chain with stack frames and the rendered SQL in `:name` form; `structured` omits both. Choose `structured` for a deployment whose pipeline authors are not trusted to see driver internals ([DAG executor §8.4](dag-executor.md#84-the-failure-record)) |
 | `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record) past their execution's completion — enforced by the hourly retention job (050/T60, safe for N replicas: one idempotent `DELETE`; `pipeline_executions` rows are never touched). The post-completion Redis event log lives for 1 hour, not configurable |
 | `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
 

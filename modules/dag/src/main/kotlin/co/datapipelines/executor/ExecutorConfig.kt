@@ -27,6 +27,11 @@ package co.datapipelines.executor
  *   cadence at which the executing instance re-reads the Redis cancel flag (§8.3.1).
  * @property maxCompositionDepth `datapipelines.pipelines.max-composition-depth` — the deepest
  *   PIPELINE-node composition chain admitted (checked at save time and again at run time).
+ * @property errorDetail `datapipelines.executions.error-detail` (Configuration §3.11) — how
+ *   much of the failure record travels: [ErrorDetail.FULL] carries the exception chain and
+ *   the rendered SQL, [ErrorDetail.STRUCTURED] omits both and keeps the catalogued code,
+ *   message, details and node context. Default FULL: a self-hosted product whose users are
+ *   engineers (057/T85).
  */
 data class ExecutorConfig(
     val maxParallelNodes: Int = 4,
@@ -37,6 +42,7 @@ data class ExecutorConfig(
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
+    val errorDetail: ErrorDetail = ErrorDetail.FULL,
     val result: ResultConfig = ResultConfig(),
 ) {
     init {

@@ -12,6 +12,7 @@ import co.datapipelines.events.NodeFailed
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
+import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -310,9 +311,41 @@ class PipelineExecutor(
             return CancellationException("node ${node.id} interrupted while the execution unwound")
         }
         run.stats.failed(node.id, mapped)
-        emit(NodeFailed(run.executionId, node.id, mapped, run.stats.snapshot(listOf(node.id)).first()))
-        return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause)
+        // 057/T85: the failure record, completed ONCE here — the only place that holds the
+        // unwrapped original cause — and then carried unchanged into `node_failed`, the
+        // terminal `pipeline_failed` and `error_json`. The node runner attached the node
+        // context and rendered SQL at the failure site; the recorder fills anything still
+        // missing and adds the exception detail under `error-detail=full`.
+        val failure = completeRecord(mapped, node, ctx, cause)
+        emit(NodeFailed(run.executionId, node.id, failure, run.stats.snapshot(listOf(node.id)).first()))
+        return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause, failure)
     }
+
+    /**
+     * Completes the 057 failure record: node context for a failure the runner never
+     * decorated (a PIPELINE node fails before render), and the [ExceptionDetail] of the
+     * ORIGINAL failure — `cause.cause ?: cause` unwraps a [NodeFailedSignal] to the driver
+     * throwable it wraps, the same unwrapping the thrown [NodeExecutionException] performs.
+     */
+    private fun completeRecord(
+        mapped: MappedError,
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        cause: Exception,
+    ): MappedError {
+        val original = cause.cause ?: cause
+        val base = mapped.copy(node = mapped.node ?: NodeErrorContext.of(node, dialectOf(node, ctx)))
+        return if (config.errorDetail == ErrorDetail.FULL) {
+            base.copy(exception = ExceptionDetail.of(original))
+        } else {
+            base
+        }
+    }
+
+    private fun dialectOf(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+    ): String? = if (node.source is NodeSource.Tempdb) ctx.tempdbDialect.name else null
 
     // -------------------------------------------------------------- outcomes
 
@@ -371,11 +404,21 @@ class PipelineExecutor(
         val view = withContext(dispatcher.context) { resultStore.describe(resultRef) }
         if (view == null) {
             LOG.error("Stored result {} vanished before data_ready; failing execution {}", resultRef, run.executionId)
+            val vanished = IllegalStateException("stored result $resultRef is gone or expired before data_ready")
             throw NodeExecutionException(
                 nodeId = run.plan.callerNodeId ?: "",
                 errorCode = PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
                 errorDetails = mapOf("result_ref" to resultRef),
-                cause = IllegalStateException("stored result $resultRef is gone or expired before data_ready"),
+                cause = vanished,
+                // 057: this path never passed a recording site, so the record is built here —
+                // node context for the caller node, exception detail per the configured level.
+                errorRecord =
+                    MappedError(
+                        PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+                        vanished.message.orEmpty(),
+                        mapOf("result_ref" to resultRef),
+                        node = run.plan.callerNodeId?.let { NodeErrorContext.of(run.plan.dag.node(it)) },
+                    ).let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(vanished)) else it },
             )
         }
         return view
@@ -387,9 +430,12 @@ class PipelineExecutor(
     ): Nothing {
         val failedAt = Instant.now()
         // node_failed was already emitted at the failure site — not re-emitted here (§5.2).
-        run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails))) }
+        // 057: the terminal event carries the SAME failure record, already completed at the
+        // recording site — rebuilt from code/details only on the one path that never passed
+        // through failNode (the vanished-result throw in resolveStoredResult carries its own).
+        run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, e.errorRecord ?: MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails))) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
-        throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails)
+        throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails, e.errorRecord)
     }
 
     /** A timeout is a **failure**, not a cancellation: status `FAILED`, code `execution.timeout`. */
@@ -399,7 +445,11 @@ class PipelineExecutor(
     ): Nothing {
         val failedAt = Instant.now()
         val timeout = PipelineTimeoutException(run.stats.runningNodeIds().firstOrNull(), run.elapsedMsAt(failedAt))
-        val error = MappedError(timeout.code, timeout.message.orEmpty(), timeout.details)
+        // 057: the same exception detail a node failure carries — a timeout's stack names the
+        // coroutine machinery that fired, and the record stays shape-identical across causes.
+        val error =
+            MappedError(timeout.code, timeout.message.orEmpty(), timeout.details)
+                .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(cause)) else it }
         run.emitTerminal { emit(pipelineFailed(run, failedAt, timeout.timedOutNodeId, error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw timeout.also { it.addSuppressed(cause) }
@@ -417,7 +467,12 @@ class PipelineExecutor(
         e: DatapipelinesException,
     ): Nothing {
         val failedAt = Instant.now()
-        val error = MappedError(e.code, e.message.orEmpty(), e.details)
+        // 057: setup failures carry the exception detail too (no node context, no SQL —
+        // neither exists yet); the raised module's own cause chain walks exactly like a
+        // driver's.
+        val error =
+            MappedError(e.code, e.message.orEmpty(), e.details)
+                .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(e)) else it }
         run.emitTerminal { emit(pipelineFailed(run, failedAt, failedNodeId = null, error = error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw e

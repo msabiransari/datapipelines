@@ -477,10 +477,13 @@ A `PIPELINE` node's `node_completed` additionally carries `"child_execution_id":
 
 Emitted when a node fails. Execution then halts (fail-fast); a `pipeline_failed` event follows.
 
+The `error` object is the **failure record** (057/T85): one object, completed once at the failure site, carried unchanged into this event, the terminal `pipeline_failed` event, and `pipeline_executions.error_json` — so the live stream, `GET /executions/{id}` and the execution detail page all show the same thing. `correlation_id` matches the top-level stamp. `node`, `sql` and `exception` are present under `datapipelines.executions.error-detail=full` (the default) and omitted under `structured`; the SQL is always the rendered statement in `:name` form — bound parameter **values never travel in the error object** (a driver message may echo a value; that is the driver's text and ships as-is, exactly as the log prints it). The `caused_by` chain is outermost-first, **root cause LAST**; frames are capped at 40 per level and the chain at 16 levels.
+
 ```json
 {
   "execution_id": "exec-uuid",
   "node_id": "fetch_orders",
+  "correlation_id": "corr-uuid",
   "started_at": "2026-08-05T14:30:00.234Z",
   "failed_at": "2026-08-05T14:30:00.500Z",
   "duration_ms": 266,
@@ -492,7 +495,25 @@ Emitted when a node fails. Execution then halts (fail-fast); a `pipeline_failed`
       "datasource_name": "pg-prod",
       "underlying_error": "java.net.ConnectException: Connection refused"
     },
-    "doc_url": "https://docs.datapipelines.co/errors/pipeline-node-datasource-connection-failed"
+    "doc_url": "https://docs.datapipelines.co/errors/pipeline-node-datasource-connection-failed",
+    "correlation_id": "corr-uuid",
+    "node": {
+      "id": "fetch_orders",
+      "type": "DQL",
+      "datasource": "pg-prod",
+      "dialect": "POSTGRES",
+      "template": "acme/finance/fetch_orders.sql",
+      "template_version": 4
+    },
+    "sql": "SELECT * FROM orders WHERE placed_on >= :start_date",
+    "exception": {
+      "class": "java.sql.SQLException",
+      "message": "Connection refused",
+      "frames": ["org.postgresql.Driver.connect(Driver.java:262)", "..."],
+      "caused_by": [
+        {"class": "java.net.ConnectException", "message": "Connection refused", "frames": ["..."]}
+      ]
+    }
   }
 }
 ```
@@ -521,7 +542,7 @@ Emitted when execution finishes successfully, immediately before `data_ready`.
 
 #### 6.4.6 `pipeline_failed`
 
-Emitted when execution halts due to any node failure.
+Emitted when execution halts due to any node failure. Its `error` object is the SAME failure record `node_failed` carried for the failed node (§6.4.4), unchanged — and is also what `pipeline_executions.error_json` stores, so `GET /executions/{id}` and the execution detail page show it after the fact. A timeout or setup failure carries the same shape minus `node`/`sql` (neither exists for it).
 
 ```json
 {

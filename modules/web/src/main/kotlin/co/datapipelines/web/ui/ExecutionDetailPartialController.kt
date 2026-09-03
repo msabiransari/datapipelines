@@ -7,7 +7,9 @@ import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ResultStore
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.visibleTo
@@ -44,6 +46,19 @@ class ExecutionDetailPartialController(
             try {
                 cursor.readable(id, principal)
             } catch (e: ApiException) {
+                // 057/T85: a FAILED execution's result area shows the failure record — the
+                // same structured rendering the detail page and the live editor got — instead
+                // of one bare code string. The other rows (expired, not found) have no record
+                // and keep the bare card.
+                if (e.code == PipelineErrorCodes.Result.EXECUTION_FAILED) {
+                    val failed =
+                        executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.visibleTo(principal) }
+                    failed?.errorJson?.let { json ->
+                        ExecutionErrorView.attributes(ExecutorJson.mapper.readTree(json)).forEach { (k, v) -> model.addAttribute(k, v) }
+                        model.addAttribute("failedNodeId", failed.failedNodeId)
+                        return "partials/execution-result-error"
+                    }
+                }
                 model.addAttribute("error", e.code)
                 return "partials/execution-result-error"
             }

@@ -218,6 +218,64 @@
                   </div>
                 </div>
               </div>
+
+              <!-- 057/T85: the failure record for THIS node — code, message, correlation id,
+                   node context, the rendered SQL and the exception chain (root cause first),
+                   straight from the node_failed payload. Absent sections stay absent: under
+                   error-detail=structured there is no SQL and no exception, and no apology. -->
+              <div class="pe-details-section pe-node-failure" x-show="nodeStates[selectedNode.id] === 'failed' && nodeErrors[selectedNode.id]">
+                <template x-if="nodeErrors[selectedNode.id]">
+                  <div x-data="{ view: failureView(nodeErrors[selectedNode.id]) }">
+                    <h3 class="pe-details-heading">Failure</h3>
+                    <div class="pe-field">
+                      <label class="pe-label">Code</label>
+                      <div class="pe-value"><code class="pe-error-code" x-text="view.code"></code></div>
+                    </div>
+                    <div class="pe-field">
+                      <label class="pe-label">Message</label>
+                      <div class="pe-value" x-text="view.message"></div>
+                    </div>
+                    <div class="pe-field" x-show="view.nodeLine">
+                      <label class="pe-label">Node</label>
+                      <div class="pe-value" x-text="view.nodeLine" x-bind:title="view.nodeLine"></div>
+                    </div>
+                    <div class="pe-field" x-show="view.correlationId">
+                      <label class="pe-label">Correlation ID</label>
+                      <div class="pe-value"><code class="pe-error-corr" x-text="view.correlationId"></code></div>
+                    </div>
+                    <template x-if="view.detailsText">
+                      <div class="pe-field">
+                        <label class="pe-label">Details</label>
+                        <pre class="pe-error-details-json" x-text="view.detailsText"></pre>
+                      </div>
+                    </template>
+                    <template x-if="view.sql">
+                      <div class="pe-field">
+                        <label class="pe-label">SQL</label>
+                        <div class="pe-sql-block">
+                          <pre class="pe-sql"><code class="pe-sql-code" x-text="view.sql"></code></pre>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="view.chain">
+                      <details class="pe-error-exception">
+                        <summary>Exception <span class="pe-error-root" x-text="'· root: ' + view.rootCause"></span></summary>
+                        <template x-for="(level, idx) in view.chain" :key="idx">
+                          <div class="pe-error-level">
+                            <div class="pe-error-level-title" x-text="(idx === 0 ? 'Root cause: ' : 'Caused by: ') + level.cls"></div>
+                            <div class="pe-error-level-message" x-text="level.message"></div>
+                            <pre class="pe-error-frames" x-text="level.frames.join('\n')"></pre>
+                          </div>
+                        </template>
+                      </details>
+                    </template>
+                    <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-copy"
+                            x-bind:data-copy="view.copyText" data-copy-label="Failure detail">
+                      Copy failure detail
+                    </button>
+                  </div>
+                </template>
+              </div>
             </div>
           </div>
         </template>
@@ -230,11 +288,51 @@
         <h2>Results</h2>
         <button class="pe-details-close" @click="resultPanel.visible = false" aria-label="Close results">&times;</button>
       </div>
-      <div x-show="resultPanel.ttlSeconds > 0" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
-      <div x-show="resultPanel.expired" class="pe-result-expired-card">
+
+      <!-- 057/T85: the execution-level failure record — the same rendering the node inspector
+           gets, in the place the engineer is already looking when the run ends. -->
+      <template x-if="resultPanel.failure">
+        <div class="pe-result-failure" x-data="{ view: failureView(resultPanel.failure) }">
+          <div class="pe-failure-summary">
+            <span class="ds-badge ds-badge-danger" x-text="view.code"></span>
+            <span class="pe-failure-message" x-text="view.message"></span>
+          </div>
+          <div class="pe-failure-meta">
+            <span x-show="view.correlationId">correlation id <code class="pe-error-corr" x-text="view.correlationId"></code></span>
+            <span x-show="view.nodeLine" x-text="view.nodeLine"></span>
+          </div>
+          <template x-if="view.sql">
+            <div class="pe-field">
+              <label class="pe-label">SQL</label>
+              <div class="pe-sql-block">
+                <pre class="pe-sql"><code class="pe-sql-code" x-text="view.sql"></code></pre>
+              </div>
+            </div>
+          </template>
+          <template x-if="view.chain">
+            <details class="pe-error-exception" open>
+              <summary>Exception <span class="pe-error-root" x-text="'· root: ' + view.rootCause"></span></summary>
+              <template x-for="(level, idx) in view.chain" :key="idx">
+                <div class="pe-error-level">
+                  <div class="pe-error-level-title" x-text="(idx === 0 ? 'Root cause: ' : 'Caused by: ') + level.cls"></div>
+                  <div class="pe-error-level-message" x-text="level.message"></div>
+                  <pre class="pe-error-frames" x-text="level.frames.join('\n')"></pre>
+                </div>
+              </template>
+            </details>
+          </template>
+          <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-copy"
+                  x-bind:data-copy="view.copyText" data-copy-label="Failure detail">
+            Copy failure detail
+          </button>
+        </div>
+      </template>
+
+      <div x-show="resultPanel.ttlSeconds > 0 && !resultPanel.failure" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
+      <div x-show="resultPanel.expired && !resultPanel.failure" class="pe-result-expired-card">
         <p>Result expired — re-run the pipeline to see the latest data.</p>
       </div>
-      <div x-show="!resultPanel.expired && resultPanel.data">
+      <div x-show="!resultPanel.expired && resultPanel.data && !resultPanel.failure">
         <div class="pe-result-table-container">
           <table class="ds-table">
             <thead>
