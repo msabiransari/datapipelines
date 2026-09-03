@@ -93,6 +93,26 @@ abstract class BrowserSuite {
         page.click("form button[type=submit]")
     }
 
+    /**
+     * Drives the SELF-SERVE workspace creation flow (the default provisioning mode,
+     * configuration.md §3.17): a first-login user has NO workspace until they create one
+     * at /workspaces. Plain form POST + redirect — no htmx to wait out.
+     */
+    protected fun createWorkspace(name: String) {
+        page.navigate("$baseUrl/workspaces")
+        page.waitForURL("**/workspaces")
+        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
+        // Wait for the form-submit navigation to settle, THEN the row — a selector wait
+        // started before the submit can bind to the outgoing document. `?` is a glob
+        // metacharacter, so the query is matched with plain wildcards.
+        page.click("form[action*='/workspaces/create'] button[type=submit]")
+        // The name appears in THREE places (the table cell, the switcher's hidden
+        // <option>, the members heading) — a bare text= wait resolves to the first,
+        // the hidden option, and waits for visibility forever. Wait for the visible
+        // table cell.
+        page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+    }
+
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */
     protected class Session(
         val page: Page,
@@ -148,7 +168,12 @@ abstract class BrowserSuite {
     protected fun generatedPassword(prefix: String): String =
         "$prefix-" + (1..24).map { BASE32[SECURE_RANDOM.nextInt(BASE32.length)] }.joinToString("")
 
-    protected fun uniqueEmail(slug: String): String = "$slug@browser.datapipelines.test"
+    /**
+     * Suite-unique email. Lowercased because [co.datapipelines.auth.LocalAuthService]
+     * normalizes the submitted email (`trim().lowercase()`) — a mixed-case stored email
+     * can never log in, and the suite must honor the app's contract, not fight it.
+     */
+    protected fun uniqueEmail(slug: String): String = "$slug@browser.datapipelines.test".lowercase()
 
     companion object {
         private const val SECRET_BYTES = 32
