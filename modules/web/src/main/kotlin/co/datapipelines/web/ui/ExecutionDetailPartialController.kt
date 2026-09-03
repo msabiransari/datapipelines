@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -50,15 +51,7 @@ class ExecutionDetailPartialController(
                 // same structured rendering the detail page and the live editor got — instead
                 // of one bare code string. The other rows (expired, not found) have no record
                 // and keep the bare card.
-                if (e.code == PipelineErrorCodes.Result.EXECUTION_FAILED) {
-                    val failed =
-                        executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.visibleTo(principal) }
-                    failed?.errorJson?.let { json ->
-                        ExecutionErrorView.attributes(ExecutorJson.mapper.readTree(json)).forEach { (k, v) -> model.addAttribute(k, v) }
-                        model.addAttribute("failedNodeId", failed.failedNodeId)
-                        return "partials/execution-result-error"
-                    }
-                }
+                if (renderExecutionFailure(id, principal, model, e.code)) return "partials/execution-result-error"
                 model.addAttribute("error", e.code)
                 return "partials/execution-result-error"
             }
@@ -81,6 +74,26 @@ class ExecutionDetailPartialController(
         model.addAttribute("prevOffset", if (offset > 0) (offset - pageSize).coerceAtLeast(0) else null)
         model.addAttribute("totalRows", page.totalRows)
         return "partials/execution-result"
+    }
+
+    /**
+     * The 057 failure branch of [result]: renders the execution's full failure record (the
+     * shared `partials/execution-error` model) when this refusal is a FAILED execution with a
+     * stored record. True when it rendered; false when the caller should fall back to the bare
+     * code card (expired, not found, or no record stored).
+     */
+    private fun renderExecutionFailure(
+        id: UUID,
+        principal: AuthenticatedPrincipal,
+        model: Model,
+        code: String,
+    ): Boolean {
+        if (code != PipelineErrorCodes.Result.EXECUTION_FAILED) return false
+        val failed = executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.visibleTo(principal) } ?: return false
+        val errorJson = failed.errorJson ?: return false
+        ExecutionErrorView.attributes(ExecutorJson.mapper.readTree(errorJson)).forEach { (k, v) -> model.addAttribute(k, v) }
+        model.addAttribute("failedNodeId", failed.failedNodeId)
+        return true
     }
 
     @Suppress("ThrowsCount")

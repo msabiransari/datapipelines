@@ -1,8 +1,8 @@
 package co.datapipelines.executor
 
-import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.events.NodeFailed
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeOutput
@@ -50,7 +50,11 @@ class FailureTransparencyTest {
                         h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
                     }
 
-                val nodeRecord = h.emitter.firstOf<NodeFailed>().error.shouldNotBeNull()
+                val nodeRecord =
+                    h.emitter
+                        .firstOf<NodeFailed>()
+                        .error
+                        .shouldNotBeNull()
 
                 // The node context: the datasource path decorated it (dialect in hand).
                 nodeRecord.node.shouldNotBeNull().let { n ->
@@ -98,7 +102,12 @@ class FailureTransparencyTest {
                 shouldThrow<PipelineExecutionFailed> {
                     h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
                 }
-                val x = h.emitter.firstOf<NodeFailed>().error.exception.shouldNotBeNull()
+                val x =
+                    h.emitter
+                        .firstOf<NodeFailed>()
+                        .error
+                        .exception
+                        .shouldNotBeNull()
                 x.frames shouldHaveSize ExceptionDetail.FRAMES_CAP
                 x.frames.first() shouldBe "Deep.frame0(Deep.kt:1)"
                 // Capped, not dropped: the record still exists and still names the failure.

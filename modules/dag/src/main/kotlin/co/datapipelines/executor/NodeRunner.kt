@@ -160,11 +160,22 @@ class NodeRunner(
                 )
         }
         val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
-        // 057: everything from the translator on is a failure AT OR AFTER RENDER — the
-        // rendered SQL exists and belongs on the failure record. The wrapper only fills
-        // facts still missing: a signal the datasource path already decorated (dialect in
-        // hand) passes through untouched, same as [asNodeFailure] re-labels nothing.
-        return try {
+        return dispatchRendered(node, ctx, startedAt, sql)
+    }
+
+    /**
+     * The translated-and-beyond leg of [run] (057): everything here is a failure AT OR AFTER
+     * RENDER — the rendered SQL exists and belongs on the failure record. The wrapper only
+     * fills facts still missing: a signal the datasource path already decorated (dialect in
+     * hand) passes through untouched, same as [asNodeFailure] re-labels nothing.
+     */
+    private suspend fun dispatchRendered(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        sql: String,
+    ): NodeResult =
+        try {
             // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
             // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
             // never on a statement that half-executed with a silent null.
@@ -180,7 +191,6 @@ class NodeRunner(
         ) {
             throw decorateFailure(e, node, ctx, sql)
         }
-    }
 
     /**
      * The outer 057 decorator: stamps the failure record's node context (dialect: the tempdb
@@ -195,12 +205,16 @@ class NodeRunner(
         sql: String,
     ): Exception =
         when (error) {
-            is NodeFailedSignal ->
+            is NodeFailedSignal -> {
                 NodeFailedSignal(
                     error.error.withNodeFacts(node, tempdbDialectOf(node, ctx), sql, config.errorDetail),
                     error.cause ?: error,
                 )
-            else -> error
+            }
+
+            else -> {
+                error
+            }
         }
 
     private fun tempdbDialectOf(
@@ -445,11 +459,23 @@ class NodeRunner(
             phase(NodePhase.CONNECT, node.id) {
                 datasourceRegistry.getVisible(name, ctx.workspaceId) ?: throw datasourceNotFound(name)
             }
-        // 057: from resolution on, the failure record can name the DIALECT — the one fact only
-        // this leg holds. This wrapper decorates first (inner), so [decorateFailure] above
-        // keeps whatever it attached. Everything a failed CONNECT can report — the T85 shape:
-        // registry resolved, pool init failed — happens inside this block.
-        return try {
+        return withResolvedDatasource(node, datasource, bound, ctx, startedAt)
+    }
+
+    /**
+     * The resolved-datasource leg (057): from resolution on, the failure record can name the
+     * DIALECT — the one fact only this leg holds. This wrapper decorates first (inner), so
+     * [decorateFailure] above keeps whatever it attached. Everything a failed CONNECT can
+     * report — the T85 shape: registry resolved, pool init failed — happens inside this block.
+     */
+    private suspend fun withResolvedDatasource(
+        node: ExecutableNode,
+        datasource: Datasource,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult =
+        try {
             runOnResolvedDatasource(node, datasource, bound, ctx, startedAt)
         } catch (e: CancellationException) {
             throw e
@@ -458,7 +484,6 @@ class NodeRunner(
         ) {
             throw decorateWithDialect(e, node, datasource.dialect)
         }
-    }
 
     private suspend fun runOnResolvedDatasource(
         node: ExecutableNode,
@@ -532,7 +557,10 @@ class NodeRunner(
                 val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
                 NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
             }
-            else -> error
+
+            else -> {
+                error
+            }
         }
 
     /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */

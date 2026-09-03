@@ -171,19 +171,38 @@ class WebEventEmitterTest {
                 )
             val event =
                 co.datapipelines.events.PipelineFailed(
-                    executionId, pipelineId, 3, NOW, NOW.plusMillis(50), 50, "n1", record, emptyList(),
+                    executionId,
+                    pipelineId,
+                    3,
+                    NOW,
+                    NOW.plusMillis(50),
+                    50,
+                    "n1",
+                    record,
+                    emptyList(),
                 )
 
             emitter().emit(event)
 
             val errorJson = slot<String>()
             verify(exactly = 1) {
-                executionRepository.complete(executionId, ExecutionStatus.FAILED, any(), any(), any(), "n1", capture(errorJson), any(), any())
+                executionRepository.complete(
+                    executionId,
+                    ExecutionStatus.FAILED,
+                    any(),
+                    any(),
+                    any(),
+                    "n1",
+                    capture(errorJson),
+                    any(),
+                    any(),
+                )
             }
             val stored = SseJson.mapper.readTree(errorJson.captured)
             stored["code"].asText() shouldBe "pipeline.node.datasource_connection_failed"
             stored["message"].asText() shouldBe "Failed to initialize pool"
-            stored["user_message"].asText() shouldBe "We couldn't reach the database this step uses. Check that it is online and reachable from this server."
+            stored["user_message"].asText() shouldBe
+                "We couldn't reach the database this step uses. Check that it is online and reachable from this server."
             stored["correlation_id"].asText() shouldBe correlationId.toString()
             stored["node"]["datasource"].asText() shouldBe "sample-trips"
             stored["node"]["dialect"].asText() shouldBe "POSTGRES"

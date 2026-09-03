@@ -170,6 +170,7 @@ class SseEventProjectionTest {
     fun `a record without 057 facts omits them - absent, never null`() {
         // The structured deployment's shape: no exception, no sql, and NO empty-panel keys.
         val event = NodeFailed(executionId, "n", MappedError("c", "m"), stats(NodeStatus.FAILED))
+
         @Suppress("UNCHECKED_CAST")
         val error = projection.payload(event)["error"] as Map<String, Any?>
         error.containsKey("node") shouldBe false

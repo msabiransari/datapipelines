@@ -10,18 +10,20 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.executions.ResultCursor
+import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeLessThan
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -404,7 +406,6 @@ class ExecutionControllerTest {
                                         "frames":["org.postgresql.util.PSQLException.parseServerError(PSQLException.java:285)"]}]}}
             """.trimIndent()
 
-        val FIXTURE_ERROR_NODE: com.fasterxml.jackson.databind.JsonNode =
-            co.datapipelines.executor.ExecutorJson.mapper.readTree(FAILURE_JSON)
+        val FIXTURE_ERROR_NODE: JsonNode = ExecutorJson.mapper.readTree(FAILURE_JSON)
     }
 }

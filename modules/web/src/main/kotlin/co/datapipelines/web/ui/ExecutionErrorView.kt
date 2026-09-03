@@ -45,30 +45,48 @@ object ExecutionErrorView {
     ): Map<String, String?> =
         mapOf(
             "label" to label,
-            "cls" to node.path("class").takeIf { it.isTextual }?.asText(),
-            "message" to node.path("message").takeIf { it.isTextual }?.asText(),
-            "framesText" to
-                node.path("frames")
-                    .filterIsInstance<JsonNode>()
-                    .joinToString("\n") { it.asText() }
-                    .ifEmpty { null },
+            "cls" to classText(node, "class"),
+            "message" to classText(node, "message"),
+            "framesText" to framesText(node),
         )
 
+    private fun classText(
+        node: JsonNode,
+        field: String,
+    ): String? = node.path(field).takeIf { it.isTextual }?.asText()
+
+    private fun framesText(node: JsonNode): String? =
+        node
+            .path("frames")
+            .filterIsInstance<JsonNode>()
+            .joinToString("\n") { it.asText() }
+            .ifEmpty { null }
+
     private fun JsonNode?.text(field: String): String? =
-        this?.path(field)?.takeIf { it.isTextual && !it.isNull }?.asText()
+        this
+            ?.path(field)
+            ?.takeIf { it.isTextual && !it.isNull }
+            ?.asText()
 
     private fun JsonNode?.nodeLine(field: String): String? {
-        val node = this?.path(field)?.takeIf { it.isObject } ?: return null
-        val parts = buildList {
-            node.text("id")?.let { add(it) }
-            node.text("type")?.let { add(it) }
-            node.text("datasource")?.let { ds ->
-                add(node.text("dialect")?.let { "$ds ($it)" } ?: ds)
+        val node =
+            this
+                ?.path(field)
+                ?.takeIf { it.isObject }
+                ?: return null
+        val parts =
+            buildList {
+                node.text("id")?.let { add(it) }
+                node.text("type")?.let { add(it) }
+                node.text("datasource")?.let { ds ->
+                    add(node.text("dialect")?.let { "$ds ($it)" } ?: ds)
+                }
+                node.text("template")?.let { t ->
+                    node.path("template_version").takeIf { it.isInt }?.let { add("$t @ v${it.asInt()}") } ?: add(t)
+                }
             }
-            node.text("template")?.let { t ->
-                node.path("template_version").takeIf { it.isInt }?.let { add("$t @ v${it.asInt()}") } ?: add(t)
-            }
-        }
-        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+        return parts
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" · ")
     }
 }

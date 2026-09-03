@@ -433,7 +433,8 @@ class PipelineExecutor(
         // 057: the terminal event carries the SAME failure record, already completed at the
         // recording site — rebuilt from code/details only on the one path that never passed
         // through failNode (the vanished-result throw in resolveStoredResult carries its own).
-        run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, e.errorRecord ?: MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails))) }
+        val record = e.errorRecord ?: MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails)
+        run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, record)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails, e.errorRecord)
     }

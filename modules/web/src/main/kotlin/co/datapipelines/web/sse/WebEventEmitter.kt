@@ -215,7 +215,8 @@ class WebEventEmitter(
                     // map, not a bare serialization of the executor's record — so `GET
                     // /executions/{id}`, the detail page and MCP `executions_get` all read what
                     // the live stream showed, `user_message`/`doc_url`/`correlation_id` included.
-                    Triple(ExecutionStatus.FAILED, event.failedNodeId, SseJson.mapper.writeValueAsString(projection.errorPayload(event.error)))
+                    val errorJson = SseJson.mapper.writeValueAsString(projection.errorPayload(event.error))
+                    Triple(ExecutionStatus.FAILED, event.failedNodeId, errorJson)
                 }
 
                 is ExecutionAborted -> {
