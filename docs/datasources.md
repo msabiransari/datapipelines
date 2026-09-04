@@ -439,12 +439,42 @@ version is what tells the operator which body to go and change.
 
 Passwords are **never** stored in plaintext. Encryption approach:
 
-- **AES-256-GCM** with a single master key. Stored value = nonce ‖ ciphertext ‖ auth tag; a fresh random 96-bit nonce per encryption.
+- **AES-256-GCM**. Stored value = `version ‖ nonce ‖ ciphertext ‖ auth tag`; a fresh random 96-bit nonce per encryption.
+- **The first byte is the KEY VERSION** the value was sealed under (`1..255`; `0` is reserved as "not a version", so a zeroed page cannot forge one). It selects which data key decrypts the row. It is not itself authenticated and does not need to be: it picks a key, and a wrong key fails the GCM tag — so flipping it is a tamper signal either way. A blob whose version this deployment holds no key for is **refused** with the same decryption error, which is the "wrong deployment / retired key" signal.
 - **The datasource `name` is bound as GCM associated data (AAD)** on both encrypt and decrypt. A stored ciphertext therefore decrypts only under the name it was sealed with: a row copied or renamed at the database level fails the tag rather than silently decrypting, closing the lift-a-ciphertext-to-another-row attack (`name` is immutable, §11.1, so this never obstructs legitimate use). Any code path that decrypts — pool build, connection test, and the §7.3 rotation pass — MUST pass the row's name as AAD.
-- The master key has exactly **one source**: the `datapipelines.db.encryption-key` config key (`DATAPIPELINES_DB_ENCRYPTION_KEY`), defined in [Configuration §2](configuration.md#2-required-configuration) — exactly 32 bytes, base64-encoded.
-- The key is **required and fail-fast**: if it is missing, not valid base64, or not exactly 32 bytes, the application **does not start**. There is no fallback chain — no KMS lookup, no generated key file.
+- Data keys come from a **key provider** (§7.1.1), selected by `datapipelines.db.key-provider` ([Configuration §3.20](configuration.md#320-credential-key-provider)) and defaulting to `env`.
+- Keys are **required and fail-fast**: a missing key, invalid base64, a key that is not exactly 32 bytes, or a provider whose backing service is unreachable **stops startup**. There is no fallback chain — no implicit KMS lookup, no generated key file.
 
-**Why no fallback.** A silently generated key file is how credentials become undecryptable on the next redeploy (new container, new file, every stored password now garbage) — the failure appears long after the deploy that caused it, and no backup of the metadata DB can repair it. Refusing to start is the cheap failure. KMS-sourced keys (AWS KMS / GCP KMS / HashiCorp Vault) are a deliberate **v1.1** item, tracked in [ROADMAP §2](ROADMAP.md#2-v11-candidates) — when added, KMS becomes an *alternative explicit* source, never an implicit fallback.
+**Why no fallback.** A silently generated key file is how credentials become undecryptable on the next redeploy (new container, new file, every stored password now garbage) — the failure appears long after the deploy that caused it, and no backup of the metadata DB can repair it. Refusing to start is the cheap failure.
+
+#### 7.1.1 The key provider seam
+
+The seam is the **key**, not the ciphertext. One `CredentialEncryptor` implements the crypto above; where its keys come from is an interface:
+
+```kotlin
+package co.datapipelines.datasources.crypto
+
+/** A 32-byte AES key and the version the ciphertext will carry. */
+class DataKey(val version: Int, val bytes: ByteArray)   // version 1..255
+
+interface KeyProvider {
+    val name: String                     // the config value that selects it: "env", "aws-kms", …
+    fun current(): DataKey
+    fun byVersion(version: Int): DataKey?
+}
+```
+
+`current()` supplies the key for every new encryption; `byVersion()` the key for a row written under an earlier one. An unknown version returns `null`, which the encryptor turns into the decryption error. Three invariants every implementation owes, pinned by one shared suite (`KeyProviderContractTest`):
+
+1. `current()` is **stable for the life of the process** — the encryptor caches it at construction.
+2. `byVersion(v)` keeps answering for any `v` that `current()` ever returned on this deployment, for as long as a stored row carries it.
+3. Both fail at **boot**, not at first decrypt, when the backing service is unreachable — a misconfigured pod must never start and serve.
+
+A provider never sees a password, and never logs key material.
+
+**The shipped provider is `env`:** `datapipelines.db.encryption-key` is version 1 forever; optional `datapipelines.db.encryption-keys` adds `version → base64` entries for a rotation; `datapipelines.db.encryption-key-current` selects which one new writes use (default: the highest configured). All of it is [Configuration §3.20](configuration.md#320-credential-key-provider).
+
+**Implementing another one** — AWS KMS, GCP KMS, Azure Key Vault, Vault transit — is a written procedure, not a design exercise: see [Key providers](key-providers.md). It is an implementation of the contract above plus a config block, a validator branch and a subclass of the shared contract suite. Nothing in the crypto changes.
 
 ### 7.2 Schema
 
@@ -454,7 +484,7 @@ The semantics this spec depends on, which the DDL must satisfy:
 
 - `name` is the **primary key** (`TEXT`), constrained to 63 characters and to the identifier regex of §9 via `CHECK` — pipelines reference datasources by this value, so it is also the immutability anchor (§11.1).
 - `description` is **optional** (nullable / no `NOT NULL` requirement) — matching §3.3.
-- `password_encrypted` is `BYTEA` — AES-256-GCM output per §7.1, never plaintext, never returned by any endpoint.
+- `password_encrypted` is `BYTEA` — AES-256-GCM output per §7.1 (`version ‖ nonce ‖ ciphertext ‖ tag`), never plaintext, never returned by any endpoint. Rows written before the version byte existed were prefixed with `0x01` by a one-off migration; the application accepts ONLY versioned blobs and never guesses the old layout.
 - `properties_json` is `JSONB` and holds the §5 object verbatim (`{"hikari": {...}, "jdbc": {...}}`), defaulting to `{}`.
 - `dialect` is `TEXT` with a `CHECK` constraint enumerating the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect values — a database-level guard duplicating the §9 application check on purpose.
 - `created_at` / `updated_at` are `TIMESTAMPTZ` (UTC); `updated_at` is set by the application in every UPDATE.
@@ -463,9 +493,38 @@ The semantics this spec depends on, which the DDL must satisfy:
 
 ### 7.3 Key rotation
 
-Key rotation = for each row, decrypt `password_encrypted` with the old key **using that row's `name` as AAD (§7.1)**, then re-encrypt with the new key **under the same `name` AAD**, in a single transaction. Triggered by an admin CLI / endpoint, with both keys supplied explicitly (the old key is never inferred). The `name` must be carried through both halves — a rotation that decrypts/re-encrypts without it fails every GCM tag. All pools are drained afterwards so the next build decrypts under the new key. Documented in the runbook (future).
+The version byte (§7.1) makes rotation **lazy-safe**: there is no big-bang re-encrypt and no window in which two keys must be applied by hand.
 
-**v1 scope:** the rotation *flow* is deferred to v1.1 ([ROADMAP](ROADMAP.md)) — no v1 surface triggers it (no REST endpoint, no CLI). What v1 ships is the primitive it needs (`CredentialEncryptor` accepts an explicit raw key, so two encryptors can coexist during a rotation pass) and the registered `datasource.key_rotation` audit event ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), which is emitted by nothing until the flow lands.
+**The flow an operator runs:**
+
+1. Generate a key: `openssl rand -base64 32`.
+2. Add it as the next version and make it current ([Configuration §3.20](configuration.md#320-credential-key-provider)):
+
+   ```yaml
+   datapipelines:
+     db:
+       encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}          # version 1, unchanged
+       encryption-keys:
+         2: ${DATAPIPELINES_DB_ENCRYPTION_KEY_V2}
+       encryption-key-current: 2
+   ```
+
+3. Restart. Every NEW encryption carries version 2. Every existing row keeps decrypting under the version it carries, because version 1 is still configured.
+4. Rows migrate to the current key **as their passwords are next saved** — no pass over the table, no downtime.
+5. Retire version 1 only when no row still carries it. That is one query, and it is the only thing that answers the question:
+
+   ```sql
+   SELECT get_byte(password_encrypted, 0) AS key_version, count(*)
+   FROM datasources
+   WHERE password_encrypted IS NOT NULL
+   GROUP BY 1 ORDER BY 1;
+   ```
+
+   While that reports any `key_version = 1`, removing the version-1 key makes those rows undecryptable. When it reports only `2`, `datapipelines.db.encryption-key` may be replaced with the version-2 material (and `encryption-keys` emptied) at the next restart.
+
+**Deliberately NOT shipped:** a rotation *endpoint* or CLI that decrypts and re-encrypts every row. It is not needed for correctness under versioned blobs, and it is a bulk-decrypt surface — every stored password in memory in one pass, behind a trigger an operator can be talked into pulling. The audit event `datasource.key_rotation` ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) stays registered and is emitted by nothing. An operator who needs every row moved NOW — a suspected key compromise — re-enters the affected credentials, which also rotates the *database* passwords, which is what a key compromise actually calls for.
+
+A re-encrypt, whenever one happens, must carry the row's `name` through both halves as AAD (§7.1): a decrypt/re-encrypt that drops it fails every GCM tag.
 
 ### 7.4 Decryption points and audit log
 
@@ -889,6 +948,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v2.18 | 068 key-provider seam | **§7.1 — the stored credential gains a leading KEY-VERSION byte** (`version ‖ nonce ‖ ciphertext ‖ tag`); the pre-versioning layout is refused, never guessed, and a one-off migration prefixed `0x01` onto every shipped row. New **§7.1.1 the key provider seam**: `KeyProvider`/`DataKey`, the three invariants, the shipped `env` provider and a pointer to the new [key-providers.md](key-providers.md) implementation guide. **§7.3 rewritten** — rotation is now lazy-safe (add a version, flip `encryption-key-current`, rows migrate on their next password write) with the one `get_byte` query that says when an old key can be retired, and an explicit statement that no rotation endpoint or CLI ships. §7.2's `password_encrypted` bullet records the layout. |
 | 2026-09-02 | v2.17 | multi-instance round 2 (050) | **§5.7 gains the cross-instance pool-invalidation mechanism** (R1/M3): registry save/delete publishes the datasource name on Redis channel `dp:datasource-invalidated` after the row commit; every instance subscribes (reconnect-surviving container, subscribed before serving) and evicts, so the next use rebuilds from the row; the 044-F5 known window narrows to out-of-band row writes only. §5.7 also gains the replication sizing sentence (`maximumPoolSize × replicas ≤ the customer DB's connection limit`, echoed by §5.1's pointer). **§3.3 gains the normalize-on-read sentence** (R3, 011 D7/F2 + 020 F1 closed): SERVER_MANAGED keys stripped from `properties.hikari` in `DatasourceRow.toDatasource` — the second instance of the normalize-at-both-boundaries rule. |
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |

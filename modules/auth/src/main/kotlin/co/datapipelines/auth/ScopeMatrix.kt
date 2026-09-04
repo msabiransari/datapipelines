@@ -150,6 +150,10 @@ object ScopeMatrix {
             "datasources_get_tables" to Scope.AUTHOR,
             "datasources_get_columns" to Scope.AUTHOR,
             "datasources_preview_rows" to Scope.AUTHOR,
+            // 068 — registering a connection sits on the same floor as testing one; `global: true`
+            // additionally requires admin, which is a D8 rule inside the shared create service,
+            // not a scope (auth.md §7.6: admin-ness is not a scope).
+            "datasources_create" to Scope.AUTHOR,
             "pipelines_execute_node" to Scope.AUTHOR,
         )
 

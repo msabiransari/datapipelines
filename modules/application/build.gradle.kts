@@ -12,6 +12,10 @@ dependencies {
     implementation(project(":modules:pipeline-contract"))
     implementation(project(":modules:dag"))
     implementation(project(":modules:auth"))
+    // 068: DatasourceCreateService — the ONE validated registration path REST and MCP share.
+    // §4.2's row for this module already allowed `datasources`; it is declared now because
+    // something here finally compiles against it (declared = what is used).
+    implementation(project(":modules:datasources"))
 
     // ExecutionLauncher binds parameters and reserves idempotency keys before the surface
     // starts anything; the reservation store and ExecuteRequest are dag types, the principal

@@ -61,6 +61,7 @@ object McpToolCatalog {
             Entry("datasources_get_tables", mutating = false),
             Entry("datasources_get_columns", mutating = false),
             Entry("datasources_preview_rows", mutating = false),
+            Entry("datasources_create", mutating = true),
             Entry("executions_list", mutating = false),
             Entry("executions_get", mutating = false),
             Entry("executions_get_result", mutating = false),

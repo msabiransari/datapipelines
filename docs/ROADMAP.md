@@ -47,7 +47,7 @@ Small, additive, likely to land soon after v1 ship. Rough priority order.
 | **DuckDB as staging engine** (`settings.tempdb.engine: "DUCKDB"`) | pipeline-contract §18, staging §14 | Better for analytical workloads (large joins, wide aggregations). DuckDB is internally parallel, sidesteps the single-connection serialization concern. |
 | **Template `engine` field** (default `freemarker`, future `pebble`/`handlebars`/etc.) | templates §13 | Additive field; supports alternative engines without breaking v1 templates. |
 | **H2 connection pool for staging** | dag-executor §13, staging §9.3 | Only if profiling shows staging serialization is a bottleneck. Default v1 is single-connection. |
-| **KMS integration for credential encryption** (AWS KMS, GCP KMS, HashiCorp Vault) | datasources §14, deployment | Replace file-based master key with KMS-sourced key. Enterprise-friendly. |
+| **A shipped KMS key provider** (AWS KMS, GCP KMS, Azure Key Vault, Vault transit) | [key-providers.md](key-providers.md), datasources §7.1.1 | The CONTRACT half shipped in v1.4 (068): credentials carry a key version, `datapipelines.db.key-provider` selects the source, and `KeyProviderContractTest` is the one suite every implementation passes. What remains is one vendor implementation plus its `credential_data_keys` migration — a written procedure (key-providers.md §4–5), not a design. |
 | **Background datasource health checks** | datasources §14 | Scheduled polling with UI indicators. Catches dead datasources before pipeline execution. |
 | **SSH tunnel / bastion host support** | datasources §14 | Common enterprise requirement for datasources behind bastions. |
 | **`tags` field on pipelines, templates, datasources** | (cross-cutting) | For organization, filtering, MCP discovery. Optional field, no execution semantics. |
@@ -230,6 +230,7 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.4 | 068 key-provider seam | §2's "KMS integration for credential encryption" row rewritten: the CONTRACT half shipped (versioned ciphertext, `datapipelines.db.key-provider`, the shared `KeyProviderContractTest`), and what remains is one vendor implementation plus its `credential_data_keys` migration, following the new [key-providers.md](key-providers.md). |
 | 2026-08-05 | v1.0 | initial draft | Initial ROADMAP: consolidated future work from all 12 specs, organized by version (v1.1 / v2 / long-term), rejected items with reasoning, operator responsibilities |
 | 2026-08-07 | v1.1 | consistency campaign | Decision log seeded with D1–D15 outcomes (params_schema removal, unified result delivery, cancel-on-disconnect, DP- headers, no key fallback); v2 list gains UI edit mode, detached execution, pub/sub cancel fan-out, MCP progress/cancel. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-17 | v1.2 | pipeline composition | v2 §3.2 "Cross-pipeline calls" removed — shipped as the `PIPELINE` node type (design 2026-08-13-pipeline-node-type; pipeline-contract §4.9/§8.5/§12.9); decision-log row added; §3.10 distributed-tracing dependency note updated |

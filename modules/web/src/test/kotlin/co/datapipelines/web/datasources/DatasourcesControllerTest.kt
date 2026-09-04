@@ -1,5 +1,6 @@
 package co.datapipelines.web.datasources
 
+import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
@@ -11,6 +12,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -35,12 +37,16 @@ import java.util.UUID
 class DatasourcesControllerTest {
     private val registry = mockk<DatasourceRegistry>()
     private val workspaceService = mockk<co.datapipelines.auth.WorkspaceService>(relaxed = true)
-    private val controller =
-        DatasourcesController(
-            registry,
-            co.datapipelines.web.datasources
-                .DatasourceWorkspaceRules(workspaceService, co.datapipelines.auth.WorkspacesProperties()),
-        )
+    private val rules =
+        co.datapipelines.web.datasources
+            .DatasourceWorkspaceRules(workspaceService, co.datapipelines.auth.WorkspacesProperties())
+
+    // 068: create is DatasourceCreateService's, and the controller calls it. The service is built
+    // over the SAME registry and the SAME rules instance the assembled application wires — a
+    // mocked service here would test that the controller delegates and nothing about what
+    // `POST /api/v1/datasources` actually does.
+    private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding)
+    private val controller = DatasourcesController(registry, rules, registrations)
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     private val userId = UUID.randomUUID()
@@ -102,7 +108,11 @@ class DatasourcesControllerTest {
     fun `a duplicate name on create is 409 duplicate_name`() {
         authenticate()
         every { registry.exists("pg-prod") } returns true
-        shouldThrow<ApiException> { controller.create(createBody) }
+        // DatapipelinesException, not ApiException: the refusal is DatasourceCreateService's
+        // now, and `application` sits below `web` (module-structure §5.10). The CODE is what the
+        // surface maps, and `ApiExceptionHandler` handles the base type — so the HTTP response
+        // is byte-identical to what the inlined controller check produced.
+        shouldThrow<DatapipelinesException> { controller.create(createBody) }
             .code shouldBe PipelineErrorCodes.Datasource.DUPLICATE_NAME
     }
 
@@ -159,7 +169,7 @@ class DatasourcesControllerTest {
                    "username":"readonly","password":"s3cret","introspection_include_schemas":[42]}""",
             )
 
-        shouldThrow<ApiException> { controller.create(body) }
+        shouldThrow<DatapipelinesException> { controller.create(body) }
             .code shouldBe PipelineErrorCodes.Datasource.PROPERTIES_INVALID
     }
 

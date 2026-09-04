@@ -94,7 +94,7 @@ API keys are:
 - Revocable, optionally expiring.
 - Scoped `read` / `execute` / `author` / `admin` (hierarchical, [Auth §7.5](auth.md#75-scopes)). A key's scopes are a subset of its creator's scopes at issue time.
 
-**Scope enforcement.** The minimum scope for every MCP tool is defined once in the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative) — this spec restates each tool's requirement in §6.2 for readability but the matrix is authoritative on any conflict. The `admin` scope exists (datasource management, user administration) but **no v1 MCP tool requires it**: creating, editing, and deleting datasources is UI/REST-only. An `admin` key still works everywhere, since scopes are hierarchical.
+**Scope enforcement.** The minimum scope for every MCP tool is defined once in the [Auth §7.6 scope ↔ operation matrix](auth.md#76-scope--operation-matrix-authoritative) — this spec restates each tool's requirement in §6.2 for readability but the matrix is authoritative on any conflict. The `admin` scope exists (global datasource management, user administration) but **no MCP tool's minimum scope is `admin`**. `datasources_create` (§6.2.22) sits on `author` like the rest; binding a datasource `global: true` does require admin, but that is a workspaces D8 rule inside the shared create service, not a scope floor — the same rule REST applies. Editing and deleting datasources remain UI/REST-only. An `admin` key still works everywhere, since scopes are hierarchical.
 
 **Security chain.** `/mcp` (both `POST` and `GET`) is an explicit matcher in the Spring Security filter chain: CSRF-exempt (no cookie auth to forge against), no session cookies accepted, same scope enforcement as REST, same per-user rate limits ([REST API §12](rest-api.md#12-rate-limiting)). See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 
@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the v1.1 tool surface is **static**: the same 21 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 22 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -183,6 +183,7 @@ Tools are named `{domain}_{action}`:
 - `datasources_get_tables`
 - `datasources_get_columns`
 - `datasources_preview_rows`
+- `datasources_create`
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
@@ -465,7 +466,7 @@ List registered datasources (without credentials).
 }
 ```
 
-**Scope:** `read`. (Creating, editing, and deleting datasources is UI/REST-only — there is no MCP tool for it in v1; workspace-bound CUD is `author` + the workspaces D8 gates, global CUD is `admin`.) The listing is scoped to the key's pinned workspace exactly like REST §9.2.
+**Scope:** `read`. (Registering a datasource is `datasources_create` (§6.2.22), `author` + the workspaces D8 gates, with `global: true` still admin-only; editing and deleting remain UI/REST-only.) The listing is scoped to the key's pinned workspace exactly like REST §9.2.
 
 #### 6.2.11 `datasources_get`
 
@@ -786,6 +787,50 @@ Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_c
 
 An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Scope:** `read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
 
+#### 6.2.22 `datasources_create`
+
+Register a new datasource connection. Mirrors `POST /api/v1/datasources` ([Datasources §3.1](datasources.md#31-json-structure-request--post-apiv1datasources)) — the same payload binder, the same D8 workspace rules and the same duplicate-name refusal, because both entry points call one service (049's rule: two entry points, one validated path).
+
+```json
+{
+  "name": "datasources_create",
+  "description": "Register a new datasource connection in the key's pinned workspace. Mirrors POST /api/v1/datasources: name, dialect, jdbc_url, username and password are required; global (admin only) or workspace select the binding, readonly forbids write-shaped use. Returns the stored metadata with password_set: true — the password is never returned. SECURITY: a password sent through this tool transits the agent's context, its transcript and any logging the client does. Prefer registering a datasource with a real credential in the UI or over REST; use this tool only with a credential the user is willing to have in that transcript — a read-only role, or a short-lived password they will rotate. Call datasources_test on the new name afterwards to confirm it connects.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["name", "dialect", "jdbc_url", "username", "password"],
+    "additionalProperties": false,
+    "properties": {
+      "name": {"type": "string"},
+      "display_name": {"type": "string"},
+      "description": {"type": "string"},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "MYSQL", "MSSQL", "ORACLE", "H2", "DUCKDB", "SQLITE"]},
+      "jdbc_url": {"type": "string"},
+      "username": {"type": "string"},
+      "password": {
+        "type": "string",
+        "description": "Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
+      },
+      "query_timeout_seconds": {"type": "integer"},
+      "global": {"type": "boolean", "description": "Admin only. true = shared infrastructure, bound to no workspace."},
+      "workspace": {"type": "string", "description": "A workspace the caller can access; default = the key's pinned workspace."},
+      "readonly": {"type": "boolean"},
+      "introspection_include_schemas": {"type": "array", "items": {"type": "string"}},
+      "properties": {"type": "object"}
+    }
+  }
+}
+```
+
+Returns the [Datasources §3.2](datasources.md#32-json-structure-response--get-apiv1datasourcesname) response shape: the stored metadata with `password_set: true`, `last_test: null` (nothing has probed it yet) — and **no `password` field at any depth**.
+
+**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
+
+**Mutating.** Declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3). The audit row carries the datasource NAME and never the credential.
+
+**The password caveat — a documented trade-off, not a bug.** A password sent to this tool transits the agent's context window, the client's transcript, and whatever logging that client does. No server-side change can undo that; refusing the tool would not undo it either, it would only push operators to paste credentials somewhere worse. So the tool states it, in the description an agent reads before calling. Register a real production credential in the UI or over REST; use this tool with a credential the user is willing to have in that transcript — a read-only role, or a short-lived password they will rotate afterwards.
+
+**Suggested next call:** `datasources_test` on the new name. Creation validates and builds a test pool, but the tool does not probe on your behalf.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -892,7 +937,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 21 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 22 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1063,7 +1108,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - **Result streaming / progress notifications via MCP**: stream execution events through the MCP transport instead of returning them only in the final tool result — removes the blocking-call experience of §6.2.3. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **Resource subscriptions**: `resources/subscribe` for live updates when pipelines/templates change. v2, [ROADMAP §3.7](ROADMAP.md#37-mcp-server).
 - **An MCP cancel tool**: v1 cancellation is `DELETE /api/v1/executions/{id}` over REST, or abandoning the blocking call (§6.2.3).
-- **Datasource management tools**: deliberate omission, not an oversight — datasource CRUD is `admin`-scoped and UI/REST-only in v1 (§4.1).
+- **Datasource UPDATE and DELETE tools**: deliberate omission, not an oversight. Registration landed as `datasources_create` (§6.2.22) because an agent standing up a new pipeline needs the connection to exist; editing and deleting an established datasource are operator actions with a blast radius across every pipeline that references it, and they stay UI/REST-only (§4.1).
 - **Sampling**: support server-initiated LLM completions (rare for this product; agents do their own LLM work).
 - **OAuth support**: when multi-tenant SaaS deployment materializes.
 - **MCP roots**: not applicable (we are not a filesystem tool).
@@ -1120,6 +1165,7 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.18 | 068 datasources_create | Tool surface 21 → **22**: new §6.2.22 `datasources_create` (scope `author`, **mutating**), which calls the same `DatasourceCreateService` `POST /api/v1/datasources` does — one payload binder, one set of workspaces D8 rules, one duplicate-name refusal. `global: true` still requires admin, refused with `datasource.validation.workspace_forbidden`. The result is the datasources §3.2 shape with `password_set: true` and no password at any depth. The tool's description carries the accepted trade-off: a password passed through an agent transits its context, transcript and client logging — prefer the UI or REST for a real credential. §4.1, §5.1, §6.1 and §8's admission-rule counts updated, and §14's "no datasource management tools" omission narrowed to update/delete. |
 | 2026-09-02 | v1.17 | 040 template used-by | Tool surface 20 → **21**: new §6.2.21 `templates_used_by` (which pipelines pin a template version in their working version — one reference per node with the carrying pipeline version; scope `read`, 040 D7). §6.2.2 `pipelines_get` gains `upgrade_available` (omit-when-empty; node/template/pinned/latest-released rows; surfaced, never applied). §6.1, §5.1 and §8 admission-rule counts updated. |
 | 2026-08-05 | v1.0 | initial draft | Initial MCP server spec: streamable HTTP transport, API key auth, 15 tools, 8 resource types, 3 prompts, error model |
 | 2026-08-05 | v1.1 | propagation | Updated `pipelines_create` tool to v1.1 Pipeline Contract shape (no `terminal_node_id`, no `datasources_used`; nodes carry `type`, `output`, `settings`). |

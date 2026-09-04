@@ -172,7 +172,7 @@ class DocsCatalog(
         private val GROUPING: Map<String, List<String>> =
             linkedMapOf(
                 "Operations manual" to
-                    listOf("deployment", "configuration", "auth", "datasources", "observability", "mcp-server"),
+                    listOf("deployment", "configuration", "auth", "datasources", "key-providers", "observability", "mcp-server"),
                 "Contracts" to
                     listOf(
                         "pipeline-contract",

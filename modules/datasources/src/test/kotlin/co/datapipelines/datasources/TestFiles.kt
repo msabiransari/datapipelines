@@ -82,3 +82,16 @@ internal fun test32ByteKeyBase64(): String =
     java.util.Base64
         .getEncoder()
         .encodeToString(ByteArray(32) { it.toByte() })
+
+/**
+ * A [co.datapipelines.datasources.crypto.KeyProvider] over the single [test32ByteKeyBase64] key,
+ * i.e. exactly the shape a deployment that has never rotated runs with (version 1 only).
+ */
+internal fun testKeyProvider(): co.datapipelines.datasources.crypto.EnvKeyProvider =
+    co.datapipelines.datasources.crypto.EnvKeyProvider
+        .fromConfig(test32ByteKeyBase64())
+
+/** The encryptor every suite that only needs "a working encryptor" builds. */
+internal fun testEncryptor(): co.datapipelines.datasources.crypto.CredentialEncryptor =
+    co.datapipelines.datasources.crypto
+        .CredentialEncryptor(testKeyProvider())

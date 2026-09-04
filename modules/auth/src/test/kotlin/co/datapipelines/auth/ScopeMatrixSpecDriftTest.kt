@@ -47,9 +47,10 @@ class ScopeMatrixSpecDriftTest {
     fun `every MCP tool minimum scope matches auth-md §7-6`() {
         val fromDoc = parseMcpTable(RepoFiles.read(RepoFiles.AUTH_SPEC_PATH))
 
-        // All 21 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
-        // data-visibility pair, 20 → 21 with 040's `templates_used_by`.
-        fromDoc.size shouldBe 21
+        // All 22 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
+        // data-visibility pair, 20 → 21 with 040's `templates_used_by`, 21 → 22 with 068's
+        // `datasources_create`.
+        fromDoc.size shouldBe 22
         ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
     }
 
@@ -121,9 +122,25 @@ class ScopeMatrixSpecDriftTest {
     private fun parseMcpTable(doc: String): Map<String, Scope> {
         val start = doc.indexOf("**MCP tools**")
         require(start >= 0) { "Could not find the MCP tools table in ${RepoFiles.AUTH_SPEC_PATH}" }
-        // The table ends at the parenthetical note that follows it in §7.6.
-        val end = doc.indexOf("(MCP has no datasource-management tools", start)
-        val section = doc.substring(start, if (end >= 0) end else doc.length)
+        // The table ends at the first non-blank line after it that is not a table row.
+        //
+        // It used to end at a literal prose sentence ("(MCP has no datasource-management
+        // tools…"), which 068 made false by shipping `datasources_create` — and the parser then
+        // ran on past §7.6 and died on `dpk_` in the key-anatomy prose. An end marker that is a
+        // sentence about the CONTENT is a guard that breaks whenever the content is right.
+        val section =
+            buildString {
+                var seenRow = false
+                for (line in doc.substring(start).lineSequence()) {
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("|")) {
+                        seenRow = true
+                    } else if (seenRow && trimmed.isNotEmpty()) {
+                        break
+                    }
+                    appendLine(line)
+                }
+            }
 
         val tokenRegex = Regex("`([a-z_]+)`")
         val result = linkedMapOf<String, Scope>()
