@@ -517,10 +517,8 @@ merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in e
 ### 10.2 Quality tooling
 
 Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
-guard has been proven able to fail (see the run handbacks in the private
-orchestration store — a sibling repo outside this one, per the 2026-08-15
-convention that keeps orchestration material out of the product repo; the
-buildSrc guard tests in-tree are the live descendants of those proofs).
+guard has been proven able to fail — the buildSrc guard tests in-tree are
+those proofs, and a new guard lands with its own.
 
 #### Coverage (Kover)
 
