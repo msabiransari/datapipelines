@@ -57,13 +57,24 @@
     },
     {
       "schema_version": 1,
-      "id": "crypto_monthly_range.sql",
+      "id": "trade/fx/fx_monthly_window.sql",
       "engine": "freemarker",
       "dialect": "SQLITE",
-      "display_name": "Monthly market range index",
-      "description": "Reads the SQLite market artifact (sample-market): per symbol and month, the average hourly high-low range as a percentage of close — a volatility proxy computable in portable SQLite (no log/stddev functions required). Expects STRING parameters named start_month and end_month in YYYY-MM form.",
+      "display_name": "Partner currency rates, monthly (H.10/G.5)",
+      "description": "Reads the SQLite FX artifact (sample-fx): the Federal Reserve monthly average rate for each reconciled partner's currency, keyed by the Census partner code so the trade facts join to it without a CASE. The month is emitted as `period` — the grain name the rest of this family uses, and the one spelling H2 accepts unquoted downstream (MONTH is a keyword there). per_usd is always foreign-currency-per-USD, usd_per always its inverse. Expects STRING parameters start_month and end_month in YYYY-MM form and partner (an ISO 3166-1 alpha-2 code, or ALL).",
       "imports": [],
-      "body": "SELECT\n    k.symbol                                    AS symbol,\n    k.month                                     AS month,\n    COUNT(*)                                    AS hours,\n    ROUND(AVG(k.high_price - k.low_price) /\n          NULLIF(AVG(k.close_price), 0) * 100, 3) AS avg_hourly_range_pct\nFROM klines_1h k\nWHERE k.month BETWEEN :start_month AND :end_month\nGROUP BY k.symbol, k.month\nORDER BY k.symbol, k.month",
+      "body": "SELECT\n    f.month        AS period,\n    p.census_code  AS census_code,\n    p.partner      AS partner,\n    p.partner_name AS partner_name,\n    f.currency     AS currency,\n    f.per_usd      AS per_usd,\n    f.usd_per      AS usd_per\nFROM fx_monthly f\nJOIN partner_currency p ON p.currency = f.currency\nWHERE f.month BETWEEN :start_month AND :end_month\n  AND (:partner = 'ALL' OR p.partner = :partner)\nORDER BY p.partner, f.month",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "trade/fx/imports_in_partner_currency.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "US imports in the partner's own currency (tempdb)",
+      "description": "Runs in tempdb (H2) over stg_trade_monthly (DuckDB, US Census) and stg_fx_monthly (SQLite, Federal Reserve): monthly US import value restated in the partner's currency, the month-over-month move in the rate, and the USD-strength effect — what the same month's imports would have cost in partner currency at the PRIOR month's rate, minus what they cost at this one. Both are NULL in a window's first month, which has no prior rate. Takes no parameters. Every ratio operand is cast to DOUBLE (H2 DECIMAL division collapses scale — staging.md 11.3).",
+      "imports": [],
+      "body": "WITH staged AS (\n    SELECT\n        f.partner                        AS partner,\n        f.partner_name                   AS partner_name,\n        f.currency                       AS currency,\n        f.period                         AS period,\n        CAST(f.per_usd AS DOUBLE)        AS per_usd,\n        CAST(SUM(t.value_usd) AS DOUBLE) AS imports_usd\n    FROM stg_fx_monthly f\n    JOIN stg_trade_monthly t\n      ON t.partner_code = f.census_code\n     AND t.period       = f.period\n     AND t.flow         = 'imports'\n    GROUP BY f.partner, f.partner_name, f.currency, f.period, f.per_usd\n),\nwith_prev AS (\n    SELECT\n        partner, partner_name, currency, period, per_usd, imports_usd,\n        LAG(per_usd) OVER (PARTITION BY partner ORDER BY period) AS prev_per_usd\n    FROM staged\n)\nSELECT\n    partner                                                 AS partner,\n    partner_name                                            AS partner_name,\n    currency                                                AS currency,\n    period                                                  AS period,\n    ROUND(imports_usd, 2)                                   AS imports_usd,\n    per_usd                                                 AS rate_per_usd,\n    ROUND(imports_usd * per_usd, 2)                         AS imports_in_currency,\n    ROUND((per_usd / NULLIF(prev_per_usd, 0) - 1) * 100, 3) AS rate_mom_pct,\n    ROUND(imports_usd * (prev_per_usd - per_usd), 2)        AS usd_strength_effect\nFROM with_prev\nORDER BY partner, period",
       "is_library": false
     },
     {
@@ -161,23 +172,42 @@
     },
     {
       "schema_version": 1,
-      "name": "crypto_monthly_range",
-      "display_name": "Monthly market range",
-      "description": "How wide do the pinned markets move, month by month? Average hourly high-low range as a share of close for BTC and ETH — a volatility proxy from the SQLite market artifact, single node.",
+      "name": "imports_in_partner_currency",
+      "display_name": "US imports in the partner's own currency",
+      "description": "What did the US actually buy, in the seller's money? Restates monthly US import value (DuckDB, US Census) in each partner's currency at the Federal Reserve's monthly average rate (SQLite, H.10/G.5), and separates the trade move from the currency move: the month-over-month rate change, and the USD-strength effect — the partner-currency difference between valuing this month's imports at last month's rate and at this one's. Three engines: DuckDB facts, SQLite rates, H2 join.",
       "settings": { "tempdb": { "engine": "H2", "config": {} } },
       "parameters": {
         "start_month": { "type": "STRING", "required": false, "default": "2023-01", "description": "Inclusive start month, YYYY-MM. The sample covers 2023-01 to 2024-12." },
-        "end_month": { "type": "STRING", "required": false, "default": "2024-12", "description": "Inclusive end month, YYYY-MM. The sample covers 2023-01 to 2024-12." }
+        "end_month": { "type": "STRING", "required": false, "default": "2024-12", "description": "Inclusive end month, YYYY-MM. The sample covers 2023-01 to 2024-12." },
+        "partner": { "type": "STRING", "required": false, "default": "ALL", "description": "Which partner to restate: an ISO 3166-1 alpha-2 code — CN, CA, MX, JP or DE — or ALL (the default) for all five." }
       },
       "nodes": [
         {
-          "id": "monthly_range",
-          "description": "Compute the monthly range index directly on the SQLite artifact.",
+          "id": "stage_trade_monthly",
+          "description": "Stage the windowed per-partner monthly trade facts from the DuckDB artifact.",
           "type": "DQL",
-          "source": "sample-market",
-          "template": { "id": "crypto_monthly_range.sql", "version": 1 },
-          "output": { "target": "caller" },
+          "source": "sample-trade-us",
+          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_trade_monthly" },
           "depends_on": []
+        },
+        {
+          "id": "stage_fx_monthly",
+          "description": "Stage the windowed monthly partner-currency rates from the SQLite FX artifact.",
+          "type": "DQL",
+          "source": "sample-fx",
+          "template": { "id": "trade/fx/fx_monthly_window.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_fx_monthly" },
+          "depends_on": []
+        },
+        {
+          "id": "restate_in_partner_currency",
+          "description": "Join facts to rates in tempdb: value in partner currency, the rate's month-over-month move, and the USD-strength effect.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": { "id": "trade/fx/imports_in_partner_currency.sql", "version": 1 },
+          "output": { "target": "caller" },
+          "depends_on": ["stage_trade_monthly", "stage_fx_monthly"]
         }
       ]
     }

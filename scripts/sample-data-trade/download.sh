@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/sample-data-trade/download.sh — stage 1 of the trade/v1 build
+# scripts/sample-data-trade/download.sh — stage 1 of the trade/v2 build
 # (mirrors ../sample-data/download.sh, design §4.1).
 #
 #   CENSUS_API_KEY=<key> ./scripts/sample-data-trade/download.sh
@@ -29,7 +29,7 @@ REPO_ROOT="$(cd "$SD_ROOT/../.." && pwd)"
 source "$REPO_ROOT/scripts/sample-data/lib/common.sh"
 
 RAW="$SD_ROOT/work/raw"
-mkdir -p "$RAW/census" "$RAW/comtrade" "$RAW/binance"
+mkdir -p "$RAW/census" "$RAW/comtrade" "$RAW/fx"
 
 require_cmd python3 "canonicalising the API responses"
 require_cmd curl "download.sh fetches the pinned sources over HTTPS"
@@ -42,10 +42,11 @@ WINDOW_START=$(lock_field param window_start 3)
 WINDOW_END=$(lock_field param window_end 3)
 PARTNERS=$(lock_field param census_partners 3)
 REPORTERS=$(lock_field param comtrade_reporters 3)
-SYMBOLS=$(lock_field param binance_symbols 3)
+FX_DAILY_PKG=$(lock_field param fx_daily_package 3)
+FX_MONTHLY_PKG=$(lock_field param fx_monthly_package 3)
 [ -n "$WINDOW_START" ] && [ -n "$WINDOW_END" ] && [ -n "$PARTNERS" ] \
-  && [ -n "$REPORTERS" ] && [ -n "$SYMBOLS" ] \
-  || die "sources.lock is missing a required param (window_start/window_end/census_partners/comtrade_reporters/binance_symbols)"
+  && [ -n "$REPORTERS" ] && [ -n "$FX_DAILY_PKG" ] && [ -n "$FX_MONTHLY_PKG" ] \
+  || die "sources.lock is missing a required param (window_start/window_end/census_partners/comtrade_reporters/fx_daily_package/fx_monthly_package)"
 
 # months between WINDOW_START and WINDOW_END inclusive, one per line
 months_list() {
@@ -222,30 +223,75 @@ with open(os.path.join(outdir, "comtrade-flows.jsonl"), "w") as out:
 print(f"comtrade: {len(rows)} rows", file=sys.stderr)
 PY
 
-# --- Binance: monthly 1h klines, immutable zips -----------------------------
+# --- Federal Reserve H.10: daily bilateral rates + G.5 monthly averages -----
+#
+# The DDP (Data Download Program) is a QUERY endpoint, but for a CLOSED
+# historical window its answer is a fixed file — two repeat pulls on
+# 2026-09-04 were byte-identical — so the pinned object is the downloaded CSV
+# itself, not a merged extract (Census/Comtrade need merging; this does not).
+#
+# Two things this endpoint does that a plain `fetch` gets wrong:
+#   1. it refuses a bare curl (no/blank User-Agent) — hence the browser UA;
+#   2. it wants the window as MM/DD/YYYY, so the from/to bounds are DERIVED
+#      from window_start/window_end (window_day_end is the shared helper) —
+#      the dates are never written down a second time.
 
-step "Binance: $(echo "$SYMBOLS" | tr ',' '\n' | wc -l | tr -d ' ') symbols x $(months_list | wc -l | tr -d ' ') monthly zips"
-for sym in ${SYMBOLS//,/ }; do
-  for month in $(months_list); do
-    dest="$RAW/binance/${sym}-${month}.zip"
-    [ -s "$dest" ] || fetch "https://data.binance.vision/data/spot/monthly/klines/${sym}/1h/${sym}-1h-${month}.zip" "$dest"
-  done
-done
+FX_FROM=$(python3 -c "import sys;y,m=sys.argv[1].split('-');print(f'{m}/01/{y}')" "$WINDOW_START")
+FX_TO=$(python3 -c "import sys;y,m,d=sys.argv[1].split('-');print(f'{m}/{d}/{y}')" "$(window_day_end "$WINDOW_END")")
+
+# ddp_url <package-hash> — the exact query string a pin documents.
+ddp_url() {
+  printf '%s' "https://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&series=$1&lastobs=&from=${FX_FROM}&to=${FX_TO}&filetype=csv&label=include&layout=seriescolumn"
+}
+
+FX_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# The DDP answers a bare curl with a 403; a browser User-Agent is required.
+# Deliberately NOT common.sh's fetch(): adding a UA there would change every
+# other family's requests for one endpoint's quirk.
+fetch_ddp() { # <url> <dest>
+  local url="$1" dest="$2"
+  if ! curl -sfL --retry 3 --retry-delay 2 --max-time "${SD_FETCH_TIMEOUT:-900}" \
+       -A "$FX_USER_AGENT" "$url" -o "$dest.part"; then
+    rm -f "$dest.part"
+    die "could not download the Federal Reserve H.10 package:
+  $url
+  (the DDP refuses a request with no browser User-Agent — this call sends one;
+  a failure here is the network, or a changed package id in sources.lock)"
+  fi
+  # A DDP error is served as an HTML page with a 200, so the shape is checked
+  # rather than the status: every package starts with the Series Description
+  # metadata row.
+  case "$(head -c 20 "$dest.part")" in
+    '"Series Description"'*) ;;
+    *) rm -f "$dest.part"; die "the H.10 response is not a DDP CSV package (no '\"Series Description\"' header) — the endpoint answered, but with something else:
+  $url" ;;
+  esac
+  mv "$dest.part" "$dest"
+}
+
+step "Federal Reserve H.10: daily + G.5 monthly packages, $FX_FROM..$FX_TO"
+[ -s "$RAW/fx/fed-h10-daily.csv" ]   || fetch_ddp "$(ddp_url "$FX_DAILY_PKG")"   "$RAW/fx/fed-h10-daily.csv"
+[ -s "$RAW/fx/fed-h10-monthly.csv" ] || fetch_ddp "$(ddp_url "$FX_MONTHLY_PKG")" "$RAW/fx/fed-h10-monthly.csv"
+# awk, not `wc -l`: the DDP packages end WITHOUT a trailing newline, so wc
+# under-counts the last observation by one.
+ddp_rows() { awk 'END { print NR - 6 }' "$1"; }
+log "H.10 daily: $(ddp_rows "$RAW/fx/fed-h10-daily.csv") observation row(s); G.5 monthly: $(ddp_rows "$RAW/fx/fed-h10-monthly.csv")"
 
 # --- verify whatever pins exist (bootstrap: report the unpinned) -----------
 
-# extract_path <id> — where a built extract lives. API extracts land in
-# $RAW/ directly; Binance zips keep their download subdir.
+# extract_path <id> — where a pinned object lives. The merged API extracts
+# land in $RAW/ directly; the H.10 packages keep their download subdir.
 extract_path() {
   local id="$1"
   case "$id" in
-    binance-*) echo "$RAW/binance/${id#binance-}.zip" ;;
+    fed-h10-*) echo "$RAW/fx/${id}.csv" ;;
     *)         echo "$RAW/${id}.jsonl" ;;
   esac
 }
 
 pinned=0 bootstrapped=0
-for id in census-imports census-exports comtrade-flows $(for s in ${SYMBOLS//,/ }; do months_list | sed "s/^/binance-${s}-/"; done); do
+for id in census-imports census-exports comtrade-flows fed-h10-daily fed-h10-monthly; do
   f=$(extract_path "$id")
   [ -f "$f" ] || die "expected extract '$id' was not built"
   want=$(lock_field sha256 "$id" 3)
@@ -259,7 +305,7 @@ done
 log "OK — $pinned extract(s) verified against sources.lock, $bootstrapped unpinned (bootstrap: record with pin.sh)"
 
 # Emit the candidate pins for pin.sh's bootstrap mode.
-for id in census-imports census-exports comtrade-flows $(for s in ${SYMBOLS//,/ }; do months_list | sed "s/^/binance-${s}-/"; done); do
+for id in census-imports census-exports comtrade-flows fed-h10-daily fed-h10-monthly; do
   printf 'sha256\t%s\t%s\n' "$id" "$(sha256_of "$(extract_path "$id")")"
 done > "$SD_ROOT/work/pins.candidates"
 log "candidate pins written to work/pins.candidates (consumed by pin.sh)"

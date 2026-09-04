@@ -1,0 +1,6 @@
+currency,name,series_daily,series_monthly,quote_convention
+CAD,Canadian dollar,RXI_N.B.CA,RXI_N.M.CA,CAD per USD
+CNY,Chinese yuan,RXI_N.B.CH,RXI_N.M.CH,CNY per USD
+EUR,Euro,RXI$US_N.B.EU,RXI$US_N.M.EU,USD per EUR (inverted at build)
+JPY,Japanese yen,RXI_N.B.JA,RXI_N.M.JA,JPY per USD
+MXN,Mexican peso,RXI_N.B.MX,RXI_N.M.MX,MXN per USD

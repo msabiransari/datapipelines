@@ -17,7 +17,7 @@ source "$REPO_ROOT/scripts/sample-data/lib/engines.sh"
 
 ART="${1:-$SD_ROOT/work/artifacts}"
 [ -f "$ART/manifest.json" ] || die "no manifest.json in '$ART' — nothing to verify"
-require_cmd sqlite3 "verifying crypto_market.db"
+require_cmd sqlite3 "verifying fx_rates.db"
 require_cmd python3 "reading manifest.json"
 trap sd_cleanup_engines EXIT
 
@@ -64,7 +64,7 @@ done < "$SD_ROOT/work/verify-expected.txt"
 step "table contents (row counts + ordered-stream checksums)"
 
 DUCK="$ART/us_trade.duckdb"
-CRYPTO="$ART/crypto_market.db"
+FX="$ART/fx_rates.db"
 
 # MySQL: restore the dump into a throwaway engine, then fingerprint there.
 MY=$(engine_start_mysql_db verify dp_sample_trade)
@@ -79,7 +79,7 @@ while read -r e t o; do
     duckdb)
       verify_table "$e" "$t" "$(count_duckdb "$DUCK" "$t")" "$(checksum_duckdb "$DUCK" "$t" "$o")" ;;
     sqlite)
-      verify_table "$e" "$t" "$(count_sqlite "$CRYPTO" "$t")" "$(checksum_sqlite "$CRYPTO" "$t" "$o")" ;;
+      verify_table "$e" "$t" "$(count_sqlite "$FX" "$t")" "$(checksum_sqlite "$FX" "$t" "$o")" ;;
     mysql)
       n=$(docker exec -e MYSQL_PWD=build "$MY" mysql --protocol=TCP -h 127.0.0.1 -uroot -N --batch -D dp_sample_trade -e "SELECT count(*) FROM $t" < /dev/null)
       ck=$(docker exec -e MYSQL_PWD=build "$MY" mysql --protocol=TCP -h 127.0.0.1 -uroot -N --batch -D dp_sample_trade -e "SELECT * FROM $t ORDER BY $o" < /dev/null | shasum -a 256 | awk '{print $1}')

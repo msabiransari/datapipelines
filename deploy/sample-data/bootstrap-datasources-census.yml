@@ -1,4 +1,4 @@
-# Demo sample-data datasources for the TRADE family (trade/v1), registered
+# Demo sample-data datasources for the TRADE family (trade/v2), registered
 # create-if-absent at startup (datasources.md §8A; sample-data design §6).
 # The NYC family lives in bootstrap-datasources-nyc.yml; the app's
 # datapipelines.bootstrap.datasources-file accepts a comma-separated list and
@@ -25,11 +25,18 @@
 datasources:
   - name: sample-trade-us
     display_name: "US Trade Facts (sample)"
+    # The notice below is VERBATIM and MANDATORY — a condition of the Census
+    # API terms of service, not a courtesy. This description is the in-app
+    # surface an engineer reads, so it travels here as well as in the family
+    # README and the artifact manifest. Nothing anywhere may describe this data
+    # as "Census-verified" or "Census-powered".
     description: >-
       US Census monthly imports/exports at HS-6 grain for the top-15 trading
       partners (data-derived), 2023-2024, plus partner and HS-chapter lookups
       and the Census-to-ISO partner crosswalk. Tables: trade_monthly, partners,
       hs_chapters, trade_flow_monthly, partner_iso_crosswalk.
+      This product uses the Census Bureau Data API but is not endorsed or
+      certified by the Census Bureau.
     dialect: DUCKDB
     jdbc_url: jdbc:duckdb:/srv/sample/us_trade.duckdb
     # Like the SQLite entry: a FILE with no login. Non-empty because §9
@@ -57,7 +64,7 @@ datasources:
       UN Comtrade mirror statistics: what the top-5 partners report trading
       with the USA, annual TOTAL level, 2022-2024 — reconciled against the
       US-reported facts in sample-trade-us. Tables: comtrade_annual,
-      reporters.
+      reporters. Source: UN Comtrade (https://comtradeplus.un.org).
     dialect: MYSQL
     jdbc_url: jdbc:mysql://mysql:3306/dp_sample_trade
     username: ${SAMPLE_DB_USER}
@@ -65,16 +72,21 @@ datasources:
     readonly: true
     global: true
 
-  - name: sample-market
-    display_name: "Crypto Market Data (sample)"
+  - name: sample-fx
+    display_name: "Foreign Exchange Rates (sample)"
     description: >-
-      Binance hourly klines for BTCUSDT and ETHUSDT, 2023-2024. Tables:
-      klines_1h, symbols.
+      Federal Reserve H.10 daily noon buying rates and their G.5 monthly
+      averages for the five currencies of the reconciled trading partners
+      (CAD, CNY, EUR, JPY, MXN), 2023-2024, with the Census partner-to-currency
+      lookup. per_usd is always foreign-currency-per-USD and usd_per its
+      inverse, so no query divides. Tables: fx_daily, fx_monthly, currencies,
+      partner_currency. Source: Board of Governors of the Federal Reserve
+      System, H.10.
     dialect: SQLITE
     # A FILE, exactly like the NYC family's reference db: no server, no login,
     # and the xerial driver ignores both of these values entirely. Non-empty
     # for the same §9 reason as the entry above.
-    jdbc_url: jdbc:sqlite:/srv/sample/crypto_market.db
+    jdbc_url: jdbc:sqlite:/srv/sample/fx_rates.db
     username: "sqlite"
     password: "sqlite-file-datasource-has-no-authentication"
     properties:
