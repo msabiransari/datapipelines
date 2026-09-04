@@ -2,11 +2,13 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.DatasourceRegistry
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidationException
 import co.datapipelines.pipeline.PipelineValidator
+import co.datapipelines.pipeline.ResolvedPipeline
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
@@ -131,11 +133,23 @@ class SampleDataExamplesContentTest {
                     every { registryFor(any()) } returns registry
                     every { engineFor(any()) } returns engine
                 }
+            // A PIPELINE node pins a SIBLING declared earlier in the file. The seeder imports
+            // pipelines in DECLARED ORDER into one workspace and every seeded entity lands at
+            // SEED_VERSION, so the resolver is filled as the walk proceeds: a parent placed
+            // ABOVE its child resolves nothing and fails here — which is exactly the ordering
+            // bug it would be at somebody's first login. A null resolver instead would report
+            // pipeline_not_found for every composition example.
+            val seeded = LinkedHashMap<String, Pipeline>()
             val validator =
                 PipelineValidator(
                     datasources = demoDatasources(),
                     templates = TemplateDryRendererImpl(engines),
-                    pipelines = PipelineResolver { _, _, _ -> null },
+                    pipelines =
+                        PipelineResolver { _, name, version ->
+                            seeded[name]
+                                ?.takeIf { version == SEED_VERSION }
+                                ?.let { ResolvedPipeline(it, deleted = false) }
+                        },
                     maxCompositionDepth = MAX_COMPOSITION_DEPTH,
                 )
             doc.path("pipelines").forEach { entry ->
@@ -151,6 +165,7 @@ class SampleDataExamplesContentTest {
                 } catch (e: PipelineValidationException) {
                     problems += "pipeline '${pipeline.name}': ${e.message}"
                 }
+                seeded[pipeline.name] = pipeline
             }
         } finally {
             engine.close()

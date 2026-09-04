@@ -158,6 +158,91 @@ Finally set `SAMPLE_BASE_URL` in `deploy/.env` to
 `https://datapipelines-co.s3.amazonaws.com/sample-data/mobility` (deployment.md
 Appendix B).
 
+## The seeded example pipelines (`content/examples.json`)
+
+The file seeds **17 templates and 6 pipelines** into every personal workspace at first
+login, through the same `ExampleContentSeeder` → import-service path a REST caller uses
+(sample-data design §6.1). `SampleDataExamplesContentTest` runs every entry through the
+app's own save-time validation in `./gradlew build`, so a broken example fails the build
+rather than somebody's first login.
+
+Two of them (`revenue_by_borough`, `rainy_vs_dry_ridership`) are the original pair. The
+other four are the **showcase set** (070): they exist to be recognisable as real work —
+several nodes, more than one engine, a staging join, declared parameters, composition, and
+a library template — and their results are what the marketing page quotes.
+
+| Pipeline | The question it answers | Nodes | Engines | Parameters | Expected result |
+|---|---|---|---|---|---|
+| `revenue_by_borough` | Which borough earns the most yellow-taxi revenue, and which tips best? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date` | 6 rows, `6bfee9237736…`, ~6 s |
+| `rainy_vs_dry_ridership` | Do New Yorkers take more taxis when it rains? | 4 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 6 rows, `097c408cefda…`, ~4 s |
+| `borough_od_matrix` | Where do the trips that start in each borough actually end up? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date`, `pickup_borough` | 27 rows, `d3f16810e1c7…`, ~8 s |
+| `airport_access_by_borough` | Which boroughs ride to JFK, LaGuardia and Newark, what does it cost, and how does that compare with the borough's ordinary economics? | 5 | Postgres + SQLite → H2 | `start_date`, `end_date` | 13 rows, `3ab8325f6b21…`, ~11 s |
+| `weather_sensitivity_by_borough` | Which boroughs lose riders when it rains, and which barely notice? | 5 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 29 rows, `c030bbb8f702…`, ~5 s |
+| `mobility_briefing` | Per borough: how many trips start there, how many never leave it, what a trip is worth. | 3 (one is a `PIPELINE` node) | composition over `borough_od_matrix` | `start_date`, `end_date` | 6 rows, `4760c5d87db6…`, ~6 s |
+
+The default window is **2024-07-01 … 2024-09-30** (one quarter), which is what keeps the
+trip-level scans in single-digit seconds; the sample covers 2023-01-01 … 2024-12-31 and any
+sub-window of it is a valid parameter set.
+
+### Template hierarchy
+
+The showcase templates use the path-in-name grammar
+([template-hierarchy-design §4.1](../../docs/template-hierarchy-design.md#41-grammar)), so
+the templates explorer shows a tree rather than a flat list:
+
+```
+nyc/lib/metrics.sql                    library — per_unit() and share_pct(), imported by four templates
+nyc/mobility/od_pairs.sql              POSTGRES  trips by (pickup zone, drop-off zone, rate code)
+nyc/mobility/daily_by_zone.sql         POSTGRES  trips by (day, pickup zone)
+nyc/mobility/borough_baseline.sql      H2        the per-borough denominator, in tempdb
+nyc/mobility/airport_access.sql        H2        the airport answer node
+nyc/mobility/od_matrix.sql             H2        the borough-by-borough matrix
+nyc/mobility/weather_sensitivity.sql   H2        the weather answer node
+nyc/mobility/briefing.sql              H2        the composition's answer node
+nyc/reference/rate_codes.sql           SQLITE    the fare-basis lookup
+nyc/weather/daily_elements.sql         MYSQL     precipitation, snow, temperature, wind per day
+```
+
+The seven original templates keep their flat names and sit at the tree root — a name is an
+identity every pin depends on, and [§4.5](../../docs/template-hierarchy-design.md#45-no-rename-no-move)
+forbids renaming one.
+
+### Two things worth knowing about the data
+
+**The raw TLC feed carries implausible rows.** The sample holds a trip recorded at 331,688
+miles and 91,033 trips at zero distance. A plain `AVG(trip_distance_mi)` over Manhattan →
+LaGuardia therefore reports **32.29 miles** for a ride that is about ten. The showcase
+scans (`od_pairs.sql`, `daily_by_zone.sql`) keep only `0 < distance < 100` miles and
+`0 < total < 1000` USD — **98.1 % of the trips** — and the same average comes out at
+**10.45 miles**. The filter is in the templates, in the open, and named in each template's
+description: it is what makes an average a fact instead of an artefact of one bad row.
+
+**A share needs its denominator drawn from its own population.** `borough_baseline.sql`
+computes the per-borough denominator from the *same* staged table as the numerator. Taking
+it from the monthly rollup instead would also count trips whose drop-off zone has no
+borough, and every percentage on the screen would be quietly wrong by a few points.
+
+### Baselines — the guard
+
+Every pipeline's expected outcome is recorded in
+[`deploy/sample-data/expected-results-nyc.json`](../../deploy/sample-data/expected-results-nyc.json)
+(row count, column list, and a SHA-256 over the canonically-encoded result rows), and
+checked by:
+
+```bash
+./deploy/sample-data/check-baselines.sh http://localhost:8080 dpk_...   # any seeded workspace's key
+```
+
+It executes each pipeline at its DEFAULT parameters and compares. Both sides hash **one
+canonical encoding** (`json.dumps(rows, sort_keys=True, separators=(',',':'))`), so no
+database collation and no float formatting can make two equal results disagree. Run it
+after any edit to `content/examples.json`, and in the release rehearsal beside
+`check-published.sh`. It is not a gate task — it needs a running demo stack with the real
+sample data.
+
+Falsified at birth (2026-09-04): with one expected hash replaced by zeroes the script exits
+1 and names the pipeline with both checksums; restored, it reports `6 pipelines matched`.
+
 ## Why this is not a gate task
 
 `verify.sh` needs Docker, several GB and minutes. Wiring it into `./gradlew
