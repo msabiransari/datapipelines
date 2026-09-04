@@ -332,7 +332,8 @@ n=$(demo_mysql "$PW_MY" "SELECT count(*) FROM stations" 2>/dev/null || true)
 [ "$n" = "1" ] && ok "mysql data intact after the re-load" || bad "mysql data wrong after re-load (got: '$n')"
 
 [ -f "$SRVD/nyc_reference.db" ] && ok "sqlite artifact placed" || bad "sqlite artifact not placed"
-grep -q '"templates"' "$SRVD/examples.json" && ok "examples.json placed" || bad "examples.json not placed"
+grep -q '"templates"' "$SRVD/examples-nyc.json" && ok "examples-nyc.json placed" || bad "examples-nyc.json not placed"
+[ -f "$SRVD/bootstrap-datasources-nyc.yml" ] && ok "nyc bootstrap datasources file placed" || bad "nyc bootstrap datasources file not placed"
 
 step "selftest complete: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || die "$FAIL assertion(s) failed — logs under $WORK"

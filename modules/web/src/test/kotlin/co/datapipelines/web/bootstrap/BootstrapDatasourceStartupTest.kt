@@ -77,4 +77,34 @@ class BootstrapDatasourceStartupTest {
         (error is IllegalStateException) shouldBe true
         error!!.message shouldBe "entry 2 failed validation"
     }
+
+    @Test
+    fun `a comma-separated list registers every file in order, one actor resolution for all`() {
+        every { userService.provisionBootstrapActor() } returns actor
+
+        BootstrapDatasourceStartup(
+            BootstrapProperties(datasourcesFile = "/etc/dp/nyc.yml, /etc/dp/trade.yml"),
+            userService,
+            registrar,
+        ).afterSingletonsInstantiated()
+
+        verify(exactly = 1) { userService.provisionBootstrapActor() }
+        verify(ordering = io.mockk.Ordering.ORDERED) {
+            registrar.register(Path.of("/etc/dp/nyc.yml"), actor.id)
+            registrar.register(Path.of("/etc/dp/trade.yml"), actor.id)
+        }
+    }
+
+    @Test
+    fun `empty entries in the list are dropped, never registered`() {
+        every { userService.provisionBootstrapActor() } returns actor
+
+        BootstrapDatasourceStartup(
+            BootstrapProperties(datasourcesFile = ", /etc/dp/nyc.yml , ,"),
+            userService,
+            registrar,
+        ).afterSingletonsInstantiated()
+
+        verify(exactly = 1) { registrar.register(Path.of("/etc/dp/nyc.yml"), actor.id) }
+    }
 }

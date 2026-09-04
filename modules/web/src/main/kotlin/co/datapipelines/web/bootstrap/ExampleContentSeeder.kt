@@ -31,16 +31,19 @@ class ExampleContentFileException(
  * `templates` entries are exactly the `POST /api/v1/templates/import` array elements and
  * `pipelines` entries exactly a `POST /api/v1/pipelines/import` body; both arrays are optional.
  *
+ * The configured value is a comma-separated LIST of files (one per sample-data family — see
+ * [BootstrapProperties]). Every file is read and structurally checked at construction; seeding
+ * then runs ALL templates (file by file, in declared order) before ANY pipeline, because a
+ * pipeline's node resolves its template at save time and the two families' templates are
+ * disjoint by contract.
+ *
  * ## Two different failure moments, both loud
- * The file is read and structurally checked **in the constructor**, i.e. while the context is
+ * The files are read and structurally checked **in the constructor**, i.e. while the context is
  * building — a typo in a mounted file fails startup, not somebody's first login. Content
  * validation is the import services' job and therefore happens at seeding time; a fixture that
  * references a datasource this deployment lacks fails workspace provisioning, and the login with
  * it. That is deliberate (see [PersonalWorkspaceSeeder]): a personal workspace silently missing
  * its examples is indistinguishable from a seeded one, so it must never be handed out.
- *
- * Templates are imported before pipelines because a pipeline's node references a template version
- * and §12 validation resolves it at save time.
  */
 class ExampleContentSeeder(
     properties: BootstrapProperties,
@@ -54,29 +57,37 @@ class ExampleContentSeeder(
     // ObjectMapperDefaultParameterKonsistTest). Declared before `content`, which uses it.
     private val mapper: ObjectMapper = ObjectMapper()
 
-    /** Null when no examples file is configured — the seeder is then a deliberate no-op. */
-    private val content: Content? = properties.examplesPath()?.let(::load)
+    /** Empty when no examples file is configured — the seeder is then a deliberate no-op. */
+    private val contents: List<Content> = properties.examplesPaths().map(::load)
 
     override fun seed(
         workspaceId: UUID,
         userId: UUID,
     ) {
-        val examples = content ?: return
-        examples.templatesBody?.let { body ->
-            reporting(workspaceId, userId, kind = "templates", fixture = examples.templateIds.joinToString(",")) {
-                templateImportService.import(body, workspaceId, userId)
+        if (contents.isEmpty()) return
+        // All templates across all files first, then all pipelines: a pipeline in the second
+        // family may reference a template seeded from the first, and §12 resolves templates at
+        // save time. File order is the configured order (BootstrapProperties).
+        contents.forEach { examples ->
+            examples.templatesBody?.let { body ->
+                reporting(workspaceId, userId, kind = "templates", fixture = examples.templateIds.joinToString(",")) {
+                    templateImportService.import(body, workspaceId, userId)
+                }
             }
         }
-        examples.pipelines.forEach { fixture ->
-            reporting(workspaceId, userId, kind = "pipeline", fixture = fixture.name) {
-                pipelineImportService.import(fixture.body, workspaceId, userId)
+        contents.forEach { examples ->
+            examples.pipelines.forEach { fixture ->
+                reporting(workspaceId, userId, kind = "pipeline", fixture = fixture.name) {
+                    pipelineImportService.import(fixture.body, workspaceId, userId)
+                }
             }
         }
         log.info(
-            "event=workspace.examples_seeded workspace_id={} templates={} pipelines={}",
+            "event=workspace.examples_seeded workspace_id={} files={} templates={} pipelines={}",
             workspaceId,
-            examples.templateIds.size,
-            examples.pipelines.size,
+            contents.size,
+            contents.sumOf { it.templateIds.size },
+            contents.sumOf { it.pipelines.size },
         )
     }
 

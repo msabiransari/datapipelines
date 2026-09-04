@@ -33,16 +33,22 @@ class BootstrapDatasourceStartup(
     private val log = LoggerFactory.getLogger(BootstrapDatasourceStartup::class.java)
 
     override fun afterSingletonsInstantiated() {
-        val path = properties.datasourcesPath() ?: return
+        val paths = properties.datasourcesPaths()
+        if (paths.isEmpty()) return
         // §6.1 item 1: the actor is resolved (pre-provisioning the row when it is absent) BEFORE
         // any entry is applied — `datasources.created_by` is NOT NULL REFERENCES users(id).
         val actor = userService.provisionBootstrapActor()
-        log.info(
-            "event=datasource.bootstrap_start file={} actor_user_id={} actor_provider={}",
-            path,
-            actor.id,
-            actor.provider,
-        )
-        registrar.register(path, actor.id)
+        // One registration call per configured file (one per sample-data family); registration is
+        // create-if-absent per entry, so overlapping files are idempotent and partial families
+        // (a deployment with only one demo profile active) register only their own entries.
+        paths.forEach { path ->
+            log.info(
+                "event=datasource.bootstrap_start file={} actor_user_id={} actor_provider={}",
+                path,
+                actor.id,
+                actor.provider,
+            )
+            registrar.register(path, actor.id)
+        }
     }
 }

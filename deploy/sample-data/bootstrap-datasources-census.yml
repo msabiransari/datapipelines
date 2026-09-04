@@ -1,0 +1,86 @@
+# Demo sample-data datasources for the TRADE family (trade/v1), registered
+# create-if-absent at startup (datasources.md §8A; sample-data design §6).
+# The NYC family lives in bootstrap-datasources-nyc.yml; the app's
+# datapipelines.bootstrap.datasources-file accepts a comma-separated list and
+# the demo profiles compose the active families into it.
+#
+# NO SECRETS HERE. Every credential is a ${VAR} placeholder resolved against the
+# app process's environment by the app's OWN substitution (§8A.2) — not Spring's:
+# this file is runtime data read after the context is built. Supply the values in
+# deploy/.env (see deploy/.env.example); deploy/sample-data/load.sh creates the
+# very same login on each engine before the app starts.
+#
+# ONLY the bare ${VAR} form is supported. `${VAR:-default}` is NOT a placeholder
+# to this resolver — the regex is `\$\{[A-Za-z_][A-Za-z0-9_]*}`, so a shell-style
+# default would register the literal string as the password and fail at first
+# query with an authentication error against a database nobody suspects.
+#
+# `global: true` is REQUIRED and must be true: registration runs before any
+# workspace exists (§8A.1). `readonly: true` writes datasources.is_readonly, so
+# every §5.7 enforcement layer applies — that is layer 2 of the three-layer demo
+# posture (design §7); layer 3 is the SELECT-only database login the loader
+# creates (MySQL) or the driver-level open mode (the file dialects), and layer 1
+# is workspace scoping.
+
+datasources:
+  - name: sample-trade-us
+    display_name: "US Trade Facts (sample)"
+    description: >-
+      US Census monthly imports/exports at HS-6 grain for the top-15 trading
+      partners (data-derived), 2023-2024, plus partner and HS-chapter lookups
+      and the Census-to-ISO partner crosswalk. Tables: trade_monthly, partners,
+      hs_chapters, trade_flow_monthly, partner_iso_crosswalk.
+    dialect: DUCKDB
+    jdbc_url: jdbc:duckdb:/srv/sample/us_trade.duckdb
+    # Like the SQLite entry: a FILE with no login. Non-empty because §9
+    # rejects a null-or-EMPTY password; nothing authenticates with these.
+    username: "duckdb"
+    password: "duckdb-file-datasource-has-no-authentication"
+    properties:
+      jdbc:
+        # READ_ONLY open mode on the pinned duckdb_jdbc 1.5.5.1 — a PROBED
+        # fact (2026-09-04, the trade family bootstrap): the URL-parameter
+        # form (jdbc:duckdb:…?access_mode=READ_ONLY) is silently IGNORED by
+        # the driver; the connection-Properties form is honored — it refuses
+        # writes on an existing file AND refuses to create the file when it
+        # is absent (so the loader must place the file before registration,
+        # which the demo profile's service ordering guarantees). This is the
+        # driver-level half; `readonly: true` below is the datapipelines-level
+        # half; the ro volume mount is the filesystem-level backstop.
+        access_mode: READ_ONLY
+    readonly: true
+    global: true
+
+  - name: sample-trade-world
+    display_name: "World Trade Mirror (sample)"
+    description: >-
+      UN Comtrade mirror statistics: what the top-5 partners report trading
+      with the USA, annual TOTAL level, 2022-2024 — reconciled against the
+      US-reported facts in sample-trade-us. Tables: comtrade_annual,
+      reporters.
+    dialect: MYSQL
+    jdbc_url: jdbc:mysql://mysql:3306/dp_sample_trade
+    username: ${SAMPLE_DB_USER}
+    password: ${SAMPLE_MYSQL_PASSWORD}
+    readonly: true
+    global: true
+
+  - name: sample-market
+    display_name: "Crypto Market Data (sample)"
+    description: >-
+      Binance hourly klines for BTCUSDT and ETHUSDT, 2023-2024. Tables:
+      klines_1h, symbols.
+    dialect: SQLITE
+    # A FILE, exactly like the NYC family's reference db: no server, no login,
+    # and the xerial driver ignores both of these values entirely. Non-empty
+    # for the same §9 reason as the entry above.
+    jdbc_url: jdbc:sqlite:/srv/sample/crypto_market.db
+    username: "sqlite"
+    password: "sqlite-file-datasource-has-no-authentication"
+    properties:
+      jdbc:
+        # 1 = SQLiteOpenMode.READONLY — the probed xerial key, same as the
+        # NYC reference datasource (datasources.md §8A.4).
+        open_mode: "1"
+    readonly: true
+    global: true

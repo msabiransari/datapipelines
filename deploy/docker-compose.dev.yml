@@ -12,12 +12,14 @@
 # without this the dev stack and deploy/docker-compose.yml would be one project
 # ("deploy") whose same-named postgres/redis services replace each other —
 # starting the dev stack tore down a running production-shape stack (2026-08-28).
-name: datapipelines-dev
+# The dp- prefix keeps every datapipelines container recognisable on a shared
+# host (2026-09-04 rename).
+name: dp-dev
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: datapipelines-dev-postgres
+    container_name: dp-dev-postgres
     environment:
       POSTGRES_DB: datapipelines
       POSTGRES_USER: datapipelines
@@ -43,7 +45,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: datapipelines-dev-redis
+    container_name: dp-dev-redis
     # noeviction is REQUIRED (deployment.md §4.2.1): eviction silently destroys
     # results, idempotency keys and cancellation flags. Same policy as production;
     # only the password and the memory ceiling differ.
@@ -66,4 +68,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Volume name pinned: the dev database predates the 2026-09-04 dp- rename
+  # and was migrated from deploy_postgres-dev-data.
   postgres-dev-data:
+    name: dp-postgres-dev-data

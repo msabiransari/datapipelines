@@ -71,6 +71,7 @@ gate-logs/
 # built dumps. Reproducible from sources.lock + the scripts, so never committed;
 # the .tools/ entry above already covers the pinned DuckDB CLI.
 scripts/sample-data/work/
+scripts/sample-data-trade/work/
 
 # --- Agent worktrees checked out INSIDE the repo ---
 # A `git add -A` from the main checkout must never stage another lane's

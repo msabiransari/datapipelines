@@ -725,6 +725,24 @@ is true and both `INSERT` and `CREATE TABLE` fail `SQLITE_READONLY`. The similar
 only makes an explicit `Connection.setReadOnly(true)` meaningful. Re-verify the key against the
 driver on any xerial upgrade.
 
+### 8A.5 DuckDB read-only open mode
+
+The DuckDB analogue of §8A.4, used by the trade family's `sample-trade-us` entry. The mechanism
+is the DuckDB config `access_mode = READ_ONLY`, delivered as a **connection property** — verified
+against the pinned driver `org.duckdb:duckdb_jdbc:1.5.5.1` (2026-09-04), two probed facts:
+
+- the **URL-parameter form** (`jdbc:duckdb:…?access_mode=READ_ONLY`) is **silently ignored** — the
+  connection opens read-write and writes succeed;
+- the **connection-Properties form** (`properties.jdbc.access_mode: READ_ONLY`) is honored: writes
+  on an existing file fail, and opening a read-only connection to a file that does not exist fails
+  at connect ("Cannot open database … in read-only mode: database does not exist") — so the loader
+  must place the file before the app registers the datasource, which the demo profile's service
+  ordering guarantees.
+
+`access_mode` is not in the DUCKDB §5.6 refusal set (only the five extension keys are), so the
+bootstrap entry may set it. The demo additionally mounts the sample volume read-only into the
+app container — the filesystem-level backstop under the driver lock and the §5.7 flag.
+
 ---
 
 ## 9. Validation Rules
@@ -889,6 +907,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v2.17 | two-family demo split | **§8A.5 new** — the DuckDB read-only open mode, probed against the pinned duckdb_jdbc 1.5.5.1: the URL-param form is silently ignored, the connection-Properties form (`properties.jdbc.access_mode: READ_ONLY`) is honored (writes refused, and a read-only open of a missing file fails at connect — so loaders place the file before registration). `access_mode` is not in the DUCKDB §5.6 refusal set. Used by the trade family's `sample-trade-us` bootstrap entry. |
 | 2026-09-02 | v2.17 | multi-instance round 2 (050) | **§5.7 gains the cross-instance pool-invalidation mechanism** (R1/M3): registry save/delete publishes the datasource name on Redis channel `dp:datasource-invalidated` after the row commit; every instance subscribes (reconnect-surviving container, subscribed before serving) and evicts, so the next use rebuilds from the row; the 044-F5 known window narrows to out-of-band row writes only. §5.7 also gains the replication sizing sentence (`maximumPoolSize × replicas ≤ the customer DB's connection limit`, echoed by §5.1's pointer). **§3.3 gains the normalize-on-read sentence** (R3, 011 D7/F2 + 020 F1 closed): SERVER_MANAGED keys stripped from `properties.hikari` in `DatasourceRow.toDatasource` — the second instance of the normalize-at-both-boundaries rule. |
 | 2026-08-05 | v1.0 | initial draft | Initial datasources spec: entity, dialect adapters, pool config, credential encryption, driver packaging strategy |
 | 2026-08-07 | v1.1 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.9](SPEC-REVIEW-2026-08.md#29-datasourcesmd): encryption key required + fail-fast, typo fixed, master-key fallback chain deleted (KMS → ROADMAP) [D8]; `properties` becomes `hikari`/`jdbc` passthrough maps validated by a test pool build [D7/D2]; §7.2 DDL replaced by a pointer to metadata-db [D4]; `description` optional; `datasource.driver_not_loaded` renamed + added to §9, `datasource_unreachable` linked to the central catalog [D5]; §7.4 per-lease decrypt/audit corrected to per pool build; `DeleteResult`/`TestResult`/`ValidationResult` field lists; `poolFor()` thread-safety; query-timeout precedence stated once; §11 paths get `/api/v1` + `name` immutability and rename procedure |

@@ -102,6 +102,37 @@ engine_start_mysql() {
   die "throwaway MySQL '$name' never became ready"
 }
 
+# engine_start_mysql_db <tag> <dbname> / mysql_in_db — the generic pair the
+# trade family (scripts/sample-data-trade/) uses; engine_start_mysql above is
+# the dp_sample_weather-specific wrapper kept for the mobility callers. The
+# TCP-probe reasoning is identical.
+engine_start_mysql_db() {
+  local tag="$1" db="$2"
+  local name="${SD_PROJECT}-$$-mysql-$tag"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker run -d --name "$name" \
+    -e MYSQL_DATABASE="$db" \
+    -e MYSQL_ROOT_PASSWORD=build \
+    "$(image_ref mysql)" \
+    --local-infile=1 >/dev/null
+  local i
+  for i in $(seq 1 180); do
+    if docker exec -e MYSQL_PWD=build "$name" \
+         mysql --protocol=TCP -h 127.0.0.1 -uroot -D "$db" -e 'SELECT 1' >/dev/null 2>&1; then
+      echo "$name"; return 0
+    fi
+    sleep 1
+  done
+  docker logs --tail 30 "$name" >&2 || true
+  die "throwaway MySQL '$name' never became ready"
+}
+
+mysql_in_db() {
+  local c="$1" db="$2"; shift 2
+  docker exec -i -e MYSQL_PWD=build "$c" \
+    mysql --protocol=TCP -h 127.0.0.1 -uroot --database="$db" "$@"
+}
+
 # psql_in <container> <args...> — psql as the build superuser, errors fatal.
 # ON_ERROR_STOP is not optional: without it psql reports success after a failed
 # statement, and a half-loaded table would be dumped and published.
@@ -165,6 +196,22 @@ count_pg()     { psql_in "$1" -At -c "SELECT count(*) FROM $2" < /dev/null; }
 count_mysql()  { mysql_in "$1" -N --batch -e "SELECT count(*) FROM $2" < /dev/null; }
 count_sqlite() { sqlite3 -noheader "$1" "SELECT count(*) FROM $2;" < /dev/null; }
 
+# checksum_duckdb <dbfile> <table> <order_by> / count_duckdb — the fourth
+# engine, used by the trade family. The .duckdb FILE is the artifact (like
+# SQLite), queried through the same pinned DuckDB CLI that built it
+# (duckdb_bin, from common.sh — both families pin the CLI version in their
+# own sources.lock, and this is only called for spec rows that name engine
+# `duckdb`, which only the trade family's checksums.spec does). Hashing
+# stays OUTSIDE the engine for the same reasons as everywhere above.
+# Rendering: -noheader -list streams `|`-separated values; DECIMAL and
+# TIMESTAMP render deterministically inside one pinned CLI version, which is
+# the same determinism boundary the whole contract already claims.
+checksum_duckdb() {
+  local f="$1" t="$2" o="$3"
+  "$(duckdb_bin)" -noheader -list "$f" "SELECT * FROM $t ORDER BY $o;" < /dev/null | shasum -a 256 | awk '{print $1}'
+}
+count_duckdb() { "$(duckdb_bin)" -noheader -list "$1" "SELECT count(*) FROM $2;" < /dev/null; }
+
 # checksum_rows <engine> <handle> — emits "engine<TAB>table<TAB>count<TAB>sha256"
 # for every table checksums.spec declares for that engine.
 checksum_rows() {
@@ -175,6 +222,7 @@ checksum_rows() {
       postgres) n=$(count_pg "$handle" "$t");     ck=$(checksum_pg "$handle" "$t" "$o") ;;
       mysql)    n=$(count_mysql "$handle" "$t");  ck=$(checksum_mysql "$handle" "$t" "$o") ;;
       sqlite)   n=$(count_sqlite "$handle" "$t"); ck=$(checksum_sqlite "$handle" "$t" "$o") ;;
+      duckdb)   n=$(count_duckdb "$handle" "$t"); ck=$(checksum_duckdb "$handle" "$t" "$o") ;;
       *) die "unknown engine '$engine' in checksums.spec" ;;
     esac
     printf '%s\t%s\t%s\t%s\n' "$engine" "$t" "$n" "$ck"

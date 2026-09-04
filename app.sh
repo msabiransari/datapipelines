@@ -6,25 +6,30 @@
 # stack an engineer evaluating the project runs.
 #
 #   ./app.sh --start [--no-build]   build image in Docker + start the full stack
-#   ./app.sh --start --demo         ...plus the published sample databases
-#   ./app.sh --stop [--demo]        stop the stack, demo profile included
-#   ./app.sh --status [--demo]      show services + app health
-#   ./app.sh --logs                 follow the app container's logs
+#   ./app.sh --start --demo-nyc      ...plus the NYC sample family (mobility)
+#   ./app.sh --start --demo-trade    ...plus the trade family (Census/Comtrade/crypto)
+#   ./app.sh --start --demo-nyc --demo-trade   both families, one box
+#   ./app.sh --stop [--demo-*]       stop the stack, demo services included
+#   ./app.sh --status [--demo-*]     show services + app health
+#   ./app.sh --logs                  follow the app container's logs
 #
 # Secrets live in deploy/.env (git-ignored). If it is missing, --start scaffolds
 # it: values are carried over from .env.local when present (JWT/encryption/OIDC),
 # infra passwords are generated. The Gradle cache persists in ./.gradle-docker
 # (git-ignored), so only the first build is cold.
 #
-# --demo activates the compose `demo` profile: a MySQL service, the two one-shot
-# loaders that download and checksum-verify the published sample artifacts, and
-# the bootstrap/workspace settings of the demo posture. It also builds the jar
-# with -Pmysql, because MySQL Connector/J is NOT in the default build (GPL +
-# FOSS exception, datasources.md §10.2) and the sample-weather datasource would
-# otherwise fail registration with datasource.driver_not_loaded. Missing SAMPLE_*
-# keys are scaffolded into deploy/.env.demo on first use, with SAMPLE_BASE_URL
-# defaulting to the published bucket (deployment.md Appendix B) — zero edits
-# needed for the standard demo.
+# --demo-nyc / --demo-trade activate the compose profiles of the two independent
+# sample-data families (deployment.md Appendix B): a shared MySQL service, the
+# per-family one-shot loaders that download and checksum-verify the published
+# sample artifacts, and the bootstrap/workspace settings of the demo posture.
+# Either family implies the -Pmysql jar build (MySQL Connector/J is NOT in the
+# default build — GPL + FOSS exception, datasources.md §10.2 — and the weather
+# and Comtrade datasources would otherwise fail registration with
+# datasource.driver_not_loaded). Missing SAMPLE_* keys are scaffolded into
+# deploy/.env.demo on first use, with SAMPLE_BASE_URL/SAMPLE_TRADE_BASE_URL
+# defaulting to the published bucket — zero edits needed. The old --demo flag
+# is GONE (2026-09-04, the two-family split): pass the family you actually
+# want; each one spins up only its own data.
 
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
@@ -32,18 +37,29 @@ cd "$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_ENV="deploy/.env"
 LOCAL_ENV=".env.local"
 # APP_COMPOSE_PROJECT overrides the compose project (default: the files' pinned
-# "deploy") — for running a second isolated copy on one machine (CI, rehearsals).
+# "dp") — for running a second isolated copy on one machine (CI, rehearsals).
 COMPOSE=(docker compose ${APP_COMPOSE_PROJECT:+-p "$APP_COMPOSE_PROJECT"} -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml)
 
-# --demo is a MODE, not a subcommand: it changes the compose invocation for every
-# verb, so it is stripped from the argument list here rather than inside start().
-# Without it the demo services are invisible to compose: --status cannot show
-# them, and --stop would leave the demo MySQL running — stop() compensates for
-# that explicitly (045 §C.1), status does not.
-DEMO=0
+# The --demo-nyc / --demo-trade flags are MODES, not subcommands: they change the
+# compose invocation for every verb, so they are stripped from the argument list
+# here rather than inside start(). Without them the demo services are invisible
+# to compose: --status cannot show them, and --stop would leave the demo MySQL
+# running — stop() compensates for that explicitly (045 §C.1), status does not.
+DEMO_NYC=0
+DEMO_TRADE=0
 ARGS=()
 for arg in "$@"; do
-  if [[ $arg == --demo ]]; then DEMO=1; else ARGS+=("$arg"); fi
+  case "$arg" in
+    --demo-nyc) DEMO_NYC=1 ;;
+    --demo-trade) DEMO_TRADE=1 ;;
+    --demo)
+      die "--demo is gone — the sample families split into independent switches
+  (2026-09-04). Pass the family you actually want:
+    --demo-nyc     the NYC mobility family (taxi trips, weather, reference)
+    --demo-trade   the trade family (US Census trade, Comtrade mirror, crypto klines)
+  Both together is fine: ./app.sh --start --demo-nyc --demo-trade" ;;
+    *) ARGS+=("$arg") ;;
+  esac
 done
 set -- "${ARGS[@]:-}"
 # Demo keys live in their OWN env file, passed only on demo invocations: appending
@@ -52,17 +68,19 @@ set -- "${ARGS[@]:-}"
 # and posture — 023 review F1). Order matters: deploy/.env comes LAST so values an
 # operator set there override the scaffolded demo file.
 DEMO_ENV="deploy/.env.demo"
-if ((DEMO)); then
-  touch "$DEMO_ENV" # --stop/--status --demo may run before any --start --demo scaffolded it
-  COMPOSE+=(--env-file "$DEMO_ENV" --env-file "$DEPLOY_ENV" --profile demo)
+if ((DEMO_NYC || DEMO_TRADE)); then
+  touch "$DEMO_ENV" # --stop/--status --demo-* may run before any --start --demo-* scaffolded it
+  COMPOSE+=(--env-file "$DEMO_ENV" --env-file "$DEPLOY_ENV")
+  ((DEMO_NYC)) && COMPOSE+=(--profile demo-nyc)
+  ((DEMO_TRADE)) && COMPOSE+=(--profile demo-trade)
 fi
-# The image tag follows the compose project (default "deploy" — the files' pinned
+# The image tag follows the compose project (default "dp" — the files' pinned
 # name): a hardcoded single tag meant every lane's --start rebuilt the tag every
 # OTHER lane's stack resolves (034 F2 — 031's build overwrote 029's mid-round).
 # The default lane keeps the documented tag; a second isolated copy gets its own.
 # IMAGE_TAG in the environment overrides the derivation entirely.
 if [[ -z ${IMAGE_TAG:-} ]]; then
-  if [[ ${APP_COMPOSE_PROJECT:-deploy} == deploy ]]; then
+  if [[ ${APP_COMPOSE_PROJECT:-dp} == dp ]]; then
     IMAGE_TAG="datapipelines:local"
   else
     IMAGE_TAG="datapipelines:local-${APP_COMPOSE_PROJECT}"
@@ -169,8 +187,32 @@ ensure_demo_env() {
     printf '%s=%s\n' "$1" "$2" >> "$DEMO_ENV"
     added=1
   }
+  # The ON markers are DERIVED state, not operator config: they are REWRITTEN on
+  # every run from this invocation's flags (a family flag flipped later must
+  # take effect without hand-editing an env file). deploy/.env still wins —
+  # it is passed LAST in the env-file list, and set_key only touches DEMO_ENV.
+  set_key() { # key value
+    local pattern="s|^$1=.*|$1=$2|"
+    if grep -qE "^$1=" "$DEMO_ENV"; then
+      sed -i.bak "$pattern" "$DEMO_ENV" && rm -f "$DEMO_ENV.bak"
+    else
+      printf '%s=%s\n' "$1" "$2" >> "$DEMO_ENV"
+    fi
+  }
+  # The pre-split scaffold wrote these two keys; compose now DERIVES the lists
+  # from the ON markers, so a stale scaffolded pair must not linger (they would
+  # be inert — nothing interpolates them anymore — but they would read as
+  # authoritative to anyone debugging the env).
+  if grep -qE "^DATAPIPELINES_BOOTSTRAP_(DATASOURCES|EXAMPLES)_FILE=" "$DEMO_ENV"; then
+    sed -i.bak -E '/^DATAPIPELINES_BOOTSTRAP_(DATASOURCES|EXAMPLES)_FILE=/d' "$DEMO_ENV" && rm -f "$DEMO_ENV.bak"
+    added=1
+  fi
+  set_key SAMPLE_NYC_ON "$([[ ${DEMO_NYC:-0} = 1 ]] && echo 1)"
+  set_key SAMPLE_TRADE_ON "$([[ ${DEMO_TRADE:-0} = 1 ]] && echo 1)"
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
   add_key SAMPLE_VERSION "v2"
+  add_key SAMPLE_TRADE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/trade"
+  add_key SAMPLE_TRADE_VERSION "v1"
   add_key SAMPLE_DB_USER "dp_demo_ro"
   # hex, NOT base64: hex can never contain the one string the loader refuses
   # in a Postgres password — its dollar-quote tag (045 §A) — and stays
@@ -179,8 +221,6 @@ ensure_demo_env() {
   add_key SAMPLE_PG_PASSWORD "$(openssl rand -hex 24)"
   add_key SAMPLE_MYSQL_PASSWORD "$(openssl rand -hex 24)"
   add_key SAMPLE_MYSQL_ROOT_PASSWORD "$(openssl rand -hex 24)"
-  add_key DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE "/srv/sample/bootstrap-datasources.yml"
-  add_key DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE "/srv/sample/examples.json"
   add_key DATAPIPELINES_WORKSPACES_PROVISIONING_MODE "auto-per-user"
   add_key DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED "false"
   # Zero-setup login (auth.md §5A): the demo needs NO OIDC client at all. Local
@@ -231,14 +271,15 @@ ensure_demo_env() {
 build() {
   local gradle_args=(:modules:app:bootJar)
   # -Pmysql adds MySQL Connector/J (GPL + FOSS exception; datasources.md §10.2),
-  # which the default build deliberately omits. The demo's sample-weather
-  # datasource is MYSQL, and registration fails with datasource.driver_not_loaded
-  # without it — at STARTUP, which under the bootstrap file is a fail-fast boot.
-  if ((DEMO)); then gradle_args=(-Pmysql "${gradle_args[@]}"); fi
-  # NOTE: ((DEMO)) arithmetic, not ${DEMO:+…}: DEMO is always set ("0" or "1"), so
-  # the :+ form claimed [-Pmysql] on every build, demo or not (023 review F10).
+  # which the default build deliberately omits. Either demo family's MySQL
+  # datasources (weather / Comtrade) fail registration without it with
+  # datasource.driver_not_loaded — at STARTUP, which under the bootstrap files
+  # is a fail-fast boot.
+  if ((DEMO_NYC || DEMO_TRADE)); then gradle_args=(-Pmysql "${gradle_args[@]}"); fi
+  # NOTE: arithmetic test, not ${DEMO:+…}: the flags are always set ("0" or "1"),
+  # so the :+ form would claim [-Pmysql] on every build, demo or not (023 F10).
   local flag_note=""
-  ((DEMO)) && flag_note=" [-Pmysql]"
+  ((DEMO_NYC || DEMO_TRADE)) && flag_note=" [-Pmysql]"
   echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)${flag_note}"
   mkdir -p "$GRADLE_CACHE"
   docker run --rm \
@@ -273,15 +314,15 @@ start() {
   local do_build=1
   [[ ${1:-} == --no-build ]] && do_build=0
   scaffold_deploy_env
-  if ((DEMO)); then ensure_demo_env; fi
+  if ((DEMO_NYC || DEMO_TRADE)); then ensure_demo_env; fi
   if ((do_build)); then
     build
   else
     docker image inspect "$IMAGE_TAG" >/dev/null 2>&1 \
       || die "image $IMAGE_TAG not found — run --start without --no-build first"
-    if ((DEMO)); then
+    if ((DEMO_NYC || DEMO_TRADE)); then
       echo "==> NOTE: --no-build reuses $IMAGE_TAG as built. If it was built without"
-      echo "    -Pmysql, the sample-weather datasource fails registration at startup."
+      echo "    -Pmysql, the demo's MySQL datasources fail registration at startup."
     fi
   fi
   echo "==> starting the stack (app healthcheck probes /ready; first boot runs migrations)"
@@ -302,7 +343,7 @@ start() {
   curl -sf "$HEALTH_URL" >/dev/null 2>&1 \
     || die "stack is up but $HEALTH_URL is not answering"
   echo "==> UP — ${APP_URL}"
-  if ((DEMO)); then
+  if ((DEMO_NYC || DEMO_TRADE)); then
     # T81: print what the ENV FILES actually hold, not the scaffold's defaults. An
     # operator who set DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL (or the local
     # bootstrap password) in deploy/.env before the first start gets a demo whose
@@ -332,7 +373,7 @@ EOM
 stop() {
   echo "==> stopping the stack (data volumes kept; '${COMPOSE[*]} down -v' resets them)"
   "${COMPOSE[@]}" stop
-  ((DEMO)) && return 0 # --stop --demo already sees the demo services
+  ((DEMO_NYC || DEMO_TRADE)) && return 0 # --stop --demo-* already sees the demo services
   # 045 §C.1 (023 review): the invocation above has no demo profile, so demo
   # containers are invisible to it and a plain --stop used to leave this
   # project's demo MySQL running — verified live on a scratch stack
@@ -341,7 +382,7 @@ stop() {
   # model: loading the model needs the demo env files, which a machine that
   # never ran --demo must not be forced to have.
   local proj svc running=""
-  proj=${APP_COMPOSE_PROJECT:-deploy}
+  proj=${APP_COMPOSE_PROJECT:-dp}
   for svc in mysql sample-data sample-data-mysql; do
     if [ -n "$(docker ps -q \
         --filter "label=com.docker.compose.project=$proj" \
