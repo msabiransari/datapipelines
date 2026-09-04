@@ -63,7 +63,7 @@ param artifact_version       v2
 # The design §8 go-live gate: set ONLY by the owner after checking every
 # source's CURRENT terms. Absent = manifest ships license_verified: null and
 # publishing blocks go-live.
-param license_verified       null
+param license_verified       2026-09-04
 
 # --- derived pins (regenerate with pin.sh) ---------------------------------
 # Written after the first successful download; see pin.sh.
