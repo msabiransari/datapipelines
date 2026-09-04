@@ -1,6 +1,6 @@
 # Design: Calculators — Configurable Pure Transformations (Context + `CALC` Node)
 
-**Status:** draft design, awaiting review (Fable)
+**Status:** reviewed 2026-09-04 (orchestrator) — see §0; **awaiting the owner's ruling R-CALC**. Full review with reasoning: the private store, `reviews/2026-09-04-calculators-design-review.md`.
 **Date:** 2026-09-04
 **Scope:** the "calculators" direction — a server-side catalog of configurable,
 pure transformation functions exposed (a) as a pipeline-level block that derives
@@ -17,6 +17,36 @@ same commit as the corresponding code constants**, because the enum table and th
 Error codes below are PROPOSED until they enter pipeline-contract §13. The
 calculator catalog (Appendix A) gets its own drift guard (`CalculatorRegistrySpecDriftTest`)
 the moment it is implemented, mirroring `NodeTypeSpecDriftTest`.
+
+---
+
+## 0. Review verdict (2026-09-04) — read before the rest
+
+**Context calculators: approved in principle.** There is no safe way today to derive a bind
+value from a parameter (`${}` of parameter values is refused by §12.6; SQL does it per
+dialect), so this fills the seam §7.1 step 5 reserves. Build it small: ~20 kinds, layer
+`context`, everything in §3–§4 and §6 as corrected below.
+
+**`CALC` node as designed (a JVM row engine, ~60 row kinds incl. window/statistics):
+not approved.** Reasons, each checkable in the tree: (1) it is a second execution engine
+beside SQL, additive-only forever (D4); (2) reuse of row transforms across pipelines is
+what **library templates** already do — `<#macro>` in a versioned, promoted, hash-pinned
+library (templates.md §6); (3) cross-dialect transforms are what **staging** is for — land
+in tempdb, transform in one dialect; (4) §5.3 whole-column kinds materialise a column in the
+app heap (demo staging tables are 2.4M rows); (5) the agent is good at SQL, and the product
+is built around that — an 80-kind JSON catalog is a worse authoring surface, not a better
+one; (6) §7.2's forms are authoring UI, which R10 / pipeline-editor §11.1 defers.
+
+**R-CALC — the owner's ruling.** (a) *recommended:* context calculators only; row transforms
+documented as stage → SQL in tempdb using a shipped `lib/` macro family (quarter, fiscal
+period, percent change, safe divide, slugify); `CALC` deferred with `EXPRESSION`/`HTTP`.
+(b) `CALC` as **SQL generation**: keep the §5.1 shape, but each kind is a per-dialect SQL
+expression template; the executor emits `SELECT *, <expr> AS col FROM input` on the source
+engine through the existing DQL path — window kinds become real window functions, nothing
+streams through the JVM, a kind a dialect lacks is a save-time 400. Phase after (a).
+(c) As designed — not recommended.
+
+Corrections C1–C12 below are applied inline, each marked *(review 2026-09-04)*.
 
 ---
 
@@ -81,6 +111,9 @@ Every calculator is a code-defined registry entry:
 - `inputs`/`output` — canonical logical types (Type System §3), not per-dialect
   SQL types. The catalog is dialect-agnostic; the executor's type mapper converts.
 - `config_schema` — JSON schema for the optional config object; absent = no config.
+- *(review 2026-09-04, C1)* `inputs` may carry `"variadic": true` on its LAST entry; a variadic
+  input is supplied as a JSON **array** of values/references in the pipeline JSON (`coalesce`,
+  `surrogate_key`, `natural_key` need this — the name→value map alone cannot express them).
 - `layer` — where the kind may be used. `both` kinds (date parsing, rounding,
   hashing) work identically in either layer.
 
@@ -149,6 +182,14 @@ Field rules (amend pipeline-contract §6-family):
 - Templates reference outputs as `:name` bind parameters; `${}` interpolation
   of a calculator output is refused at save time (same rule as declared
   parameters, §12.6).
+- *(review 2026-09-04, C4)* Outputs are **not settable at execute time**: an execution input
+  naming a calculator output is refused (`parameter_unknown`, or a dedicated
+  `calculator_output_not_settable`) — otherwise a caller overrides a derived value.
+- *(review 2026-09-04, C5)* Derived values are **recorded with the execution** beside the
+  resolved parameters (`pipeline_executions.parameters_json` already persists those);
+  non-deterministic kinds (`uuid_*`) make this mandatory for replay and lineage.
+- *(review 2026-09-04, C6)* `PIPELINE` nodes: a child sees only what its own `parameters`
+  declare; a parent maps a calculator output into a child parameter like any Context value.
 - Input type mismatch is checked at save time (literal inputs) and at runtime
   (parameter values — a runtime parameter's type is already validated against
   its declaration, so this is a backstop).
@@ -193,6 +234,11 @@ Field rules (amend pipeline-contract §4):
   are preserved.
 
 ### 5.2 Execution semantics
+
+*(review 2026-09-04, C8/C9 — apply only if R-CALC keeps a `CALC` node)* v1 restricts `source`
+to `tempdb` (an external-datasource `source` pulls a whole table through the application).
+Whole-column kinds (§5.3) need a memory story before any build: a row cap with a typed
+refusal, or R-CALC option (b) push-down — under (b) both problems disappear.
 
 The executor reads `input.table` from `source`, streams rows through the mapping
 list (each mapping = one registry evaluation per row), and lands the enriched
@@ -239,8 +285,20 @@ Save-time validation (amend pipeline-contract §12; all 400s):
 | `pipeline.validation.calculator_window_config_required` | Window kinds carry the required `order_by` |
 | `pipeline.validation.calc_node_has_template` | CALC node carries no `template` |
 | `pipeline.validation.calc_node_input_missing` | CALC node has the required `input` block |
+| `pipeline.validation.calculator_pattern_invalid` | *(review 2026-09-04, C3)* a config-carried pattern (`regex_*`, `mask_format`, `json_extract` path) fails to compile, exceeds the length cap, or is rejected by the bounded matcher |
 
 Also amended: §12.4's `type_invalid` row (enum gains `CALC`).
+
+*(review 2026-09-04, C3 — security)* Patterns in config are authored by any `author`-scoped
+principal and are a ReDoS surface. Regex evaluation runs under a per-evaluation time budget
+(or a linear-time engine) and a pattern length cap; `json_extract` uses a bounded path
+grammar. *(C10 — grammars are contract)* `date_parse`/`date_format` `format` = Java
+`DateTimeFormatter` patterns; `tz_shift` zones = IANA ids; `regex_*` = Java regex (bounded).
+The drift guard pins the grammar names.
+
+*(review 2026-09-04, C11)* Runtime codes surface through the 057 failure record (SSE
+`node_failed` + `executions_get`), not as HTTP responses; the 500 column follows §13.4's
+convention only.
 
 Runtime (amend §13.4, `pipeline.node.*` format):
 
@@ -270,22 +328,18 @@ Runtime (amend §13.4, `pipeline.node.*` format):
 
 ### 7.2 Editor UI
 
-- **Context calculators panel** on the pipeline editor (sibling of the
-  parameters form): an ordered list of calculator rows; each row = kind picker,
-  schema-driven config fields, input selectors (declared parameters + earlier
-  outputs only), output name. Reorder = drag/handle; order IS the evaluation
-  order (D5) and the UI must say so.
-- **CALC node card + inspector**: the graph renders `CALC` as a distinct node
-  kind (badge + glyph, per the 059 node-card contract); the inspector shows the
-  input table (read-only label — table choice follows source/topology), a
-  mappings table (column · kind · inputs · config), and the standard output
-  block form.
-- **Schema-driven forms**: one server-rendered partial generator walks
-  `config_schema` and renders inputs (htmx partials, house style); no
-  hand-written form per kind, no client-side catalog copy. A kind's config
-  documentation renders beside the form from its catalog entry.
-- A standalone "calculator library" screen is deferred (§9); v1 surfaces the
-  catalog inside the editor only.
+*(review 2026-09-04, C7 — rewritten: the previous text was authoring UI, which R10 /
+pipeline-editor §11.1 defer; the editor is read-only in v1.)*
+
+- **Read-only rendering in v1.** The pipeline editor's settings sidebar renders the declared
+  `calculators` block beside Parameters (id · kind · inputs · output, in evaluation order,
+  with a line saying order IS evaluation order). If a `CALC` node exists (R-CALC), its card
+  and inspector render the input table and the mappings table read-only.
+- **Authoring is MCP/REST** (`pipelines_create`/`pipelines_update`), as for every other
+  pipeline field.
+- **Schema-driven forms** (a server-rendered partial generator walking `config_schema`, one
+  grammar for UI + MCP + REST) are the design for the day UI authoring lands (ROADMAP §2,
+  "Pipeline CRUD in the UI"); they are not built in v1 and nothing here depends on them.
 
 ### 7.3 Documentation
 
@@ -297,6 +351,9 @@ suite once implemented; drift-guarded against the registry from day one.
 - **Registry drift test:** `CalculatorRegistrySpecDriftTest` — every kind in the
   code registry appears in the catalog doc, and vice versa (the `NodeTypeSpecDriftTest`
   pattern). Falsified by adding/removing a kind on either side.
+- *(review 2026-09-04, C12)* The registry lives in a new `modules/calculators` with **no**
+  dependency on `datasources`, `dag` or `web`; the purity guard is then a build-file
+  assertion in the `ArchitectureGuardTest` shape, not an allowlist audit.
 - **Purity guard:** a test that no calculator kind's evaluation path touches
   datasource/network/registry ports (the pure-function contract, D3) — enforced
   by structure (a sealed evaluation interface with no I/O ports) plus an
@@ -396,7 +453,7 @@ context, R = row, BOTH. All kinds are additive; names are proposals for review.
 | `mask_format` | BOTH | S → S | `mask` (required — phone/SSN/IBAN templates) |
 | `parse_number` | BOTH | S → D\|BD | `locale` (default en_US), `thousands_sep`, `decimal_sep` |
 | `coalesce` | BOTH | any… → any | (none) — variadic, first non-null |
-| `hash_md5` / `hash_sha256` | BOTH | S → S | `salt` (optional; salted = documented non-deterministic) |
+| `hash_md5` / `hash_sha256` | BOTH | S → S | (none) — *(review 2026-09-04, C2)* no `salt`: a salt in pipeline JSON is a secret in the body (exported, promoted, hashed); for surrogate keys only, never for security |
 | `base64_encode` / `base64_decode` | BOTH | S\|BINARY ↔ S | (none) |
 | `url_encode` / `url_decode` | BOTH | S ↔ S | (none) |
 | `levenshtein` | R | S, S → I | `case_sensitive` (default true) |
