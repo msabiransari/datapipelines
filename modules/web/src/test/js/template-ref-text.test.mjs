@@ -24,6 +24,11 @@ globalThis.document = {
   getElementById: function () { return null; },
   querySelectorAll: function () { return []; },
 };
+// 065: pipelineEditor()'s state literal builds the dock and inspector machines from
+// their modules' globals, so both load before init.js — the same IIFE-on-window
+// convention every other file here uses.
+require(path.resolve(here, "../../main/resources/static/js/pipeline-editor/dock.js"));
+require(path.resolve(here, "../../main/resources/static/js/pipeline-editor/inspector.js"));
 require(path.resolve(here, "../../main/resources/static/js/pipeline-editor/init.js"));
 const editor = globalThis.window.pipelineEditor();
 

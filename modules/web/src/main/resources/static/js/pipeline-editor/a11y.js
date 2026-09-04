@@ -9,9 +9,11 @@
     installEscapeHandler();
   }
 
-  // §14.1: Escape closes the TOPMOST open surface — error modal, then result panel,
-  // then the details panel — one per press, matching the close paths the UI already
-  // has (init.js's canvas-tap, ResultPanel.hide, the modal dismiss). Attached once:
+  // §14.1: Escape closes the TOPMOST open surface — the error modal, then the node
+  // inspector — one per press. 065 §B removed the middle rung: the dock has no
+  // close and Esc is a NO-OP on it, so a key press aimed at the panel above can no
+  // longer take the results away. Closing the inspector hands focus back to the
+  // card button that opened it (inspector.js owns the reference). Attached once:
   // setupA11y re-runs would otherwise stack duplicate listeners.
   var escapeInstalled = false;
   function installEscapeHandler() {
@@ -22,10 +24,8 @@
       if (editor.errorModal && editor.errorModal.visible) {
         editor.errorModal.visible = false;
         editor.errorModal.message = "";
-      } else if (editor.resultPanel && editor.resultPanel.visible && editor.resultPanelInstance) {
-        editor.resultPanelInstance.hide();
-      } else if (editor.selectedNode) {
-        editor.selectedNode = null;
+      } else if (editor.inspector && editor.inspector.open) {
+        editor.closeNodeDetails();
       } else {
         return;
       }
@@ -57,10 +57,14 @@
         editor.selectNodeById(id);
       });
       li.addEventListener("keydown", function (e) {
+        // 065 §C keyboard parity: a click on the row SELECTS (what tapping a card
+        // does); Enter/Space on the selected row OPENS the inspector (what the
+        // card's button does), and this row is the element focus returns to.
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           var id = this.getAttribute("data-node-id");
-          editor.selectNodeById(id);
+          if (editor.openNodeDetails) editor.openNodeDetails(id, this);
+          else editor.selectNodeById(id);
         }
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -115,18 +119,28 @@
     }
   }
 
-  function a11ySyncNode(nodeId) {
+  /**
+   * Mirror the canvas selection onto the DOM list.
+   *
+   * `moveFocus` defaults to TRUE — the roving tabindex normally carries focus, so a
+   * keyboard user sees the ring where the canvas ring is. It is passed FALSE when
+   * the selection is a side effect of OPENING the inspector (065 §C): that path
+   * moves focus into the panel, and two focus calls in one turn is a race the panel
+   * loses roughly half the time (measured live on the demo stack, 2026-09-04:
+   * `document.activeElement` was the hidden `<li>`, not the close button, at 2 of 3
+   * zoom levels). The tabindex still moves — only the focus() is withheld.
+   */
+  function a11ySyncNode(nodeId, moveFocus) {
     var list = document.getElementById("pe-node-list");
     if (!list) return;
 
+    var takeFocus = moveFocus !== false;
     var items = list.querySelectorAll('[role="option"]');
     for (var i = 0; i < items.length; i++) {
       var selected = items[i].getAttribute("data-node-id") === nodeId;
       items[i].setAttribute("aria-selected", selected ? "true" : "false");
-      // Roving tabindex follows the selection, and focus follows the tabindex so a
-      // keyboard user sees the ring where the canvas ring is.
       items[i].setAttribute("tabindex", selected ? "0" : "-1");
-      if (selected) items[i].focus();
+      if (selected && takeFocus) items[i].focus();
     }
 
     if (editor && editor.cy) {

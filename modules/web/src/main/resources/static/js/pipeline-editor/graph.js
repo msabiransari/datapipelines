@@ -250,6 +250,17 @@
     var esc = escapeHtml;
     var h = '<div class="pe-card" data-node-id="' + esc(data.id) + '">';
 
+    // 065 §C: the card's OWN affordance for the inspector. Tapping the card only
+    // SELECTS now — this button is the one route into the large pane, so it is part
+    // of the html label (it must ride the pan/zoom transform with the card) and it
+    // carries the node id in an attribute the delegated handler reads back. The
+    // label container is pointer-events:none; .pe-card-open re-enables them for
+    // itself alone, so the canvas keeps every other interaction.
+    h +=
+      '<button type="button" class="pe-card-open" data-node-open="' + esc(data.id) +
+      '" aria-label="Open details for ' + esc(name) + '">' +
+      iconSvg("maximize", "ds-icon-sm") + "</button>";
+
     h += '<div class="pe-card-title" title="' + esc(name) + '">' + esc(name) + "</div>";
 
     h +=
@@ -343,6 +354,25 @@
           },
         },
       ]);
+    }
+
+    // 065 §C: ONE delegated listener on the graph container serves every card's
+    // open button — the html label re-renders its template on each data/style event,
+    // so per-button listeners would be re-attached (and leaked) on every state
+    // change. stopPropagation keeps the canvas's tap-to-select from also firing, and
+    // because the button rides the same transform as the card this works unchanged
+    // at fit, 50% and 200%.
+    var container = document.getElementById(this.containerId);
+    if (container && container.addEventListener) {
+      container.addEventListener("click", function (evt) {
+        var t = evt.target;
+        var btn = t && t.closest ? t.closest(".pe-card-open") : null;
+        if (!btn) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        var id = btn.getAttribute("data-node-open");
+        if (self.editor && self.editor.openNodeDetails) self.editor.openNodeDetails(id, btn);
+      });
     }
 
     // Layout runs EXPLICITLY (not via the cytoscape config) so the layoutstop binding

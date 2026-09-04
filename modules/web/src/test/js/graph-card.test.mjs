@@ -245,14 +245,46 @@ test("the editor page wires the icon system — icons.css linked, toolbar at md,
   // Every svg the card template emits carries the class pair — never bare.
   const card = g.buildCardHtml({ id: "n1", label: "n1", type: "DQL", state: "success", run: "1 ms", sourceLabel: "s · P" });
   const svgs = card.match(/<svg[^>]*>/g) || [];
-  assert.ok(svgs.length >= 2, "a success card carries the glyph svg and the dot svg");
+  assert.ok(svgs.length >= 3, "a success card carries the glyph svg, the dot svg and the open button's icon");
   svgs.forEach((s) => assert.match(s, /class="[^"]*ds-icon ds-icon-(xs|sm|md)[^"]*"/, `every svg is sized: ${s}`));
 });
 
-test("exactly ONE glyph svg per card — the engine line is text, the db glyph no longer paints twice", () => {
+// 065 §C — the card's open affordance. It is the ONLY route into the inspector
+// now that tapping a card merely selects, so its presence, its size class and its
+// label are load-bearing, and the id it carries is what the delegated handler
+// reads back (per-card listeners would leak on every html-label re-render).
+test("every card carries exactly one open-details button: sized icon, non-empty label, node id attached", () => {
+  const g = loadGraph();
+  const card = g.buildCardHtml({ id: "stage_daily_trips", label: "Stage daily trips", type: "DQL", state: "idle" });
+  const buttons = card.match(/<button[^>]*class="pe-card-open"[^>]*>/g) || [];
+  assert.equal(buttons.length, 1, "exactly one open button per card");
+  const btn = buttons[0];
+  assert.match(btn, /data-node-open="stage_daily_trips"/, "the node id rides on the button for the delegated handler");
+  const label = /aria-label="([^"]*)"/.exec(btn);
+  assert.ok(label && label[1].trim().length > 0, "the button has a non-empty aria-label");
+  assert.match(label[1], /Stage daily trips/, "…that names the node it opens");
+  // The button's own icon is explicitly sized — 059b's rule, which an unsized svg
+  // would break by falling to the 300x150 replaced-element default.
+  const btnEnd = card.indexOf("</button>", card.indexOf(btn));
+  const inner = card.slice(card.indexOf(btn), btnEnd);
+  assert.match(inner, /<svg class="ds-icon ds-icon-sm"/, "the button's glyph carries ds-icon-sm");
+  // Escaping holds on the label too: names come from user-authored pipeline JSON.
+  const nasty = g.buildCardHtml({ id: "x", label: '"><script>alert(1)</script>', type: "DQL", state: "idle" });
+  assert.ok(!nasty.includes("<script>"), "the aria-label is escaped like every other interpolated value");
+});
+
+// 065 §C DELIBERATELY REVISES 059b's count. The rule 059b established was "one
+// GLYPH per card" — the db drawing must not paint twice — and that still holds.
+// What changed is that the card now also carries a CONTROL, the button that opens
+// the inspector, and a control has an icon. So the assertion moves from "one svg"
+// to "one glyph svg plus one button icon", which is the same rule stated against
+// the shape the card actually has. Anything beyond those two is still a regression.
+test("exactly ONE glyph svg per card, PLUS the open-details button's icon (065 revises the 059b count)", () => {
   const g = loadGraph();
   const card = g.buildCardHtml({ id: "n1", label: "stage_trips", type: "DQL", state: "idle", sourceLabel: "sample-trips · POSTGRES" });
-  assert.equal((card.match(/<svg/g) || []).length, 1, "an idle card carries exactly one svg — the type glyph");
+  assert.equal((card.match(/<svg/g) || []).length, 2, "an idle card carries two svgs — the type glyph and the open button's icon");
+  const outsideButton = card.replace(/<button[^>]*class="pe-card-open"[\s\S]*?<\/button>/, "");
+  assert.equal((outsideButton.match(/<svg/g) || []).length, 1, "exactly one GLYPH — the type icon; the second svg belongs to the button");
   const sourceAt = card.indexOf("pe-card-source");
   const sourceLine = sourceAt >= 0 ? card.slice(sourceAt, card.indexOf("</div>", sourceAt)) : "";
   assert.ok(sourceAt >= 0, "the source line renders");
