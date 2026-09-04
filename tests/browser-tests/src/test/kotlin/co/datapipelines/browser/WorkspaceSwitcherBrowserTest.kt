@@ -32,6 +32,12 @@ class WorkspaceSwitcherBrowserTest : BrowserSuite() {
         page.waitForSelector("form[action*='/workspace/switch'] select")
         val switcher = page.locator("form[action*='/workspace/switch'] select")
         switcher.inputValue() shouldBe first
+        // The form's source carries no CSRF field: Spring Security's request-data
+        // processor injects the hidden `_csrf` input into every `th:action` form at
+        // render time (CookieCsrfTokenRepository is active — SecurityConfig). Assert the
+        // RENDERED form, so a future template or config change that drops the token
+        // fails here instead of surfacing as a 403 in production.
+        page.locator("form[action*='/workspace/switch'] input[name='_csrf']").inputValue().isNotBlank() shouldBe true
 
         // Switch to the second: the form submits on change and re-renders with the
         // new choice selected.

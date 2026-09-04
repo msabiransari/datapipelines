@@ -251,18 +251,23 @@ loop. Invoked explicitly before a release: `./gradlew browserTest`.
 **Golden-path status (2026-09-03):** 1–4 and 8–10 live in `tests/browser-tests`
 (login, datasources CRUD + probe, templates create/select, navigation/auth-gating,
 API-key mint-once + revoke, workspace switcher both directions, history page's
-render). **5 and 6 are deferred on another round's in-flight work:** the pipeline
-editor is mid-rebuild in a parallel worktree — `pipelines/list.html` ships the
-"Create Pipeline" button DISABLED ("Pipeline editor — Phase 2 other worktree") —
-so building browser tests against that surface now would be churn against a
-moving UI; resume when the editor round lands. **7** ships its page/render half
+render). **5 and 6 are NOT yet written** — the lane deferred them believing the editor was
+mid-rebuild in a parallel worktree, because `pipelines/list.html` ships a DISABLED
+"Create Pipeline" button titled "Pipeline editor — Phase 2 other worktree". That
+title is a relic: no lane is rebuilding the editor; pipeline CRUD in the UI is a
+roadmap item (R10, 2026-09-02) and authoring is MCP-first. The editor and the
+execute/SSE path exist and the seeded demo pipelines exercise them, so paths 5–6
+are buildable now against `/pipelines/{id}` (orchestrator, 2026-09-04). **7** ships its page/render half
 (filter bar + empty state); the row/pagination half needs a real execution and
 rides the same deferral. **Flags surfaced by the suite** (for the owning rounds):
 the template create form marks `description` browser-required while the server
 treats it optional — the browser silently blocks submission until the field is
-filled; the workspace-switcher form carries no CSRF field, yet the POST succeeds
-today (verified 302) — worth re-verifying whenever the CSRF configuration next
-changes.
+filled; the workspace-switcher form's SOURCE carries no CSRF field — Spring Security's
+request-data processor injects the hidden `_csrf` input into `th:action` forms at
+render time (the logout form relies on the same mechanism), and the POST's 302
+through the active `CsrfFilter` is the token being VALIDATED, not bypassed;
+`WorkspaceSwitcherBrowserTest` now asserts the rendered field so the mechanism
+cannot drift silently (orchestrator, 2026-09-04).
 
 **Out of scope for v1:** multi-browser matrix (chromium only), visual regression
 pixel-diffing, accessibility scans (separate follow-ups if wanted).
