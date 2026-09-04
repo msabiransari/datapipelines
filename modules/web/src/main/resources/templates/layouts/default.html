@@ -20,6 +20,9 @@
         th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}"
         media="screen">
   <link th:href="@{/css/app.css}" rel="stylesheet">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
+  <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
 </head>
 <body
     th:attr="hx-headers='{&quot;DP-CSRF-Token&quot;:&quot;' + ${_csrf?.token} + '&quot;' + ${workspaceHeaderFragment} + '}'">
@@ -29,7 +32,7 @@
   <nav class="app-nav">
     <div class="app-container app-nav-inner">
       <div class="app-nav-left">
-        <a class="app-brand" th:href="@{/dashboard}">datapipelines</a>
+        <a class="app-brand" th:href="@{/dashboard}"><svg viewBox="0 0 64 64" aria-hidden="true" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default, #ffffff)"/></svg>datapipelines</a>
         <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
               class="app-workspace-form">
           <label for="workspace-switcher" class="app-workspace-label">workspace</label>

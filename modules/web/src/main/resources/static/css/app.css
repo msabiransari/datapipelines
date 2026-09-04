@@ -85,6 +85,18 @@ body {
   font-size: var(--text-xl);
   color: var(--text-primary);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+/* The mark ("the join", 2026-09-04): strokes and tile take the text colour; the
+   bars are cut out in the surface colour so the glyph reads on either theme. */
+.app-brand-mark {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  color: var(--accent-info, var(--text-primary));
+  flex: none;
 }
 
 .app-workspace-form {
