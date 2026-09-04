@@ -61,7 +61,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
         repository = DatasourceRepository(jdbc)
         registrar =
             BootstrapDatasourceRegistrar(
-                registry = DefaultDatasourceRegistry(repository, CredentialEncryptor.fromBase64Key(test32ByteKeyBase64())),
+                registry = DefaultDatasourceRegistry(repository, testEncryptor()),
                 repository = repository,
                 reader = BootstrapDatasourceFileReader(environment = ENV::get),
             )

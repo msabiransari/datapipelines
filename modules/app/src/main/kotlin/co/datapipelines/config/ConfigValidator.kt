@@ -2,6 +2,8 @@ package co.datapipelines.config
 
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
+import org.springframework.boot.context.properties.bind.Bindable
+import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.core.env.Environment
 import java.util.Base64
 
@@ -47,7 +49,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 16
+        internal const val CHECK_COUNT = 17
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -82,6 +84,7 @@ class ConfigValidator(
             val warnings = mutableListOf<String>()
             checkRequiredKeys(snapshot, violations)
             checkSecretStrength(snapshot, violations)
+            checkKeyProvider(snapshot, violations)
             checkUiTheme(snapshot, violations, warnings)
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
@@ -126,6 +129,105 @@ class ConfigValidator(
                     violations +=
                         "datapipelines.db.encryption-key decodes to ${bytes.size} bytes; " +
                         "§7 requires exactly $AES_KEY_BYTES (AES-256)."
+                }
+            }
+        }
+
+        /**
+         * §7 — the credential key provider and its own settings (datasources.md §7.1;
+         * `docs/key-providers.md` is the implementation guide).
+         *
+         * Two questions, in order: is the selected provider one this build ships, and are that
+         * provider's required settings present and well-formed? An unknown name short-circuits —
+         * validating `env`'s keys against a deployment that asked for `aws-kms` would report
+         * violations the operator cannot act on.
+         *
+         * For `env` (the default, so this is every deployment that has not opted out): version 1
+         * is `datapipelines.db.encryption-key`, already covered by [checkRequiredKeys] and
+         * [checkSecretStrength]; this check applies the SAME rules to every additional configured
+         * version and settles `encryption-key-current`. Values are never echoed — a violation
+         * message reaches the logs.
+         *
+         * A new provider adds its branch here. That is one of the steps `docs/key-providers.md`
+         * §4 enumerates, and it is why [KNOWN_KEY_PROVIDERS] is spelled as literals rather than
+         * imported: `datasources` is not on this module's compile classpath (the same reason
+         * [RESERVED_PROVIDER_NAMES] is spelled out), and the operator types these strings.
+         */
+        private fun checkKeyProvider(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            val provider = snapshot.dbKeyProvider?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_KEY_PROVIDER
+            if (provider !in KNOWN_KEY_PROVIDERS) {
+                violations +=
+                    "datapipelines.db.key-provider is '$provider'; this build ships ${KNOWN_KEY_PROVIDERS.sorted()}. " +
+                    "Adding one is docs/key-providers.md."
+                return
+            }
+            if (provider != ENV_KEY_PROVIDER) return
+            val versions = mutableSetOf(ENV_PRIMARY_KEY_VERSION)
+            snapshot.dbEncryptionKeys.forEach { (rawVersion, value) ->
+                envRotationKey(rawVersion, value, violations)?.let { versions += it }
+            }
+            envCurrentVersion(snapshot.dbEncryptionKeyCurrent, versions, violations)
+        }
+
+        /**
+         * One `datapipelines.db.encryption-keys` entry: its version, or null when the entry is
+         * itself a violation. Split out of [checkKeyProvider] rather than nested inside it —
+         * `NestedBlockDepth` is a real reader complaint about a validator, and the per-entry
+         * rules read as one thing.
+         *
+         * The helper is deliberately NOT named `check…`: `ConfigValidatorCheckCountTest` counts
+         * `check*` declarations against `CHECK_COUNT`, and this is a branch of one rule, not a
+         * new §7 rule.
+         */
+        private fun envRotationKey(
+            rawVersion: String,
+            value: String,
+            violations: MutableList<String>,
+        ): Int? {
+            val where = "datapipelines.db.encryption-keys.$rawVersion"
+            val version = rawVersion.trim().toIntOrNull()
+            if (version == null) {
+                violations += "$where is not a key version; expected an integer $KEY_VERSION_MIN..$KEY_VERSION_MAX."
+                return null
+            }
+            if (version == ENV_PRIMARY_KEY_VERSION) {
+                violations +=
+                    "$where redeclares version $ENV_PRIMARY_KEY_VERSION; that version is " +
+                    "datapipelines.db.encryption-key and has exactly one spelling."
+                return null
+            }
+            if (version !in KEY_VERSION_MIN..KEY_VERSION_MAX) {
+                violations += "$where is version $version, outside $KEY_VERSION_MIN..$KEY_VERSION_MAX."
+                return null
+            }
+            decodedBytes(value, where, violations)?.let { bytes ->
+                if (bytes.size != AES_KEY_BYTES) {
+                    violations += "$where decodes to ${bytes.size} bytes; §7 requires exactly $AES_KEY_BYTES (AES-256)."
+                }
+            }
+            return version
+        }
+
+        /** `datapipelines.db.encryption-key-current`: numeric, and naming a version that exists. */
+        private fun envCurrentVersion(
+            raw: String?,
+            versions: Set<Int>,
+            violations: MutableList<String>,
+        ) {
+            val currentRaw = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return
+            val current = currentRaw.toIntOrNull()
+            when {
+                current == null -> {
+                    violations += "datapipelines.db.encryption-key-current is '$currentRaw', not a key version."
+                }
+
+                current !in versions -> {
+                    violations +=
+                        "datapipelines.db.encryption-key-current is $current but no key is configured for that " +
+                        "version (configured: ${versions.sorted()})."
                 }
             }
         }
@@ -521,6 +623,17 @@ class ConfigValidator(
                 redisPassword = environment.getProperty("datapipelines.redis.password"),
                 jwtSecret = environment.getProperty("datapipelines.jwt.secret"),
                 dbEncryptionKey = environment.getProperty("datapipelines.db.encryption-key"),
+                // §3.20 — the provider seam. The rotation keys are a MAP whose entries a property
+                // lookup cannot enumerate, so they come through the same Binder the wiring uses
+                // (DomainConfiguration.SpringKeyProviderConfig): two readers of one config key
+                // that disagreed would be exactly the drift this validator exists to catch.
+                dbKeyProvider = environment.getProperty("datapipelines.db.key-provider"),
+                dbEncryptionKeys =
+                    Binder
+                        .get(environment)
+                        .bind("datapipelines.db.encryption-keys", Bindable.mapOf(String::class.java, String::class.java))
+                        .orElse(emptyMap()),
+                dbEncryptionKeyCurrent = environment.getProperty("datapipelines.db.encryption-key-current"),
                 uiTheme = environment.getProperty("datapipelines.ui.theme"),
                 oidcProviders = oidcProviders(environment),
                 resultTtlMinSeconds = environment.getProperty("datapipelines.result.ttl-min-seconds", Long::class.java),
@@ -629,6 +742,25 @@ class ConfigValidator(
         private const val AES_KEY_BYTES = 32
 
         /**
+         * The `datapipelines.db.key-provider` values this build ships, and its default.
+         *
+         * Literals, not imports — `datasources` is not on this module's compile classpath, and
+         * a validator rule reads better as the string an operator types (the precedent
+         * [RESERVED_PROVIDER_NAMES] set). `KeyProviders.known()` is the code-side authority;
+         * `ConfigValidatorTest` asserts this set refuses an unknown name and accepts `env`.
+         */
+        private const val ENV_KEY_PROVIDER = "env"
+        private const val DEFAULT_KEY_PROVIDER = ENV_KEY_PROVIDER
+        private val KNOWN_KEY_PROVIDERS = setOf(ENV_KEY_PROVIDER)
+
+        /** `datapipelines.db.encryption-key` is version 1, forever (datasources.md §7.2). */
+        private const val ENV_PRIMARY_KEY_VERSION = 1
+
+        /** The version is the credential blob's first byte, so it is one unsigned byte. */
+        private const val KEY_VERSION_MIN = 1
+        private const val KEY_VERSION_MAX = 255
+
+        /**
          * §3.2 — the documented default of `max-concurrent-executions-per-instance`. The
          * presence heuristic in [checkExecutorConcurrencyAlias] treats a resolved canonical
          * value equal to this as "operator did not set it" (the yml default masks true
@@ -647,6 +779,12 @@ internal data class ConfigSnapshot(
     val redisPassword: String?,
     val jwtSecret: String?,
     val dbEncryptionKey: String?,
+    /** §3.20 — which [co.datapipelines.datasources.crypto.KeyProvider] supplies data keys; unset = `env`. */
+    val dbKeyProvider: String? = null,
+    /** §3.20 — the optional rotation keys, `version -> base64`, raw so a bad version is a NAMED violation. */
+    val dbEncryptionKeys: Map<String, String> = emptyMap(),
+    /** §3.20 — which configured version new encryptions use; unset = the highest configured. */
+    val dbEncryptionKeyCurrent: String? = null,
     val uiTheme: String?,
     val oidcProviders: List<OidcProviderSnapshot>,
     val resultTtlMinSeconds: Long?,
@@ -689,6 +827,9 @@ internal data class ConfigSnapshot(
             "redisPassword=<redacted>, " +
             "jwtSecret=<redacted>, " +
             "dbEncryptionKey=<redacted>, " +
+            "dbKeyProvider=$dbKeyProvider, " +
+            "dbEncryptionKeys=<redacted, versions=${dbEncryptionKeys.keys.sorted()}>, " +
+            "dbEncryptionKeyCurrent=$dbEncryptionKeyCurrent, " +
             "uiTheme=$uiTheme, " +
             "oidcProviders=$oidcProviders, " +
             "resultTtlMinSeconds=$resultTtlMinSeconds, " +

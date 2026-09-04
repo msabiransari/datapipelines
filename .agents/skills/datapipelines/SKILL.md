@@ -1,6 +1,6 @@
 ---
 name: datapipelines
-description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and scopes."
+description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_create, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and scopes."
 ---
 
 # datapipelines
@@ -88,11 +88,13 @@ dialect-specific; a node's template dialect must match what its `source` can exe
   `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
   envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
 
-- **18 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
-  `pipelines_create`, `pipelines_update`, `templates_list`, `templates_get`,
-  `templates_create`, `templates_render`, `datasources_list`, `datasources_get`,
+- **22 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
+  `pipelines_execute_node`, `pipelines_create`, `pipelines_update`, `templates_list`,
+  `templates_get`, `templates_used_by`, `templates_create`, `templates_render`,
+  `datasources_list`, `datasources_get`, `datasources_test`,
   `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`,
-  `datasources_test`, `executions_list`, `executions_get`, `executions_get_result`.
+  `datasources_preview_rows`, `datasources_create`, `executions_list`,
+  `executions_get`, `executions_get_result`.
 
 - **3 prompts:** `analyze_pipeline` (read-only structural review of a pipeline),
   `create_pipeline_for_question` (ground a new pipeline's SQL in the introspection
@@ -101,10 +103,21 @@ dialect-specific; a node's template dialect must match what its `source` can exe
 
 - **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
   `execute` = run; `author` = create/update pipelines + templates (also template render,
-  datasource test, schema introspection, and workspace-bound datasource mutation).
-  Datasources are mutated via REST/UI only — workspace-bound CUD needs `author`,
-  global CUD needs `admin`. A tool or endpoint rejects with
-  `auth.scope.insufficient` when the key's scope is too low.
+  datasource test, schema introspection, datasource REGISTRATION, and workspace-bound
+  datasource mutation). Update and delete of a datasource are REST/UI only; `datasources_create`
+  is the one datasource WRITE on the MCP surface. Binding a datasource `global: true` needs
+  `admin` either way. A tool or endpoint rejects with `auth.scope.insufficient` when the key's
+  scope is too low.
+
+- **Registering a datasource from an agent — read this before using `datasources_create`.**
+  A password passed through an agent transits the agent's context, its transcript, and any
+  logging the client does. That is a property of handing a secret to an agent; the server
+  cannot undo it, and the tool does not refuse. **Prefer registering a datasource that has a
+  real password in the UI or over REST.** Use `datasources_create` from an agent only with a
+  credential the user is willing to have in that transcript — a read-only role, or a
+  short-lived password they will rotate afterwards. Say so before you ask for one. The
+  password never comes back: the result carries `password_set: true` and no password field.
+  Follow a create with `datasources_test` on the new name.
 
 ## The golden path (authoring a new pipeline)
 
@@ -298,6 +311,24 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
     Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
     where DOUBLE gave the correct 2456.81 (2026-09-04, congestion/tip/OD pipelines).
 
+## Credential encryption and key providers
+
+Three facts, and where to go for the rest:
+
+- **Datasource passwords are write-only.** They are stored AES-256-GCM encrypted, bound to the
+  datasource name, and no endpoint, tool or resource ever returns one — reads carry
+  `password_set: true` instead. Never try to read a password back, and never echo one you were
+  given into a pipeline body, a template, a commit message or a chat summary.
+- **Every stored credential carries a key VERSION** (its first byte), so a deployment can rotate
+  keys lazily: rows keep decrypting under the key they were written with, and move to the
+  current key the next time their password is saved. The operator flow is
+  `docs/datasources.md` §7.3 — there is deliberately no rotation endpoint or CLI to call.
+- **Where the keys come from is a seam, not a constant.** `datapipelines.db.key-provider`
+  selects a `KeyProvider`; `env` ships and is the default. Implementing an AWS/GCP/Azure/Vault
+  provider is a written procedure with a shared contract suite every implementation must pass:
+  **`docs/key-providers.md`**. If you are asked to "add KMS support", that document is the task
+  — do not redesign the crypto.
+
 ## REST fallback (when the client has no MCP transport)
 
 Same server, HTTP + JSON, authenticated with `-H "DP-API-Key: dpk_..."`:
@@ -339,9 +370,10 @@ endpoints; error codes are identical.
 
 - `docs/pipeline-contract.md` — pipeline/node JSON schema, validation rules, error catalog §13
 - `docs/templates.md` — Freemarker rules, versioning, library templates
-- `docs/datasources.md` — dialects, connection properties, credential storage
+- `docs/datasources.md` — dialects, connection properties, credential storage (§7)
+- `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (18 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (22 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

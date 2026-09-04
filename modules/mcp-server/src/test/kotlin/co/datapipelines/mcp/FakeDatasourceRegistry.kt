@@ -18,9 +18,19 @@ import java.util.UUID
  * connectivity probe, so a gate test can prove the probe never ran.
  */
 class FakeDatasourceRegistry(
-    private val stored: List<Datasource>,
+    initial: List<Datasource>,
 ) : DatasourceRegistry {
+    private val stored: MutableList<Datasource> = initial.toMutableList()
+
     val testedNames = mutableListOf<String>()
+
+    /**
+     * Every row [save] accepted, in order — the write half, added with `datasources_create`
+     * (068). A recording fake rather than a mock for the reason MISTAKES.md gives: a strict
+     * double makes a MISSING write unobservable, and "the tool actually registered something"
+     * is precisely what these tests have to be able to fail on.
+     */
+    val saved = mutableListOf<Datasource>()
 
     override fun list(dialect: Dialect?): List<Datasource> = stored.filter { dialect == null || it.dialect == dialect }
 
@@ -51,10 +61,16 @@ class FakeDatasourceRegistry(
         }
     }
 
+    /** Stores the row and returns it, exactly as the real registry returns what it persisted. */
     override fun save(
         datasource: Datasource,
         actor: UUID,
-    ): Datasource = throw UnsupportedOperationException("read-only fake")
+    ): Datasource {
+        saved += datasource
+        stored.removeIf { it.name == datasource.name }
+        stored += datasource
+        return datasource
+    }
 
     override fun validate(datasource: Datasource): ValidationResult = throw UnsupportedOperationException("read-only fake")
 

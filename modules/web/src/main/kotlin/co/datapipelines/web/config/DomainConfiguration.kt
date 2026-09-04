@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
@@ -15,6 +16,8 @@ import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.datasources.crypto.KeyProviderConfig
+import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineRepository
@@ -31,8 +34,9 @@ import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import co.datapipelines.web.templates.TemplateImportService
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.boot.context.properties.bind.Bindable
+import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
@@ -76,6 +80,21 @@ class DomainConfiguration {
         co.datapipelines.web.datasources
             .DatasourceWorkspaceRules(workspaceService, workspacesProperties)
 
+    /**
+     * The ONE validated datasource-registration path, shared by `POST /api/v1/datasources` and
+     * the `datasources_create` MCP tool (049's principle: two entry points, one path).
+     *
+     * The D8 binding rule is passed as a method reference rather than the whole component: the
+     * service lives in `application`, which sits below `web` and cannot import
+     * [co.datapipelines.web.datasources.DatasourceWorkspaceRules]. Both surfaces therefore run
+     * the SAME rules instance — there is no second copy of the permission matrix to drift.
+     */
+    @Bean
+    fun datasourceCreateService(
+        datasources: DatasourceRegistry,
+        rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding)
+
     @Bean
     fun pipelineRepository(jdbc: NamedParameterJdbcTemplate): PipelineRepository = PipelineRepository(jdbc)
 
@@ -113,16 +132,29 @@ class DomainConfiguration {
     fun systemActorSeeder(userService: UserService): SystemActorSeeder = SystemActorSeeder(userService)
 
     /**
-     * The AES-256-GCM encryptor for stored datasource passwords (datasources §6).
+     * The AES-256-GCM encryptor for stored datasource passwords (datasources §7.1), over the
+     * `KeyProvider` its data keys come from.
      *
-     * Built from `datapipelines.db.encryption-key`, which configuration.md §2 lists as **required
-     * with no fallback**; [CredentialEncryptor.fromBase64Key] fails startup with a precise message
-     * when it is missing or not exactly 32 decoded bytes.
+     * The provider is selected by `datapipelines.db.key-provider`, which defaults to `env` — so a
+     * deployment that predates the provider seam is unchanged and needs no config edit.
+     * `datapipelines.db.encryption-key` remains configuration.md §2's **required with no
+     * fallback** value and is version 1 under `env`.
+     *
+     * Building both HERE, at startup wiring, is what makes an unreachable key service a STARTUP
+     * failure rather than a first-password-write failure (`docs/key-providers.md` §2, invariant
+     * 3): [KeyProviders.create] and every provider's own factory throw, [CredentialEncryptor]
+     * reads `current()` once in its constructor, and a bean factory method that throws stops the
+     * context.
+     *
+     * The provider is deliberately NOT a bean of its own: nothing else injects it, and it is an
+     * implementation detail of this encryptor. A future KMS provider changes which class
+     * [KeyProviders] returns, not this wiring.
      */
     @Bean
-    fun credentialEncryptor(
-        @Value("\${datapipelines.db.encryption-key:}") key: String,
-    ): CredentialEncryptor = CredentialEncryptor.fromBase64Key(key)
+    fun credentialEncryptor(environment: Environment): CredentialEncryptor =
+        CredentialEncryptor(
+            KeyProviders.create(environment.getProperty(KeyProviders.PROPERTY), SpringKeyProviderConfig(environment)),
+        )
 
     /**
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
@@ -321,4 +353,24 @@ class DomainConfiguration {
         templates: TemplateRepository,
         validator: TemplateValidator,
     ): TemplateImportService = TemplateImportService(templates, validator)
+}
+
+/**
+ * [KeyProviderConfig] over Spring's [Environment] — the aggregation layer supplying the
+ * configuration port `datasources` declares, exactly as it supplies `DatasourceReferences`.
+ *
+ * The map flavour goes through [Binder] rather than [Environment.getProperty] because a map's
+ * ENTRIES cannot be enumerated through a property lookup, and `datapipelines.db.encryption-keys`
+ * is a map whose keys the operator chooses.
+ */
+private class SpringKeyProviderConfig(
+    private val environment: Environment,
+) : KeyProviderConfig {
+    override fun string(key: String): String? = environment.getProperty(key)
+
+    override fun map(key: String): Map<String, String> =
+        Binder
+            .get(environment)
+            .bind(key, Bindable.mapOf(String::class.java, String::class.java))
+            .orElse(emptyMap())
 }
