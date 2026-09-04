@@ -78,8 +78,19 @@ esac
 # Where the downloaded artifacts and the app-visible files live. On the compose
 # demo profile this is a named volume shared by both loader services and mounted
 # read-only into the app container.
+#
+# The download cache is scoped by FAMILY as well as version. It has to be: the
+# two families' loader services start CONCURRENTLY (neither depends on the
+# other), they share this volume, and both publish an `examples.json` and a
+# `manifest.json`. While the families pinned different versions the paths
+# happened not to collide; the moment both pin the same one — which trade/v2
+# does, since mobility is already v2 — two loaders write the same
+# .artifacts/<version>/manifest.json and .../examples.json at the same time, and
+# one family can verify the OTHER family's manifest or place the other family's
+# examples under its own name. Observed, not theorised (2026-09-04, the trade/v2
+# rehearsal: .artifacts/v2/ ended up holding both families' files).
 SAMPLE_DIR="${SAMPLE_DIR:-/srv/sample}"
-WORK="$SAMPLE_DIR/.artifacts/$VERSION"
+WORK="$SAMPLE_DIR/.artifacts/$FAMILY/$VERSION"
 
 # The SELECT-only demo login the registered datasources use (design §5, spec-1
 # D6 layer 3). CREATED HERE, never assumed to exist.
