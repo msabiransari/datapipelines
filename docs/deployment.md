@@ -622,7 +622,7 @@ an engineer spins up exactly the data they need:
 | Family | Flag / profile | What you get |
 |---|---|---|
 | **nyc** (mobility) | `--demo-nyc` / `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
-| **trade** (trade/v1) | `--demo-trade` / `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Binance hourly klines on SQLite — 3 datasources + 3 example pipelines |
+| **trade** (trade/v2) | `--demo-trade` / `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
 
 Both together is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
@@ -631,7 +631,7 @@ from the active families, and the MySQL service is shared.
 
 The published artifacts live at
 `https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v2/` and
-`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v1/` (us-east-1;
+`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v2/` (us-east-1;
 app.sh defaults to these). For the raw compose path, fill in the `SAMPLE_*`
 block of [`deploy/.env.example`](../deploy/.env.example) — the base URLs, the
 versions, the `SAMPLE_*_ON` markers for the families you want, and the demo
@@ -775,16 +775,20 @@ published bytes with the repo's.
    published-drift guard for the version the demo pins:
 
    ```bash
-   ./scripts/sample-data/check-published.sh v2   # or whatever SAMPLE_VERSION pins
+   ./scripts/sample-data/check-published.sh v2                  # nyc (mobility), the default family
+   ./scripts/sample-data/check-published.sh --family trade v2   # the trade family
    ```
 
    It fetches the published manifest and `examples.json`, and fails unless the
-   published copy, the published manifest's declared checksum, and the repo's
-   `content/examples.json` all agree. Against an unpublished version it fails
-   on the manifest fetch — which is the upload gate itself. Set
-   `SAMPLE_BASE_URL` to check a mirror or a locally staged build
-   (`file://…/scripts/sample-data/work`, or the local-serve recipe in `app.sh`).
-   Network by nature, so it is a rehearsal step, never part of `./gradlew build`.
+   published copy, the published manifest's declared checksum, and the family's
+   repo `content/examples.json` all agree. `--family` selects all three of the
+   repo copy, the base-URL variable (`SAMPLE_BASE_URL` for nyc,
+   `SAMPLE_TRADE_BASE_URL` for trade) and the default published prefix. Against
+   an unpublished version it fails on the manifest fetch — which is the upload
+   gate itself. Set the family's base-URL variable to check a mirror or a
+   locally staged build (`file://…/scripts/sample-data/work`, or the local-serve
+   recipe in `app.sh`). Network by nature, so it is a rehearsal step, never part
+   of `./gradlew build`.
 2. **The repo copy is validated in `build`** — the templates module's
    `SampleDataExamplesContentTest` runs every shipped template and pipeline
    through the app's own save-time validators (049 C1), so content the seeder
@@ -809,6 +813,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.10 | trade/v2 — Binance out, Federal Reserve H.10 in | The trade family republishes as **trade/v2**. The Binance market slice is **removed entirely** (its Vision terms are CC BY-NC-SA with an explicit no-hosting-of-derivative-feeds clause and a separate enterprise licence for commercial use — owner ruling 2026-09-04); the SQLite artifact is now `fx_rates.db`, built from the **Federal Reserve H.10** daily noon buying rates and their G.5 monthly averages for the five reconciled partners' currencies (a US Government work — no copyright), and the datasource is renamed `sample-market` → **`sample-fx`**. A third example pipeline, `imports_in_partner_currency`, restates US import value in the partner's own money across three engines (DuckDB facts → SQLite rates → H2 join). Two licence conditions that were never in the tree now ship with the data: the **verbatim Census notice** ("This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.") in the family README, the `sample-trade-us` datasource description and the manifest's Census provenance entry, and the **UN Comtrade citation** with the under-100,000-record note. `check-published.sh` learns `--family trade`; `SAMPLE_TRADE_VERSION` defaults to `v2` in `app.sh`, `deploy/.env.example` and the compose services. **An existing `deploy/.env.demo` pinning `SAMPLE_TRADE_VERSION=v1` is not rewritten by `app.sh` (version pins are operator config) — edit it, or the loader fetches a version whose market object no longer exists.** |
 | 2026-09-04 | v1.9 | two-family demo split | **The demo splits into two independent sample-data families** — `demo-nyc` (mobility) and `demo-trade` (trade/v1), each with its own compose profile, loader services, bootstrap datasources file and examples file; the app's bootstrap keys are now comma-separated lists and the seeder runs all templates before any pipelines. app.sh gains `--demo-nyc`/`--demo-trade` (the old `--demo` dies with a hint); the ON markers (`SAMPLE_NYC_ON`/`SAMPLE_TRADE_ON`) compose the active-family lists. The trade family adds the demo's fourth engine (DUCKDB, `sample-trade-us` — driver ships in core, read-only via the probed `properties.jdbc.access_mode: READ_ONLY`, datasources.md §8A.5). Appendix B rewritten for the two flags; the compose project is renamed `deploy`→`dp` (containers/volumes carry the dp- prefix; the metadata-DB volume was migrated, dp-postgres-data). |
 | 2026-09-02 | v1.7 | 051 auth/config sweep | §6.2 gains `datapipelines.auth.trusted-proxies` (R8/T46): behind the LB the login limiter and every audit `source_ip` must resolve the client through the trusted-proxy list — empty default keeps bare deployments on `remoteAddr`, header ignored. §6.7's homepage note updated (T46 closed; no-limiter decision stands on its own grounds). §6.3 documents the compose env contract with its `scripts/compose-env-audit.sh` guard (T32). Appendix B tells the truth about the demo password (T47/T73): on a clean checkout the scaffolded GENERATED password wins over the `demo-admin` seed — `grep DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD deploy/.env`. app.sh's `up --wait` timeout now reports "still starting" and exits 0 when the app container is running (T75; a cold JVM can outrun the HEALTHCHECK window — 243s in the 2026-09-02 rehearsal) |
 | 2026-09-02 | v1.9 | multi-instance round 2 (050) | **§6.2 checklist gains the per-instance-limits row** (R2/M4/M7): `max-concurrent-executions-per-instance` is per instance and N replicas admit N × it — the multiplication stated once, plainly; the Redis row names the datasource pool-invalidation channel. §6.6 heap paragraph rewritten around the per-instance multiplier (the old text read the key as a "cluster-wide ceiling" — false at N > 1, and the exact trap the rename closed); §5.2 deploy-time keys updated to the renamed key. |

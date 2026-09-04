@@ -7,7 +7,7 @@
 #
 #   ./app.sh --start [--no-build]   build image in Docker + start the full stack
 #   ./app.sh --start --demo-nyc      ...plus the NYC sample family (mobility)
-#   ./app.sh --start --demo-trade    ...plus the trade family (Census/Comtrade/crypto)
+#   ./app.sh --start --demo-trade    ...plus the trade family (Census/Comtrade/Fed FX)
 #   ./app.sh --start --demo-nyc --demo-trade   both families, one box
 #   ./app.sh --stop [--demo-*]       stop the stack, demo services included
 #   ./app.sh --status [--demo-*]     show services + app health
@@ -56,7 +56,7 @@ for arg in "$@"; do
       die "--demo is gone — the sample families split into independent switches
   (2026-09-04). Pass the family you actually want:
     --demo-nyc     the NYC mobility family (taxi trips, weather, reference)
-    --demo-trade   the trade family (US Census trade, Comtrade mirror, crypto klines)
+    --demo-trade   the trade family (US Census trade, Comtrade mirror, Fed H.10 FX rates)
   Both together is fine: ./app.sh --start --demo-nyc --demo-trade" ;;
     *) ARGS+=("$arg") ;;
   esac
@@ -212,7 +212,7 @@ ensure_demo_env() {
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
   add_key SAMPLE_VERSION "v2"
   add_key SAMPLE_TRADE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/trade"
-  add_key SAMPLE_TRADE_VERSION "v1"
+  add_key SAMPLE_TRADE_VERSION "v2"
   add_key SAMPLE_DB_USER "dp_demo_ro"
   # hex, NOT base64: hex can never contain the one string the loader refuses
   # in a Postgres password — its dollar-quote tag (045 §A) — and stays

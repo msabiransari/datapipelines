@@ -23,7 +23,9 @@
 #   4. a corrupted artifact is refused with NOTHING written to any engine;
 #   5. a re-load over a populated, marker-less database succeeds (the F2
 #      contract), and a same-version re-run skips by marker;
-#   6. the password never appears anywhere in the loader's own output.
+#   6. the password never appears anywhere in the loader's own output;
+#   7. the TRADE family's file stage places its own artifact list under its own
+#      per-family names, beside the nyc family's (the two coexist on one volume).
 #
 # The demo login must authenticate for real, so the scratch Postgres runs with
 # password auth (POSTGRES_HOST_AUTH_METHOD is NOT trust, unlike the build-side
@@ -149,6 +151,14 @@ SRV_PID=$!
 disown "$SRV_PID" # keep bash's job-control "Terminated" notice out of the report
 BASE_URL="http://host.docker.internal:$SRV_PORT"
 
+# The artifact version and family a run_loader call loads. Defaulted rather
+# than passed positionally so the nyc call sites below stay as they were; the
+# trade phase sets them for one call (LOADER_VERSION=... LOADER_FAMILY=...
+# run_loader ...). `--family` is ALWAYS passed, so there is no conditional
+# argument array to expand safely under `set -u`.
+LOADER_VERSION=v1
+LOADER_FAMILY=nyc
+
 run_loader() { # <image> <log> <engines>
   local image="$1" logfile="$2" engines="$3" rc=0
   shift 3
@@ -157,7 +167,8 @@ run_loader() { # <image> <log> <engines>
     -v "$SRVD":/srv/sample \
     -e SAMPLE_DIR=/srv/sample \
     "$@" \
-    "$image" sh /opt/sample-data/load.sh "$BASE_URL" v1 --engines "$engines" \
+    "$image" sh /opt/sample-data/load.sh "$BASE_URL" "$LOADER_VERSION" \
+      --engines "$engines" --family "$LOADER_FAMILY" \
     >"$logfile" 2>&1 || rc=$?
   return "$rc"
 }
@@ -334,6 +345,49 @@ n=$(demo_mysql "$PW_MY" "SELECT count(*) FROM stations" 2>/dev/null || true)
 [ -f "$SRVD/nyc_reference.db" ] && ok "sqlite artifact placed" || bad "sqlite artifact not placed"
 grep -q '"templates"' "$SRVD/examples-nyc.json" && ok "examples-nyc.json placed" || bad "examples-nyc.json not placed"
 [ -f "$SRVD/bootstrap-datasources-nyc.yml" ] && ok "nyc bootstrap datasources file placed" || bad "nyc bootstrap datasources file not placed"
+
+# --- the trade family's file stage (the second family's artifact list) -------
+# The trade family has no Postgres artifact and its file stage runs on the same
+# pinned postgres image with `--engines sqlite`. What is guarded here is the
+# thing that changes when a family's artifact set changes: load.sh's per-family
+# FILES list, the per-family placed name of examples.json, and the per-family
+# bootstrap datasources file — with the nyc family's files still in place, since
+# a deployment may run both. The artifact BYTES are irrelevant to that contract
+# (the loader checksums and places them; it never opens them), so this phase
+# uses three small stand-ins rather than rebuilding real databases.
+step "trade family: artifact list, placed names and coexistence with nyc"
+ART_TRADE="$WORK/tv2"
+mkdir -p "$ART_TRADE"
+printf 'not-a-real-duckdb-file\n' > "$ART_TRADE/us_trade.duckdb"
+printf 'not-a-real-sqlite-file\n' > "$ART_TRADE/fx_rates.db"
+printf '{"templates": [], "pipelines": []}\n' > "$ART_TRADE/examples.json"
+python3 - "$ART_TRADE" <<'PY'
+import hashlib, json, os, sys
+art = sys.argv[1]
+files = ["us_trade.duckdb", "fx_rates.db", "examples.json"]
+m = {"schema_version": 1, "family": "trade", "version": "tv2",
+     "artifacts": [{"file": f,
+                    "sha256": hashlib.sha256(open(os.path.join(art, f), "rb").read()).hexdigest(),
+                    "bytes": os.path.getsize(os.path.join(art, f))} for f in files],
+     "tables": [], "provenance": []}
+open(os.path.join(art, "manifest.json"), "w").write(json.dumps(m, indent=2))
+PY
+
+LOG="$WORK/load-trade.log"
+LOADER_VERSION=tv2 LOADER_FAMILY=trade run_loader "$(image_ref postgres)" "$LOG" sqlite \
+  && ok "trade family file stage loaded" \
+  || bad "trade family file stage failed (see $LOG)"
+
+[ -f "$SRVD/us_trade.duckdb" ] && [ -f "$SRVD/fx_rates.db" ] \
+  && ok "trade artifact list placed (us_trade.duckdb + fx_rates.db)" \
+  || bad "the trade family's artifact list was not placed — load.sh FILES for --family trade"
+grep -q '"templates"' "$SRVD/examples-trade.json" 2>/dev/null \
+  && [ -f "$SRVD/examples-nyc.json" ] \
+  && ok "examples-trade.json placed and examples-nyc.json still there (both families coexist)" \
+  || bad "the two families' examples files do not coexist under their per-family names"
+[ -f "$SRVD/bootstrap-datasources-census.yml" ] \
+  && ok "trade bootstrap datasources file placed" \
+  || bad "trade bootstrap datasources file not placed"
 
 step "selftest complete: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || die "$FAIL assertion(s) failed — logs under $WORK"

@@ -417,7 +417,7 @@ if wants sqlite; then
       BOOTSTRAP_SRC="bootstrap-datasources-nyc.yml"
       ;;
     trade)
-      FILES="us_trade.duckdb crypto_market.db examples.json"
+      FILES="us_trade.duckdb fx_rates.db examples.json"
       EXAMPLES_AS="examples-trade.json"
       BOOTSTRAP_SRC="bootstrap-datasources-census.yml"
       ;;

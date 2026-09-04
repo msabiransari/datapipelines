@@ -5,14 +5,22 @@
 # the `${}` interpolations 042 had already migrated out of the repo copy, and the demo
 # 500ed on first login for two days because nothing compared the two.
 #
-#   ./scripts/sample-data/check-published.sh <version>
+#   ./scripts/sample-data/check-published.sh [--family nyc|trade] <version>
 #   SAMPLE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh v2
+#   SAMPLE_TRADE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh --family trade v2
 #   SAMPLE_BASE_URL=file://$PWD/scripts/sample-data/work/artifacts-parent ...
 #
 # Compares THREE hashes and fails if any pair disagrees, naming which:
-#   1. the repo copy        scripts/sample-data/content/examples.json
-#   2. the published copy   $SAMPLE_BASE_URL/$version/examples.json
+#   1. the repo copy        <family content dir>/examples.json
+#   2. the published copy   $BASE/$version/examples.json
 #   3. the published manifest's declared sha256 for examples.json
+#
+# --family selects all three of: which repo copy is authoritative, which base
+# URL env var is read, and which published prefix is the default. It is the
+# SAME byte-identity contract either way — the trade family ships its own
+# examples.json into the same demo workspace, so it drifts the same way and is
+# guarded the same way. Default: nyc (mobility), the family this script was
+# written for.
 #
 # Network by nature, so deliberately NOT part of `./gradlew build`: it is a
 # release-rehearsal step (docs/deployment.md) — run it for the version the demo pins
@@ -30,16 +38,37 @@ SD_ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SD_ROOT/../.." && pwd)"
 source "$SD_ROOT/lib/common.sh"
 
-VERSION="${1:-}"
-[ -n "$VERSION" ] || die "usage: $0 <version>   (e.g. v2) — the version directory under \$SAMPLE_BASE_URL"
-BASE="${SAMPLE_BASE_URL:-https://datapipelines-co.s3.amazonaws.com/sample-data/mobility}"
-REPO_COPY="$SD_ROOT/content/examples.json"
+FAMILY=nyc
+VERSION=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --family) FAMILY="${2:-}"; shift 2 ;;
+    --family=*) FAMILY="${1#--family=}"; shift ;;
+    -*) die "unknown option '$1' — usage: $0 [--family nyc|trade] <version>" ;;
+    *) [ -z "$VERSION" ] || die "two versions given ('$VERSION' and '$1') — usage: $0 [--family nyc|trade] <version>"
+       VERSION="$1"; shift ;;
+  esac
+done
+[ -n "$VERSION" ] || die "usage: $0 [--family nyc|trade] <version>   (e.g. v2) — the version directory under the family's base URL"
+
+# Each family has its OWN content directory and its OWN base-URL variable — the
+# same two names the demo profile and app.sh already use, so a local-serve
+# rehearsal sets the variable it was already setting.
+case "$FAMILY" in
+  nyc)
+    REPO_COPY="$REPO_ROOT/scripts/sample-data/content/examples.json"
+    BASE="${SAMPLE_BASE_URL:-https://datapipelines-co.s3.amazonaws.com/sample-data/mobility}" ;;
+  trade)
+    REPO_COPY="$REPO_ROOT/scripts/sample-data-trade/content/examples.json"
+    BASE="${SAMPLE_TRADE_BASE_URL:-https://datapipelines-co.s3.amazonaws.com/sample-data/trade}" ;;
+  *) die "unknown family '$FAMILY' — the sample-data families are nyc (mobility) and trade" ;;
+esac
 [ -f "$REPO_COPY" ] || die "repo copy '$REPO_COPY' does not exist"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-step "fetching $BASE/$VERSION/manifest.json"
+step "$FAMILY: fetching $BASE/$VERSION/manifest.json"
 fetch "$BASE/$VERSION/manifest.json" "$WORK/manifest.json"
 
 MANIFEST_VERSION=$(python3 -c "
@@ -78,4 +107,4 @@ if [ "$DECLARED" != "$REPO_SHA" ]; then
   internally inconsistent. Re-publish the whole version directory per the README."
 fi
 
-log "ok — published $VERSION examples.json == repo copy (sha256=${REPO_SHA:0:16}…, manifest agrees)"
+log "ok — published $FAMILY $VERSION examples.json == repo copy (sha256=${REPO_SHA:0:16}…, manifest agrees)"
