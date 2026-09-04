@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.7 (revised — see Change Log)
+**Status:** v1.8 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-09-03
+**Last updated:** 2026-09-04
 
 ---
 
@@ -318,30 +318,76 @@ The page also loads `/js/pipeline-editor/sql-highlight.js` (§8.3) and issues on
 
 ### 4.3 Layout dimensions
 
+**The editor is full-bleed** (065 §A). `layouts/default.html` wraps every page in
+`<main class="app-container app-main">` and `app.css` caps `.app-container` at
+`--app-content-max: 1600px`. That measure is right for prose — lists, settings, docs —
+and wrong for the one surface whose value scales with width: on a ~2000px viewport the
+editor occupied ~1450px between two dead margins, while the graph was the thing paying
+for the cap. A page opts out with a single model attribute:
+
+- `PipelineEditorController` sets `model.addAttribute("fullBleed", true)`. **No other
+  page sets it**, and `th:classappend` adds nothing on a null condition, so every other
+  screen keeps the 1600px cap by default.
+- `layouts/default.html`: `<main class="app-container app-main"
+  th:classappend="${fullBleed} ? 'app-main-bleed' : null">`.
+- `app.css`: `.app-main-bleed { max-width: none; padding-inline: var(--gap-md); }` —
+  tokens only.
+- **The nav bar keeps its own `.app-container` cap.** A nav wider than its content reads
+  as broken, and a full-bleed nav was never asked for.
+- Pinned by `EditorLayoutRenderTest`: the editor's `<main>` carries `app-main-bleed`,
+  the pipelines list's does not.
+- Prior art, not unified: the template explorer un-caps itself from its own stylesheet
+  (`template-tree.css`: `.app-container:has(> .tplx-page) { max-width: none; }`, 059 §C′)
+  and keeps the `--gap-lg` gutter. The model attribute is the mechanism to reuse — it is
+  declared by the controller, visible in the rendered `<main>`, and testable without a
+  stylesheet.
+
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│ Topbar: Name | v3 | [version dropdown] | [Execute]                 │ 60px
-├──────────┬───────────────────────────────────────┬─────────────────┤
-│          │                                       │                 │
-│ Settings │                                       │  Node Details   │
-│          │                                       │  (slide-in)     │
-│ Parameters│             Graph (Cytoscape)        │                 │
-│          │                                       │  — node id      │
-│ (forms)  │           [#cy div, fills space]      │  — type         │
-│          │                                       │  — template     │
-│          │                                       │  — source       │
-│          │                                       │  — output       │
-│ 280px    │           flex: 1                     │  — dependencies │
-│          │                                       │  — stats (last) │
-│          │                                       │  — error (if)   │
-│          │                                       │  320px (when    │
-│          │                                       │  visible)       │
-└──────────┴───────────────────────────────────────┴─────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Toolbar: ← Back | Name | [draft badge] [Release] [Discard] [Execute]         │ 48px
+├──────────┬───────────────────────────────────────────────────────────────────┤
+│          │                                                          ┌────────┴──┐
+│ Settings │                                                          │ Node      │
+│          │                    Graph (Cytoscape)                     │ details   │
+│ Parameters│                                                         │ (overlay, │
+│          │            [#cy-canvas, fills the pane]                  │  scrim on │
+│          │                                                          │  canvas   │
+│  280px   │                     1fr                                  │  only)    │
+│          │                                                          │ clamp(720,│
+│          │                                                          │  60%,1200)│
+├──────────┴──────────────────────────────────────────────────────────┴─────────┤
+│ [Results] [Errors ②]                                                    [▁]   │ header
+│ …body… (open: ≤ 40vh; minimized: the header row alone)                        │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Responsive: on screens below `--breakpoint-lg` (1024px), sidebar collapses to a top drawer (hamburger menu). On screens below `--breakpoint-md` (768px), graph fills the screen; settings/parameters/details become overlay panels.
+The three panes' dimensions, all in one place:
 
-All layout dimensions come from design system tokens (`--sidebar-width`, `--header-height`, `--breakpoint-*`). No hardcoded px values in CSS.
+| Surface | Dimension | Source |
+|---|---|---|
+| Page | no max-width; `padding-inline: var(--gap-md)` | `.app-main-bleed` (§4.3 above) |
+| `.pe-root` height | `calc(100dvh - var(--header-height) - var(--space-px) - (var(--gap-lg) * 2))`, floor 540px | unchanged since 041/059 |
+| Left sidebar | `--pe-sidebar-width: 280px` | unchanged |
+| Canvas | `1fr` — the layout is a **two**-track grid; the inspector no longer owns a third track that opening a node widened | `.pe-layout` |
+| Dock, open | `max-height: 40vh` (today's value) | `.pe-dock-open` |
+| Dock, minimized | the header row's own height — one row, tokens only, no magic number | `.pe-dock-minimized` |
+| Inspector | `--pe-inspector-width: clamp(720px, 60%, 1200px)` of `.pe-layout`, full layout height | `.pe-details-panel` |
+
+The dock is the **last flex child of `.pe-root`**, not a `position: fixed` overlay. That
+is the whole mechanism behind "the canvas reclaims the rest": `.pe-layout` is `flex: 1`,
+so whatever the dock stops using, the graph gets. A fixed overlay can only ever cover the
+canvas — it can never give the space back.
+
+Responsive: below `--breakpoint-lg` (1024px) the sidebar collapses to a drawer and its
+grid track goes to 0 (the scrim then covers the whole layout). Below 1200px the inspector
+takes the full pane — a 720px overlay on a 1000px layout leaves a 280px sliver of graph,
+which is a view of nothing. Below `--breakpoint-md` (768px) the sidebar drawer is
+full-width.
+
+Layout dimensions come from design system tokens wherever a token exists. The three
+numbers in the inspector clamp are the geometry itself, declared once as
+`--pe-inspector-width` — the same standing as `--pe-card-w/h` (§5.3) and
+`--app-content-max` (Appendix A).
 
 ---
 
@@ -532,43 +578,39 @@ function buildStylesheet(t) {        // t = readDesignTokens() output
 
 ### 5.4 Event handlers
 
+**Tapping a card SELECTS it. Nothing else** (065 §C). Selection and the inspector were
+one action until 065: every click through the graph slid a 320px drawer in and fired a
+SQL-partial request. They are separate now, and the separation is what lets the inspector
+be large — a pane that opens on every click has to be small enough to ignore.
+
 ```javascript
-wireEventHandlers() {
-    // Node click → select + show details panel
-    this.cy.on('tap', 'node', (event) => {
-        const node = event.target;
-        this.selectNode(node.id());
-        window.detailsPanel.show(node.data());
-    });
-
-    // Background click → clear selection, hide details
-    this.cy.on('tap', (event) => {
-        if (event.target === this.cy) {
-            this.clearSelection();
-            window.detailsPanel.hide();
-        }
-    });
-}
-
-// Selection uses Cytoscape's own :selected pseudo-state — the §5.3 stylesheet keys on
-// the pseudo-class, so selection is cyNode.select()/unselect() and nothing else. There
-// is NO .selected class to manage. Selection is exclusive: at most one node is selected.
-selectNode(nodeId) {
-    this.clearSelection();
-    const node = this.cy.getElementById(nodeId);
-    node.select();
-    this.selectedNodeId = nodeId;
-    window.a11y.syncSelection(nodeId);       // mirrors aria-selected on the §14 DOM list
-}
-
-clearSelection() {
-    this.cy.elements().unselect();
-    this.selectedNodeId = null;
-    window.a11y.syncSelection(null);
-}
+// init.js
+this.cy.on('tap', 'node', (evt) => this.selectNodeById(evt.target.data().id));
+this.cy.on('tap', (evt) => { if (evt.target === this.cy) this.selectedNode = null; });
 ```
 
-Selecting a node from the accessible DOM list (§14) calls the same `selectNode()`, so canvas and list never disagree.
+`selectNodeById(id)` sets `selectedNode`, calls `cyNode.select()` (the `node:selected`
+pseudo-class the §5.3 stylesheet keys on — there is no `.selected` class to manage) and
+mirrors `aria-selected` onto the §14 DOM list. Selection is exclusive. It does **not**
+load SQL and does **not** open the inspector — except when the inspector is already
+open, in which case it re-targets in place (§8).
+
+| Gesture | Effect |
+|---|---|
+| Tap a card / click a node-list row | **Select** — highlight, `selectedNode`, `aria-selected` |
+| Click a card's `.pe-card-open` button | **Open the inspector** on that node (§8) |
+| `Enter` / `Space` on the focused node-list row | Open the inspector — the keyboard twin of the button |
+| Tap the canvas background | Clear the selection |
+
+The open button is part of the html label, so it rides the pan/zoom transform with its
+card and works unchanged at fit, 50% and 200%. The label container is
+`pointer-events: none` (that is what keeps the canvas's pan, drag and tap working under
+it); `.pe-card-open` re-enables pointer events **for itself alone**, and its handler
+calls `stopPropagation()` so the graph's tap-to-select does not also fire. One
+**delegated** listener on the graph container serves every card — the html-label
+re-renders its template on each `data`/`style` event, so per-button listeners would be
+re-attached and leaked on every state change. The node id travels on the button's
+`data-node-open` attribute, which is the only handle that survives a re-render.
 
 ---
 
@@ -891,9 +933,71 @@ The native `EventSource` API only supports GET requests. Our execute endpoint is
 
 ## 8. Node Details Panel
 
-When a node is clicked, the right panel slides in. The fields are grouped into headed sections — **Identity** (type badge, description, child-pipeline link for PIPELINE nodes), **SQL** (§8.3), **Configuration** (source, template, output, depends-on) and **Runtime** (execution status badge) — plus a "Select a node" empty state before the first selection.
+**An overlay panel, opened from the card, large enough for the SQL** (065 §C). Until 065
+this was a 320px fixed drawer that slid in on every selection, and the SQL section — the
+reason the panel exists — wrapped at ~35 characters behind a horizontal scrollbar. The
+owner's ask was exact: open it *from an icon on the card*, into a *large pane with a
+close button top-right and the statement in a larger box*.
 
-### 8.1 Fields displayed
+**Geometry.** The panel is an absolutely-positioned overlay **inside `.pe-layout`**, not
+a `position: fixed` drawer hanging off the viewport: anchored right, full height of
+`.pe-layout`, `--pe-inspector-width: clamp(720px, 60%, 1200px)` wide, above the canvas at
+`--z-drawer`. The `has-details` grid shift is **gone** — `.pe-layout` is a two-track grid
+that never moves, so opening a node no longer costs the canvas 320px of the width §4.3
+just gave it back. A scrim at `--z-fixed` covers the **canvas column only**: the left
+sidebar holds the pipeline's settings and parameters, which is context for what the panel
+is showing, so it stays visible and interactive underneath. Below 1200px the panel takes
+the whole pane.
+
+**Open.** Only three routes, all of them deliberate: the card's `.pe-card-open` button,
+`Enter`/`Space` on the focused node-list row, or a selection change **while the panel is
+already open** (which re-targets it). Selection alone does not open it (§5.4). The SQL
+partial loads on **open**, not on select — one request per opening instead of one per
+click through the graph.
+
+**Close.** The `×` at the panel header's top-right (`aria-label="Close details"`), `Esc`,
+or a click on the scrim. Closing leaves the node **selected** — selection is the graph's
+state, not the panel's.
+
+**Focus.** On a fresh open, focus moves into the panel (its close button). On close it
+returns to the control that opened it. Both halves are harder than they read, and both
+failed the first live measurement (demo stack, 2026-09-04):
+
+- *Into the panel.* `$nextTick` is not enough, and neither is "the element exists": the
+  panel's body sits behind an `x-if` that can land a frame after the `x-show`, and
+  `focus()` on an element whose ancestor still carries `display: none` is a **silent
+  no-op**. `focusInspector` retries across a few frames until focus **demonstrably**
+  landed (`document.activeElement === close`), then stops. It also tells the a11y list
+  mirror not to take focus (`a11ySyncNode(id, false)`), which would otherwise focus the
+  visually-hidden `<li>` in the same turn and win the race about half the time.
+- *Back to the opener.* The opener is remembered as an **element reference**, but that
+  reference is a HINT, not the answer. A node-list row is stable; a card button is drawn
+  inside `cytoscape-node-html-label`, which re-renders its template on every
+  `data`/`style` event — and selecting the node is itself a style event, so the captured
+  button is **reliably detached** by close time (`isConnected === false` after every
+  open, at 0.5, 1.0 and 2.0 zoom). `restoreFocusTo` tries the handle, verifies focus
+  actually moved, and otherwise re-finds the live button by its `data-node-open`
+  attribute.
+
+Only one inspector exists at a time; opening from a second card **replaces the content in
+place**, with no intermediate closed state (a close-then-open would flash the scrim and
+hand focus back to the first card in between) and without moving focus again.
+`inspector.js` is a pure module holding exactly this state; `inspector.test.mjs` pins the
+state rules, and the no-flicker one is asserted against a recorded transition log —
+checking `open === true` afterwards cannot see a close that already happened. The two
+focus mechanics above are DOM facts, held by the live measurement rather than by a unit
+test.
+
+**Content.** The four sections of §8.1, unchanged in order and in fields: Identity, SQL
+(§8.3), Configuration, Runtime — with the 057 **Failure** block when the node's runtime
+state is `failed`. That block stays: it is the per-**node** view of a failure, and the
+dock's Errors tab (§9) is the per-**run** view. Same record, two homes, both read-only,
+both rendered by `PEErrorDetails.build`.
+
+The old "Select a node" empty state is **gone** with the always-present drawer. The panel
+does not exist until a node has been chosen, so it has nothing to be empty about.
+
+### 8.1 Fields displayed### 8.1 Fields displayed
 
 | Field | Source | Notes |
 |---|---|---|
@@ -909,7 +1013,7 @@ When a node is clicked, the right panel slides in. The fields are grouped into h
 | Last execution stats | fetched via `/api/v1/executions?pipeline_id={id}&limit=1` | **Not implemented in v1** — needs an executions lookup the panel does not build |
 | Error (if failed) | from `node_failed` SSE event or last execution | **Not implemented in v1** — failures surface through the §9 modal only |
 
-Long values (a JDBC URL, a generated table name) wrap inside the fixed-width panel via `overflow-wrap: anywhere`; the full text rides on the element's `title`.
+Long values (a JDBC URL, a generated table name) wrap via `overflow-wrap: anywhere` rather than widening the panel; the full text rides on the element's `title`.
 
 ### 8.2 Template link
 
@@ -927,93 +1031,182 @@ GET /partials/pipelines/{id}/nodes/{nodeId}/sql?parameters=<url-encoded JSON>
 - **Wire format:** the `parameters` query value is a JSON document in [contract §6.3](pipeline-contract.md) wire form, built client-side by the page's own `coerceValue` — the same function the execute path uses (§7.2). One coercion path for both surfaces; `ParameterCoercion` is strict, so raw form strings would be rejected by design. GET, not POST: it is a read, needs no CSRF token, and matches the `/partials/**` GET idiom.
 - **Three context outcomes, not one.** *Bound* — every parameter supplied or defaulted; renders with the bound context. *Sampled* — binding rejected only on unsupplied REQUIRED parameters; renders with `ParameterBinder.sampleContext()` (the §12.6 dry-render context: defaults where present, type-appropriate sample values otherwise) and the panel labels which parameters were sampled. *Rejected* — a supplied override failed §6.3 coercion; the partial names the parameter and renders **no SQL** — SQL built from a value the executor would refuse is worse than no SQL.
 - **The non-render states.** A PIPELINE node has no template by contract (§4.6) — the partial shows the child-pipeline state (name @ version, linked), not an empty SQL block. A pinned `{id, version}` absent from the workspace registry, a `TemplateRenderException`, and an unknown node id each get their own `.ds-empty` state. `Node.template` is never null server-side (`Node.fromJson` binds `template ?: TemplateRef()`), so the "no template" branch keys on the node type / a blank template id — a null check would never fire.
-- **Loading:** `htmx.ajax` on selection change, and again (debounced ~300ms, the list-screen search delay) when a parameter override changes. The response swaps into `#pe-node-sql`; a `.ds-spinner` indicator rides the request.
+- **Loading:** `htmx.ajax` **on open** (065 §C — not on selection change: one request per inspector opening, instead of one per click through the graph), and again (debounced ~300ms, the list-screen search delay) when a parameter override changes. The response swaps into `#pe-node-sql`; a `.ds-spinner` indicator rides the request.
+- **The box (065 §C).** The statement is the point of the panel, so it gets the panel:
+  the `<pre>` spans the full width, `white-space: pre` (**no wrapping** — wrapping
+  destroys the indentation that carries the query's shape, which is exactly what the
+  reported screenshot showed at ~35 characters), and scrolls inside its own box in both
+  directions. The `POSTGRES · acme/orders.sql @ v3 · Copy` meta row and the highlighter's
+  spans are untouched; this is a box, not a renderer.
+- **The floor, and where it actually lives.** `.pe-details-section-sql` is
+  `flex: 1 0 40%` in the body's column flex: it takes **every spare pixel**, and never
+  falls below **40% of the panel's scrolling body**. Two mistakes are easy here and both
+  were made and measured before this shipped:
+  - A `min-height: 40%` on the `<pre>` resolves against a containing block with no
+    definite height and computes to `auto` — a rule that looks right and does nothing.
+    The percentage has to be a **flex-basis** in a column whose height is definite.
+  - The shrink factor **is** the floor. `flex: 1 1 40%` — the CSS default shrink — reads
+    as "40% basis, grows" and is not a floor at all: with tall sibling sections the SQL
+    box collapsed from 411px to **17px**, a 28-line statement still inside it. That is
+    this round's own defect reintroduced by one digit, so `inspector.test.mjs` asserts
+    the shipped rule's grow/shrink/basis triple against the stylesheet.
+
+  Measured (demo stack, 1920×1080, a 28-line statement): panel 922px; SQL section 411px
+  relaxed / 334px under pressure; the `<pre>` 328px / 251px. The floor is stated on the
+  section rather than the `<pre>` because the section's heading, meta row and padding sit
+  between the two, and the floor is only worth anything if it is on the box the flex
+  algorithm actually sizes.
 - **Highlighting and copy.** After the swap, `sql-highlight.js` re-highlights the `<code>` block — a zero-dependency, single-pass tokenizer (keywords, strings, comments, numbers, `${param}`/`:param` parameters), escaping each token's text as it is emitted (tokenize the RAW SQL, never the escaped string; token colours are `--pe-sql-*` custom properties resolving to design-system accents). The copy button reads the SQL from its `data-sql` attribute (or the `<code>` element's `textContent`) — never from the highlighted `innerHTML`, which carries `<span>` markup. The confirmation is the live region plus a 1.5s label swap on the button, **deliberately not a toast**: copy is high-frequency and self-evident, and a 6s notification per copy trains the user to ignore the stack the §9 terminal events need.
 
 ---
 
 ## 9. Error Display
 
-### 9.1 Error modal
+### 9.1 Where a failure lives: the dock's Errors tab
 
-When `pipeline_failed` event arrives, or when the execute call returns an HTTP error:
+**The Errors tab is the home of a failure record** (065 §B). Before 065 the 057 record
+rendered *inside the results panel*, gated on `resultPanel.failure` — results and
+failures are different objects with different lifetimes sharing one pane, and closing the
+pane took both away. The record now has its own tab beside Results, and the two are
+independently reachable at all times.
 
-```javascript
-// error.js
-class ErrorModal {
-    // Alpine owns the modal's visibility + error data. The consumer of this event is the
-    // `x-on:show-error.window` listener on #error-modal (§4.2) — the event MUST be
-    // dispatched on `window` for that listener to fire.
-    show(error) {
-        window.dispatchEvent(new CustomEvent('show-error', {
-            detail: {
-                code: error.code,
-                message: error.message,
-                userMessage: error.user_message || error.message,
-                details: JSON.stringify(error.details, null, 2),
-                docUrl: error.doc_url,
-                failedNode: error.details?.failed_node_id,
-            }
-        }));
-    }
-}
-```
+Three surfaces, three jobs, one record:
 
-### 9.2 Modal content
+| Surface | Scope | What it shows |
+|---|---|---|
+| **Errors tab** (§10, the dock) | per **run** | one entry per failed node of the current-or-last run, newest last |
+| **Node inspector's Failure section** (§8) | per **node** | the record for the selected node while its state is `failed` |
+| **Error modal** (§9.2) | the run's terminal event | a one-line summary — a failure detail is not a dialog |
+
+`PEErrorDetails.build(record)` is the one view-model all three render; `details.js` owns
+it and `sse-node-failure.test.mjs` pins it. Nothing about the wire changed: the
+`node_failed` / `pipeline_failed` `error` object, its `caused_by` chain (outermost-first
+on the wire, reversed to **root-cause-first** for humans) and the redaction rules are
+exactly as 057 left them. This round re-homed what was already on the page.
+
+An Errors entry is the summary line `node id · code`, then the message, the node line,
+the correlation id, any `details` JSON, the rendered SQL, the collapsible **Exception**
+section with the chain root-cause-first, and one `Copy failure detail` button for the
+whole record. Under `error-detail=structured` the SQL and Exception sections are simply
+absent — no empty panel, no apology. Empty state: *"No failures in this run."*
+
+`pipeline_failed`'s execution-level record joins the same list (it is the record 057
+built the failure view for, and moving the block out of Results without giving it the
+Errors tab would have deleted 057's point from the page). Records matching on node, code
+and message **dedupe**, so a node failure and the pipeline failure it caused list once.
+
+### 9.2 The error modal — a one-line summary, and only that
+
+`pipeline_failed` still raises the modal, and the modal still says one sentence:
 
 ```
 ┌──────────────────────────────────────────────────┐
 │  Execution Failed                            [×] │
 ├──────────────────────────────────────────────────┤
-│                                                  │
-│  Node "fetch_orders" failed.                     │
-│                                                  │
 │  We couldn't reach the 'pg-prod' database.       │
-│  Check that the database is online.              │
 │                                                  │
-│  Technical details:                              │
-│  Code: pipeline.node.datasource_connection_failed│
-│  ┌────────────────────────────────────────────┐  │
-│  │ {                                           │  │
-│  │   "datasource_name": "pg-prod",            │  │
-│  │   "underlying_error": "Connection refused" │  │
-│  │ }                                           │  │
-│  └────────────────────────────────────────────┘  │
-│                                                  │
-│  [View documentation]  [Close]                   │
+│                          [Dismiss]               │
 └──────────────────────────────────────────────────┘
 ```
 
-The error modal shows:
-- **User-friendly message** (`user_message` from error envelope) — large, prominent.
-- **Failed node ID** — which node in the graph caused the failure. Clicking it selects the node in the graph.
-- **Technical details** (collapsible) — the full error object in JSON, for developers.
-- **Documentation link** (`doc_url`) — opens error-specific docs in a new tab.
-- **Close button** — dismisses modal. Graph retains the failed-node coloring.
+It carries `error.user_message` (falling back to `error.message`). The **detail** —
+code, correlation id, node line, SQL, exception chain — is in the Errors tab, on the page
+the engineer is already looking at, and stays there after the modal is dismissed. The
+modal is `role="alertdialog"`; `Esc` closes it, and it is the topmost rung of the §14.1
+Escape ladder.
 
-The `details` object is rendered verbatim, so it must never contain connection secrets: the server's `node_failed` payload carries `datasource_name` and `underlying_error`, never `jdbc_url` or credentials ([REST API §6.4.4](rest-api.md#644-node_failed); redaction mechanism in [Observability](observability.md)). The editor does no redaction of its own — it has nothing to redact with.
+The `details` object is rendered verbatim wherever it appears, so it must never contain
+connection secrets: the server's `node_failed` payload carries `datasource_name` and
+`underlying_error`, never `jdbc_url` or credentials ([REST API §6.4.4](rest-api.md#644-node_failed);
+redaction mechanism in [Observability](observability.md)). The editor does no redaction
+of its own — it has nothing to redact with.
 
-The graph also shows the failed node in red — the modal is supplementary detail.
+The graph also shows the failed node in red (§6.2), and its card's open button leads
+straight to that node's Failure section.
 
 ### 9.3 Terminal events: modal for failure, toasts for the rest
 
 The three terminal SSE events report differently:
 
-- `pipeline_failed` **keeps the error modal** (§9.1/§9.2) — a failure detail is not a 6s notification.
-- `pipeline_completed` and `execution_aborted` report as **toasts** via `DpToast.show` (Shape D, [UI Screens §5.1](ui-screens.md)): a stream-borne event has no HTTP response to attach an OOB swap to, and this is the one client-side toast builder that exists. The abort toast carries the event's `reason` in its body.
-- All three also call `announceStatus` — the terminal events previously did not announce at all (only node-level events did), so screen-reader parity here is an addition, not a preservation.
+- `pipeline_failed` **keeps the error modal** (§9.2) for its one-line summary, and puts
+  the record in the Errors tab (§9.1).
+- `pipeline_completed` and `execution_aborted` report as **toasts** via `DpToast.show`
+  (Shape D, [UI Screens §5.1](ui-screens.md)): a stream-borne event has no HTTP response
+  to attach an OOB swap to, and this is the one client-side toast builder that exists.
+  The abort toast carries the event's `reason` in its body.
+- All three also call `announceStatus`, as does the first failure of a run ("Errors (1)")
+  — through `a11y.js`'s single live region (`#pe-live-region`), never a second one.
 
 The running-progress banner stays at the toolbar for the `running` state.
 
 ---
 
-## 10. Result Preview
+## 10. The bottom dock: Results | Errors
+
+**One dock, two tabs, three states, no close** (065 §B). The reported defect was small
+and total: `.pe-result-panel`'s `×` set `resultPanel.visible = false`, and there was no
+way back short of re-running the pipeline. The owner asked for **minimise**, not close.
+
+`dock.js` holds the state and the transitions and nothing else — no DOM, no Alpine, no
+fetch — so `node --test` drives every row of the table below (`dock.test.mjs`), the same
+harness decision `result.js`'s paging arithmetic got. The template binds three fields
+directly (`state`, `tab`, `errors.length`); there are no derived getters to drift from
+what the browser renders.
+
+- `dock.state ∈ {hidden, minimized, open}`
+- `dock.tab ∈ {results, errors}`
+- `dock.errors: FailureRecord[]` — the 057 record, one per failed node of the **current
+  or last** run (§9.1)
+- `dock.results` — today's `resultPanel` object, unchanged; `result.js` is untouched
+
+### 10.1 Transitions — the whole table, no others
+
+| Event | From | To |
+|---|---|---|
+| page load | — | `hidden` (nothing has run) |
+| execute started | any | `errors` cleared; state unchanged; the Results tab header shows "previous run" while `resultPanel.data` is from an earlier run |
+| `data_ready` | `hidden` | `open`, tab `results` |
+| `data_ready` | `minimized` / `open` | state unchanged, tab `results` unless `errors.length > 0` |
+| `node_failed` (first of this run) | `hidden` / `minimized` | `open`, tab `errors` |
+| `node_failed` (subsequent) | any | record appended; badge count updates; state and tab unchanged |
+| user clicks **minimise** | `open` | `minimized` |
+| user clicks a tab | `minimized` | `open`, that tab |
+| user clicks a tab | `open` | that tab |
+| user presses `Esc` | any | **no change** — `Esc` belongs to the inspector (§8) |
+
+Two readings the table leaves open, resolved in the code and pinned by tests: a **first**
+failure arriving while the dock is already `open` follows the "subsequent" row (append +
+badge, no tab yank — the user's tab choice is theirs), and a tab click while `hidden` is
+inert (there are no tabs on screen to click).
+
+There is **no close.** `minimized` renders the header strip only — tabs, badge, and the
+minimise button flipped to restore — at the header's own height, one row, tokens only.
+The canvas reclaims the rest, which works because the dock is the last **flex child** of
+`.pe-root` rather than a fixed overlay (§4.3). The `open` height is today's `max-height:
+40vh`, unchanged. There is no drag handle: it was not asked for.
+
+### 10.2 The two tabs
+
+**Results** — exactly today's body: the TTL line, the expired card, the `.ds-table`
+grid, the paging row and the download buttons. The `resultPanel.failure` block has
+**moved out** of here (§9.1).
+
+**Errors** — the list described in §9.1, with a `ds-badge-danger` count on the tab when
+`errors.length > 0`.
+
+Controls: one button carries both labels — `aria-label="Minimise results"` (`#minus`
+glyph) while open, `aria-label="Restore results"` (`#maximize`) while minimised. The
+first failure of a run announces `"Errors (1)"` through `a11y.js`'s existing live region;
+the dock header carries **no** `aria-live` of its own, because a second live region on
+the same page is exactly what §14.2 forbids.
+
+### 10.3 Result delivery (unchanged)
 
 Delivery is **uniform** — there is no inline-vs-claim-check split ([REST API §7](rest-api.md#7-result-delivery)). Every caller result is materialized in Redis before `data_ready` is emitted, and every `data_ready` carries the same fields: full `schema`, the **inline first page**, `total_rows`, `has_more`, `result_url`, `expires_at`.
 
-### 10.1 On `data_ready`
+### 10.4 On `data_ready`
 
-`result.js` renders one panel shape for every result size ([REST API §6.4.7](rest-api.md#647-data_ready)):
+`result.js` renders one body shape for every result size, inside the dock's Results tab ([REST API §6.4.7](rest-api.md#647-data_ready)):
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -1041,7 +1234,7 @@ Delivery is **uniform** — there is no inline-vs-claim-check split ([REST API �
 - BIGDECIMAL / BIGINTEGER values arrive as strings (Type System wire rules) and are rendered as-is — the editor never parses them into JS numbers.
 - Nothing is shown for a **pure-ETL pipeline**: with no caller node there is no `data_ready` event. The completion banner shows execution stats only.
 
-### 10.2 Paging and download via the result cursor
+### 10.5 Paging and download via the result cursor
 
 Both "Load next page" and the download buttons use the same cursor endpoint ([REST API §7.2](rest-api.md#72-cursor-endpoint)):
 
@@ -1124,7 +1317,9 @@ modules/web/src/main/resources/static/
         ├── graph.js                        (PipelineGraph class)
         ├── sse.js                          (SseHandler class)
         ├── execute.js                      (executePipeline, collectParameters, coercion)
-        ├── details.js                      (DetailsPanel class)
+        ├── details.js                      (DetailsPanel class + PEErrorDetails — §9.1)
+        ├── dock.js                         (bottom dock state machine, PURE — §10)
+        ├── inspector.js                    (node inspector open/close + focus, PURE — §8)
         ├── error.js                        (ErrorModal class)
         ├── result.js                       (ResultPanel class — §10)
         ├── sql-highlight.js                (zero-dependency SQL tokenizer + highlighter — §8.3)
@@ -1258,12 +1453,12 @@ The accessible surface is therefore a **parallel DOM structure mirroring the gra
 | `Enter` | Execute button | Execute pipeline |
 | `↑` / `↓` | node list | Move focus between options (roving `tabindex` — exactly one `<li>` is tabbable) |
 | `Home` / `End` | node list | First / last node |
-| `Enter` / `Space` | node list | Select the focused node, opening its details panel |
-| `Escape` | anywhere | Close details panel → result panel → error modal (topmost first) |
+| `Enter` / `Space` | node list | **Open** the focused node's inspector (the keyboard twin of the card's open button, §5.4); a plain click on the row only selects |
+| `Escape` | anywhere | Error modal → node inspector (topmost first, one per press). **Never the dock** — it has no close, and losing the results to the key that dismisses the panel above them is the defect 065 removed |
 
 The `+`/`−`/`F`/`R` graph-control shortcuts this table once listed were removed (034 F1) because the controls did not exist. The controls exist since 059 §B — Fit / Reset / Zoom in / Zoom out as REAL buttons in a `role="toolbar"` on the canvas corner (`.pe-graph-controls`), keyboard-reachable by `Tab` + `Enter`, no shortcut layer to own — since 059b a row of `.ds-icon-md` (20px) glyph buttons, sized by the `icons.css` link the page carries. The single-key shortcuts did not return: the canvas is still not a focus target (§14), and buttons are the honest surface.
 
-Selection is bidirectional and single-sourced: `Enter`/`Space` (or a click) on a list item calls `selectNodeById()` (§5.4), which calls `cyNode.select()` on the canvas node — the `node:selected` pseudo-class the §5.3 stylesheet styles — and sets `aria-selected="true"`, `tabindex="0"` and focus on the matching `<li>` (roving tabindex). Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
+Selection is bidirectional and single-sourced: a click on a list item calls `selectNodeById()` (§5.4), which calls `cyNode.select()` on the canvas node — the `node:selected` pseudo-class the §5.3 stylesheet styles — and sets `aria-selected="true"`, `tabindex="0"` and focus on the matching `<li>` (roving tabindex). Tapping a node on the canvas runs the same path in reverse. The two representations cannot drift because only one function mutates selection.
 
 The graph canvas is **not** in the tab order (`tabindex="-1"`) — focusing an image the user cannot interact with is a trap, and every graph action is reachable from the list or the controls.
 
@@ -1276,7 +1471,7 @@ The graph canvas is **not** in the tab order (`tabindex="-1"`) — focusing an i
 - Rapid node transitions are coalesced (max one announcement per 500 ms, latest wins) — parallel branches otherwise emit faster than speech synthesis can consume.
 - The Execute button carries `aria-busy="true"` for the duration of the stream.
 
-Other regions: details panel `role="region" aria-label="Node details"`; result panel `role="region" aria-label="Execution result"`; error modal `role="alertdialog" aria-modal="true" aria-labelledby="error-modal-title"` with focus moved to it on open and restored to Execute on close.
+Other regions: the node inspector `role="dialog" aria-label="Node details"` (not `aria-modal` — the left sidebar stays interactive under the scrim, §8), with focus moved into it on open and **returned to the control that opened it** on close; the dock `aria-label="Execution results and errors"` with a `role="tablist"` of two `role="tab"` buttons over two `role="tabpanel"` bodies; the error modal `role="alertdialog"` with focus moved to it on open. **The dock carries no `aria-live` of its own** — "Errors (1)" is announced through the single `#pe-live-region` this section owns; a second live region on the same page is what this rule exists to prevent.
 
 ### 14.3 Color contrast
 
@@ -1308,7 +1503,7 @@ What the editor does instead:
 3. The editor polls `GET /api/v1/executions/{execution_id}` ([REST API §10.2](rest-api.md#102-get-execution-metadata)) **once**, after a short delay, and **at most once more** — enough to catch the abort landing, not a polling loop.
 4. On a terminal status the banner is replaced by the real outcome and the graph is finalized:
    - `ABORTED` → `abortUnfinishedNodes()`, banner **"Execution aborted — the connection was lost."**
-   - `SUCCESS` → the execution had already finished when the stream died; the result is in Redis for its TTL, so the panel is populated from the cursor (§10.2).
+   - `SUCCESS` → the execution had already finished when the stream died; the result is in Redis for its TTL, so the dock's Results tab is populated from the cursor (§10.5).
    - `FAILED` → the error modal (§9), populated from the execution record.
 5. If both polls still report `RUNNING`, the editor stops and shows **"Execution still running — it will be cancelled within {grace} seconds. Reload to see the final status."** It does not keep polling.
 
@@ -1341,7 +1536,7 @@ While an execution is running, the Execute button is replaced by **Cancel**, whi
 
 - **No reconnection or stream resumption** — deliberately removed; see §15.1.
 - **No fire-and-forget execution.** Closing the tab cancels the run. A user who needs the pipeline to finish unattended should trigger it via the REST/MCP surface, not the editor.
-- **Past executions are still inspectable** after the fact: metadata via `GET /executions/{id}`, the event stream replayable for 1 hour via `GET /executions/{id}/events`, and the result within its TTL via the cursor (§10.2).
+- **Past executions are still inspectable** after the fact: metadata via `GET /executions/{id}`, the event stream replayable for 1 hour via `GET /executions/{id}/events`, and the result within its TTL via the cursor (§10.5).
 
 ---
 
@@ -1357,7 +1552,7 @@ Execution events arrive at human-observable rates (one per node start/complete, 
 
 ### 16.3 Result preview rendering
 
-The result table renders one page at a time (`datapipelines.result.page-size-rows`); further pages come from the cursor on demand (§10.2) and replace the visible page rather than appending indefinitely. DOM stays small regardless of `total_rows`.
+The result table renders one page at a time (`datapipelines.result.page-size-rows`); further pages come from the cursor on demand (§10.5) and replace the visible page rather than appending indefinitely. DOM stays small regardless of `total_rows`.
 
 ### 16.4 Cytoscape performance tips
 
@@ -1397,9 +1592,13 @@ The result table renders one page at a time (`datapipelines.result.page-size-row
   - `parseSseEvent()` — correct SSE wire format parsing; heartbeat comment frames yield `null`.
   - `coerceParameter()` — per declared type: `BOOLEAN`→`true`, `INTEGER`→number, `BIGDECIMAL`→string (never a number), `TIMESTAMP`→offset-bearing string, bad input throws.
   - `a11y.syncStatus()` — the `<li>` text and the canvas class agree after every transition.
+  - `dock.js` — every row of the §10.1 transition table, plus "`Esc` is a no-op" and "a minimised dock keeps its badge", plus a check that **no** transition in the module can return the dock to `hidden` (`dock.test.mjs`).
+  - `inspector.js` — open captures the focus-return element, close hands it back, a second open **replaces** with no intermediate closed state (asserted against a recorded transition log, not a post-hoc `open === true`), `Esc` closes (`inspector.test.mjs`).
+  - `EditorLayoutRenderTest` — the editor's `<main>` renders with `app-main-bleed`, the pipelines list's without it (§4.3).
 - **Integration tests** (Playwright or Cypress):
-  - Full execute flow: render → execute → SSE events → graph updates → result panel with the inline first page.
-  - Failure flow: execute → node fails → error modal → graph retains state.
+  - Full execute flow: render → execute → SSE events → graph updates → the dock's Results tab with the inline first page.
+  - Failure flow: execute → node fails → the dock raises its Errors tab with the record → error modal shows the one-line summary → graph retains state.
+  - Dock flow: results open → minimise → the canvas grows → a tab click restores. There is no path that loses the pane.
   - Abort flow: execute → Cancel → `execution_aborted` → all unfinished nodes aborted, banner shown.
   - Connection-loss flow: stream killed mid-execution → banner, no reconnect request issued, status poll fires at most twice.
   - Cursor paging: multi-page result → next page → stable row order, TTL countdown, expiry message.
@@ -1576,6 +1775,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.8 | editor real estate and panes (065) | Four layout/behaviour changes on a read-only editor; **no wire contract moved** — the SSE events, the 027b result cursor, the SQL partial, the 057 failure record and the 059 card facts are exactly as they were. This round re-homed what was already on the page. **§4.3 rewritten: the editor is FULL-BLEED.** `layouts/default.html` capped every page at `--app-content-max: 1600px`; on the owner's ~2000px viewport the editor took ~1450px between two dead margins, and the graph — the one surface that scales with width — was paying for a measure chosen for prose (*"use all the real estate on screen"*, twice). One model attribute (`fullBleed`, set by `PipelineEditorController` and no other page), one `th:classappend`, one `.app-main-bleed` rule (tokens only); the nav keeps its own cap. Pinned by `EditorLayoutRenderTest` in both directions. §4.3 also gains the one table of every pane's dimension. **§10 rewritten: the result panel becomes a DOCK — Results | Errors, three states, no close.** `.pe-result-panel`'s × set `resultPanel.visible = false` with no way back short of re-running; the owner asked for **minimise**. The full transition table is §10.1, implemented in a new PURE `dock.js` (state only, no DOM) and driven row-by-row by `dock.test.mjs`, including "`Esc` is a no-op", "a minimised dock keeps its badge" and "no transition can return the dock to `hidden`". The dock is the last FLEX CHILD of `.pe-root`, not a fixed overlay — that is the mechanism by which the canvas actually reclaims the space (a fixed overlay can cover the canvas but never give it back). Open height is today's 40vh; no drag handle (not asked for, YAGNI). **§9 rewritten: the Errors tab is the home of a failure record.** The 057 record used to render INSIDE the results panel, gated on `resultPanel.failure` — two different objects with different lifetimes in one pane, both lost when the pane closed. Three surfaces now: Errors tab (per RUN), inspector Failure section (per NODE, kept), error modal (one-line summary only). §9.1's old "error modal shows the technical details" wording is DEAD and replaced, not appended. `pipeline_failed`'s execution-level record joins the same list, deduped on node+code+message. **§8/§5.4 rewritten: the inspector opens FROM THE CARD, large.** Tapping a card now SELECTS and nothing else; every `.pe-card` carries a `.pe-card-open` button (`ds-icon-sm`, `stopPropagation`, one DELEGATED listener because the html-label re-renders its template on every `data`/`style` event), with `Enter`/`Space` on the node-list row as its keyboard twin. The fixed 320px drawer and the `has-details` grid shift are GONE: the panel is an overlay inside `.pe-layout` at `clamp(720px, 60%, 1200px)`, full layout height, scrim over the CANVAS only (the sidebar is context, not chrome). Close is ×/`Esc`/scrim; focus moves in on open and returns to the opening control on close — captured as an ELEMENT reference, never a selector, because the card button is re-drawn constantly. Opening from a second card replaces in place with no intermediate closed state (`inspector.js`, pure; `inspector.test.mjs` asserts it against a recorded transition log — a post-hoc `open === true` cannot see a close that already happened). The SQL section is the point: full panel width, `white-space: pre`, scroll in its own box, floored at 40% of the panel via a percentage FLEX-BASIS — a `min-height: 40%` would have resolved against a containing block with no definite height and silently computed to `auto`. The partial now loads on OPEN, not on select (one request per opening, not one per click through the graph). §14.1's Escape ladder loses its middle rung (modal → inspector → nothing); §14.2 records that the dock adds NO second live region; §12.1 gains `dock.js`/`inspector.js`. `graph-card.test.mjs`'s 059b "exactly one svg per card" assertion is deliberately revised to "one GLYPH plus the button's icon" — the one-glyph rule is unchanged, the card simply also has a control now. |
 | 2026-09-03 | v1.7 | icon sizing (059b) | The 059 screenshots showed every icon at canvas scale: toolbar glyphs 300×150, card glyphs ~190px, the database glyph drawn TWICE per card. Two causes, both fixed at the source. (1) **`icons.css` was never loaded** — the `.ds-icon` size classes on every emitted `<svg>` were inert, and an svg with no size is the 300×150 replaced-element default. The editor page now links `/vendor/design-system/icons.css` (pinned by `PipelineEditorRenderTest` and the 027b harness); §5.3 item 2 records the rule: every svg the editor emits carries the class pair, never bare. The toolbar is a row of `.ds-icon-md` buttons at the canvas's top-right corner (§14.1 note updated). (2) **The card drew `#db` twice** — the type glyph (line 2) and the engine glyph (line 3, added in 059 beyond the five-line spec) are the same database drawing on every db-backed card. The engine glyph is RETIRED: the card's one glyph is the type glyph, and the engine's identity is the source line's text (`POSTGRES`, `SQLITE`, …) — the "engine glyphs by dialect" sentence leaves §5.3 with it. `iconForDialect` deleted; the sprite keeps its 12 recorded glyphs (`file` unused, harmless). Gates: the live DOM check (every `.pe-graph svg`/toolbar svg ≤ 24×24, exactly one glyph svg per card) red on `5187efd` (toolbar 4×300×150, cards 2 svgs ~190px), green after; measured on the demo stack. |
 | 2026-09-03 | v1.6 | graph node cards (059) | **§5.3 rewritten for the CARD, reversing the 2026-08-31 label-below contract** (the operator reviewed the 031 result on the live product, 2026-09-02: an empty box with a caption — *"I want to display total node execution time, dialect, template name and datasource name. It should be INSIDE the box"*). The five lines are specified: name (two-line clamp, `title` carries the full), type badge + vendored Lucide glyph (the per-type SHAPES are RETIRED — the icon badge carries TYPE), datasource · dialect (resolved client-side from `GET /api/v1/datasources`, the body is portable and carries only names; `tempdb · H2` from settings; a PIPELINE card names the child pipeline), template@version LEFT-truncated so the leaf survives (043), and the run line from `node_completed`'s FLAT `duration_ms`/`rows_out` — absent, not a placeholder, before any execution. Rendering: **route 1 decided** — `cytoscape-node-html-label` 1.2.2 vendored (pointer-events:none container, pan/zoom transform — verified against its source) paints the content OVER a canvas that still paints the chrome (state accents §6.2, caller double border, selection ring); state dots and run lines arrive as `data.state`/`data.run` writes the overlay re-renders on. Corner status dot (✓/✕/spinner/–) and edge PORTS specified. Card geometry is one token source (`--pe-card-w/h`). **§B:** the canvas fills the main pane (041 height math), `fitToView()` fits with padding then enforces a readable minimum zoom, dagre retuned (`nodeSep` 64, `rankSep` 176, `fit: false` — §5.1 updated), Fit/Reset/Zoom buttons keyboard-reachable (§14.1 note updated: controls exist, single-key shortcuts did not return). Edges: unbundled-bezier, endpoints on the card's right/left edges, per-edge horizontal control points computed post-layout (no `control-point-positions` in Cytoscape 3.34); a DASHED `edge.secondary` style is defined and deliberately unused (future template-import links). §6.2 unchanged. Appendix A gains the card geometry tokens. |
 | 2026-08-31 | v1.5 | recurrence defect round (034) | §14.1 reconciled with the code: `Home`/`End` (first/last option, roving tabindex) and `Escape` (topmost-first close — error modal, result panel, details panel; one surface per press, unconsumed when nothing is open) are now IMPLEMENTED in `a11y.js` and pinned by `a11y.test.mjs`; the `+`/`−`, `F`, `R` rows were REMOVED — the graph zoom/fit controls they name do not exist, so they were spec requirements the code ignored. They return with the round that builds those controls. |
