@@ -59,11 +59,8 @@ class FlywayMigrationIntegrationTest {
                 "7|hierarchical template names|true",
                 "8|typed templates|true",
                 "9|datasource last test outcome|true",
-                // 068. NOTE for whoever renumbers this migration at merge (066 owns V10 and the
-                // orchestrator renumbers whichever lands second): the version here is the
-                // FLYWAY version, so it moves with the file name. The description is derived
-                // from the file name too — `V11__datasource_credential_key_version.sql`.
-                "11|datasource credential key version|true",
+                // 068 (renumbered V11→V10 at merge: it landed before 066, which now takes V11).
+                "10|datasource credential key version|true",
             )
     }
 

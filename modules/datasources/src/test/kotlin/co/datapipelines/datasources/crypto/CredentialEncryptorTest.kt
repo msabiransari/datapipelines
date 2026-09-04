@@ -150,7 +150,7 @@ class CredentialEncryptorTest {
     @Test
     fun `the pre-versioning layout is REFUSED, not guessed`() {
         // What a row looked like before this round: nonce ‖ ciphertext ‖ tag, no version byte.
-        // Migration V11 prefixed 0x01 onto every one of them, so a blob still in the old layout
+        // Migration V10 prefixed 0x01 onto every one of them, so a blob still in the old layout
         // reaching this code is a defect — reading it heuristically would only ever hide one.
         val versioned = encryptor.encrypt("secret", DS)
         val legacyLayout = versioned.copyOfRange(CredentialEncryptor.VERSION_BYTES, versioned.size)

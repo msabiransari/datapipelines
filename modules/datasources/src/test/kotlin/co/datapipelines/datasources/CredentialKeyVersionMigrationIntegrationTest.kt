@@ -11,7 +11,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
 /**
- * `V11__datasource_credential_key_version.sql` against a real Postgres — the migration that gave
+ * `V10__datasource_credential_key_version.sql` against a real Postgres — the migration that gave
  * every pre-round credential its key-version byte (datasources.md §7.1, round 068).
  *
  * The pre-round layout is reproduced the only honest way available after the code change: a row

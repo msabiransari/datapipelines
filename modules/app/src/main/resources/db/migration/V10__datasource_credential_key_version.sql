@@ -1,4 +1,4 @@
--- V11__datasource_credential_key_version.sql
+-- V10__datasource_credential_key_version.sql
 --
 -- The key-version byte on every stored datasource credential (datasources.md §7.1, round 068).
 --
