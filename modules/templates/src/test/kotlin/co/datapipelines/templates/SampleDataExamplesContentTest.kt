@@ -70,8 +70,18 @@ class SampleDataExamplesContentTest {
         // imported into the SAME workspace), so the shipped files must be disjoint.
         val templateIds = docs.flatMap { doc -> doc.path("templates").map { it.path("id").asText() } }
         val pipelineNames = docs.flatMap { doc -> doc.path("pipelines").map { it.path("name").asText() } }
-        templateIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.shouldBeEmpty()
-        pipelineNames.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.shouldBeEmpty()
+        templateIds
+            .groupingBy { it }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
+            .shouldBeEmpty()
+        pipelineNames
+            .groupingBy { it }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
+            .shouldBeEmpty()
 
         val problems = docs.flatMap { validateExamples(it) }
 
@@ -233,16 +243,18 @@ class SampleDataExamplesContentTest {
 
     private companion object {
         /** One examples file per sample-data family — both ship and both must validate. */
-        private val EXAMPLES_PATHS = listOf(
-            "scripts/sample-data/content/examples.json",
-            "scripts/sample-data-trade/content/examples.json",
-        )
+        private val EXAMPLES_PATHS =
+            listOf(
+                "scripts/sample-data/content/examples.json",
+                "scripts/sample-data-trade/content/examples.json",
+            )
 
         /** One bootstrap datasources file per family; the app accepts the comma list. */
-        private val BOOTSTRAP_PATHS = listOf(
-            "deploy/sample-data/bootstrap-datasources-nyc.yml",
-            "deploy/sample-data/bootstrap-datasources-census.yml",
-        )
+        private val BOOTSTRAP_PATHS =
+            listOf(
+                "deploy/sample-data/bootstrap-datasources-nyc.yml",
+                "deploy/sample-data/bootstrap-datasources-census.yml",
+            )
 
         /** The template the falsification poisons — referenced by a pipeline that declares the parameter. */
         private const val POISONED_TEMPLATE_ID = "sample_trips_monthly.sql"
