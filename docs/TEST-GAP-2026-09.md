@@ -178,6 +178,21 @@ new endpoints) leaves the list and enters a tier.
 **Tier 2 — second-order partials** (from the list above; each is a focused test
 inside an existing test source set).
 
+**Tier 2 status (2026-09-03, landed):** `NodeOutputModuleTest` (the lenient-binding
+edges — absent table binds empty, absent target binds caller, APPEND fallback),
+`FailureCollectorTest` (accumulation, snapshot immutability, CF-1/CF-2 path hygiene,
+the frozen §15.1 grammar), `McpNotFoundTest` (the six §13 code reuses + the §5.3
+requireVisible gate), `RedisLastUsedWorkspaceStoreTest` (keyspace + both fail-open
+paths), `IfMatchHeaderTest` (new with 056), and `TemplateJsonInstantTest` (strict
+ISO-instant binding; offset-lenient parsing recorded as the pinned JDK's actual
+semantic). **NOT-list addition:** `ClientAddressResolver.Cidr`'s "partial" status was
+an artifact — the class is private and CANNOT appear in a test by name;
+`ClientAddressResolverTest` already pins all twelve CIDR/resolution edges. The
+`PromotionService.Plan`/`PinnedPipeline` and `ExecutionLauncher.Attach`/`Reservation`
+partials stay deliberately un-backfilled: internal helpers inside classes whose
+behavioral surface is covered (`PromotionServiceTest`, `ExecutionStreamLauncherTest`),
+and a test that names them would pin shape, not behavior.
+
 **Tier 3 — the browser suite** (below) — separate module, separately invoked,
 not part of `./gradlew build` or `gate.sh` unless explicitly asked.
 
