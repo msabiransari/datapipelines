@@ -51,7 +51,7 @@ import java.nio.file.Paths
  * Run it twice and the PNGs are byte-identical; that property is the point, and the round
  * that added this task proved it rather than asserting it.
  */
-object SiteShots {
+object SiteShotsMain {
     private const val VIEWPORT_W = 1440
     private const val VIEWPORT_H = 900
 
@@ -78,27 +78,39 @@ object SiteShots {
         }
         Files.createDirectories(outDir)
 
-        Playwright.create().use { pw ->
-            pw.chromium().launch(BrowserType.LaunchOptions().setHeadless(true)).use { browser ->
-                val context =
-                    browser.newContext(
-                        Browser.NewContextOptions()
-                            .setViewportSize(VIEWPORT_W, VIEWPORT_H)
-                            .setDeviceScaleFactor(1.0)
-                            .setColorScheme(ColorScheme.LIGHT)
-                            .setReducedMotion(ReducedMotion.REDUCE),
-                    )
-                context.use {
+        val taken = withSignedInPage(email, password) { page -> Shots(page).captureAll() }
+        println("siteShots: wrote ${taken.size} PNGs to ${outDir.toAbsolutePath()}")
+        taken.forEach { println("  $it") }
+    }
+
+    /**
+     * Owns the whole browser session — Playwright, the browser, the context — so [main] reads as
+     * the six steps it is and each resource still closes in reverse order on any exit path.
+     */
+    private fun <T> withSignedInPage(
+        email: String,
+        password: String,
+        block: (Page) -> T,
+    ): T =
+        Playwright.create().use { playwright ->
+            playwright.chromium().launch(BrowserType.LaunchOptions().setHeadless(true)).use { browser ->
+                browser.newContext(contextOptions()).use { context ->
                     val page = context.newPage()
                     signIn(page, email, password)
                     assertLightTheme(page)
-                    val taken = Shots(page).captureAll()
-                    println("siteShots: wrote ${taken.size} PNGs to ${outDir.toAbsolutePath()}")
-                    taken.forEach { println("  $it") }
+                    block(page)
                 }
             }
         }
-    }
+
+    /** Fixed viewport at scale 1, light, reduced motion — the determinism contract, in one place. */
+    private fun contextOptions(): Browser.NewContextOptions =
+        Browser
+            .NewContextOptions()
+            .setViewportSize(VIEWPORT_W, VIEWPORT_H)
+            .setDeviceScaleFactor(1.0)
+            .setColorScheme(ColorScheme.LIGHT)
+            .setReducedMotion(ReducedMotion.REDUCE)
 
     private fun prop(
         key: String,
@@ -135,7 +147,9 @@ object SiteShots {
     }
 
     /** Every capture goes through here, so no shot can skip the determinism steps. */
-    internal class Shots(private val page: Page) {
+    internal class Shots(
+        private val page: Page,
+    ) {
         private val written = mutableListOf<String>()
 
         fun captureAll(): List<String> {
@@ -236,9 +250,19 @@ object SiteShots {
                 page.locator("td:has-text('$SECOND_WORKSPACE')").first().waitFor()
             }
             check(page.locator("#workspace-switcher").count() == 1) { "no workspace switcher on the page" }
-            check(page.locator("table").first().locator("tbody tr").count() >= 2) {
+            check(
+                page
+                    .locator("table")
+                    .first()
+                    .locator("tbody tr")
+                    .count() >= 2,
+            ) {
                 "the workspaces shot needs two workspaces; the screen shows " +
-                    page.locator("table").first().locator("tbody tr").count()
+                    page
+                        .locator("table")
+                        .first()
+                        .locator("tbody tr")
+                        .count()
             }
             shoot("workspaces.png")
         }
@@ -258,7 +282,9 @@ object SiteShots {
             selectNodeOnCanvas(0)
             // The resolved SQL is fetched server-side; the spinner leaving is the release signal.
             page.locator("#pe-node-sql-spinner").waitFor(
-                com.microsoft.playwright.Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN),
+                com.microsoft.playwright.Locator
+                    .WaitForOptions()
+                    .setState(WaitForSelectorState.HIDDEN),
             )
             waitFor("#pe-node-sql")
             shoot("node-inspector.png")
@@ -284,7 +310,9 @@ object SiteShots {
             // of the flow, not of this state.
             page.locator("button:has-text('Dismiss')").first().click()
             page.locator("button:has-text('Dismiss')").first().waitFor(
-                com.microsoft.playwright.Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN),
+                com.microsoft.playwright.Locator
+                    .WaitForOptions()
+                    .setState(WaitForSelectorState.HIDDEN),
             )
             // The chain is the point of the shot (dag-executor §8.4) — open every collapsed level.
             page.locator(".pe-error-exception details").all().forEach { it.evaluate("e => e.open = true") }
@@ -301,10 +329,22 @@ object SiteShots {
         private fun promotion() {
             page.navigate("$baseUrl/promotion")
             waitFor("body")
-            // No configured target renders the "names the two config keys" state (ui-screens
-            // §4.17) — a truthful screen, but not the one the shot list asks for.
-            if (page.locator("text=/promotion.target|not configured|No target/i").count() > 0) {
-                println("  SKIP promotion.png — this deployment has no promotion target configured")
+            // Three states are truthful but are NOT the one the shot list asks for: no target
+            // configured, target unreachable, and target refusing (ui-screens §4.17). Skip
+            // loudly on any of them — photographing an error page and shipping it as "here is
+            // promotion" is the mocked visual this whole task exists to avoid. The shot needs a
+            // live receiver; DEVELOPMENT.md §9.0 says how to run one.
+            val blocked =
+                page.locator("text=/target_unreachable|target_is_authoring|not configured|No target/i")
+            if (blocked.count() > 0) {
+                val why =
+                    blocked
+                        .first()
+                        .innerText()
+                        .take(80)
+                        .replace("\n", " ")
+                println("  SKIP promotion.png — the promotion target is not usable right now: $why")
+                println("         (start a receiver — deployment.md §6.3A — and re-run for this shot)")
                 return
             }
             waitFor(".ds-table, .ds-empty")
@@ -319,7 +359,9 @@ object SiteShots {
          * nobody looks unless the images are produced for them.
          */
         private fun sitePageReview() {
-            val dir = java.nio.file.Paths.get(prop("shots.review", "build/site-review"))
+            val dir =
+                java.nio.file.Paths
+                    .get(prop("shots.review", "build/site-review"))
             Files.createDirectories(dir)
             listOf("site-1440.png" to 1440, "site-390.png" to 390).forEach { (file, width) ->
                 page.setViewportSize(width, VIEWPORT_H)
@@ -332,7 +374,8 @@ object SiteShots {
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
                 settle()
                 page.screenshot(
-                    Page.ScreenshotOptions()
+                    Page
+                        .ScreenshotOptions()
                         .setPath(dir.resolve(file))
                         .setFullPage(true)
                         .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
@@ -364,7 +407,9 @@ object SiteShots {
             // The terminal state, not a timeout: the Execute button re-enables when the stream
             // ends (x-bind:disabled="isExecuting").
             page.locator("button:has-text('Execute'):not([disabled])").waitFor(
-                com.microsoft.playwright.Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS),
+                com.microsoft.playwright.Locator
+                    .WaitForOptions()
+                    .setTimeout(EXECUTION_TIMEOUT_MS),
             )
         }
 
@@ -433,13 +478,15 @@ object SiteShots {
         }
 
         private fun dismissSecretReveal() {
-            page.locator(".ds-modal-close, button:has-text('Done'), button:has-text('Close')")
+            page
+                .locator(".ds-modal-close, button:has-text('Done'), button:has-text('Close')")
                 .all()
                 .filter { it.isVisible }
                 .forEach { it.click() }
         }
 
-        private fun waitFor(selector: String): ElementHandle? = page.waitForSelector(selector, Page.WaitForSelectorOptions().setTimeout(WAIT_MS))
+        private fun waitFor(selector: String): ElementHandle? =
+            page.waitForSelector(selector, Page.WaitForSelectorOptions().setTimeout(WAIT_MS))
 
         /**
          * Everything that must be true before the shutter: fonts resolved (a fallback face
@@ -459,7 +506,8 @@ object SiteShots {
             settle()
             val target = outDir.resolve(file)
             page.screenshot(
-                Page.ScreenshotOptions()
+                Page
+                    .ScreenshotOptions()
                     .setPath(target)
                     .setClip(0.0, 0.0, VIEWPORT_W.toDouble(), VIEWPORT_H.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)

@@ -5,11 +5,11 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.springframework.http.HttpHeaders
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.springframework.ui.ExtendedModelMap
 import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
@@ -107,8 +107,13 @@ class SiteRenderTest {
 
         val uncited =
             cards
-                .filter { card -> CLAIM.find(card)?.range?.first?.let { it < card.indexOf("<h3") } != true }
-                .map { card -> HEADING.find(card)?.groupValues?.get(1) ?: card.take(120) }
+                .filter { card ->
+                    CLAIM
+                        .find(card)
+                        ?.range
+                        ?.first
+                        ?.let { it < card.indexOf("<h3") } != true
+                }.map { card -> HEADING.find(card)?.groupValues?.get(1) ?: card.take(120) }
         uncited shouldBe emptyList()
 
         val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
@@ -168,6 +173,5 @@ class SiteRenderTest {
         val CLAIM_COMMENT = Regex("""<!--\s*claim:.*?-->""", RegexOption.DOT_MATCHES_ALL)
         val DOC_PATH = Regex("""docs/[A-Za-z0-9._/-]+\.md""")
         val HEADING = Regex("""<h3>(.*?)</h3>""", RegexOption.DOT_MATCHES_ALL)
-
     }
 }

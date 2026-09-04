@@ -32,7 +32,7 @@ tasks.register<JavaExec>("siteShots") {
     group = "documentation"
     description = "Captures the marketing site's screenshots from a running demo deployment (070 §C)."
     dependsOn("testClasses")
-    mainClass.set("co.datapipelines.browser.SiteShots")
+    mainClass.set("co.datapipelines.browser.SiteShotsMain")
     classpath = sourceSets["test"].runtimeClasspath
     // The default output directory is repo-relative; a JavaExec's working directory is the
     // SUBPROJECT, so without this the shots land in tests/browser-tests/modules/web/... and
