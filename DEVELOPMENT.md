@@ -441,6 +441,44 @@ Notes for agent users:
 
 Integration tests use **Testcontainers** to spin up real Postgres, Redis, and source databases (PG, MySQL, MSSQL) in Docker containers. Docker must be running.
 
+### 9.0 The browser suite and the screenshot driver
+
+Both live in `tests/browser-tests` and both are **deliberately outside `build`/`check`**: they
+download a chromium binary on first use and launch a real browser.
+
+```bash
+./gradlew browserTest      # the Playwright golden-path suite (module-structure §5.12)
+```
+
+```bash
+# The marketing site's screenshots, produced by a script rather than by hand (070 §C).
+./app.sh --start --demo-nyc                      # the deployment being photographed
+./gradlew siteShots -PshotsUrl=http://localhost:8080 \
+                    -PshotsEmail=you@example.com -PshotsPassword=…
+```
+
+`siteShots` drives a **running demo deployment** and overwrites the PNGs under
+`modules/web/src/main/resources/static/site/img/`, which the marketing page serves. It is the
+sibling of `websiteExport` (docs/deployment.md §6.7 — the S3 cold fallback that renders the
+same page to static HTML): one produces the page, the other produces its pictures.
+
+Why a script and not ten hand-taken images: the editor's layout moves (059 reshaped the graph
+into cards, 065 re-homes the dock), and every time it moves, every screenshot on the page
+becomes a picture of a product that no longer exists. **Re-run this after any UI round** and
+the page catches up. The page's standing rule is that nothing a reader could mistake for a
+screenshot may be illustrated, composited or retouched.
+
+| Property | Value |
+|---|---|
+| Options | `-PshotsUrl` `-PshotsEmail` `-PshotsPassword` (required), `-PshotsFailingPipeline` (the failure shot), `-PshotsOut`, `-PshotsReview` |
+| Account | Must have signed in once (its personal workspace carries the seeded examples) and must not still owe a forced password change — the driver fails loudly rather than photographing the change-password form |
+| Output | Ten PNGs at 1440×900, plus two full-page review captures (1440 and 390) under `build/site-review/` |
+| Determinism | Fixed viewport at scale 1, `prefers-reduced-motion`, an injected stylesheet zeroing animations and carets, `document.fonts.ready` awaited, toasts removed, and clocks blanked — timestamps, relative ages, correlation ids and result TTLs |
+| Not blanked | **Node run times.** "Run time and rows on each card" is content the page asks for; a card reading `000 ms` would be a retouched screenshot of a product that never ran |
+| Reproducibility | 8 of the 10 are byte-identical across consecutive runs. `graph-cards.png` differs by its node run times, and `executions.png` by the rows the run itself just added — both are the capture photographing state it also creates |
+
+If a screen renders broken, it is **reported, not photographed** — and not edited afterwards.
+
 ### 9.1 One container per module, not per suite
 
 Each module's integration suites share ONE container per engine for the whole test JVM (a `SharedPostgres` / `SharedRedis` / `SharedE2e` singleton in the module's test sources). The container starts on first touch, is reset to an empty database, and — in the domain modules — the shipped migrations are applied once; `app` and the E2E module let the first Spring context's Flyway do it, exactly as production boots.
