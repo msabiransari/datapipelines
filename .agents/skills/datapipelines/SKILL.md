@@ -283,6 +283,20 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
 12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
     `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
     `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
+13. **Never put a `:bind` parameter inside a GROUP BY expression in H2 (tempdb).**
+    H2 fails to match the GROUP BY expression to the identical SELECT expression when it
+    contains a parameter marker — `Column "w.prcp_mm" must be in the GROUP BY list`
+    (SQLState 90016), a lie that sends you chasing the wrong fix. Compute the classified
+    value in a derived table (`FROM (SELECT CASE ... :threshold ... END AS weather ...) x`)
+    and `GROUP BY x.weather` — a plain column always matches. Measured on H2 2.3.232
+    (2026-09-04, congestion/tip pipelines).
+14. **Never divide DECIMAL by DECIMAL in H2 (tempdb) — cast to DOUBLE first.**
+    H2's DECIMAL arithmetic collapses result scale (a `DECIMAL(·,2)/DECIMAL(·,0)` division
+    can come back scale-0): `SUM(miles)/SUM(seconds)*3600` returned **0 mph** where the
+    true answer was ~12, and `100.0 * tip / fare` rounded to one decimal. Cast every
+    ratio operand: `CAST(SUM(x) AS DOUBLE) / NULLIF(CAST(SUM(y) AS DOUBLE), 0)`.
+    Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
+    where DOUBLE gave the correct 2456.81 (2026-09-04, congestion/tip/OD pipelines).
 
 ## REST fallback (when the client has no MCP transport)
 

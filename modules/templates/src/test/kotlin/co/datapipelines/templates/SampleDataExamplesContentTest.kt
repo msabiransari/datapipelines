@@ -57,21 +57,30 @@ class SampleDataExamplesContentTest {
 
     @Test
     fun `every shipped template and pipeline passes the app's own save-time validation`() {
-        val doc = readExamples()
+        val docs = EXAMPLES_PATHS.map(::readExamples)
 
         // Non-vacuity: a file with no templates or no pipelines would make every check below
         // pass by having nothing to check — the failure verify.sh step 5 alone could never see.
-        doc.path("templates").toList().shouldNotBeEmpty()
-        doc.path("pipelines").toList().shouldNotBeEmpty()
+        docs.forEach { doc ->
+            doc.path("templates").toList().shouldNotBeEmpty()
+            doc.path("pipelines").toList().shouldNotBeEmpty()
+        }
 
-        val problems = validateExamples(doc)
+        // Cross-family identity collisions would fail the real seeding (the two files are
+        // imported into the SAME workspace), so the shipped files must be disjoint.
+        val templateIds = docs.flatMap { doc -> doc.path("templates").map { it.path("id").asText() } }
+        val pipelineNames = docs.flatMap { doc -> doc.path("pipelines").map { it.path("name").asText() } }
+        templateIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.shouldBeEmpty()
+        pipelineNames.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.shouldBeEmpty()
+
+        val problems = docs.flatMap { validateExamples(it) }
 
         problems.shouldBeEmpty()
     }
 
     @Test
     fun `falsification - a body interpolating a declared parameter is refused with parameter_interpolated`() {
-        val doc = readExamples()
+        val doc = readExamples(EXAMPLES_PATHS[0])
         val monthly =
             requireNotNull(
                 doc.path("templates").firstOrNull { it.path("id").asText() == POISONED_TEMPLATE_ID },
@@ -88,8 +97,8 @@ class SampleDataExamplesContentTest {
         problems.joinToString("\n") shouldContain PipelineErrorCodes.Template.PARAMETER_INTERPOLATED
     }
 
-    /** Parses the shipped file; a malformed file is this suite's failure, not a skip. */
-    private fun readExamples(): JsonNode = mapper.readTree(TemplateFixtures.repoFile(EXAMPLES_PATH).readText())
+    /** Parses a shipped file; a malformed file is this suite's failure, not a skip. */
+    private fun readExamples(path: String): JsonNode = mapper.readTree(TemplateFixtures.repoFile(path).readText())
 
     /**
      * The seeder's sequence over [doc], with every failure collected (the validators are
@@ -178,10 +187,11 @@ class SampleDataExamplesContentTest {
         }
 
     /**
-     * The demo's datasource set, from the file the demo profile actually mounts — not a
-     * hand-copied list. A line scan over the flat per-entry fields; a yml whose shape stops
-     * parsing fails LOUD here (empty registry ⇒ every example pipeline fails with
-     * unknown_datasource), which is the right direction for a drift pin to fail.
+     * The demo's datasource set, from the files the demo profile actually mounts — not a
+     * hand-copied list (one file per sample-data family, both parsed into one registry:
+     * a deployment may enable both). A line scan over the flat per-entry fields; a yml
+     * whose shape stops parsing fails LOUD here (empty registry ⇒ every example pipeline
+     * fails with unknown_datasource), which is the right direction for a drift pin to fail.
      */
     private fun demoDatasources(): DatasourceRegistry {
         val facts = LinkedHashMap<String, DatasourceFacts>()
@@ -193,7 +203,7 @@ class SampleDataExamplesContentTest {
             val entryName = name ?: return
             val entryDialect = dialect
             if (entryDialect == null) {
-                error("datasource '$entryName' in $BOOTSTRAP_DATASOURCES_PATH declares no dialect — cannot model the demo environment")
+                error("datasource '$entryName' in the bootstrap datasources files declares no dialect — cannot model the demo environment")
             }
             facts[entryName] = DatasourceFacts(Dialect.fromWire(entryDialect), readonly == "true")
             name = null
@@ -201,27 +211,38 @@ class SampleDataExamplesContentTest {
             readonly = null
         }
 
-        TemplateFixtures
-            .repoFile(BOOTSTRAP_DATASOURCES_PATH)
-            .readText()
-            .lineSequence()
-            .filterNot { it.trimStart().startsWith("#") }
-            .forEach { line ->
-                NAME_LINE.find(line)?.let {
-                    flush()
-                    name = it.groupValues[1]
+        BOOTSTRAP_PATHS.forEach { path ->
+            TemplateFixtures
+                .repoFile(path)
+                .readText()
+                .lineSequence()
+                .filterNot { it.trimStart().startsWith("#") }
+                .forEach { line ->
+                    NAME_LINE.find(line)?.let {
+                        flush()
+                        name = it.groupValues[1]
+                    }
+                    DIALECT_LINE.find(line)?.let { dialect = it.groupValues[1] }
+                    READONLY_LINE.find(line)?.let { readonly = it.groupValues[1] }
                 }
-                DIALECT_LINE.find(line)?.let { dialect = it.groupValues[1] }
-                READONLY_LINE.find(line)?.let { readonly = it.groupValues[1] }
-            }
-        flush()
-        check(facts.isNotEmpty()) { "no datasources parsed from $BOOTSTRAP_DATASOURCES_PATH — the demo model is empty" }
+            flush()
+        }
+        check(facts.isNotEmpty()) { "no datasources parsed from $BOOTSTRAP_PATHS — the demo model is empty" }
         return DatasourceRegistry { facts[it] }
     }
 
     private companion object {
-        private const val EXAMPLES_PATH = "scripts/sample-data/content/examples.json"
-        private const val BOOTSTRAP_DATASOURCES_PATH = "deploy/sample-data/bootstrap-datasources.yml"
+        /** One examples file per sample-data family — both ship and both must validate. */
+        private val EXAMPLES_PATHS = listOf(
+            "scripts/sample-data/content/examples.json",
+            "scripts/sample-data-trade/content/examples.json",
+        )
+
+        /** One bootstrap datasources file per family; the app accepts the comma list. */
+        private val BOOTSTRAP_PATHS = listOf(
+            "deploy/sample-data/bootstrap-datasources-nyc.yml",
+            "deploy/sample-data/bootstrap-datasources-census.yml",
+        )
 
         /** The template the falsification poisons — referenced by a pipeline that declares the parameter. */
         private const val POISONED_TEMPLATE_ID = "sample_trips_monthly.sql"

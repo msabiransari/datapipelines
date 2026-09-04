@@ -4,11 +4,14 @@
 # one of them against the manifest, and restores them into this deployment's
 # engines.
 #
-#   load.sh <base-url> <version> [--engines postgres,sqlite|mysql]
+#   load.sh <base-url> <version> [--engines postgres,sqlite|mysql] [--family nyc|trade]
 #
 #   base-url   the artifact root, e.g. https://<bucket>.s3.amazonaws.com/sample-data/mobility
 #   version    the immutable version directory under it, e.g. v1
 #   --engines  which engines this invocation owns (default: all it can reach)
+#   --family   which sample-data family the artifacts belong to: nyc (mobility,
+#              default) or trade. Selects the file-artifact list, the example
+#              file's placed name and the MySQL database/dump names.
 #
 # The compose `demo` profile runs it twice, in two one-shot services, because no
 # single pinned image carries both a Postgres and a MySQL client: `sample-data`
@@ -56,13 +59,21 @@ VERSION="${2:-${SAMPLE_VERSION:-}}"
 shift 2 2>/dev/null || true
 
 ENGINES=""
+FAMILY="${SAMPLE_FAMILY:-nyc}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --engines) ENGINES="$2"; shift 2 ;;
     --engines=*) ENGINES="${1#--engines=}"; shift ;;
+    --family) FAMILY="$2"; shift 2 ;;
+    --family=*) FAMILY="${1#--family=}"; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
+
+case "$FAMILY" in
+  nyc|trade) ;;
+  *) die "unknown family '$FAMILY' — the sample-data families are nyc (mobility) and trade" ;;
+esac
 
 # Where the downloaded artifacts and the app-visible files live. On the compose
 # demo profile this is a named volume shared by both loader services and mounted
@@ -180,7 +191,12 @@ step "manifest $BASE_URL/$VERSION/manifest.json"
 mkdir -p "$WORK"
 fetch "$BASE_URL/$VERSION/manifest.json" "$WORK/manifest.json"
 
-manifest_version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WORK/manifest.json" | head -1)
+# The exact "version" KEY, not a substring match: artifact_version and
+# schema_version also contain the word "version", and an accidental match
+# there would bless the wrong directory. [^a-zA-Z_] binds the key name on
+# the left (the key's own closing quote is part of the pattern) so only the
+# bare key matches.
+manifest_version=$(sed -n 's/.*[^a-zA-Z_]version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WORK/manifest.json" | head -1)
 [ "$manifest_version" = "$VERSION" ] \
   || die "manifest at $BASE_URL/$VERSION/ declares version '$manifest_version', not '$VERSION'.
   Version directories are immutable (design §4); a mismatch means the wrong
@@ -254,6 +270,7 @@ log "all $count artifact(s) verified"
 # --- 3: engines -------------------------------------------------------------
 
 if wants postgres && require_client postgres psql; then
+  [ "$FAMILY" = nyc ] || die "family 'trade' has no Postgres artifact — a trade loader must not ask for --engines postgres"
   step "postgres"
   : "${PGHOST:?PGHOST must name the Postgres host}"
   : "${PGUSER:?PGUSER must name a superuser able to CREATE DATABASE and CREATE ROLE}"
@@ -329,11 +346,14 @@ EOSQL
 fi
 
 if wants mysql && require_client mysql mysql; then
-  step "mysql"
+  step "mysql ($FAMILY)"
   : "${MYSQL_HOST:?MYSQL_HOST must name the MySQL host}"
   : "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set — the loader creates a database and a role}"
   : "${SAMPLE_MYSQL_PASSWORD:?SAMPLE_MYSQL_PASSWORD must be set — it is the password of the demo login}"
-  SAMPLE_MYSQL_DB="${SAMPLE_MYSQL_DB:-dp_sample_weather}"
+  case "$FAMILY" in
+    nyc)   SAMPLE_MYSQL_DB="${SAMPLE_MYSQL_DB:-dp_sample_weather}"; MYSQL_DUMP="mysql-weather.sql.gz" ;;
+    trade) SAMPLE_MYSQL_DB="${SAMPLE_MYSQL_DB:-dp_sample_trade}";   MYSQL_DUMP="mysql-trade.sql.gz" ;;
+  esac
   require_sql_identifier SAMPLE_MYSQL_DB "$SAMPLE_MYSQL_DB"
   LOADED_ANY=1
 
@@ -348,7 +368,7 @@ if wants mysql && require_client mysql mysql; then
   else
     log "  restoring $SAMPLE_MYSQL_DB"
     # The dump carries CREATE DATABASE (mysqldump --databases), so no createdb step.
-    gzip -dc "$WORK/mysql-weather.sql.gz" | my
+    gzip -dc "$WORK/$MYSQL_DUMP" | my
 
     log "  creating SELECT-only login $DEMO_USER"
     # 045 §A: MySQL has no dollar-quoting, so the password literal is escaped
@@ -382,36 +402,56 @@ EOSQL
 fi
 
 if wants sqlite; then
-  step "sqlite + app-visible files"
+  step "file artifacts ($FAMILY)"
   LOADED_ANY=1
-  # No server, no login: the file is mounted read-only into the app container and
-  # the datasource sets the driver's read-only open mode as well
-  # (datasources.md §8A.4). "Loading" is placing the verified file.
-  #
+  # No server, no login: the files are mounted read-only into the app container
+  # and the datasources set the driver's read-only open mode as well
+  # (datasources.md §8A.4). "Loading" is placing the verified file. The
+  # families ship DIFFERENT files under per-family placed names, because the
+  # app's bootstrap keys are comma-separated lists and both families may be
+  # active at once — examples-nyc.json and examples-trade.json coexist.
+  case "$FAMILY" in
+    nyc)
+      FILES="nyc_reference.db examples.json"
+      EXAMPLES_AS="examples-nyc.json"
+      BOOTSTRAP_SRC="bootstrap-datasources-nyc.yml"
+      ;;
+    trade)
+      FILES="us_trade.duckdb crypto_market.db examples.json"
+      EXAMPLES_AS="examples-trade.json"
+      BOOTSTRAP_SRC="bootstrap-datasources-census.yml"
+      ;;
+  esac
+
   # A marker table is meaningless for a file artifact — the file's SHA-256 IS the
   # marker, and it was verified above. Copy only when the destination differs, so
   # a re-run of an unchanged version is a no-op the app never notices.
-  for f in nyc_reference.db examples.json; do
-    if [ ! -f "$SAMPLE_DIR/$f" ] || [ "$(sha_of "$SAMPLE_DIR/$f")" != "$(sha_of "$WORK/$f")" ]; then
-      cp "$WORK/$f" "$SAMPLE_DIR/$f.part"
-      mv "$SAMPLE_DIR/$f.part" "$SAMPLE_DIR/$f"
-      log "  placed $SAMPLE_DIR/$f"
+  PLACED=""
+  for f in $FILES; do
+    dest="$SAMPLE_DIR/$f"
+    [ "$f" = examples.json ] && dest="$SAMPLE_DIR/$EXAMPLES_AS"
+    if [ ! -f "$dest" ] || [ "$(sha_of "$dest")" != "$(sha_of "$WORK/$f")" ]; then
+      cp "$WORK/$f" "$dest.part"
+      mv "$dest.part" "$dest"
+      log "  placed $dest"
     else
-      log "  SKIP — $SAMPLE_DIR/$f already matches the verified artifact"
+      log "  SKIP — $dest already matches the verified artifact"
     fi
+    PLACED="$PLACED $dest"
   done
-  chmod 0444 "$SAMPLE_DIR/nyc_reference.db" "$SAMPLE_DIR/examples.json"
+  # shellcheck disable=SC2086
+  chmod 0444 $PLACED
 
   # The bootstrap datasources file is REPO content, not a published artifact: it
   # names this deployment's hosts and its credential placeholders, which are
   # deployment facts, not dataset facts. It is copied onto the same volume so the
   # app needs exactly ONE mount — adding a second bind mount to the app service
   # would enlarge the non-demo config for a file the non-demo path never reads.
-  if [ -f "$SCRIPT_DIR/bootstrap-datasources.yml" ]; then
-    cp "$SCRIPT_DIR/bootstrap-datasources.yml" "$SAMPLE_DIR/bootstrap-datasources.yml.part"
-    mv "$SAMPLE_DIR/bootstrap-datasources.yml.part" "$SAMPLE_DIR/bootstrap-datasources.yml"
-    chmod 0444 "$SAMPLE_DIR/bootstrap-datasources.yml"
-    log "  placed $SAMPLE_DIR/bootstrap-datasources.yml"
+  if [ -f "$SCRIPT_DIR/$BOOTSTRAP_SRC" ]; then
+    cp "$SCRIPT_DIR/$BOOTSTRAP_SRC" "$SAMPLE_DIR/$BOOTSTRAP_SRC.part"
+    mv "$SAMPLE_DIR/$BOOTSTRAP_SRC.part" "$SAMPLE_DIR/$BOOTSTRAP_SRC"
+    chmod 0444 "$SAMPLE_DIR/$BOOTSTRAP_SRC"
+    log "  placed $SAMPLE_DIR/$BOOTSTRAP_SRC"
   fi
 fi
 

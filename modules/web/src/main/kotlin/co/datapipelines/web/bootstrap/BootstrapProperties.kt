@@ -14,19 +14,32 @@ import java.nio.file.Path
  * Neither key is a URL. The app never fetches an artifact at runtime (sample-data design D5):
  * downloading and verifying artifacts is a deployment step, and by the time the app reads these
  * files they are already on disk.
+ *
+ * **Both values are comma-separated LISTS of paths** (one file per sample-data family; the demo
+ * profiles compose the list from the active families). A single value with no comma is the
+ * one-file shape every pre-family deployment shipped — the list semantics are backward
+ * compatible by construction. Empty entries (a leading comma when a family is off, or an
+ * entry of whitespace) are dropped, so an env var built by shell conditional expansion never
+ * turns the feature on by accident.
  */
 @ConfigurationProperties(prefix = "datapipelines.bootstrap")
 data class BootstrapProperties(
-    /** YAML file of datasource definitions to register create-if-absent (datasources.md §8A). */
+    /** YAML file(s) of datasource definitions to register create-if-absent (datasources.md §8A). */
     val datasourcesFile: String? = null,
-    /** JSON file of example templates + pipelines to seed into personal workspaces (D9). */
+    /** JSON file(s) of example templates + pipelines to seed into personal workspaces (D9). */
     val examplesFile: String? = null,
 ) {
-    /** [datasourcesFile] as a path, or null when the feature is off. */
-    fun datasourcesPath(): Path? = toPath(datasourcesFile)
+    /** Every configured datasources file, in declared order; empty list when the feature is off. */
+    fun datasourcesPaths(): List<Path> = toPaths(datasourcesFile)
 
-    /** [examplesFile] as a path, or null when the feature is off. */
-    fun examplesPath(): Path? = toPath(examplesFile)
+    /** Every configured examples file, in declared order; empty list when the feature is off. */
+    fun examplesPaths(): List<Path> = toPaths(examplesFile)
 
-    private fun toPath(raw: String?): Path? = raw?.trim()?.takeIf { it.isNotEmpty() }?.let(Path::of)
+    private fun toPaths(raw: String?): List<Path> =
+        raw
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.map { Path.of(it) }
+            .orEmpty()
 }

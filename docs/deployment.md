@@ -608,56 +608,66 @@ Format and further provider examples: [Auth §5.1](auth.md#51-provider-configura
 
 ## Appendix B: Demo Quickstart — the Published Sample Data
 
-The sample data is a **published, versioned artifact set**, not something the app
-downloads: loading it is a deployment step (sample-data design D5). Any
-deployment that pulls the same version gets the same databases, byte for byte in
-content. The build scripts that produce it live at
-[`scripts/sample-data/`](../scripts/sample-data/README.md); everything below is
-the consuming side.
+The sample data is **published, versioned artifact sets** (one per family), not
+something the app downloads: loading it is a deployment step (sample-data design
+D5). Any deployment that pulls the same version gets the same databases, byte for
+byte in content. The build scripts that produce them live at
+[`scripts/sample-data/`](../scripts/sample-data/README.md) (nyc family) and
+[`scripts/sample-data-trade/`](../scripts/sample-data-trade/README.md) (trade
+family); everything below is the consuming side.
 
-What you get: NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus
-daily and monthly rollups), NOAA weather for five NYC-area stations on MySQL, and
-TLC zones / rate codes / payment types / a holiday calendar on SQLite —
-registered as three `global` + `readonly` datasources, with two cross-datasource
-example pipelines seeded into every new personal workspace.
+Two independent families, each behind its own compose profile and app.sh flag —
+an engineer spins up exactly the data they need:
+
+| Family | Flag / profile | What you get |
+|---|---|---|
+| **nyc** (mobility) | `--demo-nyc` / `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
+| **trade** (trade/v1) | `--demo-trade` / `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Binance hourly klines on SQLite — 3 datasources + 3 example pipelines |
+
+Both together is fine — the app's bootstrap keys are comma-separated lists built
+from the active families, and the MySQL service is shared.
 
 ### One command
 
 The published artifacts live at
-`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v2/` (us-east-1;
-`./app.sh --start --demo` defaults to it). For the raw compose path, fill in the
-`SAMPLE_*` block of [`deploy/.env.example`](../deploy/.env.example) — the base
-URL above, `SAMPLE_VERSION=v2`, and the demo login's passwords — then:
+`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v2/` and
+`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v1/` (us-east-1;
+app.sh defaults to these). For the raw compose path, fill in the `SAMPLE_*`
+block of [`deploy/.env.example`](../deploy/.env.example) — the base URLs, the
+versions, the `SAMPLE_*_ON` markers for the families you want, and the demo
+login's passwords — then:
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
-  --profile demo up -d --wait
+  --profile demo-nyc --profile demo-trade up -d --wait
 ```
 
 That is the whole thing. `--wait` returns when the app is healthy, and by then
 the artifacts have been downloaded, every checksum verified, the databases
-restored, the SELECT-only demo login created, and the three datasources
+restored, the SELECT-only demo login created, and the families' datasources
 registered. From a checkout that builds its own image:
 
 ```bash
-./app.sh --start --demo
+./app.sh --start --demo-nyc --demo-trade
 ```
 
-`--demo` wraps the same profile and additionally builds the jar with `-Pmysql`
-(see the driver note below). `./app.sh --stop --demo` and `--status --demo` take
-the same flag, so the demo services are not left running invisibly.
+Either family flag also builds the jar with `-Pmysql` (see the driver note
+below). `./app.sh --stop` and `--status` take the same flags, so the demo
+services are not left running invisibly. The old `--demo` flag is gone
+(2026-09-04, the two-family split): pass the family you actually want.
 
 **MySQL driver.** MySQL Connector/J is GPL with a FOSS exception and is *not* in
 the default build (§3.5, [Datasources §10.2](datasources.md#102-strategy)). The
-`sample-weather` datasource is MYSQL, and bootstrap registration fail-fasts
-startup with `datasource.driver_not_loaded` without it. Build with the driver:
+`sample-weather` and `sample-trade-world` datasources are MYSQL, and bootstrap
+registration fail-fasts startup with `datasource.driver_not_loaded` without it.
+Build with the driver:
 
 ```bash
 ./gradlew -Pmysql :modules:app:bootJar && docker build -t datapipelines:local .
 ```
 
-or drop the jar into `lib/`. `./app.sh --start --demo` does the `-Pmysql` build
-for you.
+or drop the jar into `lib/`. `./app.sh --start --demo-nyc [--demo-trade]` does
+the `-Pmysql` build for you.
 
 ### Point an agent at it — three steps
 
@@ -728,16 +738,16 @@ fetch in the one place that has to be reproducible.
 The loader creates the `dp_demo_ro` login with the passwords from the env files,
 and bootstrap registration is **create-if-absent — it never updates an existing
 datasource row** (§8A). So if you delete an engine's data volume
-(`docker volume rm deploy_mysql-data`) or rotate a `SAMPLE_*` password, the
+(`docker volume rm dp-mysql-data`) or rotate a `SAMPLE_*` password, the
 freshly created login no longer matches the credential the app stored at the
 original bootstrap, and that datasource fails validation in the UI while the
 engine itself is fine. The repair is to re-run registration for the stale entry
 only:
 
 ```bash
-docker exec deploy-postgres-1 sh -c \
+docker exec dp-postgres-1 sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "delete from datasources where name='"'"'sample-weather'"'"';"'
-docker restart deploy-datapipelines-1   # bootstrap re-registers with the current env password
+docker restart dp-datapipelines-1   # bootstrap re-registers with the current env password
 ```
 
 (2026-08-30: hit live — a recreated MySQL volume left `sample-weather` failing
@@ -799,6 +809,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.9 | two-family demo split | **The demo splits into two independent sample-data families** — `demo-nyc` (mobility) and `demo-trade` (trade/v1), each with its own compose profile, loader services, bootstrap datasources file and examples file; the app's bootstrap keys are now comma-separated lists and the seeder runs all templates before any pipelines. app.sh gains `--demo-nyc`/`--demo-trade` (the old `--demo` dies with a hint); the ON markers (`SAMPLE_NYC_ON`/`SAMPLE_TRADE_ON`) compose the active-family lists. The trade family adds the demo's fourth engine (DUCKDB, `sample-trade-us` — driver ships in core, read-only via the probed `properties.jdbc.access_mode: READ_ONLY`, datasources.md §8A.5). Appendix B rewritten for the two flags; the compose project is renamed `deploy`→`dp` (containers/volumes carry the dp- prefix; the metadata-DB volume was migrated, dp-postgres-data). |
 | 2026-09-02 | v1.7 | 051 auth/config sweep | §6.2 gains `datapipelines.auth.trusted-proxies` (R8/T46): behind the LB the login limiter and every audit `source_ip` must resolve the client through the trusted-proxy list — empty default keeps bare deployments on `remoteAddr`, header ignored. §6.7's homepage note updated (T46 closed; no-limiter decision stands on its own grounds). §6.3 documents the compose env contract with its `scripts/compose-env-audit.sh` guard (T32). Appendix B tells the truth about the demo password (T47/T73): on a clean checkout the scaffolded GENERATED password wins over the `demo-admin` seed — `grep DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD deploy/.env`. app.sh's `up --wait` timeout now reports "still starting" and exits 0 when the app container is running (T75; a cold JVM can outrun the HEALTHCHECK window — 243s in the 2026-09-02 rehearsal) |
 | 2026-09-02 | v1.9 | multi-instance round 2 (050) | **§6.2 checklist gains the per-instance-limits row** (R2/M4/M7): `max-concurrent-executions-per-instance` is per instance and N replicas admit N × it — the multiplication stated once, plainly; the Redis row names the datasource pool-invalidation channel. §6.6 heap paragraph rewritten around the per-instance multiplier (the old text read the key as a "cluster-wide ceiling" — false at N > 1, and the exact trap the rename closed); §5.2 deploy-time keys updated to the renamed key. |
 | 2026-09-02 | v1.8 | demo artifact v2 + guards (049) | **Appendix B gains "Publish confirmation & release rehearsal — the drift guards"**: `scripts/sample-data/check-published.sh` (published `examples.json` vs repo vs manifest, 049 C2) is now a named pre-upload / rehearsal step, and the repo copy's semantic validation is pinned in `build` (`SampleDataExamplesContentTest`, 049 C1) — the two guards T70 (published-v1 drift → first-login 500 ×2 days) proved missing. A v2 artifact is staged from unchanged pins with the licence gate re-stamped 2026-09-02; this row's commit is the held version bump — it moved the demo pin (`SAMPLE_VERSION=v2`) and every current-version citation, and merges only after the owner's upload is confirmed live (`check-published.sh v2` against the bucket). |

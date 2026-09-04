@@ -15,13 +15,17 @@
 # at least one authentication method is required — a fully-configured OIDC
 # provider or local accounts (auth.md §5A) — or startup fails (ConfigValidator §7).
 
-# Pinned to the directory-derived default so existing deployments keep their
-# container and volume names (deploy_postgres-data holds the metadata DB —
-# changing the project name would ORPHAN it). The pin exists because Compose
+# Pinned to an explicit project name so every container this stack creates
+# carries the dp- prefix (dp-postgres-1, dp-datapipelines-1, …) — the
+# datapipelines instances are distinguishable at a glance from the other
+# projects on a shared Docker host. The pin also exists because Compose
 # derives the project name from the DIRECTORY: without explicit names, this
 # file and docker-compose.dev.yml form the SAME project and their same-named
 # services replace each other (bit us live, 2026-08-28).
-name: deploy
+# The volumes keep explicit `name:` pins below — a project rename must never
+# orphan them (deploy_postgres-data held the metadata DB across the
+# 2026-09-04 rename to `dp`; it was migrated to dp-postgres-data).
+name: dp
 
 services:
   datapipelines:
@@ -99,8 +103,8 @@ services:
       # effective configuration is byte-for-byte what it was. The demo profile
       # supplies them from deploy/.env, pointing at the read-only sample volume
       # the one-shot loaders populate.
-      DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:-}
-      DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:-}
+      DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}"
+      DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}"
 
       # The full DATAPIPELINES_* pass-through contract (T32). Every such variable the
       # app binds from its environment is passed here with the SAME default
@@ -202,6 +206,12 @@ services:
       sample-data-mysql:
         condition: service_completed_successfully
         required: false
+      sample-data-trade:
+        condition: service_completed_successfully
+        required: false
+      sample-data-trade-mysql:
+        condition: service_completed_successfully
+        required: false
     restart: unless-stopped
 
   postgres:
@@ -235,32 +245,36 @@ services:
 
   # ---------------------------------------------------------------- demo profile
   #
-  # Everything below runs ONLY under `--profile demo` (sample-data design §5/§7).
+  # Everything below runs ONLY under a `demo-*` profile (sample-data design
+  # §5/§7). Two independent sample-data families, each with its own profile —
+  # demo-nyc (mobility) and demo-trade (trade/v1) — so an engineer pays for
+  # exactly the sample data they asked for. Both together is fine: the app's
+  # bootstrap keys are comma-separated lists built by compose from the
+  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers (deploy/.env.demo, scaffolded by
+  # app.sh from the --demo-nyc / --demo-trade flags).
   #
   # WHAT THE NON-DEMO PATH INHERITS, precisely — Compose has no per-profile env,
-  # volume or dependency, so the four additions to `datapipelines` above are
-  # unconditional and each is inert without the profile:
-  #   * two DATAPIPELINES_BOOTSTRAP_* env keys, empty (empty = feature off), and
-  #     the three SAMPLE_* credential keys the bootstrap file names, also empty
-  #     (nothing reads them while the bootstrap keys are empty);
+  # volume or dependency, so the additions to `datapipelines` above are
+  # unconditional and each is inert without a profile:
+  #   * the two DATAPIPELINES_BOOTSTRAP_* env keys, built from the ON markers
+  #     (both empty — feature off — while no marker is set), and the three
+  #     SAMPLE_* credential keys the bootstrap files name, also empty;
   #   * an empty read-only `sample-data` volume mount nothing points at;
-  #   * two `depends_on` entries marked `required: false`, which Compose ignores
-  #     when the target service is not enabled;
+  #   * the four `depends_on` entries marked `required: false`, which Compose
+  #     ignores when the target service is not enabled;
   #   * the `mysql-data` / `sample-data` volume declarations (Compose drops
-  #     `mysql-data` from the rendered config entirely without the profile,
+  #     `mysql-data` from the rendered config entirely without the profiles,
   #     since no enabled service references it).
-  # `docker compose config` without `--profile demo` differs from the pre-change
-  # file by exactly those lines and nothing else.
   #
   #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
-  #     --profile demo up -d --wait
+  #     --profile demo-nyc --profile demo-trade up -d --wait
   #
   # Requires SAMPLE_* in deploy/.env (deploy/.env.example) and, for the MySQL
   # sample, an image built with -Pmysql — Connector/J is not in the default build
   # (datasources.md §10.2). deployment.md Appendix B is the quickstart.
 
   mysql:
-    profiles: [demo]
+    profiles: [demo-nyc, demo-trade]
     image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
     environment:
       MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
@@ -286,10 +300,10 @@ services:
   # both clients, and installing one at container start would be an unpinned
   # package fetch in the one place that has to be reproducible.
   sample-data:
-    profiles: [demo]
+    profiles: [demo-nyc]
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "postgres,sqlite"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "postgres,sqlite", "--family", "nyc"]
     environment:
       # The metadata-DB superuser: the loader creates the dp_sample_trips
       # database and the SELECT-only demo role, so it needs more than the demo
@@ -313,10 +327,10 @@ services:
   # volume before restoring — the checksums are cheap and the alternative is
   # trusting that nothing touched the volume between the two services.
   sample-data-mysql:
-    profiles: [demo]
+    profiles: [demo-nyc]
     image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "mysql"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v1}", "--engines", "mysql", "--family", "nyc"]
     environment:
       MYSQL_HOST: mysql
       MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
@@ -333,9 +347,55 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+
+  # The trade family (trade/v1): two one-shot services mirroring the nyc pair.
+  # No Postgres artifact exists in this family, so the file stage needs no
+  # engine client at all — it downloads, verifies and places us_trade.duckdb,
+  # crypto_market.db and the family examples + bootstrap files. It still runs
+  # on the pinned postgres image for the same reproducibility reason as stage 1
+  # above (that image carries wget + sha256sum; the image must be PINNED, not
+  # picked for its tools).
+  sample-data-trade:
+    profiles: [demo-trade]
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
+    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v1}", "--engines", "sqlite", "--family", "trade"]
+    environment:
+      SAMPLE_DIR: /srv/sample
+    volumes:
+      - ./sample-data:/opt/sample-data:ro
+      - sample-data:/srv/sample
+    restart: "no"
+
+  # The trade MySQL half: restores dp_sample_trade beside dp_sample_weather on
+  # the same server and grants the demo login SELECT on it.
+  sample-data-trade-mysql:
+    profiles: [demo-trade]
+    image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
+    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v1}", "--engines", "mysql", "--family", "trade"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
+      SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
+      SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD}
+      SAMPLE_DIR: /srv/sample
+    volumes:
+      - ./sample-data:/opt/sample-data:ro
+      - sample-data:/srv/sample
+    depends_on:
+      mysql:
+        condition: service_healthy
+      sample-data-trade:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
   postgres-data:
+    name: dp-postgres-data
   # Demo-profile data. Declared unconditionally because a Compose volume cannot
   # carry a profile; unused and empty without it.
   mysql-data:
+    name: dp-mysql-data
   sample-data:
+    name: dp-sample-data

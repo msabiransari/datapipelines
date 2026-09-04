@@ -1,0 +1,185 @@
+{
+  "templates": [
+    {
+      "schema_version": 1,
+      "id": "trade_monthly_window.sql",
+      "engine": "freemarker",
+      "dialect": "DUCKDB",
+      "display_name": "US trade facts, windowed to month grain",
+      "description": "Reads the DuckDB trade artifact (sample-trade-us): one row per flow/month/partner with the windowed HS-6 value sum. Expects STRING parameters named start_month and end_month in YYYY-MM form.",
+      "imports": [],
+      "body": "SELECT\n    t.flow         AS flow,\n    t.period       AS period,\n    t.partner_code AS partner_code,\n    t.partner_name AS partner_name,\n    SUM(t.value_usd) AS value_usd\nFROM trade_monthly t\nWHERE t.period BETWEEN :start_month AND :end_month\nGROUP BY t.flow, t.period, t.partner_code, t.partner_name\nORDER BY t.partner_code, t.period, t.flow",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "sample_trade_balance.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Trade balance by partner (tempdb)",
+      "description": "Runs in tempdb (H2) over stg_trade_monthly: exports, imports and net balance per partner across the staged window, with the largest-surplus and largest-deficit flags. Takes no parameters. Ratios are computed over DOUBLE casts (H2 DECIMAL division collapses scale — staging.md 11.3).",
+      "imports": [],
+      "body": "SELECT\n    x.partner_name                                              AS partner_name,\n    SUM(CASE WHEN x.flow = 'exports' THEN x.value_usd ELSE 0 END) AS exports_usd,\n    SUM(CASE WHEN x.flow = 'imports' THEN x.value_usd ELSE 0 END) AS imports_usd,\n    SUM(CASE WHEN x.flow = 'exports' THEN x.value_usd ELSE -x.value_usd END) AS net_balance_usd,\n    ROUND(CAST(SUM(CASE WHEN x.flow = 'imports' THEN x.value_usd ELSE 0 END) AS DOUBLE) /\n          NULLIF(CAST(SUM(CASE WHEN x.flow = 'exports' THEN x.value_usd ELSE 0 END) AS DOUBLE), 0), 3) AS import_export_ratio\nFROM stg_trade_monthly x\nGROUP BY x.partner_name\nORDER BY CAST(SUM(CASE WHEN x.flow = 'exports' THEN x.value_usd ELSE -x.value_usd END) AS DOUBLE) DESC",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "comtrade_reported.sql",
+      "engine": "freemarker",
+      "dialect": "MYSQL",
+      "display_name": "Partner-reported trade with the USA (Comtrade mirror)",
+      "description": "Reads the MySQL world-trade artifact (sample-trade-world): what each reporter country says it exported to / imported from the USA, annual TOTAL level, plus the reporter name lookup. Takes no parameters (the table is small; window filtering belongs to the caller).",
+      "imports": [],
+      "body": "SELECT\n    c.reporter_code AS reporter_code,\n    r.reporter_name AS reporter_name,\n    c.flow          AS flow,\n    c.period        AS period,\n    c.value_usd     AS value_usd\nFROM comtrade_annual c\nJOIN reporters r ON r.reporter_code = c.reporter_code\nORDER BY c.reporter_code, c.period, c.flow",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "sample_trade_reconciliation.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Mirror-statistics reconciliation (tempdb)",
+      "description": "Runs in tempdb (H2): joins stg_us_reported (DuckDB, US-reported annual trade per partner) to stg_partner_reported (MySQL, partner-reported) on the ISO code and computes the reporting gap. X = what the partner says it exported to the USA, mirrored against US imports; M = what the partner says it imported from the USA, against US exports. Gap percentage is computed over DOUBLE casts (H2 DECIMAL division collapses scale — staging.md 11.3). Takes no parameters.",
+      "imports": [],
+      "body": "SELECT\n    x.partner_name                                                     AS partner_name,\n    x.period                                                          AS period,\n    x.us_imports_from_partner                                         AS us_imports_from_partner,\n    x.partner_exports_to_us                                           AS partner_exports_to_us,\n    x.us_exports_to_partner                                           AS us_exports_to_partner,\n    x.partner_imports_from_us                                         AS partner_imports_from_us,\n    ROUND(CAST(x.partner_exports_to_us AS DOUBLE) /\n          NULLIF(CAST(x.us_imports_from_partner AS DOUBLE), 0) * 100, 1) AS mirror_import_ratio_pct,\n    ROUND(CAST(x.partner_imports_from_us AS DOUBLE) /\n          NULLIF(CAST(x.us_exports_to_partner AS DOUBLE), 0) * 100, 1) AS mirror_export_ratio_pct\nFROM (\n    SELECT\n        iso.partner_name                       AS partner_name,\n        substr(u.period, 1, 4)               AS period,\n        SUM(CASE WHEN u.flow = 'imports' THEN u.value_usd ELSE 0 END) AS us_imports_from_partner,\n        SUM(CASE WHEN m.flow = 'X' THEN m.value_usd END)               AS partner_exports_to_us,\n        SUM(CASE WHEN u.flow = 'exports' THEN u.value_usd ELSE 0 END) AS us_exports_to_partner,\n        SUM(CASE WHEN m.flow = 'M' THEN m.value_usd END)             AS partner_imports_from_us\n    FROM stg_us_reported u\n    JOIN stg_iso iso ON iso.census_code = u.partner_code\n    JOIN stg_partner_reported m ON m.reporter_code = iso.iso_numeric\n        AND m.period = substr(u.period, 1, 4)\n    GROUP BY iso.partner_name, substr(u.period, 1, 4), u.partner_code\n) x\nORDER BY x.partner_name, x.period",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "trade_reference_lookups.sql",
+      "engine": "freemarker",
+      "dialect": "DUCKDB",
+      "display_name": "Census-to-ISO partner crosswalk",
+      "description": "Reads the DuckDB trade artifact (sample-trade-us): the partner_iso_crosswalk table mapping Census partner codes to UN M49 numeric codes (with names), for joining US-reported facts to Comtrade mirror statistics. Takes no parameters.",
+      "imports": [],
+      "body": "SELECT\n    x.census_code  AS census_code,\n    x.iso_numeric  AS iso_numeric,\n    x.partner_name AS partner_name\nFROM partner_iso_crosswalk x\nORDER BY x.census_code",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "crypto_monthly_range.sql",
+      "engine": "freemarker",
+      "dialect": "SQLITE",
+      "display_name": "Monthly market range index",
+      "description": "Reads the SQLite market artifact (sample-market): per symbol and month, the average hourly high-low range as a percentage of close — a volatility proxy computable in portable SQLite (no log/stddev functions required). Expects STRING parameters named start_month and end_month in YYYY-MM form.",
+      "imports": [],
+      "body": "SELECT\n    k.symbol                                    AS symbol,\n    k.month                                     AS month,\n    COUNT(*)                                    AS hours,\n    ROUND(AVG(k.high_price - k.low_price) /\n          NULLIF(AVG(k.close_price), 0) * 100, 3) AS avg_hourly_range_pct\nFROM klines_1h k\nWHERE k.month BETWEEN :start_month AND :end_month\nGROUP BY k.symbol, k.month\nORDER BY k.symbol, k.month",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "trade_hhi.sql",
+      "engine": "freemarker",
+      "dialect": "DUCKDB",
+      "display_name": "HS-chapter concentration (HHI) per partner",
+      "description": "Reads the DuckDB trade artifact (sample-trade-us): Herfindahl-Hirschman concentration of a partner's imports across HS chapters, per year — how diversified that sourcing is. Expects STRING parameters named start_year and end_year in YYYY form.",
+      "imports": [],
+      "body": "WITH chapter_year AS (\n    SELECT\n        t.partner_name                                  AS partner_name,\n        substr(t.period, 1, 4)                         AS yr,\n        c.chapter                                       AS chapter,\n        SUM(t.value_usd)                                AS chapter_value\n    FROM trade_monthly t\n    JOIN hs_chapters c ON c.chapter = substr(t.hs_code, 1, 2)\n    WHERE t.flow = 'imports'\n      AND substr(t.period, 1, 4) BETWEEN :start_year AND :end_year\n    GROUP BY t.partner_name, substr(t.period, 1, 4), c.chapter\n),\nshares AS (\n    SELECT\n        partner_name, yr,\n        chapter_value,\n        chapter_value / NULLIF(SUM(chapter_value) OVER (PARTITION BY partner_name, yr), 0) AS share\n    FROM chapter_year\n)\nSELECT\n    partner_name                          AS partner_name,\n    yr                                    AS yr,\n    COUNT(*)                              AS chapters_sourced,\n    ROUND(SUM(share * share) * 10000, 1)  AS hhi\nFROM shares\nGROUP BY partner_name, yr\nORDER BY hhi DESC",
+      "is_library": false
+    }
+  ],
+  "pipelines": [
+    {
+      "schema_version": 1,
+      "name": "trade_balance_by_partner",
+      "display_name": "Trade balance by partner",
+      "description": "Which partners does the US run its largest surpluses and deficits with? Stages the windowed DuckDB trade facts into tempdb and rolls them up per partner: exports, imports, net balance, import/export ratio. Run as-is for the full 2023-2024 sample window.",
+      "settings": { "tempdb": { "engine": "H2", "config": {} } },
+      "parameters": {
+        "start_month": { "type": "STRING", "required": false, "default": "2023-01", "description": "Inclusive start month, YYYY-MM. The sample covers 2023-01 to 2024-12." },
+        "end_month": { "type": "STRING", "required": false, "default": "2024-12", "description": "Inclusive end month, YYYY-MM. The sample covers 2023-01 to 2024-12." }
+      },
+      "nodes": [
+        {
+          "id": "stage_trade_monthly",
+          "description": "Stage the windowed per-partner monthly trade facts from the DuckDB artifact.",
+          "type": "DQL",
+          "source": "sample-trade-us",
+          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_trade_monthly" },
+          "depends_on": []
+        },
+        {
+          "id": "partner_balance",
+          "description": "Roll up exports vs imports per partner in tempdb.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": { "id": "sample_trade_balance.sql", "version": 1 },
+          "output": { "target": "caller" },
+          "depends_on": ["stage_trade_monthly"]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "trade_reconciliation",
+      "display_name": "Mirror statistics: US-reported vs partner-reported",
+      "description": "Whose numbers are bigger? Joins what the US says it traded with each partner (DuckDB, Census) against what that partner reports trading with the US (MySQL, UN Comtrade) — the classic mirror-statistics gap, in percent. Three engines: DuckDB facts, MySQL mirror, H2 join. Only the five Comtrade reporters reconcile.",
+      "settings": { "tempdb": { "engine": "H2", "config": {} } },
+      "parameters": {
+        "start_month": { "type": "STRING", "required": false, "default": "2023-01", "description": "Inclusive start month, YYYY-MM. The sample covers 2023-01 to 2024-12." },
+        "end_month": { "type": "STRING", "required": false, "default": "2024-12", "description": "Inclusive end month, YYYY-MM. The sample covers 2023-01 to 2024-12." }
+      },
+      "nodes": [
+        {
+          "id": "stage_us_reported",
+          "description": "Stage US-reported annual per-partner trade from the DuckDB artifact.",
+          "type": "DQL",
+          "source": "sample-trade-us",
+          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_us_reported" },
+          "depends_on": []
+        },
+        {
+          "id": "stage_partner_reported",
+          "description": "Stage partner-reported annual trade with the USA from the MySQL mirror artifact.",
+          "type": "DQL",
+          "source": "sample-trade-world",
+          "template": { "id": "comtrade_reported.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_partner_reported" },
+          "depends_on": []
+        },
+        {
+          "id": "stage_reference",
+          "description": "Stage the partner and crosswalk lookups from the DuckDB artifact.",
+          "type": "DQL",
+          "source": "sample-trade-us",
+          "template": { "id": "trade_reference_lookups.sql", "version": 1 },
+          "output": { "target": "tempdb", "table": "stg_iso" },
+          "depends_on": []
+        },
+        {
+          "id": "reconcile",
+          "description": "Join both sides on the ISO code in tempdb and compute the reporting gap.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": { "id": "sample_trade_reconciliation.sql", "version": 1 },
+          "output": { "target": "caller" },
+          "depends_on": ["stage_us_reported", "stage_partner_reported", "stage_reference"]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "crypto_monthly_range",
+      "display_name": "Monthly market range",
+      "description": "How wide do the pinned markets move, month by month? Average hourly high-low range as a share of close for BTC and ETH — a volatility proxy from the SQLite market artifact, single node.",
+      "settings": { "tempdb": { "engine": "H2", "config": {} } },
+      "parameters": {
+        "start_month": { "type": "STRING", "required": false, "default": "2023-01", "description": "Inclusive start month, YYYY-MM. The sample covers 2023-01 to 2024-12." },
+        "end_month": { "type": "STRING", "required": false, "default": "2024-12", "description": "Inclusive end month, YYYY-MM. The sample covers 2023-01 to 2024-12." }
+      },
+      "nodes": [
+        {
+          "id": "monthly_range",
+          "description": "Compute the monthly range index directly on the SQLite artifact.",
+          "type": "DQL",
+          "source": "sample-market",
+          "template": { "id": "crypto_monthly_range.sql", "version": 1 },
+          "output": { "target": "caller" },
+          "depends_on": []
+        }
+      ]
+    }
+  ]
+}

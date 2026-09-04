@@ -194,6 +194,50 @@ class ExampleContentSeederTest {
         failure.shouldContain("error_code=${PipelineErrorCodes.Template.SYNTAX_ERROR}")
     }
 
+    // ---------------------------------------------------------------- F10: family list semantics
+
+    @Test
+    fun `two families seed ALL templates before ANY pipeline, in file order`() {
+        val fileA = tempDir.resolve("examples-nyc.json").also {
+            it.writeText("""{"templates":[{"id":"nyc_t.sql","dialect":"H2","display_name":"N","description":"d","body":"SELECT 1"}],"pipelines":[{"schema_version":1,"name":"nyc_p","display_name":"N","nodes":[]}]}""")
+        }.toString()
+        val fileB = tempDir.resolve("examples-trade.json").also {
+            it.writeText("""{"templates":[{"id":"trade_t.sql","dialect":"DUCKDB","display_name":"T","description":"d","body":"SELECT 2"}],"pipelines":[{"schema_version":1,"name":"trade_p","display_name":"T","nodes":[]}]}""")
+        }.toString()
+
+        val templateBodies = mutableListOf<String>()
+        val pipelineBodies = mutableListOf<String>()
+        every { templates.import(capture(templateBodies), workspaceId, userId) } returns emptyList()
+        every { pipelines.import(capture(pipelineBodies), workspaceId, userId) } returns mockk()
+
+        seeder("$fileA, $fileB").seed(workspaceId, userId)
+
+        templateBodies shouldHaveSize 2
+        mapper.readTree(templateBodies[0]).get("templates")[0].get("id").asText() shouldBe "nyc_t.sql"
+        mapper.readTree(templateBodies[1]).get("templates")[0].get("id").asText() shouldBe "trade_t.sql"
+
+        pipelineBodies shouldHaveSize 2
+        pipelineBodies.map { mapper.readTree(it).get("name").asText() } shouldBe listOf("nyc_p", "trade_p")
+
+        // Both template imports precede BOTH pipeline imports.
+        verify(ordering = io.mockk.Ordering.ORDERED) {
+            templates.import(any(), workspaceId, userId)
+            templates.import(any(), workspaceId, userId)
+            pipelines.import(any(), workspaceId, userId)
+            pipelines.import(any(), workspaceId, userId)
+        }
+    }
+
+    @Test
+    fun `empty entries in the family list are dropped`() {
+        every { templates.import(any(), any(), any()) } returns emptyList()
+
+        seeder(", ${file(examples)} ,").seed(workspaceId, userId)
+
+        verify(exactly = 1) { templates.import(any(), workspaceId, userId) }
+        verify(exactly = 2) { pipelines.import(any(), workspaceId, userId) }
+    }
+
     private fun capturingLogs(block: () -> Unit): List<String> {
         val logger = LoggerFactory.getLogger(ExampleContentSeeder::class.java) as ch.qos.logback.classic.Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
