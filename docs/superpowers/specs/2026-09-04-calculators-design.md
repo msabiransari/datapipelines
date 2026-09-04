@@ -1,6 +1,6 @@
 # Design: Calculators — Configurable Pure Transformations (Context + `CALC` Node)
 
-**Status:** reviewed 2026-09-04 (orchestrator) — see §0; **awaiting the owner's ruling R-CALC**. Full review with reasoning: the private store, `reviews/2026-09-04-calculators-design-review.md`.
+**Status:** RATIFIED 2026-09-04 (owner) — the shape in §0 supersedes §4–§5 and Appendix A's row kinds; implementation prompt 072. Full review with reasoning: the private store, `reviews/2026-09-04-calculators-design-review.md`.
 **Date:** 2026-09-04
 **Scope:** the "calculators" direction — a server-side catalog of configurable,
 pure transformation functions exposed (a) as a pipeline-level block that derives
@@ -20,33 +20,120 @@ the moment it is implemented, mirroring `NodeTypeSpecDriftTest`.
 
 ---
 
-## 0. Review verdict (2026-09-04) — read before the rest
+## 0. Ratified shape (owner rulings, 2026-09-04) — this section is normative; §1–§9 and Appendix A are the draft it was distilled from
 
-**Context calculators: approved in principle.** There is no safe way today to derive a bind
-value from a parameter (`${}` of parameter values is refused by §12.6; SQL does it per
-dialect), so this fills the seam §7.1 step 5 reserves. Build it small: ~20 kinds, layer
-`context`, everything in §3–§4 and §6 as corrected below.
+**R-CALC = (a), with the owner's refinements.** Context calculators only; **no `CALC` row
+engine** (SQL and library templates do row transforms — see §0.7); **MCP-only authoring, no
+editor UI** (R10 stands; the picker is a roadmap item under "UI authoring"). Rejection reasons
+for the row engine are in the private review (`reviews/2026-09-04-calculators-design-review.md`).
 
-**`CALC` node as designed (a JVM row engine, ~60 row kinds incl. window/statistics):
-not approved.** Reasons, each checkable in the tree: (1) it is a second execution engine
-beside SQL, additive-only forever (D4); (2) reuse of row transforms across pipelines is
-what **library templates** already do — `<#macro>` in a versioned, promoted, hash-pinned
-library (templates.md §6); (3) cross-dialect transforms are what **staging** is for — land
-in tempdb, transform in one dialect; (4) §5.3 whole-column kinds materialise a column in the
-app heap (demo staging tables are 2.4M rows); (5) the agent is good at SQL, and the product
-is built around that — an 80-kind JSON catalog is a worse authoring surface, not a better
-one; (6) §7.2's forms are authoring UI, which R10 / pipeline-editor §11.1 defers.
+### 0.1 Org values are configuration — `datapipelines.org.*`
 
-**R-CALC — the owner's ruling.** (a) *recommended:* context calculators only; row transforms
-documented as stage → SQL in tempdb using a shipped `lib/` macro family (quarter, fiscal
-period, percent change, safe divide, slugify); `CALC` deferred with `EXPRESSION`/`HTTP`.
-(b) `CALC` as **SQL generation**: keep the §5.1 shape, but each kind is a per-dialect SQL
-expression template; the executor emits `SELECT *, <expr> AS col FROM input` on the source
-engine through the existing DQL path — window kinds become real window functions, nothing
-streams through the JVM, a kind a dialect lacks is a save-time 400. Phase after (a).
-(c) As designed — not recommended.
+Organisation facts live in `application.yml`, validated at boot like every other key
+(`ConfigValidator`, one new check), documented in configuration.md §7:
 
-Corrections C1–C12 below are applied inline, each marked *(review 2026-09-04)*.
+```yaml
+datapipelines:
+  org:
+    currency:
+      name: ${DATAPIPELINES_ORG_CURRENCY_NAME:Dollar}
+      symbol: ${DATAPIPELINES_ORG_CURRENCY_SYMBOL:$}
+    fiscal-start-date: ${DATAPIPELINES_ORG_FISCAL_START_DATE:01-01}   # MM-DD; month names refused
+    week-start: ${DATAPIPELINES_ORG_WEEK_START:monday}                  # monday | sunday
+    timezone: ${DATAPIPELINES_ORG_TIMEZONE:UTC}                          # IANA id
+```
+
+Restart-to-change is accepted: these change once a decade. A bad value stops the server.
+
+### 0.2 Everything is Context — one namespace, tiered precedence
+
+Every value a node can bind is a typed Context key (`[a-z_][a-z0-9_]*`, §6.1). Sources, lowest
+precedence first:
+
+1. **org config** — yml path minus prefix, dots and dashes → `_`: `org_currency_name`,
+   `org_currency_symbol`, `org_fiscal_start_date` (DATE-like `MM-DD` string typed `STRING`; the
+   calculator kinds parse it), `org_week_start`, `org_timezone`;
+2. **platform keys** — always present: `current_date` (DATE, in `org_timezone`),
+   `current_timestamp` (TIMESTAMP), `execution_id` (STRING);
+3. **pipeline `parameters`** — declaring a key that an org value also provides IS the
+   override, visible in the body;
+4. **execute-time inputs** — for declared parameters only (unchanged);
+5. **calculator outputs** — may shadow org/platform keys; **never** a declared parameter
+   (D6 stays: save-time `calculator_output_collision`).
+
+Binding rule unchanged (§12.6): `:key` yes, `${key}` refused for every tier. Org keys are
+never secrets.
+
+### 0.3 Calculators are NODES — `type: "CALCULATOR"`
+
+```json
+{ "id": "fiscal_q", "type": "CALCULATOR",
+  "kind": "fiscal_quarter",
+  "inputs": { "fiscal_start": "$org_fiscal_start_date", "date": "$current_date" },
+  "context_key": "run_fiscal_quarter",
+  "depends_on": [] }
+```
+
+- New `NodeType.CALCULATOR` (enums.md §2 — `EXPRESSION`/`HTTP` stay reserved). No
+  `template`, `source`, or §4.7 `output` block: the node writes ONE typed value to the Context
+  under `context_key` (deliberately not named `output`).
+- **`$name` is a reference** to a Context key; any other string/number/boolean/array is a
+  literal typed against the kind's input. `"fiscal_start": "09-15"` is a per-pipeline override
+  without touching config.
+- **Sequencing is topology.** A `$ref` to another calculator's `context_key`, and a SQL node
+  binding `:that_key`, are valid only if the referencing node `depends_on` the producer
+  (directly or transitively) — else save-time `calculator_input_unordered`. One writer per
+  `context_key` per pipeline. The draft's pipeline-level `calculators` array (§4) and D5's
+  array order are withdrawn.
+- Runtime: executes at its DAG position, records its value in the run's Context snapshot,
+  reports through SSE/history like any node; failure = the 057 failure record.
+- Purity (D3) unchanged: kinds read the Context and their inputs only. Variadic inputs (C1)
+  use a JSON array.
+
+### 0.4 The catalog — context kinds only (≈20), `modules/calculators`
+
+A new module with **no** dependency on `datasources`, `dag` or `web` (C12; purity by build
+file). Kinds, each `inputs → output`: `quarter_of_year`, `fiscal_year`, `fiscal_quarter`,
+`period_start`, `period_end`, `prior_period`, `date_trunc`, `iso_week`, `iso_year`,
+`day_of_week`, `days_in_month`, `date_diff`, `add_days`, `add_months`, `add_business_days`
+(weekend + holiday list as literal inputs), `date_parse`, `date_format`, `tz_shift`, `round`,
+`percent_change`, `coalesce` (variadic), `if_null`, `map`. Config-free where the draft had
+config: inputs carry it (a kind is a function, not a form). Grammars are contract (C10):
+`DateTimeFormatter` patterns, IANA zones. Drift guard `CalculatorRegistrySpecDriftTest`
+against the catalog doc from day one; additive-only (D4).
+
+### 0.5 Recorded, refused, and visible
+
+- **Snapshot:** `pipeline_executions.parameters_json` persists the FULL resolved Context the
+  nodes saw — org keys, platform keys, parameters, inputs, calculator outputs (C5 generalised).
+- **Promotion:** the receiver's import dry-render refuses a pipeline that binds an `org_*` key
+  the target deployment's yml does not define (`pipeline.import.context_key_missing`); never a
+  silent default in prod.
+- **Agents:** `calculators_list` / `calculators_get` (READ scope) return kinds with typed
+  input/output schemas; `pipelines_get` returns CALCULATOR nodes as authored; `executions_get`
+  shows each calculator node's computed value. `SKILL.md` documents the node, `$` references,
+  the org/platform keys, and that row-level transforms are SQL (library macros), not
+  calculators.
+
+### 0.6 Editor — read-only rendering only (R10)
+
+The graph must render a CALCULATOR node as a card (badge + glyph per the 059 contract,
+`kind → context_key` as its facts line); the inspector shows kind, inputs with resolved
+references, `context_key`, and the computed value after a run. **No picker, no form, no
+editing.** The schema-driven picker (D9) is the first item under UI authoring on the roadmap.
+
+### 0.7 Deferred, by name
+
+- **Row calculators / `CALC` node** — not planned; rows are transformed in SQL on the engine
+  or in tempdb, reused through library templates (templates.md §6).
+- **`output.target = "context"` for DQL nodes** — a scalar query (exactly one row × one column
+  at runtime, else `pipeline.node.scalar_shape_violation`; typed via the type system; one
+  writer per key; topology-ordered like calculators) lifts a value into the Context so
+  `scalar node → calculator → SQL` chains work. Modelled as a fourth output target, not a
+  boolean. Future.
+- **Editor picker / calculator authoring UI** — with UI authoring (R10).
+- **Standard macro library** shipped with the demo (`lib/dates`, `lib/math`) — SQL-side reuse;
+  a sample-data round, not this one.
 
 ---
 
