@@ -74,6 +74,13 @@ class McpRecordingExecutionRunner(
      * [ExecutionStreamLauncher].
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
+    /**
+     * The test seam [ExecutionStreamLauncher] and [SubPipelineExecutionRunner] established:
+     * when set, builds the per-run executor INSTEAD of the production `pipelineExecutor`
+     * assembly — the unit test observes the request the runner hands downstream without
+     * provisioning eighteen real collaborators. Null in production (the default).
+     */
+    private val executorFactory: ((co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor)? = null,
 ) : McpExecutionRunner {
     private val log = LoggerFactory.getLogger(McpRecordingExecutionRunner::class.java)
 
@@ -100,7 +107,9 @@ class McpRecordingExecutionRunner(
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
             )
-        val result = newExecutor(emitter, workspace.id).execute(request.copy(triggeredVia = ExecutionTrigger.MCP))
+        val result =
+            (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspace.id))
+                .execute(request.copy(triggeredVia = ExecutionTrigger.MCP))
         recordResultColumns(result)
         return result
     }
