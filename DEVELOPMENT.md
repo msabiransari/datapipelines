@@ -479,6 +479,39 @@ screenshot may be illustrated, composited or retouched.
 
 If a screen renders broken, it is **reported, not photographed** — and not edited afterwards.
 
+**Reproducing `failure-detail.png`.** No seeded pipeline fails — a demo whose examples break
+would be a bad demo — so the failure shot needs a throwaway pipeline, named with
+`-PshotsFailingPipeline`. Without it the driver prints `SKIP failure-detail.png` and produces
+the other nine. The state is made honestly (nothing is illustrated); against a `--demo-nyc`
+stack it is four steps:
+
+```bash
+# 1. a login that works, so the datasource passes save-time validation
+docker exec -e PGPASSWORD="$METADATA_DB_PASSWORD" <project>-postgres-1 \
+  psql -U datapipelines -d dp_sample_trips -c "
+    CREATE ROLE demo_probe_ro LOGIN PASSWORD 'probe-initial-secret';
+    GRANT CONNECT ON DATABASE dp_sample_trips TO demo_probe_ro;
+    GRANT USAGE ON SCHEMA public TO demo_probe_ro;
+    GRANT SELECT ON trips_daily TO demo_probe_ro;"
+
+# 2. register it (global datasources are admin-gated; the demo posture disables member ones)
+POST /api/v1/datasources  {"name":"probe-trips-readonly","dialect":"POSTGRES","global":true,
+  "jdbc_url":"jdbc:postgresql://postgres:5432/dp_sample_trips",
+  "username":"demo_probe_ro","password":"probe-initial-secret","readonly":true}
+
+# 3. a two-node pipeline: stage the zone lookup (succeeds), then read through the probe
+POST /api/v1/templates   ops/probe/daily_totals.sql   (a SELECT over trips_daily)
+POST /api/v1/pipelines   connectivity_probe
+
+# 4. rotate the password out from under it — ONLY this login breaks
+psql -c "ALTER ROLE demo_probe_ro PASSWORD 'rotated-out-from-under-it';"
+```
+
+The node then fails with the real thing: `pipeline.node.datasource_connection_failed`,
+`FATAL: password authentication failed for user "demo_probe_ro"`, the node's facts, the
+rendered SQL and the driver's own exception chain. None of this is in `examples.json`; it is
+lane-local state and never reaches anyone's demo.
+
 ### 9.1 One container per module, not per suite
 
 Each module's integration suites share ONE container per engine for the whole test JVM (a `SharedPostgres` / `SharedRedis` / `SharedE2e` singleton in the module's test sources). The container starts on first touch, is reset to an empty database, and — in the domain modules — the shipped migrations are applied once; `app` and the E2E module let the first Spring context's Flyway do it, exactly as production boots.
