@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/sample-data-trade/manifest.sh — stage 4 of the trade/v1 build
+# scripts/sample-data-trade/manifest.sh — stage 4 of the trade/v2 build
 # (mirrors ../sample-data/manifest.sh): assemble manifest.json on STDOUT from
 # the artifacts + checksums.tsv + sources.lock params. stdout is the JSON; all
 # progress goes to stderr (house convention — a script's stdout stays usable
@@ -40,7 +40,7 @@ def sha256(path):
 restore_hints = {
     "us_trade.duckdb": "register as a DUCKDB datasource: jdbc:duckdb:<path> (readonly)",
     "mysql-trade.sql.gz": "gunzip < mysql-trade.sql.gz | mysql (creates database dp_sample_trade)",
-    "crypto_market.db": "register as a SQLITE datasource: jdbc:sqlite:<path> (readonly)",
+    "fx_rates.db": "register as a SQLITE datasource: jdbc:sqlite:<path> (readonly)",
     "examples.json": "seed content: templates + example pipelines for new workspaces",
 }
 
@@ -60,7 +60,7 @@ for name in sorted(os.listdir(art_dir)):
     if name not in restore_hints:
         continue
     engine = {"us_trade.duckdb": "DUCKDB", "mysql-trade.sql.gz": "MYSQL",
-              "crypto_market.db": "SQLITE"}.get(name)
+              "fx_rates.db": "SQLITE"}.get(name)
     artifacts.append({"file": name, "engine": engine, "sha256": sha256(p),
                       "bytes": os.path.getsize(p),
                       "restore_hint": restore_hints[name]})
@@ -81,20 +81,25 @@ provenance = [
      "transform": "per partner-month API pulls merged to canonical JSONL; HS-6 rows kept as the aggregate grain; lookups derived from the same pulls",
      "artifact": "us_trade.duckdb",
      "license": "US Government work; Census API terms of service",
+     # A CONDITION of the Census API terms of service, not a courtesy: the
+     # wording is fixed and must travel with the data (verbatim).
+     "notice": "This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.",
      "license_verified": lic},
     {"source": "UN Comtrade preview API (annual TOTAL flows, reporters x USA)",
      "source_url": "https://comtradeapi.un.org/public/v1/preview/",
      "retrieved_at": None,
      "transform": "preview pulls per reporter-year-flow merged to canonical JSONL; values cast to DECIMAL",
      "artifact": "mysql-trade.sql.gz",
-     "license": "UN Comtrade terms of use (preview tier)",
+     "license": "UN Comtrade terms of use (preview tier); the slice is deliberately under the 100,000-record fee-free re-dissemination line",
+     "citation": "Source: UN Comtrade (https://comtradeplus.un.org)",
      "license_verified": lic},
-    {"source": "Binance public market data (spot monthly 1h klines)",
-     "source_url": "https://data.binance.vision/",
+    {"source": "Board of Governors of the Federal Reserve System, H.10 Foreign Exchange Rates (daily) and its G.5 monthly averages, via the Data Download Program",
+     "source_url": "https://www.federalreserve.gov/releases/h10/",
      "retrieved_at": None,
-     "transform": "immutable monthly zips read directly; timestamps ms->ISO-8601 UTC; month derived from timestamp",
-     "artifact": "crypto_market.db",
-     "license": "Binance public data terms of use",
+     "transform": "two DDP CSV packages reshaped to long form for five currencies; 'ND' observations dropped, never zero-filled; reciprocally-quoted series inverted so per_usd is always foreign-per-USD",
+     "artifact": "fx_rates.db",
+     "license": "Work of the US Government; no copyright (17 U.S.C. 105). The H.10 release page, its About page, the DDP chooser and the Board's site-wide Website Policies carry no terms-of-use or copyright statement over Board content (checked 2026-09-04).",
+     "citation": "Source: Board of Governors of the Federal Reserve System, H.10",
      "license_verified": lic},
 ]
 

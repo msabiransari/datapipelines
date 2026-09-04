@@ -27,13 +27,18 @@ force=0
 
 WINDOW_START=$(lock_field param window_start 3)
 WINDOW_END=$(lock_field param window_end 3)
-SYMBOLS=$(lock_field param binance_symbols 3)
+FX_DAILY_PKG=$(lock_field param fx_daily_package 3)
+FX_MONTHLY_PKG=$(lock_field param fx_monthly_package 3)
+# The DDP window bounds, derived exactly as download.sh derives them — the
+# URL a pin documents must be the URL that was fetched.
+FX_FROM=$(python3 -c "import sys;y,m=sys.argv[1].split('-');print(f'{m}/01/{y}')" "$WINDOW_START")
+FX_TO=$(python3 -c "import sys;y,m,d=sys.argv[1].split('-');print(f'{m}/{d}/{y}')" "$(window_day_end "$WINDOW_END")")
 
 # url_for <id> — the source URL a pin documents. API extracts document the
 # QUERY, not a fetchable file (the Census URL additionally needs the key,
-# which never lives here); Binance pins name the exact immutable zip.
+# which never lives here); the H.10 pins name the exact DDP query.
 url_for() {
-  local id="$1" sym month
+  local id="$1"
   case "$id" in
     census-imports)
       echo "https://api.census.gov/data/timeseries/intltrade/imports/hs?get=CTY_CODE,CTY_NAME,I_COMMODITY,I_COMMODITY_LDESC,GEN_VAL_MO&time=${WINDOW_START}..${WINDOW_END}&CTY_CODE=<census_partners> (per partner-month calls merged; key appended at download)" ;;
@@ -41,9 +46,10 @@ url_for() {
       echo "https://api.census.gov/data/timeseries/intltrade/exports/hs?get=CTY_CODE,CTY_NAME,E_COMMODITY,E_COMMODITY_LDESC,ALL_VAL_MO&time=${WINDOW_START}..${WINDOW_END}&CTY_CODE=<census_partners> (per partner-month calls merged; key appended at download)" ;;
     comtrade-flows)
       echo "https://comtradeapi.un.org/public/v1/preview/C/A/HS?reporterCode=<comtrade_reporters>&period=2022..2024&partnerCode=842&flowCode=X|M&cmdCode=TOTAL (per reporter-year-flow calls merged)" ;;
-    binance-*)
-      sym=${id#binance-}; sym=${sym%-*}; month=${id##*-}
-      echo "https://data.binance.vision/data/spot/monthly/klines/${sym}/1h/${sym}-1h-${month}.zip" ;;
+    fed-h10-daily)
+      echo "https://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&series=${FX_DAILY_PKG}&lastobs=&from=${FX_FROM}&to=${FX_TO}&filetype=csv&label=include&layout=seriescolumn" ;;
+    fed-h10-monthly)
+      echo "https://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&series=${FX_MONTHLY_PKG}&lastobs=&from=${FX_FROM}&to=${FX_TO}&filetype=csv&label=include&layout=seriescolumn" ;;
     *) die "no url mapping for pin id '$id'" ;;
   esac
 }

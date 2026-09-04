@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/sample-data-trade/transform.sh — stage 2 of the trade/v1 build
+# scripts/sample-data-trade/transform.sh — stage 2 of the trade/v2 build
 # (mirrors ../sample-data/transform.sh, design §4.1): DuckDB ETL over the
 # cached raw extracts, emitting TOTALLY ORDERED CSVs into work/csv/.
 #
@@ -109,46 +109,116 @@ SQL
 cp "$SD_ROOT/data/reporters.csv" "$CSV/reporters.csv"
 cp "$SD_ROOT/data/partner_iso_crosswalk.csv" "$CSV/partner_iso_crosswalk.csv"
 
-step "ETL: binance zips -> hourly klines"
-# DuckDB's read_csv cannot read the .zip archives directly (the sniffer
-# fails on the compressed stream — measured 2026-09-04); the pinned zips are
-# unzipped to a scratch dir first. Timestamps are milliseconds in this
-# window (pre-2025 data; Binance moved to microseconds for 2025+ months —
-# out of our pinned window, and the pin would catch a window extension).
-# The month is derived from the timestamp, not the filename, so it survives
-# any re-globbing.
-require_cmd unzip "binance klines arrive as zips"
-KUNZIP="$SD_ROOT/work/klines_unzipped"
-rm -rf "$KUNZIP"; mkdir -p "$KUNZIP"
-SYMBOLS=$(lock_field param binance_symbols 3)
-for sym in ${SYMBOLS//,/ }; do
-  for z in "$RAW"/binance/${sym}-*.zip; do
-    # Info-ZIP takes ONE archive per invocation — a multi-archive argument
-    # list is read as archive + member patterns ("filename not matched").
-    unzip -o -q "$z" -d "$KUNZIP" || die "unzip failed for $z"
-  done
-  duckdb_run <<SQL
-COPY (
-  SELECT '${sym}' AS symbol,
-         strftime(epoch_ms(open_time), '%Y-%m') AS month,
-         epoch_ms(open_time) AS open_ts,
-         TRY_CAST(open AS DOUBLE)  AS open_price,
-         TRY_CAST(high AS DOUBLE)  AS high_price,
-         TRY_CAST(low AS DOUBLE)   AS low_price,
-         TRY_CAST(close AS DOUBLE) AS close_price,
-         TRY_CAST(volume AS DOUBLE) AS base_volume,
-         TRY_CAST(quote_volume AS DOUBLE) AS quote_volume,
-         TRY_CAST(trade_count AS BIGINT) AS trade_count
-  FROM read_csv('$KUNZIP/${sym}-*.csv', header = false, delim = ',', columns = {
-    'open_time': 'BIGINT', 'open': 'VARCHAR', 'high': 'VARCHAR',
-    'low': 'VARCHAR', 'close': 'VARCHAR', 'volume': 'VARCHAR',
-    'close_time': 'BIGINT', 'quote_volume': 'VARCHAR',
-    'trade_count': 'BIGINT', 'taker_buy_base': 'VARCHAR',
-    'taker_buy_quote': 'VARCHAR', 'ignore': 'VARCHAR'})
-  ORDER BY open_time
-) TO '$CSV/klines_1h_${sym}.csv' (FORMAT CSV, HEADER);
-SQL
-done
+step "ETL: Federal Reserve H.10 packages -> fx_daily / fx_monthly"
+# python3, not DuckDB: the DDP package is a wide "series column" CSV with a
+# five-line metadata header, one column per currency and 'ND' for a day a rate
+# was not published. Reshaping it to long form, dropping ND (never zero-filling
+# — a rate that does not exist must not be invented) and inverting the
+# reciprocally-quoted series is a dozen lines of Python and an unreadable pivot
+# in SQL.
+#
+# WHICH DIRECTION A SERIES IS QUOTED IN is the one thing here worth getting
+# wrong quietly, so it is established three ways: the `RXI$US` prefix on the
+# Board's own series id (the reciprocal, US$-per-unit, series — the euro is
+# ours); the monthly package's `Unit: Currency:_Per_<X>` row, which must agree;
+# and — the check no metadata row can fool — every monthly average must land
+# within 2% of the mean of that month's daily rates, which it cannot if either
+# package was stored upside down. (The DAILY package's "Currency:" row is NOT
+# usable for this: it names the pair currency, EUR, for a series whose values
+# are US dollars. Measured 2026-09-04.)
+require_cmd python3 "reshaping the H.10 CSV packages"
+python3 - "$RAW/fx/fed-h10-daily.csv" "$RAW/fx/fed-h10-monthly.csv" "$SD_ROOT/data/currencies.csv" "$CSV" <<'PY'
+import csv, os, statistics, sys
+
+daily_path, monthly_path, currencies_path, outdir = sys.argv[1:5]
+
+with open(currencies_path, newline="") as f:
+    currencies = list(csv.DictReader(f))
+
+def load(path, series_key):
+    """Long-form (period, currency, per_usd, usd_per) rows from one DDP package."""
+    with open(path, newline="") as f:
+        rows = list(csv.reader(f))
+    meta = {r[0].strip().rstrip(":").strip(): r for r in rows[:5]}
+    header = rows[5]
+    if header[0] != "Time Period":
+        raise SystemExit(f"{path}: row 6 is not the 'Time Period' header — the DDP layout changed")
+    out, dropped = [], 0
+    for c in currencies:
+        sid = c[series_key]
+        if sid not in header:
+            raise SystemExit(f"{path}: series '{sid}' ({c['currency']}) is not in the package")
+        col = header.index(sid)
+        if meta["Multiplier"][col] != "1":
+            raise SystemExit(f"{path}: series '{sid}' has multiplier {meta['Multiplier'][col]}, not 1 — the values would be scaled")
+        reciprocal = sid.startswith("RXI$US")
+        # Where the package DOES carry the direction in its metadata, it must
+        # agree. Only the monthly (G.5) package does: its "Unit:" row reads
+        # `Currency:_Per_<X>`, X=USD for a directly-quoted series. The daily
+        # package's "Unit:" is a bare "Currency" and its "Currency:" row names
+        # the PAIR currency (EUR for the reciprocal euro series, whose values
+        # are US dollars) — measured 2026-09-04, so it says nothing about
+        # direction and is deliberately not consulted.
+        unit = meta.get("Unit", [""] * (col + 1))[col]
+        if unit.startswith("Currency:_Per_") and (unit != "Currency:_Per_USD") != reciprocal:
+            raise SystemExit(f"{path}: series '{sid}' — the 'Unit:' row says {unit} but the id "
+                             f"{'does' if reciprocal else 'does not'} carry the RXI$US reciprocal "
+                             "prefix; refusing to guess the direction")
+        for r in rows[6:]:
+            if not r or not r[0]:
+                continue
+            raw = r[col].strip()
+            if raw in ("ND", ""):     # not published that period — dropped, never zero-filled
+                dropped += 1
+                continue
+            v = float(raw)
+            if v <= 0:
+                raise SystemExit(f"{path}: series '{sid}' has a non-positive rate {raw} at {r[0]}")
+            usd_per, per_usd = (v, 1.0 / v) if reciprocal else (1.0 / v, v)
+            out.append((r[0], c["currency"], per_usd, usd_per))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out, dropped
+
+def write(rows, name, period_col):
+    with open(os.path.join(outdir, name), "w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow([period_col, "currency", "per_usd", "usd_per"])
+        for period, cur, per_usd, usd_per in rows:
+            w.writerow([period, cur, f"{per_usd:.10g}", f"{usd_per:.10g}"])
+
+d_rows, d_dropped = load(daily_path, "series_daily")
+m_rows, m_dropped = load(monthly_path, "series_monthly")
+
+# THE DIRECTION CHECK THAT CANNOT BE FOOLED BY EITHER PACKAGE'S METADATA: the
+# G.5 monthly figure IS the average of the H.10 daily figures, so a series
+# stored upside down in one package and not the other is off by its own square.
+# Every currency-month must agree within 2% (the residual is the Jensen gap on
+# the inverted series plus the Board's own rounding).
+daily_by_month = {}
+for period, cur, per_usd, _ in d_rows:
+    daily_by_month.setdefault((period[:7], cur), []).append(per_usd)
+checked = 0
+for month, cur, per_usd, _ in m_rows:
+    sample = daily_by_month.get((month, cur))
+    if not sample:
+        raise SystemExit(f"monthly {cur} {month} has no daily observations to check it against")
+    ratio = per_usd / statistics.fmean(sample)
+    if abs(ratio - 1.0) > 0.02:
+        raise SystemExit(f"{cur} {month}: the monthly average is {ratio:.3f}x the mean of that "
+                         "month's daily rates — one of the two packages is quoted the other way "
+                         "round from what this build assumed")
+    checked += 1
+
+write(d_rows, "fx_daily.csv", "rate_date")
+write(m_rows, "fx_monthly.csv", "month")
+print(f"fx_daily: {len(d_rows)} rows ({d_dropped} ND observations dropped, never zero-filled)", file=sys.stderr)
+print(f"fx_monthly: {len(m_rows)} rows ({m_dropped} ND observations dropped)", file=sys.stderr)
+print(f"monthly-vs-daily direction check: {checked} currency-months agree within 2%", file=sys.stderr)
+PY
+
+# Pinned reference data, passed through so load-and-dump has one directory.
+cp "$SD_ROOT/data/currencies.csv" "$CSV/currencies.csv"
+cp "$SD_ROOT/data/partner_currency.csv" "$CSV/partner_currency.csv"
 
 for f in "$CSV"/*.csv; do
   log "$(basename "$f"): $(($(wc -l < "$f") - 1)) rows"

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# scripts/sample-data-trade/load-and-dump.sh — stage 3 of the trade/v1 build
+# scripts/sample-data-trade/load-and-dump.sh — stage 3 of the trade/v2 build
 # (mirrors ../sample-data/load-and-dump.sh, design §4.1): work/csv/ ->
 # artifacts. The three engines of this family:
 #
 #   us_trade.duckdb      built in-process with the pinned DuckDB CLI — the
 #                        file IS the artifact (same as SQLite), no container
 #   mysql-trade.sql.gz   throwaway pinned MySQL container + mysqldump | gzip
-#   crypto_market.db     sqlite3 .import, the file IS the artifact
+#   fx_rates.db          sqlite3 .import, the file IS the artifact
 #
 # Row counts are asserted against the CSVs, content checksums recorded to
 # work/artifacts/checksums.tsv (consumed by manifest.sh, re-derived by
@@ -25,7 +25,7 @@ ART="$SD_ROOT/work/artifacts"
 mkdir -p "$ART"
 
 require_cmd docker "the MySQL build engine is a pinned container image"
-require_cmd sqlite3 "the crypto artifact IS a SQLite file, built with the sqlite3 CLI"
+require_cmd sqlite3 "the FX artifact IS a SQLite file, built with the sqlite3 CLI"
 require_cmd gzip "the MySQL artifact is a gzipped mysqldump"
 
 trap sd_cleanup_engines EXIT
@@ -92,32 +92,23 @@ docker exec -e MYSQL_PWD=build "$MY" mysqldump -uroot --no-tablespaces --skip-du
   --databases dp_sample_trade | gzip -n > "$ART/mysql-trade.sql.gz"
 
 # --- SQLITE -------------------------------------------------------------------
-step "sqlite: building crypto_market.db"
-CRYPTO="$ART/crypto_market.db"
-rm -f "$CRYPTO"
-sqlite3 "$CRYPTO" < "$SD_ROOT/ddl/sqlite-crypto.sql"
+step "sqlite: building fx_rates.db"
+FX="$ART/fx_rates.db"
+rm -f "$FX"
+sqlite3 "$FX" < "$SD_ROOT/ddl/sqlite-fx.sql"
 
-SYMBOLS=$(lock_field param binance_symbols 3)
-expected_klines=0
-for sym in ${SYMBOLS//,/ }; do
-  log "  .import klines_1h ($sym)"
-  sqlite3 "$CRYPTO" <<SQL
+for t in fx_daily fx_monthly currencies partner_currency; do
+  log "  .import $t"
+  sqlite3 "$FX" <<SQL
 .mode csv
-.import --skip 1 '$CSV/klines_1h_${sym}.csv' klines_1h
+.import --skip 1 '$CSV/$t.csv' $t
 SQL
-  expected_klines=$(( expected_klines + $(csv_rows "$CSV/klines_1h_${sym}.csv") ))
+  assert_rows "$(count_sqlite "$FX" "$t")" "$(csv_rows "$CSV/$t.csv")" "sqlite.$t"
 done
-assert_rows "$(count_sqlite "$CRYPTO" klines_1h)" "$expected_klines" "sqlite.klines_1h"
-
-sqlite3 "$CRYPTO" <<SQL
-.mode csv
-.import --skip 1 '$SD_ROOT/data/symbols.csv' symbols
-SQL
-assert_rows "$(count_sqlite "$CRYPTO" symbols)" "$(csv_rows "$SD_ROOT/data/symbols.csv")" "sqlite.symbols"
-sqlite3 "$CRYPTO" "VACUUM;"
+sqlite3 "$FX" "VACUUM;"
 
 log "  checksums"
-checksum_rows sqlite "$CRYPTO" >> "$CHECKSUMS"
+checksum_rows sqlite "$FX" >> "$CHECKSUMS"
 
 # --- examples -----------------------------------------------------------------
 if [ -f "$SD_ROOT/content/examples.json" ]; then
