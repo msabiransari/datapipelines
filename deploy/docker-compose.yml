@@ -390,12 +390,16 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+# 071 §I: volume names follow the compose project. The default project `dp`
+# keeps the historical names (dp-postgres-data, …) byte-for-byte, so the live
+# deployment is untouched; a lane's APP_COMPOSE_PROJECT=<x> now gets <x>-*
+# volumes instead of mounting the live stack's data (which a fixed name did).
 volumes:
   postgres-data:
-    name: dp-postgres-data
+    name: ${APP_COMPOSE_PROJECT:-dp}-postgres-data
   # Demo-profile data. Declared unconditionally because a Compose volume cannot
   # carry a profile; unused and empty without it.
   mysql-data:
-    name: dp-mysql-data
+    name: ${APP_COMPOSE_PROJECT:-dp}-mysql-data
   sample-data:
-    name: dp-sample-data
+    name: ${APP_COMPOSE_PROJECT:-dp}-sample-data
