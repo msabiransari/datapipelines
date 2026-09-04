@@ -17,7 +17,7 @@
   --_surface-inset:           #eef0f3;
   --_surface-hover:           #eef0f3;
   --_surface-active:          #e4e7ec;
-  --_surface-selected:        #e0e7ff;
+  --_surface-selected:        #cbd1e8;
 
   --_text-primary:            #0a0e1a;
   --_text-secondary:          #2d3448;
@@ -29,10 +29,10 @@
   --_text-success:            #14532d;
   --_text-warning:            #854d0e;
 
-  --_border-default:          #dadee6;
-  --_border-hover:            #c2c8d4;
-  --_border-focus:            #9aa3b5;
-  --_border-subtle:           #eceef2;
+  --_border-default:          #8f939d;
+  --_border-hover:            #8a909c;
+  --_border-focus:            #81899a;
+  --_border-subtle:           #b4b6bc;
   --_border-danger:           #fecaca;
 
   --_accent-primary:          #0f1d40;
@@ -93,10 +93,10 @@
     --_text-success:            #86efac;
     --_text-warning:            #fde047;
 
-    --_border-default:          #374151;
-    --_border-hover:            #4b5563;
+    --_border-default:          #5e6673;
+    --_border-hover:            #616976;
     --_border-focus:            #6b7280;
-    --_border-subtle:           #1f2937;
+    --_border-subtle:           #444d58;
     --_border-danger:           #7f1d1d;
 
     --_accent-primary:          #f9fafb;

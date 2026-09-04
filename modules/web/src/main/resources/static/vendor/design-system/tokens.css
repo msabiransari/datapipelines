@@ -236,3 +236,16 @@
   --stagger-slow:             80ms;
 
 }
+
+/* --------------------------------------------------------
+   prefers-contrast: more (WCAG 1.4.11, opt-in amplification)
+   --------------------------------------------------------
+   The OS asks for more contrast: raise the STRUCTURAL tokens past their
+   floors. Both source tokens are audited at 4.5:1 on surface-default, so
+   these mappings guarantee the raises with zero concrete values. */
+@media (prefers-contrast: more) {
+  :root {
+    --border-default: var(--text-primary);
+    --border-subtle: var(--text-secondary);
+  }
+}
