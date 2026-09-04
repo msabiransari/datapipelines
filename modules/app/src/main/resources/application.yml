@@ -97,7 +97,19 @@ datapipelines:
     secret: ${DATAPIPELINES_JWT_SECRET}
 
   db:
+    # §3.20 — which KeyProvider supplies the credential data keys (datasources.md §7.1).
+    # `env` is the default and is today's behaviour: keys come from the config values below.
+    # Other providers (aws-kms, …) are implemented from docs/key-providers.md; an unknown
+    # name is refused at boot by ConfigValidator §7.
+    key-provider: ${DATAPIPELINES_DB_KEY_PROVIDER:env}
+    # §2/§3.20 — the `env` provider's key. Required, base64 of exactly 32 bytes, and it is
+    # KEY VERSION 1 forever: every credential written under it carries 0x01 as its first byte.
     encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
+    # §3.20 — rotation, deliberately UNSET here. Adding `encryption-keys: {2: ${VAR}}` plus
+    # `encryption-key-current: 2` starts writing new credentials under version 2 while every
+    # version-1 row keeps decrypting; see datasources.md §7.3 for when version 1 can be
+    # retired. Declaring an empty map here instead would bind an empty map over any
+    # environment-supplied one, so the keys are absent, not blank.
 
   auth:
     # §3.4 — the deployment's exact external origin; OIDC redirect URIs are built

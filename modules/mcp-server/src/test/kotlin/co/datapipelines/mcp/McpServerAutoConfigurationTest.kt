@@ -70,8 +70,8 @@ class McpServerAutoConfigurationTest {
 
             assertAll(
                 { servlet.urlMappings shouldContainExactly listOf(McpServerFactory.ENDPOINT) },
-                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 21 },
-                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 21 },
+                { context.getBean(McpStatelessSyncServer::class.java).listTools().size shouldBe 22 },
+                { context.getBean(McpToolDispatcher::class.java).toolNames().size shouldBe 22 },
             )
         }
     }
@@ -93,6 +93,10 @@ class McpServerAutoConfigurationTest {
         @Bean fun templates(): TemplateRepository = mockk()
 
         @Bean fun datasources(): DatasourceRegistry = mockk()
+
+        // 068: the shared registration path `web`'s DomainConfiguration declares in the
+        // assembled application. Mocked here like every other collaborator.
+        @Bean fun datasourceCreateService(): co.datapipelines.application.datasources.DatasourceCreateService = mockk()
 
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 

@@ -198,12 +198,25 @@ class ExampleContentSeederTest {
 
     @Test
     fun `two families seed ALL templates before ANY pipeline, in file order`() {
-        val fileA = tempDir.resolve("examples-nyc.json").also {
-            it.writeText("""{"templates":[{"id":"nyc_t.sql","dialect":"H2","display_name":"N","description":"d","body":"SELECT 1"}],"pipelines":[{"schema_version":1,"name":"nyc_p","display_name":"N","nodes":[]}]}""")
-        }.toString()
-        val fileB = tempDir.resolve("examples-trade.json").also {
-            it.writeText("""{"templates":[{"id":"trade_t.sql","dialect":"DUCKDB","display_name":"T","description":"d","body":"SELECT 2"}],"pipelines":[{"schema_version":1,"name":"trade_p","display_name":"T","nodes":[]}]}""")
-        }.toString()
+        val fileA =
+            tempDir
+                .resolve("examples-nyc.json")
+                .also {
+                    it.writeText(
+                        """{"templates":[{"id":"nyc_t.sql","dialect":"H2","display_name":"N","description":"d","body":"SELECT 1"}]""" +
+                            ""","pipelines":[{"schema_version":1,"name":"nyc_p","display_name":"N","nodes":[]}]}""",
+                    )
+                }.toString()
+        val fileB =
+            tempDir
+                .resolve("examples-trade.json")
+                .also {
+                    it.writeText(
+                        """{"templates":[{"id":"trade_t.sql","dialect":"DUCKDB","display_name":"T",""" +
+                            """"description":"d","body":"SELECT 2"}],""" +
+                            """"pipelines":[{"schema_version":1,"name":"trade_p","display_name":"T","nodes":[]}]}""",
+                    )
+                }.toString()
 
         val templateBodies = mutableListOf<String>()
         val pipelineBodies = mutableListOf<String>()
@@ -213,8 +226,16 @@ class ExampleContentSeederTest {
         seeder("$fileA, $fileB").seed(workspaceId, userId)
 
         templateBodies shouldHaveSize 2
-        mapper.readTree(templateBodies[0]).get("templates")[0].get("id").asText() shouldBe "nyc_t.sql"
-        mapper.readTree(templateBodies[1]).get("templates")[0].get("id").asText() shouldBe "trade_t.sql"
+        mapper
+            .readTree(templateBodies[0])
+            .get("templates")[0]
+            .get("id")
+            .asText() shouldBe "nyc_t.sql"
+        mapper
+            .readTree(templateBodies[1])
+            .get("templates")[0]
+            .get("id")
+            .asText() shouldBe "trade_t.sql"
 
         pipelineBodies shouldHaveSize 2
         pipelineBodies.map { mapper.readTree(it).get("name").asText() } shouldBe listOf("nyc_p", "trade_p")

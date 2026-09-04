@@ -29,7 +29,7 @@ Every configuration key for datapipelines.co, in one place. Environment variable
 | `spring.datasource.password` | `SPRING_DATASOURCE_PASSWORD` | Metadata DB password |
 | `datapipelines.redis.host` | `DATAPIPELINES_REDIS_HOST` | Redis host (results, idempotency, post-completion event log) |
 | `datapipelines.jwt.secret` | `DATAPIPELINES_JWT_SECRET` | Internal JWT signing secret. ≥ 32 bytes random, base64-encoded |
-| `datapipelines.db.encryption-key` | `DATAPIPELINES_DB_ENCRYPTION_KEY` | AES-256 master key for datasource password encryption. Exactly 32 bytes, base64-encoded. **Required — there is no fallback source.** (KMS-sourced keys are a v1.1 item, see [ROADMAP §2](ROADMAP.md#2-v11-candidates).) |
+| `datapipelines.db.encryption-key` | `DATAPIPELINES_DB_ENCRYPTION_KEY` | AES-256 data key for datasource password encryption. Exactly 32 bytes, base64-encoded. **Required — there is no fallback source.** It is **key version 1**, forever: every credential written under it carries `0x01` as its first byte ([Datasources §7.1](datasources.md#71-encryption-at-rest)). Rotation and KMS-backed sources are §3.20's `key-provider` seam. |
 
 **OIDC provider configuration** is also required — at least one provider must be configured in `datapipelines.auth.oidc.providers` (in `application.yml`). Each provider requires `client-id`, `client-secret`, and `issuer-uri`. The client-id and client-secret are typically referenced from env vars. See [Auth spec §11.1](auth.md#111-oidc-provider-configuration) for the full format.
 
@@ -252,6 +252,20 @@ Generate the secret the way every other one here is generated — `openssl rand 
 
 **Both keys are bearer secrets.** They are never logged, never in an error message, never in an audit `details` map, and never in a `toString()`. A receiver records only a truncated SHA-256 fingerprint of the key a push presented, so two keys are distinguishable across a rotation without either being carried.
 
+### 3.20 Credential key provider
+
+Where the AES data keys for `datasources.password_encrypted` come from ([Datasources §7.1](datasources.md#71-encryption-at-rest)). The seam exists so a customer's AWS/GCP/Azure/Vault key store is an **implementation of a contract**, not a change to the crypto — `docs/key-providers.md` is the guide an implementer works from. Every stored credential carries the key VERSION it was sealed under as its first byte, which is what makes rotation lazy-safe.
+
+| YAML path | Env var | Default | Description |
+|---|---|---|---|
+| `datapipelines.db.key-provider` | `DATAPIPELINES_DB_KEY_PROVIDER` | `env` | Which provider supplies data keys. `env` is the only one this build ships and is today's behaviour, so a deployment that predates the seam needs **no config edit**. An unknown name refuses startup, listing what is shipped (§7) |
+| `datapipelines.db.encryption-keys` | (per entry, e.g. `DATAPIPELINES_DB_ENCRYPTION_KEYS_2`) | (unset) | `env` only. Additional keys as `version: base64`, for a rotation — e.g. `2: ${DATAPIPELINES_DB_ENCRYPTION_KEY_V2}`. Each value is exactly 32 bytes base64-encoded; each version is an integer `1..255`. Version `1` may **not** appear here: that version is `datapipelines.db.encryption-key` and has exactly one spelling |
+| `datapipelines.db.encryption-key-current` | `DATAPIPELINES_DB_ENCRYPTION_KEY_CURRENT` | the highest configured version | `env` only. Which configured version NEW encryptions use. Existing rows keep decrypting under the version they carry, so flipping this rotates lazily rather than all at once ([Datasources §7.3](datasources.md#73-key-rotation)) |
+
+**Every configured key is a bearer secret.** None of them is logged, put in an error message, put in an audit `details` map, or rendered by a `toString()` — the §7 violations name the *property* and the defect, never the value.
+
+**Rotating.** Generate a key (`openssl rand -base64 32`), add it as version N+1, set `encryption-key-current: N+1`, restart. New writes carry N+1; rows written under earlier versions keep decrypting, and are rewritten under the current key the next time their password is saved. Keep the old keys configured until no row still carries their version — [Datasources §7.3](datasources.md#73-key-rotation) has the one SQL query that answers that.
+
 ---
 
 ## 4. Precedence
@@ -317,7 +331,12 @@ datapipelines:
     secret: ${DATAPIPELINES_JWT_SECRET}
 
   db:
+    key-provider: ${DATAPIPELINES_DB_KEY_PROVIDER:env}
     encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
+    # Rotation (§3.20) — unset by default; a declared empty map would bind over the environment.
+    # encryption-keys:
+    #   2: ${DATAPIPELINES_DB_ENCRYPTION_KEY_V2}
+    # encryption-key-current: 2
 
   auth:
     oidc:
@@ -484,6 +503,7 @@ On startup, the app validates:
 - All required keys present → fail-fast with a clear error if missing.
 - `DATAPIPELINES_JWT_SECRET` ≥ 32 bytes decoded.
 - `DATAPIPELINES_DB_ENCRYPTION_KEY` is exactly 32 bytes decoded.
+- **Key provider (§3.20):** `datapipelines.db.key-provider` names a provider this build ships (a violation lists them and points at `docs/key-providers.md`), and that provider's own settings are present and well-formed. For `env`: every entry of `datapipelines.db.encryption-keys` has an integer version in `1..255` that is not `1`, and a value that decodes to exactly 32 bytes; `datapipelines.db.encryption-key-current` is an integer naming a configured version (the violation lists which versions ARE configured). An unknown provider name short-circuits the rest — reporting `env`'s key rules to an operator who asked for `aws-kms` is noise they cannot act on.
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
 - At least one authentication method: a fully-configured OIDC provider (non-empty `client-id`, `client-secret`, and `issuer-uri`) or `datapipelines.auth.local.enabled=true`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
 - `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
@@ -511,6 +531,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.10 | 068 key-provider seam | New **§3.20 credential key provider**: `datapipelines.db.key-provider` (default `env`, so no deployment needs a config edit), plus the `env` provider's optional `encryption-keys` rotation map and `encryption-key-current`. §2's `encryption-key` row now states that it is key version 1, forever. §5 template and §7 updated — one new validation rule: the provider name must be one this build ships, and that provider's own settings must be present and well-formed (an unknown name short-circuits the rest). |
 | 2026-09-02 | v1.9 | 051 auth/config sweep | Added §3.4 `datapipelines.auth.trusted-proxies` (CIDR list, default empty = header ignored; the login limiter and every auth `source_ip` resolve the client through it — R8/T46, deployment.md §6.2) with the §5 template line and two §7 rules (each entry must parse as a CIDR or startup is refused; enforced at the auth module's resolver construction). §3.17: `open-join: true` + `closed` provisioning now refused at startup, naming both keys (T45 — the self-join branch gates on `open-join` alone, so the pair would re-open the membership surface `closed` exists to keep admin-only); §7 gains the rule |
 | 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |
 | 2026-08-07 | v1.1 | consistency campaign | Authority + naming-derivation rules (§1); §3 tables and §5 YAML reconciled (unit-suffixed names win); added result.* (D9), sse.disconnect-grace-seconds (D7), idempotency, templates, audit, staging result-batch-size, login rate-limit keys; removed large-result-threshold-bytes and redis.ttl-seconds (superseded by result.*); rate limits per-user; encryption key required with no fallback; precedence section. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

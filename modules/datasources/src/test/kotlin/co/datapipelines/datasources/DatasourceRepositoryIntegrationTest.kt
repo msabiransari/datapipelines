@@ -29,7 +29,7 @@ class DatasourceRepositoryIntegrationTest {
     private lateinit var repository: DatasourceRepository
     private lateinit var owner: UUID
 
-    private val encryptor = CredentialEncryptor.fromBase64Key(test32ByteKeyBase64())
+    private val encryptor = testEncryptor()
 
     /** Binds the JDBC template to the module's shared, already-migrated container. */
     @BeforeAll

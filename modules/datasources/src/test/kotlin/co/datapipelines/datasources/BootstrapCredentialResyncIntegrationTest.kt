@@ -58,7 +58,7 @@ class BootstrapCredentialResyncIntegrationTest {
     private lateinit var repository: DatasourceRepository
     private lateinit var actor: UUID
 
-    private val encryptor = CredentialEncryptor.fromBase64Key(test32ByteKeyBase64())
+    private val encryptor = testEncryptor()
 
     @TempDir
     lateinit var tempDir: Path

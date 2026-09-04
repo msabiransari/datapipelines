@@ -6,8 +6,6 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
-import java.security.SecureRandom
-import java.util.Base64
 
 /**
  * The §7 rules as data. No Spring context: [ConfigValidator.validate] is pure, so every
@@ -15,41 +13,10 @@ import java.util.Base64
  * production checks** — is exercised by feeding a [ConfigSnapshot].
  */
 class ConfigValidatorTest {
-    private val random = SecureRandom()
+    /** The shared §7 baseline and secret generator ([ConfigSnapshots]) — one copy, two suites. */
+    private fun secret(bytes: Int): String = ConfigSnapshots.secret(bytes)
 
-    /** A fresh base64 secret of [bytes] decoded bytes — never a literal (see ApplicationSmokeTest). */
-    private fun secret(bytes: Int): String = Base64.getEncoder().encodeToString(ByteArray(bytes).also { random.nextBytes(it) })
-
-    /** The valid production-grade baseline; individual tests break one rule at a time. */
-    private fun validSnapshot() =
-        ConfigSnapshot(
-            datasourceUrl = "jdbc:postgresql://db.internal:5432/datapipelines",
-            datasourceUsername = "datapipelines",
-            datasourcePassword = "s3cret",
-            redisHost = "redis.internal",
-            redisPassword = "redis-secret",
-            jwtSecret = secret(32),
-            dbEncryptionKey = secret(32),
-            uiTheme = "saas",
-            oidcProviders =
-                listOf(
-                    OidcProviderSnapshot(
-                        name = "google",
-                        clientId = "id",
-                        clientSecret = "secret",
-                        issuerUri = "https://accounts.google.com",
-                    ),
-                ),
-            resultTtlMinSeconds = 60,
-            resultTtlDefaultSeconds = 300,
-            resultTtlMaxSeconds = 3600,
-            workspacesProvisioningMode = "self-serve",
-            bootstrapDatasourcesFile = null,
-            bootstrapExamplesFile = null,
-            bootstrapAdminEmail = null,
-            activeProfiles = emptySet(),
-            vendoredThemes = setOf("saas", "high-contrast"),
-        )
+    private fun validSnapshot() = ConfigSnapshots.valid()
 
     // §7 closing rule — the documented dev setup must pass the PRODUCTION rules, so a
     // broken dev value is fixed at the data, never by weakening the check.

@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
+import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
@@ -44,7 +45,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 21 tools of §6.1, in `tools/list` order. */
+    /** The 22 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -71,6 +72,10 @@ class McpServerAutoConfiguration {
         // bean exists where the engine is fully wired; without it the execute tool runs every
         // call, its pre-056 behaviour.
         launcher: ObjectProvider<ExecutionLauncher>,
+        // 068: the ONE validated datasource-registration path, shared with POST /api/v1/datasources.
+        // A plain (required) parameter, not a provider: this whole bean is @ConditionalOnBean on
+        // the engine, so wherever the tools exist the assembled application has declared it too.
+        datasourceCreateService: DatasourceCreateService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -113,6 +118,7 @@ class McpServerAutoConfiguration {
             DatasourcesGetTablesTool(introspector, datasources),
             DatasourcesGetColumnsTool(introspector, datasources),
             DatasourcesPreviewRowsTool(datasources, sqlRunner),
+            DatasourcesCreateTool(datasourceCreateService),
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),
