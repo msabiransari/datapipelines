@@ -67,6 +67,17 @@ built from a filename-based check that could not see same-name classes in other
 files. Lesson folded into the method section: match by declared class name, not
 file name.
 
+**Second correction (2026-09-03, Tier 1 completion):** the execution pages were
+also partially covered under a different class name — `ExecutionControllerTest`
+(not `ExecutionHistoryControllerTest`/`ExecutionDetailControllerTest`) already
+pinned several history/detail contracts. The same-name check under-counted
+coverage in both directions: it missed sibling-file classes (over-reporting
+gaps) and, being filename-based, could not see differently-named suites either.
+The backfill landed the same-name unit classes anyway — they pin deeper
+contracts (the four-way resultState derivation, the cancel gate, the lineage
+family read) — but the audit's controller table should be read as
+"same-name test absent," never "no test touches this controller."
+
 The pattern is historical: REST controllers got the unit-test treatment as they
 were built; the UI layer grew later (024 website round onward) and leaned on E2Es
 plus the browser-driven dev loop. The htmx partials are the untested tail at EVERY
