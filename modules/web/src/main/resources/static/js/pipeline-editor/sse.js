@@ -212,6 +212,10 @@
         // rendered SQL, exception chain. Dropping it (the reported defect) left the
         // inspector with nothing but a red node; the owner opened the database to learn why.
         if (payload.error && editor.nodeErrors) editor.nodeErrors[payload.node_id] = payload.error;
+        // 065 §B: the same record also joins the dock's Errors tab — the PER-RUN
+        // view beside the inspector's per-node one. One record, two homes, both
+        // read-only; PEErrorDetails.build renders both.
+        if (payload.error && editor.recordFailure) editor.recordFailure(payload.node_id, payload.error);
         if (payload.dependents && editor.graph) {
           payload.dependents.forEach(function (depId) {
             editor.graph.setNodeState(depId, "aborted");
