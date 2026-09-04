@@ -52,6 +52,20 @@ Small, additive, likely to land soon after v1 ship. Rough priority order.
 | **SSH tunnel / bastion host support** | datasources §14 | Common enterprise requirement for datasources behind bastions. |
 | **`tags` field on pipelines, templates, datasources** | (cross-cutting) | For organization, filtering, MCP discovery. Optional field, no execution semantics. |
 
+### 2.1 Test & release engineering
+
+The browser-suite backlog (TEST-GAP-2026-09.md) — deliberately deferred chunks of the
+mechanical Playwright suite, plus its next layers. The suite (`./gradlew browserTest`)
+already covers golden paths 1–4, 7's page half, and 8–10.
+
+| Item | Source | Notes |
+|---|---|---|
+| **Browser golden paths 5–6: pipeline editor + execute/SSE** | TEST-GAP-2026-09.md | Buildable now — the disabled "Create Pipeline" button was an R10 relic, not an in-flight lane (verified 2026-09-03). Given R10 (UI authoring is MCP-first), the tests author the pipeline via MCP/REST, then drive the editor's display + Execute + the SSE stream and results panel in the browser. |
+| **Browser golden path 7, second half: history rows / pagination / detail** | TEST-GAP-2026-09.md | Rides on a real execution — land together with 5–6. |
+| **Accessibility layer for the browser suite** | TEST-GAP-2026-09.md (out-of-scope-v1 list) | Mechanical axe-core checks over the golden paths (landmarks, contrast, ARIA, keyboard reachability), as a suite layer or a separate task — never a human-judgment gate. |
+| **Multi-browser matrix** (chromium + firefox + webkit) | TEST-GAP-2026-09.md (out-of-scope-v1 list) | After the paths are stable on chromium. |
+| **Visual-regression pixel-diffing** | TEST-GAP-2026-09.md (out-of-scope-v1 list) | Golden screenshots per screen with a baselined diff gate; last priority — flake-prone if added too early. |
+
 ---
 
 ## 3. v2 Features
@@ -234,3 +248,4 @@ When something moves from ROADMAP into a shipped spec — or a spec-level decisi
 | 2026-08-07 | v1.1 | consistency campaign | Decision log seeded with D1–D15 outcomes (params_schema removal, unified result delivery, cancel-on-disconnect, DP- headers, no key fallback); v2 list gains UI edit mode, detached execution, pub/sub cancel fan-out, MCP progress/cancel. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |
 | 2026-08-17 | v1.2 | pipeline composition | v2 §3.2 "Cross-pipeline calls" removed — shipped as the `PIPELINE` node type (design 2026-08-13-pipeline-node-type; pipeline-contract §4.9/§8.5/§12.9); decision-log row added; §3.10 distributed-tracing dependency note updated |
 | 2026-09-02 | v1.3 | UI authoring on the roadmap | §2 gains **Pipeline CRUD and template CRUD in the UI** (owner ruling R10: MCP/agents author for now; the editors are preview/release/discard-only and the template editor has never had a Save). §2's Parameterized SQL row marked SHIPPED (042). |
+| 2026-09-03 | v1.4 | browser-suite backlog | New §2.1: the browser suite's deferred golden paths 5–6 (editor + execute/SSE — buildable, the disabled Create button was an R10 relic) and 7's row half, plus the accessibility layer and the multi-browser / visual-regression extras. Source: TEST-GAP-2026-09.md. |
