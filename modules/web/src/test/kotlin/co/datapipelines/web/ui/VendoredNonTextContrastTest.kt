@@ -50,7 +50,11 @@ class VendoredNonTextContrastTest {
     fun `the guard sees all nine vendored themes and both auto branches - a vacuous pass is not a pass`() {
         val names = vendoredThemes().map { it.first }.toList()
         names.shouldNotBeEmpty()
-        names shouldBe listOf("auto.css", "dark.css", "forest.css", "healthcare.css", "light.css", "minimal.css", "ocean.css", "professional.css", "saas.css")
+        names shouldBe
+            listOf(
+                "auto.css", "dark.css", "forest.css", "healthcare.css", "light.css",
+                "minimal.css", "ocean.css", "professional.css", "saas.css",
+            )
         // auto.css audits BOTH its light default block and its dark @media block.
         vendoredThemes().first { it.first == "auto.css" }.second.size shouldBe 2
     }
