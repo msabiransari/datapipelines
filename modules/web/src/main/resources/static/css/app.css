@@ -57,6 +57,17 @@ body {
   padding-block: var(--gap-lg);
 }
 
+/* 065 §A — full-bleed pages. The graph editor is the one surface whose value
+   scales with width; on a 2000px viewport the 1600px cap left it ~1450px and two
+   dead margins. Opt-in per page (`fullBleed` model attribute → th:classappend in
+   layouts/default.html), so lists, settings and docs keep the cap that suits
+   prose. The nav bar keeps its own .app-container cap — a nav wider than its
+   content reads as broken. */
+.app-main-bleed {
+  max-width: none;
+  padding-inline: var(--gap-md);
+}
+
 /* Sticky top nav — one bordered bar, not a floating ds-surface card. */
 .app-nav {
   position: sticky;

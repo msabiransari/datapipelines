@@ -67,6 +67,10 @@ class PipelineEditorController(
             ),
         )
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        // 065 §A: this page — and only this page — opts out of the layout's 1600px
+        // content cap. layouts/default.html reads the flag; every other screen omits
+        // it and keeps the cap, which is the right measure for prose.
+        model.addAttribute("fullBleed", true)
         return "pipelines/editor"
     }
 }
