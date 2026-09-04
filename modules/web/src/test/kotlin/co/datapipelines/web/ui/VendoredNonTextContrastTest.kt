@@ -29,20 +29,21 @@ class VendoredNonTextContrastTest {
         val themes = vendoredThemes()
         themes.shouldNotBeEmpty()
 
-        val failures = themes.flatMap { (file, branches) ->
-            branches.flatMap { (branch, vars) ->
-                val label = if (branches.size > 1) "$file ($branch)" else file
-                NON_TEXT_PAIRS.mapNotNull { pair ->
-                    val ratio = contrastRatio(vars[pair.fg], vars[pair.bg])
-                    if (ratio == null || ratio < pair.min) {
-                        "$label: ${pair.name} — ${ratio?.let { "%.2f".format(it) + ":1" } ?: "missing token"} " +
-                            "(floor ${pair.min}:1)"
-                    } else {
-                        null
+        val failures =
+            themes.flatMap { (file, branches) ->
+                branches.flatMap { (branch, vars) ->
+                    val label = if (branches.size > 1) "$file ($branch)" else file
+                    NON_TEXT_PAIRS.mapNotNull { pair ->
+                        val ratio = contrastRatio(vars[pair.fg], vars[pair.bg])
+                        if (ratio == null || ratio < pair.min) {
+                            "$label: ${pair.name} — ${ratio?.let { "%.2f".format(it) + ":1" } ?: "missing token"} " +
+                                "(floor ${pair.min}:1)"
+                        } else {
+                            null
+                        }
                     }
                 }
             }
-        }
         failures shouldBe emptyList()
     }
 
@@ -52,8 +53,15 @@ class VendoredNonTextContrastTest {
         names.shouldNotBeEmpty()
         names shouldBe
             listOf(
-                "auto.css", "dark.css", "forest.css", "healthcare.css", "light.css",
-                "minimal.css", "ocean.css", "professional.css", "saas.css",
+                "auto.css",
+                "dark.css",
+                "forest.css",
+                "healthcare.css",
+                "light.css",
+                "minimal.css",
+                "ocean.css",
+                "professional.css",
+                "saas.css",
             )
         // auto.css audits BOTH its light default block and its dark @media block.
         vendoredThemes().first { it.first == "auto.css" }.second.size shouldBe 2
@@ -64,12 +72,13 @@ class VendoredNonTextContrastTest {
         // The 2026-09-03 defect, measured: every boundary shipped as a 1.05-1.35:1
         // surface step. The same contrastRatio this guard uses must see those values
         // as failures, or the guard could pass a re-vendored regression.
-        val shippedLight = mapOf(
-            "border-default" to "#e2e8f0",
-            "border-subtle" to "#f1f5f9",
-            "surface-selected" to "#e8f0fe",
-            "surface-default" to "#ffffff",
-        )
+        val shippedLight =
+            mapOf(
+                "border-default" to "#e2e8f0",
+                "border-subtle" to "#f1f5f9",
+                "surface-selected" to "#e8f0fe",
+                "surface-default" to "#ffffff",
+            )
         (contrastRatio(shippedLight["border-default"]!!, shippedLight["surface-default"]!!)!! < 3.0) shouldBe true
         (contrastRatio(shippedLight["border-subtle"]!!, shippedLight["surface-default"]!!)!! < 2.0) shouldBe true
         (contrastRatio(shippedLight["surface-selected"]!!, shippedLight["surface-default"]!!)!! < 1.5) shouldBe true
@@ -124,14 +133,18 @@ class VendoredNonTextContrastTest {
     }
 
     private fun luminance(rgb: Triple<Int, Int, Int>): Double {
-        val linear = listOf(rgb.first, rgb.second, rgb.third).map { v ->
-            val vd = v / 255.0
-            if (vd <= 0.03928) vd / 12.92 else Math.pow((vd + 0.055) / 1.055, 2.4)
-        }
+        val linear =
+            listOf(rgb.first, rgb.second, rgb.third).map { v ->
+                val vd = v / 255.0
+                if (vd <= 0.03928) vd / 12.92 else Math.pow((vd + 0.055) / 1.055, 2.4)
+            }
         return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
     }
 
-    private fun contrastRatio(hex1: String?, hex2: String?): Double? {
+    private fun contrastRatio(
+        hex1: String?,
+        hex2: String?,
+    ): Double? {
         if (hex1 == null || hex2 == null) return null
         val rgb1 = hexToRgb(hex1) ?: return null
         val rgb2 = hexToRgb(hex2) ?: return null
@@ -158,5 +171,10 @@ class VendoredNonTextContrastTest {
         val DARK_MEDIA = Regex("""@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)\s*\{([\s\S]*)\}""")
     }
 
-    private data class NonTextPair(val name: String, val fg: String, val bg: String, val min: Double)
+    private data class NonTextPair(
+        val name: String,
+        val fg: String,
+        val bg: String,
+        val min: Double,
+    )
 }
