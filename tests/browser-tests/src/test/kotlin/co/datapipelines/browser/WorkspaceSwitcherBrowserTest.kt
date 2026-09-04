@@ -37,7 +37,7 @@ class WorkspaceSwitcherBrowserTest : BrowserSuite() {
         // render time (CookieCsrfTokenRepository is active — SecurityConfig). Assert the
         // RENDERED form, so a future template or config change that drops the token
         // fails here instead of surfacing as a 403 in production.
-        page.locator("form[action*='/workspace/switch'] input[name='_csrf']").inputValue().isNotBlank() shouldBe true
+        page.locator(".app-workspace-form input[name='_csrf']").inputValue().isNotBlank() shouldBe true
 
         // Switch to the second: the form submits on change and re-renders with the
         // new choice selected.
