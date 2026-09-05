@@ -4,9 +4,12 @@ import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.node.AbstractVisitor
 import org.commonmark.node.Code
+import org.commonmark.node.HardLineBreak
 import org.commonmark.node.Heading
 import org.commonmark.node.Link
 import org.commonmark.node.Node
+import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.Text
 import org.commonmark.parser.Parser
 import org.commonmark.renderer.html.AttributeProvider
@@ -36,11 +39,15 @@ import java.nio.file.Paths
 class DocsCatalog(
     classLoader: ClassLoader,
 ) {
-    /** One index row: slug, display title (first H1), group name. */
+    /**
+     * One index row: slug, display title (first H1), group name, and the meta description
+     * the public doc page publishes (073 §C).
+     */
     data class DocEntry(
         val slug: String,
         val title: String,
         val group: String,
+        val description: String,
     )
 
     /** A named section of the docs index, in display order. */
@@ -129,8 +136,60 @@ class DocsCatalog(
                 }
             },
         )
-        return RenderedDoc(DocEntry(slug, title, groupOf(slug)), html, anchors)
+        return RenderedDoc(DocEntry(slug, title, groupOf(slug), metaDescription(document)), html, anchors)
     }
+
+    /**
+     * The doc's meta description (073 §C): its first REAL paragraph, flattened to one line
+     * and trimmed to the length a search result displays.
+     *
+     * "First paragraph" naively is the wrong answer here — every spec opens with the
+     * `**Status:** … **Owner:** … **Last updated:** …` metadata block, which describes the
+     * document's bookkeeping and not its subject. So the scan skips that block by its own
+     * marker and skips one-liners (a pointer sentence, a table caption), and takes the first
+     * paragraph long enough to be prose. A doc with no such paragraph gets an empty
+     * description and the page omits the tag — an absent description is a worse result
+     * snippet; a wrong one is a wrong page in the index.
+     */
+    private fun metaDescription(document: Node): String {
+        val paragraphs = mutableListOf<String>()
+        document.accept(
+            object : AbstractVisitor() {
+                override fun visit(paragraph: Paragraph) {
+                    paragraphs += paragraphText(paragraph).replace(WHITESPACE, " ").trim()
+                }
+            },
+        )
+        val prose =
+            paragraphs.firstOrNull { it.length >= MIN_DESCRIPTION_CHARS && !it.startsWith(STATUS_BLOCK_MARKER) }
+                ?: return ""
+        return truncateToDisplay(prose)
+    }
+
+    /**
+     * A paragraph's visible text, with line breaks turned back into spaces.
+     *
+     * Deliberately NOT [textOf], which the heading-slug provider uses: that one ignores
+     * `SoftLineBreak`, so a paragraph wrapped mid-sentence in the source comes out with the
+     * words on either side of the newline glued together ("how edits becomedrafts", which is
+     * what versioning.md's first paragraph produced). Widening [textOf] instead would change
+     * the heading ids it feeds, and those are pinned to GitHub's algorithm and to
+     * `scripts/docs-audit.sh` — a slug change would 404 every anchor the audit calls live.
+     */
+    private fun paragraphText(paragraph: Node): String =
+        buildString {
+            paragraph.accept(
+                object : AbstractVisitor() {
+                    override fun visit(text: Text) = append(text.literal).let { }
+
+                    override fun visit(code: Code) = append(code.literal).let { }
+
+                    override fun visit(softLineBreak: SoftLineBreak) = append(' ').let { }
+
+                    override fun visit(hardLineBreak: HardLineBreak) = append(' ').let { }
+                },
+            )
+        }
 
     private fun groupOf(slug: String): String =
         GROUPING.entries.firstOrNull { slug in it.value }?.key
@@ -190,6 +249,29 @@ class DocsCatalog(
 
         private val EXTENSIONS = listOf(TablesExtension.create(), StrikethroughExtension.create())
         private val PARSER: Parser = Parser.builder().extensions(EXTENSIONS).build()
+
+        /** Google truncates a description around 155–160 characters; 155 is the safe display budget. */
+        const val DESCRIPTION_MAX_CHARS = 155
+
+        /** Below this a "paragraph" is a pointer line or a caption, not the doc's subject. */
+        private const val MIN_DESCRIPTION_CHARS = 60
+
+        /** Every spec opens with this bookkeeping block; it describes the file, not the subject. */
+        private const val STATUS_BLOCK_MARKER = "Status:"
+
+        private val WHITESPACE = Regex("""\s+""")
+
+        /**
+         * Cut to [DESCRIPTION_MAX_CHARS] at a word boundary — mid-word truncation reads as a
+         * broken page in the search result. Text that already fits is returned untouched, so
+         * a short first paragraph keeps its full stop instead of gaining an ellipsis.
+         */
+        internal fun truncateToDisplay(text: String): String {
+            if (text.length <= DESCRIPTION_MAX_CHARS) return text
+            val head = text.take(DESCRIPTION_MAX_CHARS - 1)
+            val cut = head.lastIndexOf(' ')
+            return (if (cut > 0) head.take(cut) else head).trimEnd(',', ';', ':', '.', ' ') + "\u2026"
+        }
 
         /** The non-alphanumerics GitHub keeps in heading slugs: underscore, dash, space. */
         private const val SLUG_KEPT_CHARS = "_- "

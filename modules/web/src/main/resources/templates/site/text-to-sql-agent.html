@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Text-to-SQL agent</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="tts-title">
+    <div class="container">
+      <p class="kicker">Text to SQL, and then what?</p>
+      <h1 id="tts-title" class="ds-display">From a question to a pipeline your team can rerun</h1>
+      <p class="section-lede">
+        <strong>We do not generate SQL.</strong> Your agent does that, and it is already good at it. What it usually
+        lacks is everything on either side of the query: the real schema going in, and somewhere durable for the
+        answer to live coming out. That is what this server is.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gap-title">
+    <div class="container">
+      <h2 id="gap-title" class="ds-headline">The gap a text-to-SQL tool leaves</h2>
+      <p class="section-lede">
+        A natural-language-to-SQL layer answers a question once, in one session, against one database. Three days
+        later the question comes back, and nothing about the first answer helps.
+      </p>
+      <ul class="fact-list fact-list-plain">
+        <li><strong>The schema was a guess.</strong> Without introspection the model infers columns from names, and a plausible query over a wrong column returns a plausible wrong number.</li>
+        <li><strong>The answer was a message.</strong> It is in a chat log. It is not versioned, not reviewable, and not runnable by anyone else.</li>
+        <li><strong>The failure was a stack trace.</strong> When the query breaks, the agent gets a driver exception to guess at rather than a code to branch on.</li>
+        <li><strong>One database at a time.</strong> Real questions cross two — the facts here, the lookup there.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="four-title">
+    <div class="container">
+      <p class="kicker">What the agent gets here</p>
+      <h2 id="four-title" class="ds-headline">Real schemas, a versioned artefact, readable failures, history</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.1 -->
+          <h3>Your actual schema, before the query</h3>
+          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code> — the agent looks at the columns and a few real values first, so its SQL is grounded rather than inferred.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §3.1 -->
+          <h3>The answer becomes an artefact</h3>
+          <p>The query is saved as a template, referenced by a pipeline in declarative JSON. It has a name, parameters, and a diff. Somebody else can run it without asking the agent again.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/versioning.md §3.1, docs/versioning.md §3.2 -->
+          <h3>And a version history</h3>
+          <p>Editing a released pipeline copies it to a draft; the release keeps running until a person releases the new one. Last quarter's number is reproducible because last quarter's SQL still exists.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §13 -->
+          <h3>Failures the agent can act on</h3>
+          <p>Catalogued <code>{domain}.{entity}.{failure}</code> codes with details — a missing parameter, an unreachable datasource, a refused write — instead of a driver message to parse.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.2.15 -->
+          <h3>The rows themselves</h3>
+          <p><code>executions_get_result</code> pages the real result through a cursor, so the agent checks its own answer against the data rather than declaring victory.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §8.3 -->
+          <h3>A prompt for the debugging loop</h3>
+          <p>The server ships a <code>debug_failed_execution</code> prompt that walks a failed run to a diagnosis — the failure path, treated as a first-class part of the agent's job.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cross-title">
+    <div class="container">
+      <h2 id="cross-title" class="ds-headline">And the question that crosses two databases</h2>
+      <!-- claim: docs/staging.md §1 -->
+      <p class="section-lede">
+        The question that stops a single-database text-to-SQL tool dead — "revenue by borough", where the trips are
+        in Postgres and the zone lookup is in SQLite — is an ordinary pipeline here. Each source is read in place,
+        staged into an in-memory database created for that one execution, and joined there.
+        <a th:href="@{/federated-query}">The worked example, with its SQL</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="honest-title">
+    <div class="container">
+      <h2 id="honest-title" class="ds-headline">Being straight about it</h2>
+      <ul class="fact-list fact-list-plain">
+        <li><strong>No natural-language box.</strong> There is no "ask a question" UI. Your agent is the interface, over MCP.</li>
+        <li><strong>No model shipped or called.</strong> The quality of the SQL is your agent's; the quality of what happens to it is ours.</li>
+        <li><strong>No accuracy claim.</strong> We do not benchmark on Spider or BIRD, because we are not the thing being benchmarked.</li>
+      </ul>
+      <p><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here &rarr;</a> &middot;
+         <a th:href="@{/add-mcp-server-to-claude-code}">Connect your agent &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>

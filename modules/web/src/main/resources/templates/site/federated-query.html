@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Federated query</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="fq-title">
+    <div class="container">
+      <p class="kicker">Data virtualization, minus the platform</p>
+      <h1 id="fq-title" class="ds-display">Federated query across databases, without a warehouse</h1>
+      <p class="section-lede">
+        Join tables from different databases — Postgres to MySQL to SQLite — in one pipeline. Each source is queried
+        where it lives, the join happens in a staging database created for that one execution, and the staging
+        database is destroyed when the execution ends. Nothing is landed, nothing is synced, and there is no
+        warehouse to keep.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="/#demo">See it on real data</a>
+        <a class="btn btn-secondary" th:href="@{/docs/staging}">Read the staging spec</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="how-title">
+    <div class="container">
+      <p class="kicker">The mechanism</p>
+      <h2 id="how-title" class="ds-headline">Cross-database joins in an in-memory staging area</h2>
+      <!-- claim: docs/staging.md §1 -->
+      <p class="section-lede">
+        Staging is an in-memory H2 database that holds the intermediate result sets of one execution. It is created
+        when the execution starts and destroyed when it ends. No state survives between executions — that is the
+        design, not a limitation being worked around.
+      </p>
+      <!-- claim: docs/staging.md §3.1 -->
+      <p>
+        Each execution gets its own isolated instance at <code>jdbc:h2:mem:exec_{execution_id}</code>, with no
+        <code>DB_CLOSE_DELAY</code>: the database exists exactly while a connection to it is open, so a leaked
+        staging database is not a shape this can take. The connection the author's SQL runs on is a de-privileged
+        user, not H2's <code>sa</code>.
+      </p>
+      <ol class="steps">
+        <li>
+          <h3>Read each source in place</h3>
+          <!-- claim: docs/pipeline-contract.md §8 -->
+          <p>One node per source, each a plain <code>DQL</code> query against its own datasource, in that engine's own dialect. The source database does the filtering and the aggregation it is good at.</p>
+        </li>
+        <li>
+          <h3>Stage the result sets</h3>
+          <!-- claim: docs/staging.md §1 -->
+          <p>Each node's output becomes a table in the execution's staging database, under a stable name the downstream SQL can reference.</p>
+        </li>
+        <li>
+          <h3>Join in staging</h3>
+          <!-- claim: docs/pipeline-contract.md §8 -->
+          <p>A node whose source is <code>tempdb</code> sees all of them as ordinary tables and joins them with ordinary SQL. Neither original engine ever learns about the other.</p>
+        </li>
+        <li>
+          <h3>Return rows, drop the staging database</h3>
+          <!-- claim: docs/mcp-server.md §6.2.15 -->
+          <p>The caller node's result is paged back through the result cursor; the staging database goes away with the execution.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="worked-title">
+    <div class="container">
+      <p class="kicker">Worked example</p>
+      <h2 id="worked-title" class="ds-headline">Join Postgres and SQLite in one query: <code>revenue_by_borough</code></h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        Seeded by the NYC demo. The trip rollup lives in a Postgres datasource; the 265-row taxi-zone lookup that
+        turns a pickup zone into a borough lives in a SQLite one. Neither engine can see the other's table, so both
+        are staged first — and then it is just a join.
+      </p>
+
+      <h3>Node 1 &mdash; the trips, from Postgres</h3>
+      <p>A <code>DQL</code> node against the <code>sample-trips</code> datasource, staged as <code>stg_trips_monthly</code>.</p>
+
+      <h3>Node 2 &mdash; the zones, from SQLite</h3>
+      <p>A <code>DQL</code> node against the <code>sample-reference</code> datasource, staged as <code>stg_zones</code>.</p>
+
+      <h3>Node 3 &mdash; the join, in staging</h3>
+      <p>Source <code>tempdb</code>. This is the pipeline's SQL, verbatim:</p>
+      <div class="code-block">
+        <pre><code>SELECT
+    z.borough                                                AS borough,
+    SUM(t.trip_count)                                        AS trip_count,
+    ROUND(SUM(t.total_revenue), 2)                           AS total_revenue,
+    ROUND(SUM(t.total_tips), 2)                              AS total_tips,
+    ROUND(SUM(t.total_revenue) / SUM(t.trip_count), 2)       AS revenue_per_trip,
+    ROUND(100.0 * SUM(t.total_tips) / SUM(t.total_revenue), 2) AS tip_pct_of_revenue
+FROM stg_trips_monthly t
+JOIN stg_zones z ON z.location_id = t.pu_location_id
+GROUP BY z.borough
+ORDER BY SUM(t.total_revenue) DESC</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <!-- claim: docs/staging.md §3.1 -->
+      <p>
+        Unquoted references to staged tables resolve because the staging database runs in PostgreSQL compatibility
+        mode with lower-folded identifiers — the author style the specs themselves use. That parameter is a
+        correctness invariant of the identifier scheme, not an operator preference.
+      </p>
+      <p>
+        The demo family goes further than two engines: <code>rainy_vs_dry_ridership</code> joins the same Postgres
+        trips to daily precipitation from a MySQL datasource and a calendar from SQLite — three engines, one query,
+        nothing landed.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="honest-title">
+    <div class="container">
+      <p class="kicker">Where this fits</p>
+      <h2 id="honest-title" class="ds-headline">And where it does not</h2>
+      <ul class="fact-list fact-list-plain">
+        <li>
+          <!-- claim: docs/staging.md §1 -->
+          <strong>Staging is in memory, per execution.</strong> That is the right shape for joining a rollup to a lookup, and the wrong one for joining two billion-row fact tables. Push the aggregation down into each source node — that is what the source engines are for.
+        </li>
+        <li>
+          <!-- claim: docs/ROADMAP.md §2 -->
+          <strong>DuckDB as a staging engine is planned, not shipped.</strong> H2 is the staging engine today; the abstraction exists so a larger analytical engine can take its place.
+        </li>
+        <li><strong>This is not data virtualization as a platform.</strong> There is no unified catalog, no semantic layer, no query planner spanning engines. There is a pipeline that reads several databases and joins their results — which is the part most teams actually needed.</li>
+        <li><strong>It is not an ETL tool.</strong> Nothing is copied anywhere on a schedule. If you want a result written back to a database, that is a node you add on purpose.</li>
+      </ul>
+      <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
+         <a th:href="@{/docs/staging}">Staging specification &rarr;</a> &middot;
+         <a th:href="@{/docs/pipeline-contract}">Pipeline contract &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>

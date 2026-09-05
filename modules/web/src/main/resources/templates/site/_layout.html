@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<!--/*
+  The public site's shared chrome (073). Every indexable page outside the homepage renders
+  through `page(content)`; the homepage reuses the `siteHeader`/`siteFooter` fragments only,
+  because its 760-line body predates this layout and its own <head> carries the JSON-LD.
+
+  The <head> is model-driven, never hardcoded: pageTitle / pageDescription / canonicalUrl /
+  ogImage arrive from the SitePages registry through PublicPage, so the sitemap, the page and
+  the SEO guards read ONE set of strings.
+*/-->
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:fragment="page(content)">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${pageTitle}">datapipelines.co</title>
+  <meta name="description" th:content="${pageDescription}" content="">
+  <link rel="canonical" th:href="${canonicalUrl}" href="https://datapipelines.co/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="datapipelines.co">
+  <meta property="og:url" th:content="${canonicalUrl}" content="">
+  <meta property="og:title" th:content="${pageTitle}" content="">
+  <meta property="og:description" th:content="${pageDescription}" content="">
+  <meta property="og:image" th:content="${ogImage}" content="">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" th:content="${pageTitle}" content="">
+  <meta name="twitter:description" th:content="${pageDescription}" content="">
+  <meta name="twitter:image" th:content="${ogImage}" content="">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
+  <link rel="icon" type="image/png" sizes="16x16" th:href="@{/site/brand/favicon-16.png}">
+  <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
+  <link rel="manifest" th:href="@{/site/brand/site.webmanifest}">
+  <meta name="theme-color" content="#1F4FD8">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/tokens.css}">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/base.css}">
+  <link rel="stylesheet" th:href="@{/vendor/design-system/motion.css}">
+  <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}">
+  <link rel="stylesheet" th:href="@{/site/css/site.css}">
+  <!--/* One optional extra sheet, named by the controller — the public docs page's typography. */-->
+  <link th:if="${extraCss}" rel="stylesheet" th:href="@{${extraCss}}">
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div th:replace="~{site/_layout :: siteHeader}"></div>
+  <main id="main">
+    <th:block th:replace="${content}"/>
+  </main>
+  <div th:replace="~{site/_layout :: siteFooter}"></div>
+  <script th:src="@{/site/js/site.js}"></script>
+</body>
+</html>
+
+<!--/*
+  The public header. Section links are absolute (`/#how-it-works`) so the SAME markup works
+  on the homepage — a same-path fragment link is an in-page scroll, not a navigation — and on
+  every cluster page, where it has to be a real link back to `/`.
+*/-->
+<header class="site-header" th:fragment="siteHeader" xmlns:th="http://www.thymeleaf.org">
+  <div class="container header-inner">
+    <a class="brand" th:href="@{/}">
+      <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default, #ffffff)"/></svg>
+      <span>datapipelines.co</span>
+    </a>
+    <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
+    <nav class="nav-wide" aria-label="Primary">
+      <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
+      <a th:href="@{/federated-query}">Federated query</a>
+      <a href="/#demo">Demo</a>
+      <a th:href="@{/docs}">Docs</a>
+      <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
+      <a class="nav-github" th:href="@{/login}">Sign in</a>
+    </nav>
+    <details class="nav-mobile">
+      <summary aria-label="Open menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        </svg>
+      </summary>
+      <nav class="menu" aria-label="Primary mobile">
+        <a th:href="@{/mcp-server-for-sql-databases}">MCP server</a>
+        <a th:href="@{/federated-query}">Federated query</a>
+        <a href="/#demo">Demo</a>
+        <a th:href="@{/docs}">Docs</a>
+        <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
+        <a th:href="@{/login}">Sign in</a>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<!--/*
+  The public footer, and the site's internal link graph: every cluster page is one hop from
+  every other one and from the homepage. That is the whole reason the registry drives it —
+  a page added to SitePages.NAV is linked from every page the moment it exists.
+*/-->
+<footer class="site-footer" th:fragment="siteFooter" xmlns:th="http://www.thymeleaf.org">
+  <div class="container">
+    <nav class="footer-map" aria-label="Site map">
+      <div class="footer-col">
+        <h2>MCP server</h2>
+        <ul>
+          <li><a th:href="@{/mcp-server-for-sql-databases}">SQL MCP server</a></li>
+          <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h2>Use cases</h2>
+        <ul>
+          <li><a th:href="@{/add-mcp-server-to-claude-code}">Add to Claude Code or Cursor</a></li>
+          <li><a th:href="@{/ai-data-pipeline}">AI data pipeline</a></li>
+          <li><a th:href="@{/text-to-sql-agent}">Text-to-SQL agent</a></li>
+          <li><a th:href="@{/federated-query}">Federated query</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h2>Compare</h2>
+        <ul>
+          <li><a th:href="@{/compare/airflow}">vs Apache Airflow</a></li>
+          <li><a th:href="@{/compare/dbt}">vs dbt</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h2>Project</h2>
+        <ul>
+          <li><a th:href="@{/docs}">Documentation</a></li>
+          <li><a href="https://github.com/msabiransari/datapipelines">GitHub</a></li>
+          <li><a th:href="@{/login}">Sign in</a></li>
+        </ul>
+      </div>
+    </nav>
+    <div class="footer-inner">
+      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br>&copy; 2026 datapipelines.co</p>
+    </div>
+  </div>
+</footer>

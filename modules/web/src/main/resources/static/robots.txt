@@ -1,0 +1,9 @@
+# datapipelines.co — everything the app serves publicly is meant to be indexed
+# (073). The private surface is not listed here on purpose: robots.txt is a
+# PUBLIC file, so naming internal routes in it advertises them, and the routes
+# that matter are already refused by the filter chain — SecurityConfig's
+# `anyRequest().authenticated()` is the control, not this file.
+User-agent: *
+Allow: /
+
+Sitemap: https://datapipelines.co/sitemap.xml

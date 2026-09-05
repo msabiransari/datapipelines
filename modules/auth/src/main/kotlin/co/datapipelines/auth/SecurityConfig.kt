@@ -115,6 +115,34 @@ class SecurityConfig(
                         // 033: the marketing site's own assets (css/js/img). The design
                         // system it references rides the already-public /vendor/** below.
                         "/site/**",
+                        // 073: the site's intent-cluster pages — one route per thing a
+                        // searcher types. Same shape as `/` and public for the same reason:
+                        // GET-only, constant content, the only live fact is the compile-time
+                        // MCP tool count, and no request on them touches a datastore or a
+                        // principal. Enumerated rather than globbed, so a future route under
+                        // one of these prefixes cannot become public by accident.
+                        "/mcp-server-for-sql-databases",
+                        "/mcp-server/*",
+                        "/add-mcp-server-to-claude-code",
+                        "/ai-data-pipeline",
+                        "/text-to-sql-agent",
+                        "/compare/*",
+                        "/federated-query",
+                        // 073: the in-product spec set, public. The viewer renders the
+                        // Markdown packaged in the jar — DocsCatalog's only collaborator is a
+                        // ClassLoader, the controller reads no principal and no workspace, and
+                        // no route here reaches a datastore. The identical content is already
+                        // public in the AGPL repository on GitHub, so this exposes nothing new;
+                        // it moves ~25 pages of long-tail documentation from GitHub's index to
+                        // ours. Anonymous requests get the public chrome, signed-in ones keep
+                        // the app chrome (DocsController).
+                        "/docs",
+                        "/docs/*",
+                        // 073: crawler infrastructure. robots.txt is a static file; sitemap.xml
+                        // is generated from the page registry and the packaged doc slugs — both
+                        // are, by definition, documents that must be readable without a login.
+                        "/robots.txt",
+                        "/sitemap.xml",
                         "/health",
                         "/ready",
                         "/info",
