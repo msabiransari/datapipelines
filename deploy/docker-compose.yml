@@ -158,6 +158,9 @@ services:
       # runs every pipeline against the shipped defaults with nothing to say so. The
       # currency symbol's default is written `$$`: a lone `$` is Compose's interpolation
       # sigil, and `$$` is its escape for a literal one (the container receives `$`).
+      # 068's key-provider selector; without this line a deployment that sets aws-kms in .env
+      # would silently run on the env provider (compose-env-audit finding, fixed at the 072 merge).
+      DATAPIPELINES_DB_KEY_PROVIDER: ${DATAPIPELINES_DB_KEY_PROVIDER:-env}
       DATAPIPELINES_ORG_CURRENCY_NAME: ${DATAPIPELINES_ORG_CURRENCY_NAME:-Dollar}
       DATAPIPELINES_ORG_CURRENCY_SYMBOL: ${DATAPIPELINES_ORG_CURRENCY_SYMBOL:-$$}
       DATAPIPELINES_ORG_FISCAL_START_DATE: ${DATAPIPELINES_ORG_FISCAL_START_DATE:-01-01}
