@@ -39,4 +39,8 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.web)
     testImplementation(libs.spring.boot.starter.test)
+    // 074 — the endpoint services collaborate with concrete repositories and PipelineService;
+    // mockk mocks final classes, which is what lets those units be tested here rather than only
+    // through the web module's integration suite (where this module earns no coverage).
+    testImplementation(libs.mockk)
 }

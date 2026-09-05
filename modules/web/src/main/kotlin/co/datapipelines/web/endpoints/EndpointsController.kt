@@ -78,7 +78,7 @@ class EndpointsController(
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
-    @Transactional
+    @Transactional("metadataTransactionManager")
     fun create(
         @RequestBody body: CreateEndpointRequest,
     ): ApiResponse<Map<String, Any?>> =
@@ -112,7 +112,7 @@ class EndpointsController(
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
-    @Transactional
+    @Transactional("metadataTransactionManager")
     fun delete(
         @RequestParam path: String,
     ) {
@@ -123,7 +123,7 @@ class EndpointsController(
     @PostMapping("/bindings")
     @ResponseStatus(HttpStatus.CREATED)
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
-    @Transactional
+    @Transactional("metadataTransactionManager")
     fun bind(
         @RequestBody body: BindEndpointKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
@@ -137,7 +137,7 @@ class EndpointsController(
     @DeleteMapping("/bindings")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
-    @Transactional
+    @Transactional("metadataTransactionManager")
     fun unbind(
         @RequestParam pathPrefix: String,
         @RequestParam apiKeyName: String,
