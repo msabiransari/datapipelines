@@ -108,7 +108,11 @@ class PipelinesCreateTool(
                     "DQL node may resolve to output.target='caller' (a node that omits its output block resolves to " +
                     "'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource " +
                     "references must exist in this environment; all template references must exist and dry-render " +
-                    "against the declared parameters. Returns the created pipeline with server-assigned id and version 1.",
+                    "against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog " +
+                    "function and writes a typed value into the execution Context under context_key, which downstream " +
+                    "nodes bind as :context_key — call calculators_list first for the kinds and their input names, and " +
+                    "remember that a node referencing another node's context_key must depend_on it. Returns the " +
+                    "created pipeline with server-assigned id and version 1.",
             schema = SCHEMA,
         )
 
@@ -174,7 +178,8 @@ class PipelinesUpdateTool(
                     "body_hash you read (pipelines_get, or a previous update's result) for the version you based your " +
                     "edit on. The result carries status='DRAFT' — your work is NOT released; a human releases it from " +
                     "the UI. On pipeline.version.conflict someone modified it after you loaded it: re-read, rebase, " +
-                    "retry; never retry blindly.",
+                    "retry; never retry blindly. The body takes the same node types as pipelines_create, CALCULATOR " +
+                    "included (calculators_list has the kinds); no extra arguments are needed for one.",
             schema = SCHEMA,
         )
 

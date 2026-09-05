@@ -55,6 +55,11 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
         put("completed_at", completedAt)
         put("duration_ms", durationMs)
         put("failed_node_id", failedNodeId)
+        // 072: both of these now carry the calculator story, with no projection change here.
+        // `parameters` is the FULLY RESOLVED Context after the run — org keys, platform keys,
+        // parameters and every calculator output (§0.5) — and each CALCULATOR node's entry in
+        // `node_stats` carries `context_key` / `context_value`, which is where an agent looks
+        // when a computed value is not what it expected.
         put("parameters", McpTools.readTree(parametersJson))
         put("node_stats", nodeStatsJson?.let { McpTools.readTree(it) })
         put("error", errorJson?.let { McpTools.readTree(it) })

@@ -122,6 +122,10 @@ class McpServerAutoConfiguration {
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, executorConfig.result),
+            // 072: no collaborators at all — the catalog is a compile-time constant, which is
+            // exactly why these two need no workspace, no repository and no registry.
+            CalculatorsListTool(),
+            CalculatorsGetTool(),
         )
     }
 
