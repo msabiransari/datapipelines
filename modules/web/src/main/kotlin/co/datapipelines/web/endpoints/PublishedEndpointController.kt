@@ -5,7 +5,6 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorResponse
-import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.WebHeaders
 import jakarta.servlet.http.HttpServletRequest
@@ -125,7 +124,10 @@ class PublishedEndpointController(
         HttpHeaders().apply {
             cacheControl = "no-store"
             contentType = MediaType.APPLICATION_JSON
-            set(CorrelationId.HEADER, CorrelationId.current())
+            // DP-Correlation-Id is NOT set here: `CorrelationIdFilter` already puts it on every
+            // response, and setting it again emitted the header TWICE on a live serve — found by
+            // reading the first real `curl -D -` rather than by any test, since MockMvc and
+            // RestAssured both read a duplicated header as its first value.
         }
 
     companion object {
