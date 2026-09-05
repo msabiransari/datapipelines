@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!--/* The ANONYMOUS docs index (073 §C) — the public twin of docs/index.html. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Documentation</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="docs-title">
+    <div class="container">
+      <p class="kicker">Specifications</p>
+      <h1 id="docs-title" class="ds-display">Documentation</h1>
+      <p class="section-lede">
+        The operations manual and the contracts, packaged into the jar — so what you read here always
+        describes the version that is running. Everything below is also in the AGPL repository.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" th:each="group : ${groups}"
+           th:with="groupId=${'group-' + #strings.replace(#strings.toLowerCase(group.name), ' ', '-')}"
+           th:attr="aria-labelledby=${groupId}">
+    <div class="container">
+      <h2 class="ds-headline" th:id="${groupId}" th:text="${group.name}">Group</h2>
+      <ul class="doc-index">
+        <li th:each="doc : ${group.docs}">
+          <a th:href="@{/docs/{slug}(slug=${doc.slug})}" th:text="${doc.title}">Doc</a>
+          <span class="doc-index-desc" th:text="${doc.description}">description</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+</th:block>
+</html>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--/*
+  The ANONYMOUS doc page (073 §C). Same rendered Markdown as docs/doc.html; the difference is
+  the chrome — the public site header and footer, an SEO head, and no link into the
+  authenticated app. docs.css arrives through the layout's `extraCss` slot rather than a
+  <link> in the body, which is where the app-chrome version has to put it.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/docs}">Documentation</a></li>
+      <li aria-current="page" th:text="${docTitle}">Document</li>
+    </ol>
+  </nav>
+
+  <section class="section doc-section">
+    <div class="container">
+      <p class="kicker" th:text="${docGroup}">Group</p>
+      <!-- 033/B1: th:utext — the rendered markdown is DATA. A dollar-brace sequence inside it
+           (13 packaged docs carry env/YAML placeholders legitimately) is inserted literally;
+           Thymeleaf never evaluates it. Do NOT convert to an inline expression — see
+           DocsController. The doc's own first heading is this page's single top-level heading.
+           This comment deliberately spells no literal placeholder: DocsPublicSeoTest sweeps the
+           page chrome for unresolved expressions, and one written here would be a false red. -->
+      <article class="doc-body" th:utext="${docHtml}">rendered doc</article>
+      <p class="doc-source">
+        This is the documentation packaged with the running version. The same files live in the
+        <a href="https://github.com/msabiransari/datapipelines/tree/main/docs">repository on GitHub</a>.
+      </p>
+    </div>
+  </section>
+
+</th:block>
+</html>
