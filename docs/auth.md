@@ -473,7 +473,7 @@ Every seeded (§5A.2) and admin-reset credential is one-time: `users.must_change
 - **API-key principals are not gated** — an API key is a separate credential the user created deliberately; the forced change is about the human proving control of the interactive account.
 - The flag is read through the same ~60s liveness cache (D13); every password mutation evicts it immediately.
 
-The change itself (self-service, `POST /partials/account/password`) verifies the **current** password first — a hijacked session must not be able to rotate the credential — enforces the §5A.5 floor, clears `must_change_password`, and audits `auth.password.changed`.
+On a successful change **through the gate** (the user's `must_change_password` was TRUE), the response carries `HX-Redirect: /dashboard` so the browser leaves the change screen; a voluntary change from Settings stays on the page with a toast (fixed 2026-09-05 — the forced flow used to leave the form on screen with a toast saying "you can continue"). The change itself (self-service, `POST /partials/account/password`) verifies the **current** password first — a hijacked session must not be able to rotate the credential — enforces the §5A.5 floor, clears `must_change_password`, and audits `auth.password.changed`.
 
 ### 5A.5 Enumeration resistance and the password policy
 

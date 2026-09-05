@@ -66,8 +66,9 @@ class LoginGoldenPathBrowserTest : BrowserSuite() {
             }
         change.status() shouldBe 200
 
-        // Step 4: the dashboard now loads, and its htmx stats partials arrive.
-        page.navigate("$baseUrl/dashboard")
+        // Step 4: the FORCED change redirects the browser itself (HX-Redirect → /dashboard).
+        // The earlier version of this step navigated by hand — which is exactly how the
+        // "the dialog did not go away" defect (2026-09-05) stayed invisible to the suite.
         page.waitForURL("**/dashboard")
         page.locator("h1").first().innerText() shouldContain "Dashboard"
         page.waitForSelector(".ds-stats .ds-stat, .ds-stats td, .ds-stats div")

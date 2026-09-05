@@ -171,6 +171,9 @@ class CredentialMintingSessionOnlyTest {
     @Test
     fun `an OIDC session can still change its own password`() {
         authenticateAs(AuthMethod.OIDC)
+        // The handler now reads the gate's key before changing (forced vs voluntary response
+        // shape); this test is about the credential boundary, so a voluntary change is enough.
+        every { userRepository.findById(userId) } returns null
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
 

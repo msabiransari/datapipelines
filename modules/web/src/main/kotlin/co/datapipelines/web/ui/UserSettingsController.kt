@@ -127,18 +127,35 @@ class UserSettingsController(
         if (newPassword != confirmPassword) {
             return ResponseEntity.badRequest().body(errorSpan("The new passwords do not match"))
         }
+        // Read the gate's key BEFORE the change: a successful change clears it, and the
+        // response shape depends on whether this screen was reached through the forced-change
+        // gate (auth.md §5A.4) or voluntarily from Settings.
+        val wasForced = userRepository.findById(principal.userId)?.mustChangePassword == true
         return when (val result = localPasswordService.changeOwn(principal.userId, currentPassword, newPassword)) {
             is LocalPasswordService.ChangeResult.Success -> {
-                // Toast-only (§5.1 Shape B): htmx extracts the OOB toast and clears
-                // #password-change-result with the empty remainder. The FAILURES below
-                // stay inline spans — field-level/credential validation is never a toast.
-                ResponseEntity.ok(
-                    ToastHtml.oob(
-                        "success",
-                        "Password changed",
-                        "You can continue to the app.",
-                    ),
-                )
+                if (wasForced) {
+                    // The forced flow: the user came here because every other screen was
+                    // refused. A toast that says "you can continue" while the same form stays
+                    // on screen is a dead end (found on the owner's first local login,
+                    // 2026-09-05). htmx follows HX-Redirect with a full navigation; the gate's
+                    // liveness cache is evicted by the password write, so the dashboard renders.
+                    ResponseEntity
+                        .ok()
+                        .header("HX-Redirect", "/dashboard")
+                        .body("")
+                } else {
+                    // Voluntary change from Settings — toast-only (§5.1 Shape B): htmx extracts
+                    // the OOB toast and clears #password-change-result with the empty remainder.
+                    // The FAILURES below stay inline spans — field-level/credential validation
+                    // is never a toast.
+                    ResponseEntity.ok(
+                        ToastHtml.oob(
+                            "success",
+                            "Password changed",
+                            "You can continue to the app.",
+                        ),
+                    )
+                }
             }
 
             is LocalPasswordService.ChangeResult.WrongCurrentPassword -> {

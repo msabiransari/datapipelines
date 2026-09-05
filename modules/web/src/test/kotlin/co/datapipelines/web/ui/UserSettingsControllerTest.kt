@@ -76,6 +76,11 @@ class UserSettingsControllerTest {
             themePreference = "dark",
         )
 
+    private fun stubUser(mustChange: Boolean) {
+        every { userRepository.findById(userId) } returns
+            sampleUser.copy(mustChangePassword = mustChange, hasLocalPassword = true)
+    }
+
     @Test
     fun `settings page returns view with user and themes`() {
         authenticate()
@@ -178,6 +183,7 @@ class UserSettingsControllerTest {
     @Test
     fun `a password failure stays inline - 400 span, no retarget, no toast markup`() {
         authenticate()
+        stubUser(mustChange = false)
         every { localPasswordService.changeOwn(userId, "wrong-current-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.WrongCurrentPassword
 
@@ -190,16 +196,34 @@ class UserSettingsControllerTest {
     }
 
     @Test
-    fun `a password success is a toast-only response`() {
+    fun `a VOLUNTARY password success is a toast-only response`() {
         authenticate()
+        stubUser(mustChange = false)
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
 
         val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
 
         response.statusCode shouldBe HttpStatus.OK
+        response.headers.containsKey("HX-Redirect") shouldBe false
         response.body shouldContain "hx-swap-oob=\"beforeend:#toast\""
         response.body shouldContain "Password changed"
+    }
+
+    @Test
+    fun `a FORCED password success redirects to the dashboard instead of leaving the gate on screen`() {
+        // The owner's first local login (2026-09-05): the gate forced the change, the change
+        // succeeded, the toast said "you can continue" — and the same form stayed on screen.
+        authenticate()
+        stubUser(mustChange = true)
+        every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
+            LocalPasswordService.ChangeResult.Success
+
+        val response = controller.changeOwnPassword("current-password-1", "new-password-1", "new-password-1")
+
+        response.statusCode shouldBe HttpStatus.OK
+        response.headers.getFirst("HX-Redirect") shouldBe "/dashboard"
+        (response.body ?: "") shouldBe ""
     }
 
     private fun WebContext.fillLayoutChrome() {
@@ -243,6 +267,7 @@ class UserSettingsControllerTest {
     @Test
     fun `change password maps the service outcomes to fragments`() {
         authenticate()
+        stubUser(mustChange = false)
         every { localPasswordService.changeOwn(userId, "current-password-1", "new-password-1") } returns
             LocalPasswordService.ChangeResult.Success
         controller
