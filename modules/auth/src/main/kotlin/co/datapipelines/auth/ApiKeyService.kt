@@ -55,7 +55,11 @@ class ApiKeyService(
         expiresAt: Instant? = null,
         kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): IssuedApiKey {
-        val requested = scopes.ifEmpty { defaultScopes() }
+        // §7.7 — an ENDPOINT key carries no scopes by design, so the default-scopes fallback
+        // must not apply to it: falling back would hand it `read` across the whole API and make
+        // "its authority is its bindings" false. Caught by the 074 E2E, which asserted the
+        // minted key's scope set was empty and found `[read]`.
+        val requested = if (kind == ApiKeyKind.ENDPOINT) emptySet() else scopes.ifEmpty { defaultScopes() }
         if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
             throw ScopeInsufficientException(required = overreach, held = creatorScopes)
