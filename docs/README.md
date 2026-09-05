@@ -42,6 +42,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [datasources.md](datasources.md) | v1.8 | Named connections, 7 dialects, Hikari/JDBC property passthrough (§5.6 refusal sets), AES-GCM credential storage |
 | [staging.md](staging.md) | v1.10 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
 | [dag-executor.md](dag-executor.md) | v1.3 | Coroutine executor: topological execution, fail-fast, cancellation (Redis flag), result materialization |
+| [calculators.md](calculators.md) | v1.0 | The calculator catalogue: 23 pure `kind`s a `CALCULATOR` node can run (calendar/fiscal periods, date arithmetic, rounding, percent change, coalesce/map), the eight always-present Context keys (`org_*`, `current_date`, …), `$name` references vs literals, the topology rule. `calculators_list` returns the same catalogue live; drift-guarded against the registry. |
 
 ### Surfaces
 
