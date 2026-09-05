@@ -260,10 +260,13 @@ class PipelineExplorerRenderTest {
         setVariable("workingVersion", 2)
         setVariable("draftVersion", 2)
         setVariable("settings", PipelineSettings(TempdbSettings(StagingEngine.H2)))
-        setVariable(
-            "parameters",
-            mapOf("start_date" to Parameter(LogicalType.DATE, required = false, default = PipelineJson.objectMapper().readTree("\"2024-01-01\""))),
-        )
+        val startDate =
+            Parameter(
+                LogicalType.DATE,
+                required = false,
+                default = PipelineJson.objectMapper().readTree("\"2024-01-01\""),
+            )
+        setVariable("parameters", mapOf("start_date" to startDate))
         setVariable("nodeCount", 3)
         setVariable(
             "versions",
