@@ -693,9 +693,9 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
 | Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses the floor because it carries no scopes at all | `read` |
-| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings (owner-or-`admin` for bindings, enforced in-handler) | `author` |
+| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler — binding hands a credential authority over a subtree | `author` |
 
-**MCP tools** (all 22 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 26 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
@@ -703,8 +703,10 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
 | `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `datasources_create`, `pipelines_execute_node` | `author` |
+| `endpoints_list`, `endpoints_get` | `read` |
+| `endpoints_create`, `endpoints_delete` | `author` |
 
-(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. All 22 tools operate inside the API key's pinned workspace, design §9.)
+(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. All 26 tools operate inside the API key's pinned workspace, design §9.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 

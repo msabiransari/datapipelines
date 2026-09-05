@@ -39,10 +39,28 @@ class ApiKeyRepository(
      * (rest-api §16.1), whose `is_revoked` field is only meaningful when both values can appear
      * (gate C, F12c). Owner-scoped in SQL, like everything else here.
      */
+
     fun findByUser(userId: UUID): List<ApiKey> =
         jdbc.query(
             "$SELECT_COLUMNS WHERE k.user_id = :uid ORDER BY k.created_at DESC",
             MapSqlParameterSource("uid", userId),
+            ::map,
+        )
+
+    /**
+     * Live keys with this NAME in this workspace (074, promotion §19.5).
+     *
+     * A list, not a single row: `api_keys.name` carries no uniqueness constraint (metadata-db
+     * §4.2), so a name can legitimately belong to several people in one workspace. The caller
+     * decides what an ambiguous name means; promotion refuses to guess.
+     */
+    fun findByWorkspaceAndName(
+        workspaceId: UUID,
+        name: String,
+    ): List<ApiKey> =
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE k.workspace_id = :workspaceId AND k.name = :name AND k.is_revoked = FALSE",
+            mapOf("workspaceId" to workspaceId, "name" to name),
             ::map,
         )
 

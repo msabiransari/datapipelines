@@ -1548,8 +1548,14 @@ is fine, and the answer is coming.
 
 ### 19.5 Managing endpoints
 
-`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`; bindings owner-or-`admin`), addressed by
-`?path=`. Promotion carries endpoint rows and their bindings **by key name**; a target missing
+`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=` — never by a path
+segment, because a `path_pattern` contains `/` and an encoded `%2F` is refused below routing on
+the pinned Tomcat (the measured reason §8 moved templates to query addressing).
+
+Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, naming the key by NAME and requiring
+the key's **owner**. Binding another user's key is not offered in v1: `api_keys.name` carries no
+uniqueness constraint, so "the key named `ci`" is ambiguous deployment-wide and a surface that
+resolved it would pick one person's credential to widen. Promotion carries endpoint rows and their bindings **by key name**; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
 

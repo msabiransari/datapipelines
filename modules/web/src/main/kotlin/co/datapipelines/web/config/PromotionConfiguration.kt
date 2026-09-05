@@ -8,6 +8,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.web.pipelines.EndpointPromotion
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.PromotionInventoryService
 import co.datapipelines.web.pipelines.PromotionReceiveService
@@ -62,6 +63,10 @@ class PromotionConfiguration {
      * this bean should take the service instead of a transaction template.
      */
     @Bean
+    // A DI factory's arity is the container's business, not a design smell: every parameter is a
+    // bean this service genuinely needs, and collapsing them into a holder purely to satisfy the
+    // rule would add a type that exists only to be counted.
+    @Suppress("LongParameterList")
     fun promotionReceiveService(
         environment: Environment,
         inventory: PromotionInventoryService,
@@ -70,6 +75,8 @@ class PromotionConfiguration {
         userService: UserService,
         auditLogger: AuditLogger,
         transactionManager: PlatformTransactionManager,
+        // 074 — endpoints ride the batch, through the same publish path REST and MCP use.
+        endpointPromotion: EndpointPromotion,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -79,7 +86,19 @@ class PromotionConfiguration {
             auditLogger,
             TransactionTemplate(transactionManager),
             authoringEnabled(environment),
+            endpointPromotion,
         )
+
+    /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
+    @Bean
+    fun endpointPromotion(
+        publishing: co.datapipelines.application.endpoints.EndpointPublishService,
+        keys: co.datapipelines.application.endpoints.EndpointKeyService,
+        endpoints: co.datapipelines.application.endpoints.PublishedEndpointRepository,
+        bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        pipelines: PipelineRepository,
+    ): EndpointPromotion = EndpointPromotion(publishing, keys, endpoints, bindings, apiKeys, pipelines)
 
     @Bean
     fun promotionTargetClient(promotionProperties: PromotionProperties): PromotionTargetClient = PromotionTargetClient(promotionProperties)
@@ -91,7 +110,17 @@ class PromotionConfiguration {
         templates: TemplateRepository,
         client: PromotionTargetClient,
         promotionProperties: PromotionProperties,
-    ): PromotionService = PromotionService(pipelines, templates, client, promotionProperties, deploymentName(environment))
+        // 074 — the endpoints published over the promoted pipelines.
+        endpointPromotion: EndpointPromotion,
+    ): PromotionService =
+        PromotionService(
+            pipelines = pipelines,
+            templates = templates,
+            client = client,
+            promotionProperties = promotionProperties,
+            deploymentName = deploymentName(environment),
+            endpointPromotion = endpointPromotion,
+        )
 
     /** The deployment LABEL, carried as data (never branched on) — see the class KDoc. */
     private fun deploymentName(environment: Environment): String =

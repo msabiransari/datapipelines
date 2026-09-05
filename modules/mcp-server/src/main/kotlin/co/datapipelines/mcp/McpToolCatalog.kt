@@ -65,6 +65,12 @@ object McpToolCatalog {
             Entry("executions_list", mutating = false),
             Entry("executions_get", mutating = false),
             Entry("executions_get_result", mutating = false),
+            // 074 — published endpoints. `endpoints_create` and `endpoints_delete` write the
+            // registry, so they are the `mcp.tool.write` audit's business; list/get are reads.
+            Entry("endpoints_create", mutating = true),
+            Entry("endpoints_list", mutating = false),
+            Entry("endpoints_get", mutating = false),
+            Entry("endpoints_delete", mutating = true),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

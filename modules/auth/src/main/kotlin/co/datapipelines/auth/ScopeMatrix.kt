@@ -173,6 +173,12 @@ object ScopeMatrix {
             // not a scope (auth.md §7.6: admin-ness is not a scope).
             "datasources_create" to Scope.AUTHOR,
             "pipelines_execute_node" to Scope.AUTHOR,
+            // 074 — publishing exposes a released pipeline at a URL: an authoring act. The reads
+            // sit on the same floor every other listing does.
+            "endpoints_create" to Scope.AUTHOR,
+            "endpoints_list" to Scope.READ,
+            "endpoints_get" to Scope.READ,
+            "endpoints_delete" to Scope.AUTHOR,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

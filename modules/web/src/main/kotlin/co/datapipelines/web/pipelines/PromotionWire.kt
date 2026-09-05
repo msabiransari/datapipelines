@@ -85,6 +85,39 @@ object PromotionWire {
         /** Full pipeline JSON, children before parents (§10.4 steps 2–3). */
         @field:JsonProperty("pipelines") @get:JsonProperty("pipelines") @param:JsonProperty("pipelines")
         val pipelines: List<JsonNode> = emptyList(),
+        /**
+         * Published endpoints (074, rest-api §19.5), applied AFTER their pipelines — an endpoint
+         * over a pipeline the same batch is bringing must find it already stored.
+         *
+         * Defaulted to empty so a sender that predates 074 pushes a batch this receiver still
+         * accepts, and so a receiver that predates it ignores the field rather than refusing.
+         */
+        @field:JsonProperty("endpoints") @get:JsonProperty("endpoints") @param:JsonProperty("endpoints")
+        val endpoints: List<EndpointEntry> = emptyList(),
+    )
+
+    /**
+     * One promoted endpoint. Everything identity-shaped travels by NAME: the pipeline, and each
+     * bound API key.
+     *
+     * Keys are environment-local (metadata-db §5A) — a dev key does not exist in prod and must
+     * not be created by a promotion. So the binding names the key the target is expected to
+     * already have, and a target missing it refuses the batch with `endpoint.promotion.key_missing`
+     * before anything is pushed, rather than importing an endpoint nobody can call.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EndpointEntry(
+        @field:JsonProperty("path") @get:JsonProperty("path") @param:JsonProperty("path")
+        val path: String,
+        @field:JsonProperty("pipeline") @get:JsonProperty("pipeline") @param:JsonProperty("pipeline")
+        val pipeline: String,
+        @field:JsonProperty("timeout_seconds") @get:JsonProperty("timeout_seconds") @param:JsonProperty("timeout_seconds")
+        val timeoutSeconds: Int? = null,
+        @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")
+        val description: String = "",
+        /** The names of the API keys bound at this endpoint's own path node. */
+        @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
+        val bindings: List<String> = emptyList(),
     )
 
     /** What the receiver reports back: what it stored, per kind. */
@@ -98,5 +131,7 @@ object PromotionWire {
         val templates: Int,
         @field:JsonProperty("pipelines") @get:JsonProperty("pipelines") @param:JsonProperty("pipelines")
         val pipelines: Int,
+        @field:JsonProperty("endpoints") @get:JsonProperty("endpoints") @param:JsonProperty("endpoints")
+        val endpoints: Int = 0,
     )
 }

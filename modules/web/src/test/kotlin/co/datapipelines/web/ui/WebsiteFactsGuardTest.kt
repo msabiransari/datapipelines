@@ -126,6 +126,7 @@ class WebsiteFactsGuardTest {
                 executionRunner = executionRunner,
                 launcher = launcher,
                 datasourceCreateService = mockk<co.datapipelines.application.datasources.DatasourceCreateService>(),
+                endpointPublishService = mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
             ).size
     }
 

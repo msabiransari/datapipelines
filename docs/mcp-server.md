@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 22 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 26 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -187,6 +187,10 @@ Tools are named `{domain}_{action}`:
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
+- `endpoints_create`
+- `endpoints_list`
+- `endpoints_get`
+- `endpoints_delete`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -823,6 +827,114 @@ Register a new datasource connection. Mirrors `POST /api/v1/datasources` ([Datas
 
 Returns the [Datasources §3.2](datasources.md#32-json-structure-response--get-apiv1datasourcesname) response shape: the stored metadata with `password_set: true`, `last_test: null` (nothing has probed it yet) — and **no `password` field at any depth**.
 
+#### 6.2.23 `endpoints_create`
+
+Publish a released pipeline as a `GET` endpoint under `/api/x` ([REST API §19](rest-api.md#19-published-endpoints)). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+
+```json
+{
+  "name": "endpoints_create",
+  "description": "Publish a released pipeline as a GET endpoint under /api/x. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, transitively through PIPELINE nodes. A DML/DDL node, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 1-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "path",
+      "pipeline"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "e.g. /nyc/revenue/{borough} — no /api/x prefix, no trailing slash."
+      },
+      "pipeline": {
+        "type": "string",
+        "description": "The pipeline NAME. It must have a released version."
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."
+      },
+      "description": {
+        "type": "string"
+      }
+    }
+  }
+}
+```
+
+Returns the endpoint's wire shape: `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`.
+
+#### 6.2.24 `endpoints_list`
+
+The published endpoints of the key's pinned workspace.
+
+```json
+{
+  "name": "endpoints_list",
+  "description": "List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists.",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
+```
+
+Returns `{endpoints: [...]}` in the shape §6.2.23 returns.
+
+#### 6.2.25 `endpoints_get`
+
+One published endpoint, by its path PATTERN.
+
+```json
+{
+  "name": "endpoints_get",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/nyc/revenue/{borough}').",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "path"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The published path PATTERN, e.g. /nyc/revenue/{borough}."
+      }
+    }
+  }
+}
+```
+
+Returns the §6.2.23 shape, or `endpoint.not_found`.
+
+#### 6.2.26 `endpoints_delete`
+
+Unpublish an endpoint. The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it.
+
+```json
+{
+  "name": "endpoints_delete",
+  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "path"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The published path PATTERN, e.g. /nyc/revenue/{borough}."
+      }
+    }
+  }
+}
+```
+
+Returns `{path, deleted: true}`, or `endpoint.not_found`.
+
 **Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
 
 **Mutating.** Declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3). The audit row carries the datasource NAME and never the credential.
@@ -937,7 +1049,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 22 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 26 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 

@@ -4,6 +4,7 @@ import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
@@ -13,6 +14,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
@@ -101,6 +103,36 @@ class EndpointsConfiguration {
      */
     @Bean
     fun endpointServeAudit(jdbc: NamedParameterJdbcTemplate): EndpointServeAudit = EndpointServeAudit(jdbc)
+
+    /**
+     * Publishing and unpublishing (§4.2/§6) — the ONE validated path REST, MCP and promotion all
+     * go through, so a publish cannot skip the read-only rule by arriving over a different
+     * surface.
+     */
+    @Bean
+    fun endpointPublishService(
+        endpoints: PublishedEndpointRepository,
+        pipelines: PipelineService,
+        pipelineRepository: PipelineRepository,
+        readOnlyRule: ReadOnlyPipelineRule,
+        registry: EndpointRegistry,
+        audit: AuditEventSink,
+        properties: EndpointsProperties,
+    ): EndpointPublishService =
+        EndpointPublishService(
+            endpoints = endpoints,
+            pipelines = pipelines,
+            pipelineRepository = pipelineRepository,
+            readOnlyRule = readOnlyRule,
+            registry = registry,
+            audit = audit,
+            timeouts =
+                EndpointPublishService.TimeoutBounds(
+                    defaultSeconds = properties.timeoutDefaultSeconds,
+                    minSeconds = properties.timeoutMinSeconds,
+                    maxSeconds = properties.timeoutMaxSeconds,
+                ),
+        )
 
     /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
     @Bean

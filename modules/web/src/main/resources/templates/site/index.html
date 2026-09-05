@@ -197,8 +197,8 @@
               <h3>Point the agent at <code>/mcp</code></h3>
               <!-- claim: docs/mcp-server.md §4.1 -->
               <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
-              <!-- claim: docs/mcp-server.md §6.2.1–6.2.22 -->
-              <p>Exactly <span th:text="${toolCount}">22</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
+              <!-- claim: docs/mcp-server.md §6.2.1–6.2.26 -->
+              <p>Exactly <span th:text="${toolCount}">26</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
             </li>
             <li>
               <h3>Author as a JSON contract</h3>
@@ -220,7 +220,7 @@
           <figure class="how-figure">
             <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
               <title id="flow-title">Agent-to-engine flow</title>
-              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (22 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (26 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
               <defs>
                 <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
@@ -234,7 +234,7 @@
               <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
 
               <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
-              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 22 MCP tools</text>
+              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 26 MCP tools</text>
               <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
 
               <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>

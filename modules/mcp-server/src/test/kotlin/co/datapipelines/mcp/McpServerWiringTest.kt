@@ -79,26 +79,31 @@ class McpServerWiringTest {
             ExecutionsListTool(executions),
             ExecutionsGetTool(executions),
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
-        )
+            // 074 — the four published-endpoint tools, appended the way the shipped bean does.
+        ) +
+            EndpointsTools.all(
+                mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
+                mockk<co.datapipelines.pipeline.PipelineRepository>(),
+            )
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 22 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 26 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist.
      */
     @Test
-    fun `the tool surface is exactly the 22 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 26 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
-            { dispatcher.toolNames().size shouldBe 22 },
+            { dispatcher.toolNames().size shouldBe 26 },
             { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys },
         )
     }
 
     @Test
-    fun `the server builds with all 22 tools and all three prompts registered`() {
+    fun `the server builds with all 26 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(
@@ -111,7 +116,7 @@ class McpServerWiringTest {
             )
 
         assertAll(
-            { server.listTools().size shouldBe 22 },
+            { server.listTools().size shouldBe 26 },
             {
                 server.listPrompts().map { it.name() } shouldContainExactlyInAnyOrder
                     listOf("analyze_pipeline", "create_pipeline_for_question", "debug_failed_execution")

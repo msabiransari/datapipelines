@@ -51,6 +51,12 @@ class PromotionService(
     private val client: PromotionTargetClient,
     private val promotionProperties: PromotionProperties,
     private val deploymentName: String,
+    /**
+     * 074 — the endpoints published over the pipelines being promoted. Nullable so a deployment
+     * wired before 074 (and every unit test that predates it) keeps building endpoint-free
+     * batches rather than needing a stub.
+     */
+    private val endpointPromotion: EndpointPromotion? = null,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     private val log = LoggerFactory.getLogger(PromotionService::class.java)
@@ -131,14 +137,16 @@ class PromotionService(
                 workspace = workspaceName,
                 templates = closure.templatePayloads(inventory),
                 pipelines = closure.pipelinePayloads(inventory),
+                endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames()).orEmpty(),
             )
         log.info(
-            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} pipelines={}",
+            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} pipelines={} endpoints={}",
             client.targetBaseUrl,
             workspaceName,
             names.size,
             batch.templates.size,
             batch.pipelines.size,
+            batch.endpoints.size,
         )
         return client.push(batch)
     }
@@ -200,6 +208,9 @@ class PromotionService(
 
         /** Pinned template versions, imports before importers. Key is `id@version`. */
         private val templateOrder = LinkedHashMap<String, TemplateRef>()
+
+        /** The names of every pipeline this batch carries — what 074's endpoint scoping asks for. */
+        fun pipelineNames(): List<String> = pipelineOrder.values.map { it.name }.distinct()
 
         private val visitedPipelines = mutableSetOf<String>()
         private val visitedTemplates = mutableSetOf<String>()
