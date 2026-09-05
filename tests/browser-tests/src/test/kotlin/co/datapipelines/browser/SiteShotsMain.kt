@@ -270,7 +270,9 @@ object SiteShotsMain {
         private fun editorRunAndGraph() {
             openEditor(SHOWCASE)
             execute()
-            waitFor(".pe-result-panel")
+            // 065: the results live in the bottom dock (Results | Errors), never a closable panel.
+            waitFor(".pe-dock")
+            waitFor(".pe-dock .ds-table")
             // The results dock takes the lower half; without a fit only the first cards are in
             // frame, and the shot is supposed to show the run state of EVERY node.
             fitGraph()
@@ -304,18 +306,22 @@ object SiteShotsMain {
             }
             openEditor(pipeline)
             execute()
-            waitFor(".pe-node-failure, .pe-error-exception")
-            // §9.1's modal restates the user-facing message over the graph. The shot is about
-            // the CARD and the detail beneath it, so dismiss the modal — it is a real element
-            // of the flow, not of this state.
-            page.locator("button:has-text('Dismiss')").first().click()
-            page.locator("button:has-text('Dismiss')").first().waitFor(
-                com.microsoft.playwright.Locator
-                    .WaitForOptions()
-                    .setState(WaitForSelectorState.HIDDEN),
-            )
-            // The chain is the point of the shot (dag-executor §8.4) — open every collapsed level.
-            page.locator(".pe-error-exception details").all().forEach { it.evaluate("e => e.open = true") }
+            // 065: the first node failure opens the dock on the Errors tab (pipeline-editor §9).
+            // §9.1's modal still restates the user-facing message over the graph; the shot is
+            // about the CARD and the Errors tab beneath it, so dismiss it — it is a real element
+            // of the flow, not of this state. The chain is the point of the shot (dag-executor
+            // §8.4) — open every collapsed level.
+            waitFor(".pe-dock-error")
+            val dismiss = page.locator("button:has-text('Dismiss')").first()
+            if (dismiss.isVisible) {
+                dismiss.click()
+                dismiss.waitFor(
+                    com.microsoft.playwright.Locator
+                        .WaitForOptions()
+                        .setState(WaitForSelectorState.HIDDEN),
+                )
+            }
+            page.locator(".pe-dock-error details").all().forEach { it.evaluate("e => e.open = true") }
             settle()
             shoot("failure-detail.png")
         }
@@ -450,11 +456,11 @@ object SiteShotsMain {
             val card = page.locator(".pe-card").nth(index)
             card.waitFor()
             val box = laidOutBox(card, index)
+            // 065: a click on the card only SELECTS it; the inspector opens from the card's own
+            // button (or Enter). The button sits in the card's top-right corner.
             page.mouse().click(box.x + box.width / 2, box.y + box.height / 2)
-            page.locator(".pe-details-panel.pe-details-visible").waitFor()
-            // `.pe-node-list` is clipped for sighted users but un-clips on :focus-within (031),
-            // and the canvas click leaves focus inside it — so the screen-reader affordance
-            // would appear in the frame. Drop focus to the body and it re-clips.
+            card.locator(".pe-card-open").first().click()
+            page.locator(".pe-details-panel").waitFor()
             page.evaluate("() => document.activeElement && document.activeElement.blur()")
         }
 
