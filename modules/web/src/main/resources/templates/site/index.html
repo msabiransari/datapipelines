@@ -3,20 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>datapipelines.co — Agent-native Data Pipelines</title>
-  <meta name="description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
-  <link rel="canonical" href="https://datapipelines.co/">
+  <!--/* 073: title/description/canonical/og come from the SitePages registry through
+       PublicPage — the SAME row /sitemap.xml lists and the SEO guards measure. The title
+       leads with "MCP server for SQL databases" because that is what searchers type
+       (measured, 2026-09-04); the <h1> below keeps the poster's line, which is the pitch. */-->
+  <title th:text="${pageTitle}">datapipelines.co</title>
+  <meta name="description" th:content="${pageDescription}" content="">
+  <link rel="canonical" th:href="${canonicalUrl}" href="https://datapipelines.co/">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://datapipelines.co/">
-  <meta property="og:title" content="datapipelines.co — Agent-native Data Pipelines">
-  <meta property="og:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
-  <meta property="og:image" content="https://datapipelines.co/site/brand/og-1200x630.png">
+  <meta property="og:site_name" content="datapipelines.co">
+  <meta property="og:url" th:content="${canonicalUrl}" content="">
+  <meta property="og:title" th:content="${pageTitle}" content="">
+  <meta property="og:description" th:content="${pageDescription}" content="">
+  <meta property="og:image" th:content="${ogImage}" content="">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="datapipelines.co — Agent-native Data Pipelines">
-  <meta name="twitter:description" content="Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).">
-  <meta name="twitter:image" content="https://datapipelines.co/site/brand/og-1200x630.png">
+  <meta name="twitter:title" th:content="${pageTitle}" content="">
+  <meta name="twitter:description" th:content="${pageDescription}" content="">
+  <meta name="twitter:image" th:content="${ogImage}" content="">
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
   <link rel="icon" type="image/png" sizes="16x16" th:href="@{/site/brand/favicon-16.png}">
@@ -28,44 +33,99 @@
   <link rel="stylesheet" th:href="@{/vendor/design-system/motion.css}">
   <link id="dp-theme" rel="stylesheet" th:href="@{/vendor/design-system/themes/auto.css}">
   <link rel="stylesheet" th:href="@{/site/css/site.css}">
+  <!--/* 073 §D — structured data. Two blocks, both parsed by SiteJsonLdTest (a block that
+       stops being valid JSON is worse than no block: the crawler drops it silently). Every
+       FAQ answer restates something this site claims elsewhere WITH its citation, so the
+       schema cannot say more than the docs do. */-->
+  <!-- claim: docs/datasources.md §4.1 — FAQ "Which SQL databases" -->
+  <!-- claim: docs/datasources.md §5.7 — FAQ "write to my database" -->
+  <!-- claim: docs/auth.md §7.5, docs/mcp-server.md §4.1 — FAQ "how does an agent authenticate" -->
+  <!-- claim: docs/auth.md §10.1, docs/mcp-server.md §14 — FAQ "is every call audited" -->
+  <!-- claim: docs/staging.md §1 — FAQ "join across two databases" -->
+  <!-- claim: docs/deployment.md §3.5 — FAQ "self-hosted and open source" -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "datapipelines.co",
+    "url": "https://datapipelines.co/",
+    "applicationCategory": "DeveloperApplication",
+    "applicationSubCategory": "MCP server for SQL databases",
+    "operatingSystem": "Docker, any JVM 21 host",
+    "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+    "isAccessibleForFree": true,
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "A self-hosted MCP server and pipeline engine for SQL databases: agents author declarative SQL pipelines against Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, and run them under scoped, audited, read-only-by-default credentials."
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Which SQL databases does the datapipelines.co MCP server support?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Seven dialects: Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB and H2. Postgres, SQL Server, SQLite, DuckDB and H2 ship in the published image; the MySQL and Oracle drivers are added by rebuilding with a Gradle profile or dropping the jar into lib/, because of their licenses. See the dialect catalog in docs/datasources.md section 4.1 and the driver matrix in docs/deployment.md section 3.5."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can an AI agent write to my database through the MCP server?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Only where you allow it. A datasource flagged read-only refuses the three write-shaped uses in the pipeline contract - a DML node source, a DDL node source, and any node writing its output back to a datasource - at save time and again at execution time, against the live row. The documented deployment pattern is a SELECT-only database user as well, because the flag is contract and the credential is the guarantee. See docs/datasources.md section 5.7."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does an agent authenticate to the MCP server?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "With an API key, and nothing else. The /mcp endpoint accepts DP-API-Key or Authorization: Bearer dpk_... and rejects browser session cookies outright. Keys are Argon2id-hashed, shown once, pinned to one workspace, carry hierarchical scopes read, execute, author and admin, and stop working within about a minute of revocation. See docs/auth.md section 7 and docs/mcp-server.md section 4.1."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is every MCP tool call audited?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. The dispatcher emits mcp.tool.called for every tool call and mcp.tool.write for every mutating one, into the same audit log that carries the login, API-key and datasource-decryption events. See docs/auth.md section 10.1 and docs/mcp-server.md section 14."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can one pipeline join tables that live in two different databases?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Each source is queried in place, its result set is staged into an in-memory H2 database created for that one execution, and the join runs there. The staging database is destroyed when the execution ends, so nothing is landed and no warehouse is involved. See docs/staging.md section 1."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is datapipelines.co self-hosted and open source?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Both. It is AGPL-3.0 licensed and runs on your own hardware as a Docker image or a plain JVM process, with Postgres for metadata and Redis for results. Credentials never leave your deployment. See docs/deployment.md."
+        }
+      }
+    ]
+  }
+  </script>
 </head>
 <body id="top">
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="#top">
-        <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default, #ffffff)"/></svg>
-        <span>datapipelines.co</span>
-      </a>
-      <button type="button" class="theme-toggle" data-theme-toggle hidden>Theme: Auto</button>
-      <nav class="nav-wide" aria-label="Primary">
-        <a href="#how-it-works">How it works</a>
-        <a href="#capabilities">Features</a>
-        <a href="#demo">Demo</a>
-        <a href="#security">Security</a>
-        <a href="#roadmap">Roadmap</a>
-        <a class="nav-github" href="https://github.com/msabiransari/datapipelines">GitHub</a>
-        <a class="nav-github" th:href="@{/login}">Sign in</a>
-      </nav>
-      <details class="nav-mobile">
-        <summary aria-label="Open menu">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-          </svg>
-        </summary>
-        <nav class="menu" aria-label="Primary mobile">
-          <a href="#how-it-works">How it works</a>
-          <a href="#capabilities">Features</a>
-          <a href="#demo">Demo</a>
-          <a href="#security">Security</a>
-          <a href="#roadmap">Roadmap</a>
-          <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
-          <a th:href="@{/login}">Sign in</a>
-        </nav>
-      </details>
-    </div>
-  </header>
+  <!--/* 073: the header and footer are ONE markup, shared with every cluster page and the
+       public docs pages (site/_layout.html). Two copies of a nav is how one of them stops
+       linking a page that exists. */-->
+  <div th:replace="~{site/_layout :: siteHeader}"></div>
 
   <main id="main">
 
@@ -97,6 +157,23 @@
           <img th:src="@{/site/img/execution-result.png}" width="1440" height="1000" alt="Execution detail for the seeded rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
           <figcaption>A real SUCCESS execution, triggered over REST with an API key — exactly the agent flow. Rows included, so the agent can check its own work.</figcaption>
         </figure>
+      </div>
+    </section>
+
+    <!-- ============================ ENGINE STRIP ============================ -->
+    <!--/* 073: the six engine pages, one hop from the front door. This band is the site's
+         internal link graph as much as it is navigation — a searcher who arrived on
+         "mysql mcp server" and a visitor who arrived here both need the same page. */-->
+    <section class="section engine-strip" aria-labelledby="engines-title">
+      <div class="container">
+        <p class="kicker">One server, six engines</p>
+        <h2 id="engines-title" class="ds-headline">An MCP server for your SQL database</h2>
+        <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
+        <p class="section-lede">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.</p>
+        <ul class="engine-links">
+          <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
+        </ul>
+        <p class="engine-strip-more"><a th:href="@{/mcp-server-for-sql-databases}">Start with the SQL MCP server overview &rarr;</a></p>
       </div>
     </section>
 
@@ -745,15 +822,7 @@
 
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-inner">
-      <nav class="footer-links" aria-label="Footer">
-        <a href="https://github.com/msabiransari/datapipelines">GitHub</a>
-        <a href="https://github.com/msabiransari/datapipelines/tree/main/docs">Docs</a>
-      </nav>
-      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br>© 2026 datapipelines.co</p>
-    </div>
-  </footer>
+  <div th:replace="~{site/_layout :: siteFooter}"></div>
 
   <script th:src="@{/site/js/site.js}"></script>
 </body>
