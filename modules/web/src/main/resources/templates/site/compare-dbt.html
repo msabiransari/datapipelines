@@ -27,7 +27,7 @@
     <div class="container">
       <p class="kicker">Read this first</p>
       <h2 id="use-dbt-title" class="ds-headline">Use dbt instead when…</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>Everything is in one warehouse already.</strong> dbt transforms in place, inside the engine, and that is the fastest and cheapest way to do it when the data is there.</li>
         <li><strong>You are building a modelling layer.</strong> Staging models, marts, a lineage graph the whole team reads, generated documentation. That is a discipline, and dbt is the tool that carries it.</li>
         <li><strong>Data tests are part of the deal.</strong> Uniqueness, not-null, referential and custom tests, run alongside the models. We do not have an equivalent, and would not pretend a validation rule is one.</li>
@@ -68,7 +68,7 @@
   <section class="section" aria-labelledby="not-title">
     <div class="container">
       <h2 id="not-title" class="ds-headline">What we deliberately do not claim</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>Not a modelling framework.</strong> There is no <code>ref()</code>, no automatic lineage graph across models, no generated documentation site.</li>
         <li><strong>Not a testing framework.</strong> Pipelines validate structurally at save time; they do not assert facts about your data.</li>
         <li><strong>Not a warehouse tool.</strong> Snowflake, BigQuery and Databricks are not among the dialects. If that is where your data lives, dbt is the answer and we are not in the running.</li>

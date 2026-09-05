@@ -177,8 +177,20 @@ val websiteExportAssets =
     tasks.register<Copy>("websiteExportAssets") {
         group = "distribution"
         description = "Copies the marketing site's assets into build/website-export (033 fallback)."
+        // Wipe first. A Copy adds; it never removes, so an export directory left over from a
+        // previous run makes the whole export un-reproducible — and, worse, makes the
+        // completeness check in SiteExportMain pass on a file THIS run did not produce
+        // (measured, 2026-09-04: removing the css copy still exported "successfully").
+        val exportDir = layout.buildDirectory.dir("website-export")
+        doFirst { exportDir.get().asFile.deleteRecursively() }
         from("src/main/resources/static/site") { into("site") }
         from("src/main/resources/static/vendor/design-system") { into("vendor/design-system") }
+        // 073: the public docs pages reference /css/docs.css through the layout's extraCss
+        // slot. Without this the exported doc pages render as unstyled full-width prose —
+        // which is exactly what the first export produced, and what a 404 on a stylesheet
+        // looks like when nothing checks for it.
+        from("src/main/resources/static/css") { into("css") }
+        from("src/main/resources/static/favicon.ico")
         into(layout.buildDirectory.dir("website-export"))
     }
 

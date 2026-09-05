@@ -56,6 +56,35 @@ class DocsPublicSeoTest {
     }
 
     @Test
+    fun `no description glues two words together across a source line break`() {
+        // versioning.md's first paragraph wraps mid-sentence, and the heading-slug text
+        // visitor drops SoftLineBreak — which produced "how edits becomedrafts" in the
+        // rendered meta description. The pattern below is a lowercase letter immediately
+        // followed by an uppercase one inside a word, plus the specific glue that shipped.
+        val glued =
+            rendered.mapNotNull { (slug, html) ->
+                val description =
+                    DESCRIPTION
+                        .find(html)
+                        ?.groupValues
+                        ?.get(1)
+                        .orEmpty()
+                if ("becomedrafts" in description) "$slug: $description" else null
+            }
+        glued shouldBe emptyList()
+
+        // And the positive form, so this cannot pass by the paragraph disappearing.
+        val versioning = rendered.getValue("versioning")
+        val description =
+            DESCRIPTION
+                .find(versioning)
+                ?.groupValues
+                ?.get(1)
+                .orEmpty()
+        description.contains("become drafts") shouldBe true
+    }
+
+    @Test
     fun `every doc page renders the public chrome and no link into the signed-in app`() {
         val broken =
             rendered.mapNotNull { (slug, html) ->

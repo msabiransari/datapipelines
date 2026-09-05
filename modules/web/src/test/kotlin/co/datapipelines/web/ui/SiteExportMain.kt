@@ -56,7 +56,39 @@ fun main(args: Array<String>) {
             slugs.map { "$SITE_ORIGIN/docs/$it" }
     File(outDir, "sitemap.xml").writeText(SitemapXml.render(locations, lastmod = null))
 
+    val missing = missingAssets(outDir)
+    check(missing.isEmpty()) {
+        "website-export: ${missing.size} referenced asset(s) are not in the export — the fallback would serve " +
+            "unstyled pages: ${missing.sorted().joinToString()}"
+    }
+
     println("website-export: wrote $pages pages + robots.txt + sitemap.xml (${locations.size} urls) to ${outDir.absolutePath}")
+}
+
+/**
+ * Every root-relative `href`/`src` an exported page emits, checked against what the Copy task
+ * actually put in the directory.
+ *
+ * This exists because the first 073 export shipped the public doc pages referencing
+ * `/css/docs.css`, which the asset Copy task did not carry — the pages rendered as unstyled
+ * full-width prose, and nothing anywhere said so. `SiteAssetAuditTest` cannot see it: that
+ * guard asks whether the app's classpath serves an asset, and the app's classpath did.
+ * The fallback's own completeness is a different question, and this is where it gets asked.
+ */
+private fun missingAssets(outDir: File): Set<String> {
+    val assetTag = Regex("""<(?:link|script|img)\b[^>]*>""")
+    val attr = Regex("""\b(?:href|src)="([^"]*)"""")
+    return outDir
+        .walkTopDown()
+        .filter { it.isFile && it.extension == "html" }
+        .flatMap { file ->
+            assetTag
+                .findAll(file.readText())
+                .filterNot { "rel=\"canonical\"" in it.value }
+                .mapNotNull { attr.find(it.value)?.groupValues?.get(1) }
+                .filter { it.startsWith("/") }
+        }.filterNot { File(outDir, it.removePrefix("/")).isFile }
+        .toSet()
 }
 
 /** `/` becomes `index.html`; everything else becomes `<path>/index.html`. */

@@ -29,7 +29,7 @@
         A natural-language-to-SQL layer answers a question once, in one session, against one database. Three days
         later the question comes back, and nothing about the first answer helps.
       </p>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>The schema was a guess.</strong> Without introspection the model infers columns from names, and a plausible query over a wrong column returns a plausible wrong number.</li>
         <li><strong>The answer was a message.</strong> It is in a chat log. It is not versioned, not reviewable, and not runnable by anyone else.</li>
         <li><strong>The failure was a stack trace.</strong> When the query breaks, the agent gets a driver exception to guess at rather than a code to branch on.</li>
@@ -93,7 +93,7 @@
   <section class="section" aria-labelledby="honest-title">
     <div class="container">
       <h2 id="honest-title" class="ds-headline">Being straight about it</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>No natural-language box.</strong> There is no "ask a question" UI. Your agent is the interface, over MCP.</li>
         <li><strong>No model shipped or called.</strong> The quality of the SQL is your agent's; the quality of what happens to it is ours.</li>
         <li><strong>No accuracy claim.</strong> We do not benchmark on Spider or BIRD, because we are not the thing being benchmarked.</li>

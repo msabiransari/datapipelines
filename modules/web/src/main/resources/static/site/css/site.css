@@ -900,6 +900,38 @@ code {
    ============================================================ */
 
 /* --------------------------------------------------------
+   A NEUTRAL fact list. The base .fact-list marks every item
+   with a green tick, which is right for "here is what we do"
+   and wrong — actively misleading — for the lists 073 added:
+   the problems on the pillar, the "use them instead when…"
+   sections on the comparison pages, the "what this is not"
+   sections. A tick beside "There is no audit trail" reads as
+   a feature. Same layout, an em dash instead of the tick.
+   -------------------------------------------------------- */
+
+.fact-list-plain li::before {
+  content: "\2014";
+  color: var(--text-muted);
+  font-weight: inherit;
+}
+
+/* A closing sentence after a list is a paragraph, not a list item. */
+.fact-list + p {
+  margin-top: var(--space-5);
+}
+
+/* On the homepage every list follows a .section-lede, which carries the gap. The 073 pages
+   sometimes go straight from the heading to the content, so give that pairing its own. */
+.ds-headline + .fact-list,
+.ds-headline + .features-grid,
+.ds-headline + .steps,
+.ds-headline + .doc-index,
+.ds-headline + .engine-links,
+.ds-headline + .code-block {
+  margin-top: var(--space-5);
+}
+
+/* --------------------------------------------------------
    Breadcrumbs — the reader's position, and the crawler's
    view of the site's shape.
    -------------------------------------------------------- */

@@ -27,7 +27,7 @@
     <div class="container">
       <p class="kicker">Read this first</p>
       <h2 id="use-airflow-title" class="ds-headline">Use Airflow instead when…</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>Scheduling is the problem.</strong> Cron-style triggers, backfills, retries with policies, SLAs, sensors that wait on external state. We have none of that: pipelines here are executed on demand, by an agent, a REST call or a person.</li>
         <li><strong>The work is not all SQL.</strong> Airflow orchestrates anything you can put in a Python operator — file transfers, ML training, API calls, container jobs. We execute SQL against JDBC datasources, and nothing else.</li>
         <li><strong>You need one control plane for the whole platform.</strong> A single place where every job's dependencies, history and alerting live. That is exactly what Airflow is for.</li>

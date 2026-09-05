@@ -4,10 +4,12 @@ import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.node.AbstractVisitor
 import org.commonmark.node.Code
+import org.commonmark.node.HardLineBreak
 import org.commonmark.node.Heading
 import org.commonmark.node.Link
 import org.commonmark.node.Node
 import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.Text
 import org.commonmark.parser.Parser
 import org.commonmark.renderer.html.AttributeProvider
@@ -154,7 +156,7 @@ class DocsCatalog(
         document.accept(
             object : AbstractVisitor() {
                 override fun visit(paragraph: Paragraph) {
-                    paragraphs += textOf(paragraph).replace(WHITESPACE, " ").trim()
+                    paragraphs += paragraphText(paragraph).replace(WHITESPACE, " ").trim()
                 }
             },
         )
@@ -163,6 +165,31 @@ class DocsCatalog(
                 ?: return ""
         return truncateToDisplay(prose)
     }
+
+    /**
+     * A paragraph's visible text, with line breaks turned back into spaces.
+     *
+     * Deliberately NOT [textOf], which the heading-slug provider uses: that one ignores
+     * `SoftLineBreak`, so a paragraph wrapped mid-sentence in the source comes out with the
+     * words on either side of the newline glued together ("how edits becomedrafts", which is
+     * what versioning.md's first paragraph produced). Widening [textOf] instead would change
+     * the heading ids it feeds, and those are pinned to GitHub's algorithm and to
+     * `scripts/docs-audit.sh` — a slug change would 404 every anchor the audit calls live.
+     */
+    private fun paragraphText(paragraph: Node): String =
+        buildString {
+            paragraph.accept(
+                object : AbstractVisitor() {
+                    override fun visit(text: Text) = append(text.literal).let { }
+
+                    override fun visit(code: Code) = append(code.literal).let { }
+
+                    override fun visit(softLineBreak: SoftLineBreak) = append(' ').let { }
+
+                    override fun visit(hardLineBreak: HardLineBreak) = append(' ').let { }
+                },
+            )
+        }
 
     private fun groupOf(slug: String): String =
         GROUPING.entries.firstOrNull { slug in it.value }?.key

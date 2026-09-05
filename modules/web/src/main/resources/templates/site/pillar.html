@@ -26,7 +26,7 @@
     <div class="container">
       <h2 id="pain-title" class="ds-headline">Don't point an agent at production with write credentials</h2>
       <p class="section-lede">The fast way to give a coding agent database access is to paste a connection string into a config file. It works on the first afternoon and creates four problems you keep.</p>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong>The credential can write.</strong> Most database logins that can read a table can also drop it. An agent that misreads a schema does not need bad intent to do damage.</li>
         <li><strong>Database passwords sprawl across laptops.</strong> Every developer's MCP config is another copy, in plain text, outside any inventory.</li>
         <li><strong>Revoking one person means rotating a shared password</strong> — and then finding every config that held it.</li>
@@ -119,7 +119,7 @@
   <section class="section" aria-labelledby="next-title">
     <div class="container">
       <h2 id="next-title" class="ds-headline">Where to go next</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><a th:href="@{/add-mcp-server-to-claude-code}">Add the MCP server to Claude Code, Cursor or Copilot</a> — the config block per client, and how to mint the key.</li>
         <li><a th:href="@{/federated-query}">Federated query without a warehouse</a> — the cross-database join, with the SQL the demo actually runs.</li>
         <li><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here</a> — what the agent authors, and what reviews it.</li>

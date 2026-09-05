@@ -120,7 +120,7 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
     <div class="container">
       <p class="kicker">Where this fits</p>
       <h2 id="honest-title" class="ds-headline">And where it does not</h2>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li>
           <!-- claim: docs/staging.md §1 -->
           <strong>Staging is in memory, per execution.</strong> That is the right shape for joining a rollup to a lookup, and the wrong one for joining two billion-row fact tables. Push the aggregation down into each source node — that is what the source engines are for.

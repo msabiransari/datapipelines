@@ -147,7 +147,7 @@
       </p>
       <!-- claim: docs/mcp-server.md §4.2 -->
       <h3>If it does not connect</h3>
-      <ul class="fact-list">
+      <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong> — the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
         <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong> — wrong, revoked, expired, or the owning user is deactivated.</li>
         <li><strong><code>403 auth.scope.insufficient</code></strong> — the key is real and too small for what the agent tried. Mint one at the next scope up rather than widening the one you have.</li>
