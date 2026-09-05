@@ -161,7 +161,7 @@ for p, t in texts.items():
 # catalog domain, and without the prefix a misspelt workspace.* code in any doc
 # passed the mechanical audit — only the drift tests would have caught it.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.

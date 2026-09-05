@@ -74,6 +74,45 @@ data class ResultProperties(
 }
 
 /**
+ * The `datapipelines.endpoints.*` keys (Configuration §3.21) — published endpoints, the
+ * `GET /api/x/{path}` surface (rest-api §19).
+ *
+ * Only the timeout bounds live here. The design's fourth value, "page-rows-max", is
+ * deliberately NOT a key of its own: ruling R-EP4 makes `DP-Result-Page-Rows` **one
+ * contract** across the endpoint and `POST /pipelines/{id}/execute`, and both clamp to
+ * [ResultProperties.pageMaxRows]. A second key that had to equal the first would be a
+ * second authority for one bound — the thing configuration.md §1 exists to prevent — and
+ * an operator who retuned one and not the other would get two different clamps on one
+ * documented header.
+ *
+ * `timeout-default-seconds` is what a publish that names no timeout gets;
+ * min/max clamp every stored `published_endpoints.timeout_seconds` at write time (§5.5).
+ */
+@ConfigurationProperties(prefix = "datapipelines.endpoints")
+data class EndpointsProperties(
+    /** `timeout-default-seconds` — the timeout a publish that omits one is stored with. */
+    val timeoutDefaultSeconds: Int = 30,
+    /** `timeout-min-seconds` — the floor a published timeout is clamped up to. */
+    val timeoutMinSeconds: Int = 1,
+    /**
+     * `timeout-max-seconds` — the ceiling a published timeout is clamped down to, and so the
+     * longest a serve may block before it answers `202` and leaves the execution running.
+     */
+    val timeoutMaxSeconds: Int = 300,
+) {
+    init {
+        // configuration.md §7 — the validator asserts exactly this ordering at startup.
+        require(timeoutMinSeconds <= timeoutDefaultSeconds && timeoutDefaultSeconds <= timeoutMaxSeconds) {
+            "datapipelines.endpoints: timeout-min-seconds <= timeout-default-seconds <= timeout-max-seconds must hold"
+        }
+        require(timeoutMinSeconds > 0) { "datapipelines.endpoints.timeout-min-seconds must be > 0" }
+    }
+
+    /** The §5.5 clamp a publish applies to a requested timeout. */
+    fun clampTimeout(requested: Int): Int = requested.coerceIn(timeoutMinSeconds, timeoutMaxSeconds)
+}
+
+/**
  * The `datapipelines.executor.*` keys (Configuration §3.2), plus the two values
  * [co.datapipelines.executor.ExecutorConfig] needs that live in other namespaces:
  * `datapipelines.staging.h2.max-memory-mb` (§3.3) and `datapipelines.sse.heartbeat-interval-seconds`

@@ -49,7 +49,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 17
+        internal const val CHECK_COUNT = 18
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -88,6 +88,7 @@ class ConfigValidator(
             checkUiTheme(snapshot, violations, warnings)
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
+            checkEndpointsTimeoutOrdering(snapshot, violations)
             checkDevProfileGuard(snapshot, violations)
             checkWorkspacesProvisioningMode(snapshot, violations)
             checkWorkspacesOpenJoinMode(snapshot, violations)
@@ -368,6 +369,35 @@ class ConfigValidator(
             }
         }
 
+        /**
+         * §7 — `datapipelines.endpoints` timeout ordering, the §5.5 clamp's own bounds.
+         *
+         * The same shape as [checkResultTtlOrdering], and it exists for the same reason: the
+         * `EndpointsProperties` `init` block already refuses an out-of-order triple, but that
+         * fires as a binder failure naming a Kotlin class. This names the KEYS, in the one
+         * report the operator reads, alongside every other §7 violation.
+         *
+         * A missing value is NOT a violation here: application.yml always supplies all three,
+         * and unlike the result TTLs (which the executor reads directly) an absent key binds to
+         * the documented default. Only a value that is present and out of order is refused.
+         */
+        private fun checkEndpointsTimeoutOrdering(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            val min = snapshot.endpointsTimeoutMinSeconds ?: return
+            val default = snapshot.endpointsTimeoutDefaultSeconds ?: return
+            val max = snapshot.endpointsTimeoutMaxSeconds ?: return
+            if (min < 1) {
+                violations += "datapipelines.endpoints.timeout-min-seconds ($min) must be >= 1 (§7)."
+            }
+            if (!(min <= default && default <= max)) {
+                violations +=
+                    "datapipelines.endpoints timeouts out of order: timeout-min-seconds ($min) <= " +
+                    "timeout-default-seconds ($default) <= timeout-max-seconds ($max) must hold (§7)."
+            }
+        }
+
         /** §7 — the dev-profile guard: dev convenience must never touch production infra. */
         private fun checkDevProfileGuard(
             snapshot: ConfigSnapshot,
@@ -639,6 +669,10 @@ class ConfigValidator(
                 resultTtlMinSeconds = environment.getProperty("datapipelines.result.ttl-min-seconds", Long::class.java),
                 resultTtlDefaultSeconds = environment.getProperty("datapipelines.result.ttl-default-seconds", Long::class.java),
                 resultTtlMaxSeconds = environment.getProperty("datapipelines.result.ttl-max-seconds", Long::class.java),
+                endpointsTimeoutMinSeconds = environment.getProperty("datapipelines.endpoints.timeout-min-seconds", Int::class.java),
+                endpointsTimeoutDefaultSeconds =
+                    environment.getProperty("datapipelines.endpoints.timeout-default-seconds", Int::class.java),
+                endpointsTimeoutMaxSeconds = environment.getProperty("datapipelines.endpoints.timeout-max-seconds", Int::class.java),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
                 workspacesOpenJoin = environment.getProperty("datapipelines.workspaces.open-join", Boolean::class.java) ?: false,
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
@@ -790,6 +824,10 @@ internal data class ConfigSnapshot(
     val resultTtlMinSeconds: Long?,
     val resultTtlDefaultSeconds: Long?,
     val resultTtlMaxSeconds: Long?,
+    /** §3.21 (074) — the published-endpoint timeout bounds; null = key absent, the binder default applies. */
+    val endpointsTimeoutMinSeconds: Int? = null,
+    val endpointsTimeoutDefaultSeconds: Int? = null,
+    val endpointsTimeoutMaxSeconds: Int? = null,
     val workspacesProvisioningMode: String?,
     /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
     val workspacesOpenJoin: Boolean = false,

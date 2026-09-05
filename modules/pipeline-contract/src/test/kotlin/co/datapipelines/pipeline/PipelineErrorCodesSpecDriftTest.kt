@@ -130,6 +130,10 @@ class PipelineErrorCodesSpecDriftTest {
                 "rate_limit.",
                 "idempotency.",
                 "workspace.",
+                // 074 — published endpoints. Both families, because the request validator's
+                // codes are a separate table half and a truncated parse could drop just one.
+                "endpoint.",
+                "endpoint.request.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -160,6 +164,20 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Workspace.SESSION_REQUIRED,
                 PipelineErrorCodes.Workspace.NOT_FOUND,
                 PipelineErrorCodes.Workspace.IN_USE,
+                // 074 §13.14 — the `endpoint` domain has no entity dimension, so its
+                // publish-time and resolution-time codes are two-segment, exactly like the
+                // datasource and template ones above. The validator's `endpoint.request.*`
+                // family DOES have one and is three-segment, so it is deliberately absent here.
+                PipelineErrorCodes.Endpoint.PATH_INVALID,
+                PipelineErrorCodes.Endpoint.PATH_CONFLICT,
+                PipelineErrorCodes.Endpoint.PATH_VARIABLE_UNKNOWN,
+                PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY,
+                PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
+                PipelineErrorCodes.Endpoint.NOT_FOUND,
+                PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED,
+                PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
+                PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
+                PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
             )
 
         /** First cell of a markdown table row, when it is a backticked lowercase code. */

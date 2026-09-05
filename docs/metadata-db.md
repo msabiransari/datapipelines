@@ -132,12 +132,16 @@ CREATE TABLE api_keys (
     last_used_at          TIMESTAMPTZ,
     expires_at            TIMESTAMPTZ,
     last_used_ip          INET,
-    last_used_user_agent  TEXT
+    last_used_user_agent  TEXT,
+    kind                  TEXT        NOT NULL DEFAULT 'user',   -- 'user' | 'endpoint' (V11)
+    CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint'))
 );
 
 CREATE INDEX idx_api_keys_user ON api_keys(user_id) WHERE is_revoked = FALSE;
 CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
     WHERE expires_at IS NOT NULL AND is_revoked = FALSE;
+CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
+    WHERE kind = 'endpoint' AND is_revoked = FALSE;
 ```
 
 **Notes:**
@@ -146,7 +150,8 @@ CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
 - `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
-- No `updated_at` — the only mutations are `last_used_*` (written on use) and `is_revoked` (written once), and both are self-timestamping.
+- `kind` (V11) is the key's KIND (Auth §7.7): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
+- No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
 ### 4.3 `audit_log`
 
@@ -487,6 +492,60 @@ CREATE TABLE workspace_members (
 - The role set is deliberately closed (CHECK): `owner` manages the workspace and its members, `member` authors within it. Finer-grained workspace roles are deferred with per-datasource ACLs (workspaces design D4).
 - No `updated_at`: membership rows are inserted and deleted, and role flips are rare administrative acts — `joined_at` carries the only timestamp the model needs.
 
+### 4.13 `published_endpoints`
+
+The registry of released pipelines served as `GET` endpoints under `/api/x` (V11, round 074). See REST API §19.
+
+```sql
+CREATE TABLE published_endpoints (
+    id               UUID        PRIMARY KEY,
+    workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
+    path_pattern     TEXT        NOT NULL,   -- '/lending/{borough}/home'
+    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),
+    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
+    description      TEXT        NOT NULL DEFAULT '',
+    is_enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (path_pattern)
+);
+
+CREATE INDEX idx_published_endpoints_workspace ON published_endpoints(workspace_id);
+CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id);
+```
+
+**Notes:**
+- **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/x/lending/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
+- The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
+- The row pins a **pipeline, not a version**: the latest RELEASED version is resolved at request time, which is why the read-only rule is re-checked on every serve and not only at publish.
+- `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
+- Matching reads the enabled rows whole and matches them in memory (the set is small and cached per instance, invalidated over the same Redis channel datasource pools use), so no query plan depends on the shape of `path_pattern`.
+
+### 4.14 `endpoint_key_bindings`
+
+Which API keys authorise which part of the endpoint tree (V11). See Auth §7.7.
+
+```sql
+CREATE TABLE endpoint_key_bindings (
+    path_prefix      TEXT        NOT NULL,   -- a tree NODE: '/lending' binds '/lending/**'
+    api_key_id       TEXT        NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (path_prefix, api_key_id)
+);
+
+CREATE INDEX idx_endpoint_key_bindings_key ON endpoint_key_bindings(api_key_id);
+```
+
+**Notes:**
+- `path_prefix` is a **node** of the endpoint tree, not a pattern: `/lending` authorises every endpoint beneath it. Resolution walks the request path's ancestors from the most specific, and the FIRST node carrying any binding decides — so a deeper binding **replaces** an inherited one for its subtree rather than adding to it. Bind both keys at the deeper node when both should keep working.
+- `api_key_id` is `TEXT` because [`api_keys.id`](#42-api_keys) is the `dpk_…` id itself, not a UUID.
+- `ON DELETE CASCADE`: a key that no longer exists cannot authorise anything, and an orphaned binding would show on the endpoints screen as a binding to nothing. Note that ordinary revocation is a soft flag and leaves the row — the cascade is for a genuine row delete.
+- The primary key `(path_prefix, api_key_id)` says one key binds a node once and several keys may bind the same node.
+- No `updated_at`: a binding is inserted and deleted, never edited.
+
 ---
 
 ## 5. Index Strategy Summary
@@ -504,6 +563,7 @@ CREATE TABLE workspace_members (
 | `api_keys` | `api_keys_pkey` | via PK | Key lookup by `dpk_` id on every API-key request |
 | `api_keys` | `idx_api_keys_user` | explicit (partial) | List a user's active keys |
 | `api_keys` | `idx_api_keys_expires` | explicit (partial) | Find expiring/expired keys for cleanup |
+| `api_keys` | `idx_api_keys_endpoint_kind` | explicit (partial) | The endpoint keys of a workspace — the endpoints screen and binding resolution; partial because user keys are the overwhelming majority (V11) |
 | `audit_log` | `audit_log_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `audit_log` | `idx_audit_timestamp` | explicit | Recent events (DESC) |
 | `audit_log` | `idx_audit_user` | explicit (partial) | Per-user audit trail |
@@ -532,6 +592,12 @@ CREATE TABLE workspace_members (
 | `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
 | `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
 | `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
+| `published_endpoints` | `published_endpoints_pkey` | via PK | Lookup by id |
+| `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
+| `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
+| `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
+| `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
+| `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -572,6 +638,8 @@ table and the test's expected-table list in the same commit.
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
+| `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
+| `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 
 ---
 

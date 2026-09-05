@@ -273,3 +273,14 @@ datapipelines:
   bootstrap:
     datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
     examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
+
+  # Published endpoints (074) — a released pipeline served as GET /api/x/** (rest-api §19).
+  # Appended after the whole datapipelines: tree on purpose: a block inserted between two
+  # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).
+  # There is no page-rows-max here — the DP-Result-Page-Rows clamp is
+  # datapipelines.result.page-max-rows above, one contract for the endpoint and for
+  # POST /pipelines/{id}/execute (ruling R-EP4).
+  endpoints:
+    timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
+    timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
+    timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}

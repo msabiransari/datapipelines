@@ -931,6 +931,37 @@ entry, Versioning is the semantics).
 | `pipeline.promotion.target_unreachable` | 502 | The promotion target did not answer, timed out, or answered something that is not this API — a transport failure on the SENDER, never a refusal by the receiver (a receiver's refusal is re-raised with the receiver's OWN code). `details` carries `target` and, when there was one, `target_status`. Logged WARN without a stack: the operator's own peer deployment being down is not a defect in this one |
 | `pipeline.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — a promotion receiver never authors (Versioning D7/§5.5). Reads, execution and import are unaffected. The template mirror is `template.authoring.disabled` (§13.9) |
 
+### 13.14 Published endpoints
+
+The contract and the complete status table are REST API §19; the key kinds and the hierarchical
+bindings are Auth §7.7. This table is the catalog entry — it lands with the constants (a
+catalogued code split from its constant leaves the build red between the two), and the two
+sections above land with the surfaces that raise them.
+
+The bare `endpoint.*` codes are two-segment: the domain has no entity dimension, the same shape as
+`datasource.in_use` and `template.not_found`. The `endpoint.request.*` family is the request
+validator's, and it is the only family a caller of a published endpoint can provoke by changing
+their query string — every one of its codes is reported inside one `endpoint.request.invalid`
+response whose `details.errors[]` names every defect at once.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `endpoint.path_invalid` | 400 | `path_pattern` is not a legal path (REST API §19.1): wrong segment alphabet, more than 10 segments, over 200 characters, a trailing slash, a `**`, or a malformed `{variable}` |
+| `endpoint.path_conflict` | 409 | The pattern could match the same URL as an already-published one (`/a/{x}` against `/a/b`); `details.conflicting_path` names the other. Ambiguity is refused, never resolved by precedence — at request time at most one pattern may match |
+| `endpoint.path_variable_unknown` | 400 | A `{variable}` in the path names no declared parameter of the pipeline's released version |
+| `endpoint.pipeline_not_readonly` | 409 | The pipeline is not side-effect-free: a `DML`/`DDL` node, or a DQL node writing back to a datasource, transitively through `PIPELINE` children; `details.node_id` names the offender. Raised at publish. The SAME code is returned as `503` at serve time (REST API §19.4) when a later release breaks the rule under a live endpoint — the endpoint is not run |
+| `endpoint.pipeline_not_released` | 503 | The published pipeline has no RELEASED version to serve; a draft is never served |
+| `endpoint.not_found` | 404 | No endpoint matches the request path. Deliberately identical for an unknown path and a disabled one — distinguishing them would let an unauthenticated caller enumerate the registry |
+| `endpoint.method_not_allowed` | 405 | Any method but `GET` under `/api/x`; the response carries `Allow: GET` |
+| `endpoint.not_acceptable` | 406 | An `Accept` this surface cannot satisfy (v1 serves `application/json`) |
+| `endpoint.key_not_bound` | 403 | The presented key is not among those bound at the first ancestor of the request path carrying any binding. A deeper binding REPLACES an inherited one, so a key bound higher up is refused rather than inherited (Auth §7.7) |
+| `endpoint.key_kind_refused` | 403 | The key's kind is wrong for what it is doing: an `endpoint` key outside its bound endpoints and the cursor of executions it started, or an `endpoint` key presented to an endpoint with no binding on any ancestor (where only `user` keys with `execute` are accepted — an unbound endpoint key authorises nothing) |
+| `endpoint.promotion.key_missing` | 409 | A promotion batch carries an endpoint binding naming an API key by name that the target deployment does not have. Reported before anything is pushed, like every other promotion pre-validation, so the target is left byte-unchanged |
+| `endpoint.request.invalid` | 400 | One or more request defects; `details.errors[]` carries `{parameter, code, message}` for every one of them (REST API §19.3) |
+| `endpoint.request.parameter_unknown` | 400 | A query parameter the version does not declare. Strict on purpose: a typo that silently ran the default would return plausible, wrong rows |
+| `endpoint.request.parameter_repeated` | 400 | The same query key appeared more than once; an endpoint takes one value per parameter |
+| `endpoint.request.value_too_large` | 400 | A single parameter value over 4 KB |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations

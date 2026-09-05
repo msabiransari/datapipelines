@@ -61,6 +61,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     SseProperties::class,
     RateLimitProperties::class,
     ResultProperties::class,
+    EndpointsProperties::class,
     ExecutorProperties::class,
     StagingH2Properties::class,
     IdempotencyProperties::class,

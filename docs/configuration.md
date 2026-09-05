@@ -266,6 +266,18 @@ Where the AES data keys for `datasources.password_encrypted` come from ([Datasou
 
 **Rotating.** Generate a key (`openssl rand -base64 32`), add it as version N+1, set `encryption-key-current: N+1`, restart. New writes carry N+1; rows written under earlier versions keep decrypting, and are rewritten under the current key the next time their password is saved. Keep the old keys configured until no row still carries their version — [Datasources §7.3](datasources.md#73-key-rotation) has the one SQL query that answers that.
 
+### 3.21 Published endpoints
+
+The timeout bounds for a released pipeline published as a `GET` endpoint under `/api/x` (round 074). `timeout-default-seconds` is what a publish that names no timeout is stored with; the min/max pair clamps every stored `published_endpoints.timeout_seconds` at write time, so retuning the bounds later never makes an existing row unreadable — it only changes what the next publish may ask for.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.endpoints.timeout-default-seconds` | `30` | Timeout a publish that omits one is stored with |
+| `datapipelines.endpoints.timeout-min-seconds` | `1` | Lower clamp for a published endpoint's timeout |
+| `datapipelines.endpoints.timeout-max-seconds` | `300` | Upper clamp, and the longest a serve may block before it answers `202` and leaves the execution running |
+
+**There is deliberately no `page-rows-max` key here.** The `DP-Result-Page-Rows` request header is **one contract** across a published endpoint and `POST /pipelines/{id}/execute`, and both clamp it to `datapipelines.result.page-max-rows` (§3.5). A second key that had to equal the first would be a second authority for one bound, and an operator who retuned one and not the other would get two different clamps on one documented header.
+
 ---
 
 ## 4. Precedence
@@ -449,6 +461,11 @@ datapipelines:
   bootstrap:
     datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
     examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
+
+  endpoints:
+    timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
+    timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
+    timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -510,6 +527,7 @@ On startup, the app validates:
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
 - The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
+- `endpoints.timeout-min-seconds` ≤ `endpoints.timeout-default-seconds` ≤ `endpoints.timeout-max-seconds`, and the minimum is ≥ 1 (§3.21). Unlike the result TTLs, an ABSENT key is not a violation here — the binder default applies — so only a present, out-of-order triple refuses startup.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
 - `datapipelines.workspaces.open-join: true` together with `closed` provisioning is refused, naming both keys (§3.17) — open-join is a `self-serve` knob, and under `closed` it would let any authenticated user self-join any workspace, the exact surface `closed` exists to close.
 - Every `datapipelines.auth.trusted-proxies` entry parses as a CIDR (a bare IP is a host CIDR); anything else refuses startup at the auth module's resolver construction — a typo'd range must not silently widen proxy trust.
