@@ -1170,6 +1170,20 @@ code {
   padding-block: var(--space-8) var(--space-12);
 }
 
+/* The specs carry very wide reference tables. `docs.css` gives them width:100% but no
+   scroll container, so on a 390px viewport the widest table pushed the whole PAGE to 522px
+   — a horizontally scrolling document, on exactly the pages whose reason to exist is mobile
+   search. Scoped to the public wrapper so the in-app viewer's typography is untouched. */
+.doc-section .doc-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.doc-section .doc-body {
+  overflow-wrap: break-word;
+}
+
 .doc-source {
   margin-top: var(--space-8);
   padding-top: var(--space-4);
