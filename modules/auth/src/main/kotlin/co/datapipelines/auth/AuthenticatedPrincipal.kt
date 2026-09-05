@@ -38,7 +38,24 @@ data class AuthenticatedPrincipal(
     val keyId: String? = null,
     val workspaceName: String? = null,
     val workspace: WorkspaceContext? = null,
+    /**
+     * The presented key's [ApiKeyKind] (§7.7), or null when the credential is not an API key.
+     *
+     * Carried on the principal rather than re-read per check because the decision it drives —
+     * "may this credential be here at all?" — is made in a filter and again in the scope
+     * interceptor, and a second database read between the two could see a different answer.
+     */
+    val keyKind: ApiKeyKind? = null,
 ) {
+    /**
+     * True when this principal's authority is endpoint bindings rather than scopes (§7.7).
+     *
+     * Such a principal is refused everywhere the published-endpoint surface does not reach —
+     * including surfaces its scope set would otherwise open — and holds NO authority on an
+     * endpoint with no binding on any ancestor.
+     */
+    val isEndpointKey: Boolean get() = keyKind == ApiKeyKind.ENDPOINT
+
     /** Global admin (D4): bypasses workspace membership checks. Same rule as `ExecutionRecord.visibleTo`. */
     val isAdmin: Boolean get() = Scope.satisfies(scopes, Scope.ADMIN)
 

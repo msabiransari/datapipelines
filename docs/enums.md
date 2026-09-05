@@ -180,6 +180,22 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ---
 
+## 8A. `ApiKeyKind` — what an API key IS
+
+**Source:** [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)
+**Used by:** auth, web, mcp-server, persistence (`api_keys.kind`).
+
+| Value | Description |
+|---|---|
+| `user` | Every key that existed before round 074, and the default for any key minted without an explicit kind: scopes, a pinned workspace, and the whole API surface those scopes allow |
+| `endpoint` | A credential for published endpoints only: no scopes are consulted, workspace-pinned, and it authorises exactly the endpoints its bindings cover plus the result cursor of executions it started |
+
+> A kind is **not** a scope and is deliberately not modelled as one. Scopes answer "how much may this credential do?" along one hierarchy; a kind answers "what kind of credential is this?", and the two axes do not compose — an endpoint key is not "a user key with fewer scopes". The wire form is the lowercase name, as with [`Scope`](#8-scope--api-key-authorization-scope).
+
+> **An endpoint key with no binding on any ancestor of the path it presents at authorises nothing.** The absence of a binding is never a fall-through to the user-key rule; if it were, publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+
+---
+
 ## 9. `NodeStatus` — per-node execution outcome
 
 **Source:** [DAG Executor §7](dag-executor.md#7-node-stats-collection)
@@ -301,6 +317,11 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 | `auth.workspace.provisioned` | Personal workspace auto-created on first login (`auto-per-user` mode) |
 | `auth.workspace.created` | Workspace created through the service path |
 | `auth.workspace.header_rejected` | `DP-Workspace` presented on an API-key request |
+| `endpoint.served` | A published endpoint served a request (074). Details carry the endpoint id, the execution id and the outcome; the key id is the row's own `key_id`. This row is also what proves an endpoint key may read that execution's result |
+| `endpoint.key_bound` | An API key was bound to a node of the endpoint tree |
+| `endpoint.key_unbound` | An API key's binding to a node was removed |
+| `endpoint.published` | An endpoint was published over a released pipeline |
+| `endpoint.unpublished` | An endpoint was deleted |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
@@ -393,6 +414,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `REST` | Direct REST API call (programmatic client) |
 | `MCP` | MCP tool invocation (agent) |
 | `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
+| `ENDPOINT` | A published endpoint served a `GET /api/x/…` request (074). The execution runs in-process as the endpoint's workspace, `triggered_by` is the key's owner, and the serve's audit row carries the key id |
 | `SCHEDULED` | (Future) Cron-triggered execution |
 | `WEBHOOK` | (Future) External webhook trigger |
 
@@ -420,6 +442,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `SslMode` | datasources | datasources |
 | `AuthAuditEvent` | auth (+ datasource/mcp event tables in §15) | observability |
 | `ExecutionTrigger` | rest-api | mcp-server, persistence |
+| `ApiKeyKind` | [auth.md §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings) | metadata-db, rest-api, mcp-server |
 
 ---
 

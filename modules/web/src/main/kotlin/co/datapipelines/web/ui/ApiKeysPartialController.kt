@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -22,6 +24,8 @@ import java.time.temporal.ChronoUnit
 class ApiKeysPartialController(
     private val apiKeyService: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,
+    /** §7.7 — issuance that also writes bindings; the same service `POST /api/v1/auth/api-keys` uses. */
+    private val endpointKeys: EndpointKeyService,
 ) {
     @PostMapping("/partials/api-keys")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
@@ -29,6 +33,10 @@ class ApiKeysPartialController(
         @RequestParam name: String,
         @RequestParam(required = false) scopes: String?,
         @RequestParam(required = false) expiryDays: Int?,
+        // §7.7 — the two endpoint-key fields. Both optional and both absent by default, so the
+        // form means exactly what it meant before 074 for every operator who ignores them.
+        @RequestParam(required = false) kind: String?,
+        @RequestParam(required = false) bindings: String?,
         model: Model,
     ): String {
         val principal = requirePrincipal()
@@ -45,13 +53,25 @@ class ApiKeysPartialController(
             } else {
                 null
             }
+        val requestedKind =
+            kind?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                ApiKeyKind.fromWireOrNull(it)
+                    ?: throw IllegalArgumentException("Unknown key kind '$it'")
+            } ?: ApiKeyKind.DEFAULT
+        val bindingPaths =
+            bindings
+                ?.split(",")
+                ?.mapNotNull { it.trim().takeIf { path -> path.isNotEmpty() } }
+                .orEmpty()
+        // Through the SAME service the REST surface calls, so the two entry points cannot
+        // diverge on what a kind means or on when a binding is written.
         val issued =
-            apiKeyService.issue(
-                ownerId = principal.userId,
+            endpointKeys.issue(
+                principal = principal,
                 name = name,
                 scopes = requestedScopes,
-                creatorScopes = principal.scopes,
-                workspaceId = principal.requireWorkspace().id,
+                kind = requestedKind,
+                bindingPaths = bindingPaths,
                 expiresAt = expiresAt,
             )
         val keys = apiKeyRepository.findByUser(principal.userId)
@@ -127,8 +147,14 @@ class ApiKeysPartialController(
                 ""
             }
         val revokedBadge = if (key.isRevoked) """ <span class="ds-badge ds-badge-danger">revoked</span>""" else ""
+
+        // §7.7 — an endpoint key behaves nothing like a user key, so the table has to say
+        // which it is. Rendered inside the name cell rather than as a new column, so the
+        // header is unchanged and this builder stays comparable with the Thymeleaf fragment.
+        val kindBadge =
+            if (key.isEndpointKey) """ <span class="ds-badge ds-badge-default">endpoint</span>""" else ""
         return """<tr>
-          <td><span>${ToastHtml.esc(key.name)}</span>$revokedBadge</td>
+          <td><span>${ToastHtml.esc(key.name)}</span>$kindBadge$revokedBadge</td>
           <td>$createdAt</td>
           <td>$lastUsed</td>
           <td>$scopeBadges</td>

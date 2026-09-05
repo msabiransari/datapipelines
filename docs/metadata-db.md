@@ -150,7 +150,7 @@ CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
 - `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
-- `kind` (V11) is the key's KIND (Auth §7.7): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
+- `kind` (V11) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
 ### 4.3 `audit_log`
@@ -524,7 +524,7 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 
 ### 4.14 `endpoint_key_bindings`
 
-Which API keys authorise which part of the endpoint tree (V11). See Auth §7.7.
+Which API keys authorise which part of the endpoint tree (V11). See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings).
 
 ```sql
 CREATE TABLE endpoint_key_bindings (

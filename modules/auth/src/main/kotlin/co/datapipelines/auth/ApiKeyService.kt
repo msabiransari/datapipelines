@@ -45,6 +45,7 @@ class ApiKeyService(
      * An empty [scopes] falls back to `datapipelines.auth.api-keys.default-scopes`
      * ([Configuration §3.4]) — the operator's default, not a hard-coded `read`.
      */
+    @Suppress("LongParameterList") // the issuance contract; every argument is a distinct decision
     fun issue(
         ownerId: UUID,
         name: String,
@@ -52,6 +53,7 @@ class ApiKeyService(
         creatorScopes: Set<Scope>,
         workspaceId: UUID,
         expiresAt: Instant? = null,
+        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): IssuedApiKey {
         val requested = scopes.ifEmpty { defaultScopes() }
         if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
@@ -65,13 +67,19 @@ class ApiKeyService(
         val fullKey = "$keyId.$secret"
         val hash = secretHasher.hash(fullKey)
 
-        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId)
+        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId, kind)
         authCache.invalidateKey(keyId)
         auditLogger.log(
             event = "auth.api_key.created",
             userId = ownerId,
             keyId = keyId,
-            details = mapOf("name" to name, "scopes" to requested.map { it.wire }, "workspace_id" to workspaceId.toString()),
+            details =
+                mapOf(
+                    "name" to name,
+                    "scopes" to requested.map { it.wire },
+                    "workspace_id" to workspaceId.toString(),
+                    "kind" to kind.wire,
+                ),
         )
         return IssuedApiKey(record = record, plaintext = fullKey)
     }
@@ -125,6 +133,9 @@ class ApiKeyService(
             // no per-request switch exists (design §5.2).
             workspaceName = record.workspaceName,
             workspace = WorkspaceContext(record.workspaceId, record.workspaceName),
+            // §7.7 — what the credential IS travels with it, so every downstream gate reads one
+            // answer rather than re-deriving it.
+            keyKind = record.kind,
         )
     }
 

@@ -1,8 +1,17 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
+import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointRegistry
+import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
+import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.pipeline.PipelineResolver
+import co.datapipelines.web.executions.ExecutionVisibility
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -17,8 +26,13 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
 /**
- * Cross-instance invalidation of the published-endpoint registry (design §4.1) — the same 050
- * mechanism, and deliberately the same shape, as datasource pool invalidation next door.
+ * Every bean of the published-endpoint feature that `web` owns (074) — the registry, its
+ * cross-instance invalidation, and the services the REST/MCP surfaces call.
+ *
+ * ## Cross-instance invalidation (design §4.1)
+ *
+ * The same 050 mechanism, and deliberately the same shape, as datasource pool invalidation
+ * next door.
  *
  * ## Why this is needed at all
  *
@@ -42,7 +56,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * same trade the pool publisher documents.
  */
 @Configuration
-class EndpointInvalidationConfiguration {
+class EndpointsConfiguration {
     /**
      * The registry's persistence. Declared here rather than in `DomainConfiguration` for
      * cohesion — every bean of the published-endpoint feature that `web` owns is in this file —
@@ -58,6 +72,48 @@ class EndpointInvalidationConfiguration {
         repository: PublishedEndpointRepository,
         invalidation: EndpointInvalidationPublisher,
     ): EndpointRegistry = EndpointRegistry(repository, invalidation)
+
+    /** The key-binding table (§4.14). */
+    @Bean
+    fun endpointKeyBindingRepository(jdbc: NamedParameterJdbcTemplate): EndpointKeyBindingRepository = EndpointKeyBindingRepository(jdbc)
+
+    /**
+     * Issuance that writes a key and its bindings together (§5.2) — cross-aggregate, so the
+     * service lives in `modules/application` and only its wiring is here.
+     */
+    @Bean
+    fun endpointKeyService(
+        apiKeys: ApiKeyService,
+        bindings: EndpointKeyBindingRepository,
+        audit: AuditEventSink,
+    ): EndpointKeyService = EndpointKeyService(apiKeys, bindings, audit)
+
+    /**
+     * The §7.7 proof that an execution belongs to the endpoint key asking for its result. Reads
+     * the serve audit row, because `triggered_by` is the key's OWNER and cannot tell two of one
+     * person's keys apart.
+     */
+    @Bean
+    fun endpointServeAudit(jdbc: NamedParameterJdbcTemplate): EndpointServeAudit = EndpointServeAudit(jdbc)
+
+    /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
+    @Bean
+    fun executionVisibility(serveAudit: EndpointServeAudit): ExecutionVisibility = ExecutionVisibility(serveAudit)
+
+    /** The §5.2 hierarchical decision. Pure and stateless — one instance serves every request. */
+    @Bean
+    fun endpointAuthorizer(): EndpointAuthorizer = EndpointAuthorizer()
+
+    /**
+     * The §4.2 read-only rule. It resolves PIPELINE children through the same
+     * [co.datapipelines.pipeline.PipelineResolver] the save-time validator uses, so "what the
+     * child pipeline is" has one answer across both.
+     */
+    @Bean
+    fun readOnlyPipelineRule(
+        pipelineResolver: PipelineResolver,
+        pipelineProperties: PipelineProperties,
+    ): ReadOnlyPipelineRule = ReadOnlyPipelineRule(pipelineResolver, pipelineProperties.maxCompositionDepth)
 
     @Bean
     fun endpointInvalidationPublisher(

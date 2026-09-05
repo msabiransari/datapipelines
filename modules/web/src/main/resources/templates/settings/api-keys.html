@@ -42,6 +42,11 @@
       <tr th:fragment="keyRows(keys)" th:each="key : ${keys}">
         <td>
           <span th:text="${key.name}">key-name</span>
+          <!-- §7.7: an endpoint key is authorised by its path bindings, not by scopes, so the
+               scopes column below is empty for one. The badge is what tells the two apart.
+               Kept in the NAME cell (not a new column) so ApiKeysPartialController's Kotlin-built
+               revoke row stays comparable with this fragment — TemplateHtmxRenderAuditTest. -->
+          <span th:if="${key.isEndpointKey}" class="ds-badge ds-badge-default">endpoint</span>
           <span th:if="${key.isRevoked}" class="ds-badge ds-badge-danger">revoked</span>
         </td>
         <td th:text="${#temporals.format(key.createdAt, 'yyyy-MM-dd HH:mm')}">2026-08-01 12:00</td>
@@ -79,9 +84,27 @@
           <input type="text" name="scopes" class="ds-input" style="width:100%" placeholder="read, execute" th:attr="placeholder='Available: ' + ${#strings.listJoin(scopes, ', ')}">
           <p style="color:var(--text-tertiary);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">Available: <th:block th:each="s,stat : ${scopes}"><span th:text="${s}">read</span><th:block th:if="!${stat.last}">, </th:block></th:block></p>
         </div>
-        <div style="margin-bottom:var(--gap-lg)">
+        <div style="margin-bottom:var(--gap-md)">
           <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Expiry (days, optional)</label>
           <input type="number" name="expiryDays" class="ds-input" style="width:100%" placeholder="Leave blank for no expiry" min="1">
+        </div>
+        <!-- §7.7 — the two endpoint-key fields. Both optional: leaving them alone mints exactly
+             the user key this form has always minted. Publishing and binding otherwise happen
+             through MCP/REST (R10), so this stays a form change, not a new authoring surface. -->
+        <div style="margin-bottom:var(--gap-md)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Kind</label>
+          <select name="kind" class="ds-input" style="width:100%">
+            <option value="user">user — scopes, the whole API</option>
+            <option value="endpoint">endpoint — published endpoints only</option>
+          </select>
+        </div>
+        <div style="margin-bottom:var(--gap-lg)">
+          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Endpoint bindings (comma-separated)</label>
+          <input type="text" name="bindings" class="ds-input" style="width:100%" placeholder="/lending, /nyc/revenue">
+          <p style="color:var(--text-tertiary);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">
+            Tree nodes an endpoint key may call. A binding at <code>/lending</code> covers everything beneath it;
+            a binding deeper down replaces it there. An endpoint key with no binding authorises nothing.
+          </p>
         </div>
         <button type="submit" class="ds-button ds-button-primary" style="width:100%" onclick="setTimeout(hideCreateModal, 200)">Generate</button>
       </form>

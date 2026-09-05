@@ -1,8 +1,11 @@
 package co.datapipelines.web.authapi
 
+import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
@@ -31,7 +34,15 @@ class AuthControllerTest {
     private val apiKeyService = mockk<ApiKeyService>()
     private val apiKeyRepository = mockk<ApiKeyRepository>()
     private val userService = mockk<UserService>()
-    private val controller = AuthController(apiKeyService, apiKeyRepository, userService)
+
+    // 074 §7.7 — the REAL issuance service over the mocked key service, so the controller's
+    // kind/bindings handling is exercised rather than stubbed away. The binding repository is
+    // relaxed: this suite asks "what was issued", not "what was written to the binding table",
+    // which EndpointKeyServiceTest owns.
+    private val bindingRepository = mockk<EndpointKeyBindingRepository>(relaxed = true)
+    private val auditSink = mockk<AuditEventSink>(relaxed = true)
+    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink)
+    private val controller = AuthController(apiKeyService, apiKeyRepository, userService, endpointKeys)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

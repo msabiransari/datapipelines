@@ -51,6 +51,7 @@ class ApiKeyRepository(
      * (their membership in it is the caller's check, auth.md §7.4). No default: a key
      * without an explicit workspace decision must not compile.
      */
+    @Suppress("LongParameterList") // one row, spelled out; the alternative is a builder for one call site
     fun insert(
         id: String,
         userId: UUID,
@@ -59,11 +60,12 @@ class ApiKeyRepository(
         scopes: Set<Scope>,
         expiresAt: Instant?,
         workspaceId: UUID,
+        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): ApiKey {
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id)
-            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id)
+            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id, kind)
+            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id, :kind)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", id)
@@ -72,7 +74,8 @@ class ApiKeyRepository(
                 .addValue("key_hash", keyHash)
                 .addValue("scopes", scopes.map { it.wire }.toTypedArray())
                 .addValue("expires_at", expiresAt?.let { java.sql.Timestamp.from(it) })
-                .addValue("workspace_id", workspaceId),
+                .addValue("workspace_id", workspaceId)
+                .addValue("kind", kind.wire),
         )
         return checkNotNull(findById(id)) { "api_keys row '$id' vanished immediately after insert" }
     }
@@ -136,6 +139,10 @@ class ApiKeyRepository(
             expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
             workspaceId = rs.getObject("workspace_id", UUID::class.java),
             workspaceName = rs.getString("workspace_name"),
+            // V11. A row written before the column existed reads as the column's DEFAULT, so
+            // there is no null to tolerate — but fromWire would throw on an unexpected value,
+            // and a key that cannot be classified must fail loudly rather than authenticate.
+            kind = ApiKeyKind.fromWire(rs.getString("kind")),
         )
     }
 }

@@ -22,7 +22,16 @@ data class ApiKey(
     val expiresAt: Instant?,
     val workspaceId: UUID,
     val workspaceName: String,
-)
+    /**
+     * What this key IS (V11, §7.7). Defaults to [ApiKeyKind.DEFAULT] so every construction site
+     * that predates kinds keeps meaning what it meant — the same choice the column's
+     * `DEFAULT 'user'` makes for every stored row.
+     */
+    val kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+) {
+    /** True when this key's authority is its endpoint bindings rather than its scopes (§7.7). */
+    val isEndpointKey: Boolean get() = kind == ApiKeyKind.ENDPOINT
+}
 
 /**
  * The plaintext half of a freshly issued key, returned to the caller exactly once

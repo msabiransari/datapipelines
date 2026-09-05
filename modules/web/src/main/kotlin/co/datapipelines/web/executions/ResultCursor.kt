@@ -46,6 +46,8 @@ class ResultCursor(
     private val resultStore: ResultStore,
     private val resultConfig: ResultConfig,
     private val metrics: WebMetrics,
+    /** §7.2/§7.7 visibility — shared with the metadata read so the two cannot disagree. */
+    private val visibility: ExecutionVisibility = ExecutionVisibility(),
 ) {
     /** The visibility + status gate every format passes through first (§7.6's row order). */
     @Suppress("ThrowsCount") // each §7.6 row is its own throw; collapsing them would obscure the table
@@ -54,7 +56,7 @@ class ResultCursor(
         principal: AuthenticatedPrincipal,
     ): ExecutionRecord {
         val record = executions.findById(principal.requireWorkspace().id, executionId)
-        if (record == null || !record.visibleTo(principal)) {
+        if (record == null || !visibility.visible(record, principal, executionId)) {
             metrics.cursorRead(FORMAT_NONE, WebMetrics.OUTCOME_NOT_FOUND)
             throw ApiErrors.executionNotFound(executionId.toString())
         }

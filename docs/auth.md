@@ -706,6 +706,45 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 
+### 7.7 Key kinds and published-endpoint bindings
+
+Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`), and gives the `endpoint` kind an authorisation model that is not scopes at all.
+
+| Kind | Authority | Where it may go |
+|---|---|---|
+| `user` | Its `scopes`, against the §7.6 matrix, inside its pinned workspace | Everywhere the matrix allows |
+| `endpoint` | Its rows in `endpoint_key_bindings` | `GET /api/x/**`, plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started |
+
+A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. An `endpoint` key is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
+
+**The confinement is central, not per-handler.** `ScopeInterceptor` refuses an `endpoint`-kind principal on every route but the three above, so a new route cannot become reachable to endpoint keys by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. The scope floor is deliberately not applied on the routes it may reach: its scope set is empty, so any floor would refuse it everywhere.
+
+#### Hierarchical bindings (ruling R-EP2)
+
+A binding names a **node of the endpoint tree**, not a pattern: `/lending` authorises every endpoint beneath it. Per request, the ancestors of the request path are walked from the most specific (`/lending/{borough}/home` → `/lending/{borough}` → `/lending` → `/`), and the **first node carrying any binding decides**. The presenting key must be among that node's bound keys, or the request is `403 endpoint.key_not_bound`.
+
+A deeper binding therefore **replaces** an inherited one rather than adding to it: a binding at `/lending/private` hides the one at `/lending` for that subtree, and the key bound at `/lending` stops working there. Bind both keys at the deeper node when both should work.
+
+That is the more conservative of the two readings, and it is chosen deliberately. An operator who binds a narrow key deep in the tree is drawing a boundary; an additive model would silently keep the broad key working across it. The cost of "replace" is a binding an operator can see is missing and add; the cost of "add" is a boundary that was never real.
+
+A bound node decides for **every** credential, `user` keys included — otherwise binding a path would tighten it for machines while leaving it open to every operator key.
+
+#### The unbound case
+
+An endpoint with no binding on any ancestor is not public and not open to any key. It accepts `user` keys **of the endpoint's own workspace holding `execute`**, so operators and agents keep working on endpoints nobody has bound yet, and it refuses `endpoint` keys outright (`403 endpoint.key_kind_refused`).
+
+That asymmetry is the security property: **an unbound endpoint key authorises nothing.** If an unbound path fell through to "any endpoint key may call it", publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+
+#### Reading results
+
+An endpoint key may read the cursor of executions it started. Ownership is proved by the `endpoint.served` audit row that pairs the **key id** with the **execution id** — not by `pipeline_executions.triggered_by`, which is the key's *owner* and would make two endpoint keys of one person interchangeable. A different endpoint key asking for the same execution is refused.
+
+#### Issuance
+
+`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§12).
+
+Binding and unbinding are audited (`endpoint.key_bound` / `endpoint.key_unbound`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), as is every serve (`endpoint.served`).
+
 ---
 
 ## 8. Spring Security Configuration

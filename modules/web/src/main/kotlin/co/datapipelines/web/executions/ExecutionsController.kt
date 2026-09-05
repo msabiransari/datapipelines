@@ -53,6 +53,8 @@ class ExecutionsController(
     private val resultUrls: ResultUrlFactory,
     private val streamer: SseLogStreamer,
     private val pipelines: co.datapipelines.pipeline.PipelineRepository,
+    /** §7.2/§7.7 — the one visibility rule, shared with the result cursor. */
+    private val visibility: ExecutionVisibility = ExecutionVisibility(),
 ) {
     /**
      * §10.1 — the listing. Filters are evaluated **in SQL** by the repository (gate C, B4): the
@@ -107,8 +109,11 @@ class ExecutionsController(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
+        // §7.7 — the SHARED rule, not `visibleTo` alone: an endpoint key that could fetch a
+        // result but not see that its execution exists would be a contradiction a client trips
+        // over immediately.
         val record =
-            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { visibility.visible(it, currentPrincipal(), id) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         val releasedAt = pipelines.releasedAtFor(workspaceId, listOf(record.pipelineId to record.pipelineVersion))
         return ApiResponse.of(record.toMetadata(includeResult = true, draftRun(record, releasedAt)))

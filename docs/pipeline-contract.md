@@ -934,7 +934,7 @@ entry, Versioning is the semantics).
 ### 13.14 Published endpoints
 
 The contract and the complete status table are REST API §19; the key kinds and the hierarchical
-bindings are Auth §7.7. This table is the catalog entry — it lands with the constants (a
+bindings are [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings). This table is the catalog entry — it lands with the constants (a
 catalogued code split from its constant leaves the build red between the two), and the two
 sections above land with the surfaces that raise them.
 
@@ -954,7 +954,7 @@ response whose `details.errors[]` names every defect at once.
 | `endpoint.not_found` | 404 | No endpoint matches the request path. Deliberately identical for an unknown path and a disabled one — distinguishing them would let an unauthenticated caller enumerate the registry |
 | `endpoint.method_not_allowed` | 405 | Any method but `GET` under `/api/x`; the response carries `Allow: GET` |
 | `endpoint.not_acceptable` | 406 | An `Accept` this surface cannot satisfy (v1 serves `application/json`) |
-| `endpoint.key_not_bound` | 403 | The presented key is not among those bound at the first ancestor of the request path carrying any binding. A deeper binding REPLACES an inherited one, so a key bound higher up is refused rather than inherited (Auth §7.7) |
+| `endpoint.key_not_bound` | 403 | The presented key is not among those bound at the first ancestor of the request path carrying any binding. A deeper binding REPLACES an inherited one, so a key bound higher up is refused rather than inherited ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) |
 | `endpoint.key_kind_refused` | 403 | The key's kind is wrong for what it is doing: an `endpoint` key outside its bound endpoints and the cursor of executions it started, or an `endpoint` key presented to an endpoint with no binding on any ancestor (where only `user` keys with `execute` are accepted — an unbound endpoint key authorises nothing) |
 | `endpoint.promotion.key_missing` | 409 | A promotion batch carries an endpoint binding naming an API key by name that the target deployment does not have. Reported before anything is pushed, like every other promotion pre-validation, so the target is left byte-unchanged |
 | `endpoint.request.invalid` | 400 | One or more request defects; `details.errors[]` carries `{parameter, code, message}` for every one of them (REST API §19.3) |

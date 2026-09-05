@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.ExecutionLauncher
+import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.auth.LastUsedWorkspaceStore
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
@@ -23,6 +24,7 @@ import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
@@ -122,7 +124,8 @@ class WebSurfaceConfiguration {
         resultStore: ResultStore,
         resultConfig: ResultConfig,
         metrics: WebMetrics,
-    ): ResultCursor = ResultCursor(executions, resultStore, resultConfig, metrics)
+        visibility: ExecutionVisibility,
+    ): ResultCursor = ResultCursor(executions, resultStore, resultConfig, metrics, visibility)
 
     /**
      * The scope execute coroutines launch into. `SupervisorJob`: one execution's failure must not
