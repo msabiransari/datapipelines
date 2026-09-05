@@ -71,7 +71,10 @@ class PipelineNameGrammarTest {
         // production sources and this regex has exactly one save-time call site each in
         // StructuralRules and CompositionRules, and none on the execute path.
         val legacy = Fixtures.pipeline(name = "_scratch")
-        val resolver = PipelineResolver { _, name, version -> if (name == "_scratch" && version == 1) ResolvedPipeline(legacy, false) else null }
+        val resolver =
+            PipelineResolver { _, name, version ->
+                if (name == "_scratch" && version == 1) ResolvedPipeline(legacy, false) else null
+            }
 
         resolver.resolve(workspaceId, "_scratch", 1)?.pipeline?.name shouldBe "_scratch"
     }
