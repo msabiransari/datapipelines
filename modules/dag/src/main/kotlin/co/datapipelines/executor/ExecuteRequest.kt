@@ -71,6 +71,11 @@ data class ExecuteRequest(
     val parameters: Map<String, JsonNode> = emptyMap(),
     val idempotencyKey: String? = null,
     val resultTtlSeconds: Long? = null,
+    /**
+     * The client's `DP-Result-Page-Rows` (ruling R-EP4) — how many rows `data_ready` carries
+     * inline. Null means the configured page size, which is every pre-074 caller.
+     */
+    val resultPageRows: Int? = null,
     val correlationId: UUID? = null,
     val triggeredVia: ExecutionTrigger = ExecutionTrigger.REST,
     val executionId: UUID? = null,

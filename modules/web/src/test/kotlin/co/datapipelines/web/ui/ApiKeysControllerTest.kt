@@ -1,8 +1,11 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
@@ -158,7 +161,16 @@ class ApiKeysControllerTest {
 class ApiKeysPartialControllerTest {
     private val apiKeyService = mockk<ApiKeyService>()
     private val apiKeyRepository = mockk<ApiKeyRepository>()
-    private val partialController = ApiKeysPartialController(apiKeyService, apiKeyRepository)
+
+    // 074 §7.7 — the real issuance service, so the form's kind/bindings path is exercised.
+    private val bindingRepository = mockk<EndpointKeyBindingRepository>(relaxed = true)
+    private val auditSink = mockk<AuditEventSink>(relaxed = true)
+    private val partialController =
+        ApiKeysPartialController(
+            apiKeyService,
+            apiKeyRepository,
+            EndpointKeyService(apiKeyService, bindingRepository, auditSink),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -205,11 +217,11 @@ class ApiKeysPartialControllerTest {
     @Test
     fun `create returns partial with key plaintext`() {
         authenticate()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
         val model: ExtendedModelMap = ExtendedModelMap()
-        val viewName = partialController.create("Test Key", "read", null, model)
+        val viewName = partialController.create("Test Key", "read", null, null, null, model)
 
         viewName shouldBe "partials/api-key-created"
         model["key"] shouldBe "dpk_abc123.supersecret"
@@ -219,11 +231,11 @@ class ApiKeysPartialControllerTest {
     @Test
     fun `create returns the once-shown panel, refreshes the table, and points a toast at it`() {
         authenticate()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) } returns sampleIssued()
         every { apiKeyRepository.findByUser(any()) } returns listOf(sampleKey())
 
         val model: ExtendedModelMap = ExtendedModelMap()
-        val view = partialController.create("ci", "read", null, model)
+        val view = partialController.create("ci", "read", null, null, null, model)
 
         view shouldBe "partials/api-key-created"
         val html =

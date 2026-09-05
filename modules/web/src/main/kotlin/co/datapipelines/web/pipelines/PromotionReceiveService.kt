@@ -1,7 +1,9 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.AuditLogger
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Scope
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -56,6 +58,8 @@ class PromotionReceiveService(
     private val auditLogger: AuditLogger,
     private val transactionTemplate: TransactionTemplate,
     private val authoringEnabled: Boolean,
+    /** 074 — published endpoints ride the batch; the rules live in one collaborator. */
+    private val endpointPromotion: EndpointPromotion,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -63,6 +67,13 @@ class PromotionReceiveService(
         refuseIfAuthoring()
         val workspace = inventory.contextFor(batch.workspace)
         val actor = userService.systemActor()
+        val promoter = promotionPrincipal(actor, workspace)
+
+        // §10.5's discipline, applied to endpoint bindings: every key name the batch references
+        // must already exist on this deployment, checked ONCE for the whole batch BEFORE anything
+        // is pushed, so the target is left byte-unchanged rather than failing mid-batch. Keys are
+        // environment-local — a promotion must never mint one.
+        endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
 
         withActiveWorkspace(workspace) {
             transactionTemplate.executeWithoutResult {
@@ -72,6 +83,10 @@ class PromotionReceiveService(
                 batch.pipelines.forEach { pipeline ->
                     pipelineImportService.import(pipeline.toString(), workspace.id, actor.id)
                 }
+                // AFTER the pipelines: an endpoint over a pipeline this same batch is bringing
+                // must find it already stored. Republishing an unchanged endpoint is a no-op
+                // rather than a conflict, so a re-push is idempotent like every other entry.
+                batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
             }
         }
 
@@ -88,6 +103,7 @@ class PromotionReceiveService(
                     "workspace" to batch.workspace,
                     "templates" to batch.templates.size,
                     "pipelines" to batch.pipelines.size,
+                    "endpoints" to batch.endpoints.size,
                 ),
         )
         log.info(
@@ -98,8 +114,35 @@ class PromotionReceiveService(
             batch.pipelines.size,
             actor.id,
         )
-        return PromotionWire.Applied(batch.workspace, batch.sourceEnv, batch.templates.size, batch.pipelines.size)
+        return PromotionWire.Applied(
+            workspace = batch.workspace,
+            sourceEnv = batch.sourceEnv,
+            templates = batch.templates.size,
+            pipelines = batch.pipelines.size,
+            endpoints = batch.endpoints.size,
+        )
     }
+
+    /**
+     * The system actor as a principal for the duration of the import.
+     *
+     * The promotion credential pins no workspace (§10.6), but publishing resolves its pipeline
+     * and writes its row against one — so the batch's target workspace is stamped here, the same
+     * value [withActiveWorkspace] stamps for the import services' datasource resolution.
+     */
+    private fun promotionPrincipal(
+        actor: co.datapipelines.auth.User,
+        workspace: WorkspaceContext,
+    ): AuthenticatedPrincipal =
+        AuthenticatedPrincipal(
+            userId = actor.id,
+            email = actor.email,
+            displayName = actor.displayName,
+            scopes = setOf(Scope.ADMIN),
+            authMethod = AuthMethod.PROMOTION,
+            workspaceName = workspace.name,
+            workspace = workspace,
+        )
 
     /**
      * Stamps the batch's target workspace onto the promotion principal for the duration of

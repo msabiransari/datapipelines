@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.ExecutionLauncher
+import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.auth.LastUsedWorkspaceStore
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
@@ -23,11 +24,13 @@ import co.datapipelines.mcp.McpExecutionRunner
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.pipelines.ExecutionStreamLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
+import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.pipelines.SubPipelineExecutionRunner
 import co.datapipelines.web.pipelines.WebIdempotencyMetrics
 import co.datapipelines.web.ratelimit.RateLimiter
@@ -122,7 +125,8 @@ class WebSurfaceConfiguration {
         resultStore: ResultStore,
         resultConfig: ResultConfig,
         metrics: WebMetrics,
-    ): ResultCursor = ResultCursor(executions, resultStore, resultConfig, metrics)
+        visibility: ExecutionVisibility,
+    ): ResultCursor = ResultCursor(executions, resultStore, resultConfig, metrics, visibility)
 
     /**
      * The scope execute coroutines launch into. `SupervisorJob`: one execution's failure must not
@@ -276,7 +280,7 @@ class WebSurfaceConfiguration {
      */
     @Suppress("LongParameterList")
     @Bean
-    fun mcpExecutionRunner(
+    fun recordingExecutionRunner(
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -295,8 +299,8 @@ class WebSurfaceConfiguration {
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
         subPipelineRunner: SubPipelineRunner,
-    ): McpExecutionRunner =
-        McpRecordingExecutionRunner(
+    ): RecordingExecutionRunner =
+        RecordingExecutionRunner(
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
@@ -316,4 +320,12 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
             subPipelineRunner = subPipelineRunner,
         )
+
+    /**
+     * `mcp-server`'s port over the shared runner (074). A thin adapter, so "how an in-process
+     * execution is recorded" has exactly one implementation — the endpoint surface uses the same
+     * [RecordingExecutionRunner] with `ExecutionTrigger.ENDPOINT`.
+     */
+    @Bean
+    fun mcpExecutionRunner(runner: RecordingExecutionRunner): McpExecutionRunner = McpRecordingExecutionRunner(runner)
 }

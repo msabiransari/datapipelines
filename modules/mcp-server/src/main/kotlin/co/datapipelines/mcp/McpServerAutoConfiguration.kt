@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.datasources.DatasourceRegistry
@@ -76,6 +77,9 @@ class McpServerAutoConfiguration {
         // A plain (required) parameter, not a provider: this whole bean is @ConditionalOnBean on
         // the engine, so wherever the tools exist the assembled application has declared it too.
         datasourceCreateService: DatasourceCreateService,
+        // 074 — the SAME publish service POST /api/v1/endpoints calls, so a publish cannot skip
+        // the read-only rule by arriving over MCP.
+        endpointPublishService: EndpointPublishService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -126,7 +130,7 @@ class McpServerAutoConfiguration {
             // exactly why these two need no workspace, no repository and no registry.
             CalculatorsListTool(),
             CalculatorsGetTool(),
-        )
+        ) + EndpointsTools.all(endpointPublishService, pipelines)
     }
 
     @Bean

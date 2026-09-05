@@ -626,4 +626,108 @@ object PipelineErrorCodes {
          */
         const val AUTHORING_DISABLED = "pipeline.authoring.disabled"
     }
+
+    /**
+     * §13.14 — published endpoints (published-endpoints design, round 074): a released pipeline
+     * served as `GET /api/x/{path}`.
+     *
+     * Two families in one object because they are one surface:
+     *  - the bare `endpoint.*` codes are **publish-time and resolution-time** refusals — the path
+     *    grammar, the read-only rule, the key model;
+     *  - `endpoint.request.*` are the **request validator's** (§5.3), and they are the only ones a
+     *    caller of a published endpoint can provoke by changing their query string.
+     *
+     * The bare codes are two-segment (`endpoint.path_conflict`) because the `endpoint` domain has
+     * no entity dimension — the same shape as `datasource.in_use` and `template.not_found`, and
+     * `PipelineErrorCodesSpecDriftTest.KNOWN_TWO_SEGMENT_CODES` lists each one deliberately.
+     */
+    object Endpoint {
+        /**
+         * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, more than 10
+         * segments, over 200 characters, a trailing slash, a `**`, or a malformed `{variable}`.
+         */
+        const val PATH_INVALID = "endpoint.path_invalid"
+
+        /**
+         * §4.1 — the pattern could match the same URL as one already published (`/a/{x}` against
+         * `/a/b`). `details.conflicting_path` names the other. Ambiguity is REFUSED, never
+         * resolved by precedence: at request time at most one pattern may match.
+         */
+        const val PATH_CONFLICT = "endpoint.path_conflict"
+
+        /** §4.2 — a `{variable}` in the path names no declared parameter of the released version. */
+        const val PATH_VARIABLE_UNKNOWN = "endpoint.path_variable_unknown"
+
+        /**
+         * §4.2/§5.1 — the pipeline is not side-effect-free: some node is `DML`/`DDL`, or a DQL
+         * node writes back to a datasource, transitively through PIPELINE children.
+         * `details.node_id` names the offender. **409 at publish, 503 at serve** — the same fact
+         * has two meanings depending on when it is discovered, which is why the catalog lists it
+         * once and the two surfaces choose the status (§5.6).
+         */
+        const val PIPELINE_NOT_READONLY = "endpoint.pipeline_not_readonly"
+
+        /** §5.1 — the published pipeline has no RELEASED version to serve; a draft is never served. */
+        const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
+
+        /**
+         * §5.6 — no endpoint matches. Deliberately identical for an unknown path and a DISABLED
+         * one: distinguishing them would let an unauthenticated caller enumerate the registry.
+         */
+        const val NOT_FOUND = "endpoint.not_found"
+
+        /** §5.6 — any method but `GET` on `/api/x/{path}`; the response carries `Allow: GET`. */
+        const val METHOD_NOT_ALLOWED = "endpoint.method_not_allowed"
+
+        /** §5.3 — an `Accept` this surface cannot satisfy (v1 serves `application/json` only). */
+        const val NOT_ACCEPTABLE = "endpoint.not_acceptable"
+
+        /**
+         * §5.2 — the presented key is not among those bound at the first ancestor of the request
+         * path that carries any binding. A deeper binding REPLACES an inherited one, so a key
+         * bound higher up is refused here rather than inherited (ruling R-EP2).
+         */
+        const val KEY_NOT_BOUND = "endpoint.key_not_bound"
+
+        /**
+         * §5.2 — the key's KIND is wrong for what it is doing: an `endpoint` key anywhere but its
+         * bound endpoints and the cursor of executions it started, or an `endpoint` key presented
+         * to an endpoint that has no binding on any ancestor (where only `user` keys with
+         * `execute` are accepted — an unbound endpoint key authorises nothing).
+         */
+        const val KEY_KIND_REFUSED = "endpoint.key_kind_refused"
+
+        /**
+         * §6 — a promotion batch carries an endpoint binding naming an API key by NAME that the
+         * target deployment does not have. Refused before anything is pushed, like every other
+         * promotion pre-validation, so the target is left byte-unchanged.
+         */
+        const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
+    }
+
+    /**
+     * §13.14 — the published-endpoint REQUEST validator (§5.3).
+     *
+     * Every code here is reported inside ONE `400` whose `details.errors[]` carries every defect
+     * the request has, because a client fixes a request once. The envelope code is
+     * [EndpointRequest.INVALID]; the per-defect codes below (and the two existing
+     * `pipeline.execution.*` parameter codes, reused rather than re-spelled) appear in the
+     * entries.
+     */
+    object EndpointRequest {
+        /** §5.3 — the envelope: one or more request defects, each named in `details.errors[]`. */
+        const val INVALID = "endpoint.request.invalid"
+
+        /**
+         * §5.3 — a query parameter the version does not declare. Strict on purpose: a typo that
+         * silently ran the default would return plausible, wrong rows, which is worse than a 400.
+         */
+        const val PARAMETER_UNKNOWN = "endpoint.request.parameter_unknown"
+
+        /** §5.3 — the same query key appeared more than once; the endpoint takes one value each. */
+        const val PARAMETER_REPEATED = "endpoint.request.parameter_repeated"
+
+        /** §5.3 — a single parameter value over 4 KB. */
+        const val VALUE_TOO_LARGE = "endpoint.request.value_too_large"
+    }
 }

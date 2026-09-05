@@ -49,6 +49,14 @@ class WebPropertiesSpecDriftTest {
     }
 
     @Test
+    fun `endpoints property defaults match configuration-md section 3-21`() {
+        val props = EndpointsProperties()
+        documented.getValue("datapipelines.endpoints.timeout-default-seconds") shouldBe props.timeoutDefaultSeconds.toString()
+        documented.getValue("datapipelines.endpoints.timeout-min-seconds") shouldBe props.timeoutMinSeconds.toString()
+        documented.getValue("datapipelines.endpoints.timeout-max-seconds") shouldBe props.timeoutMaxSeconds.toString()
+    }
+
+    @Test
     fun `executor property defaults match configuration-md section 3-2`() {
         val props = ExecutorProperties()
         documented.getValue("datapipelines.executor.max-parallel-nodes") shouldBe props.maxParallelNodes.toString()

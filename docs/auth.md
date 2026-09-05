@@ -692,8 +692,10 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | `author` |
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
+| Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses the floor because it carries no scopes at all | `read` |
+| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler — binding hands a credential authority over a subtree | `author` |
 
-**MCP tools** (all 22 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+**MCP tools** (all 28 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 
 | Tool | Min scope |
 |---|---|
@@ -701,10 +703,51 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
 | `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `datasources_create`, `pipelines_execute_node` | `author` |
+| `endpoints_list`, `endpoints_get` | `read` |
+| `endpoints_create`, `endpoints_delete` | `author` |
 
-(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. 22 of the 24 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
+(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. 26 of the 28 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
+
+### 7.7 Key kinds and published-endpoint bindings
+
+Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`), and gives the `endpoint` kind an authorisation model that is not scopes at all.
+
+| Kind | Authority | Where it may go |
+|---|---|---|
+| `user` | Its `scopes`, against the §7.6 matrix, inside its pinned workspace | Everywhere the matrix allows |
+| `endpoint` | Its rows in `endpoint_key_bindings` | `GET /api/x/**`, plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started |
+
+A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. An `endpoint` key is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
+
+**The confinement is central, not per-handler.** `ScopeInterceptor` refuses an `endpoint`-kind principal on every route but the three above, so a new route cannot become reachable to endpoint keys by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. The scope floor is deliberately not applied on the routes it may reach: its scope set is empty, so any floor would refuse it everywhere.
+
+#### Hierarchical bindings (ruling R-EP2)
+
+A binding names a **node of the endpoint tree**, not a pattern: `/lending` authorises every endpoint beneath it. Per request, the ancestors of the request path are walked from the most specific (`/lending/{borough}/home` → `/lending/{borough}` → `/lending` → `/`), and the **first node carrying any binding decides**. The presenting key must be among that node's bound keys, or the request is `403 endpoint.key_not_bound`.
+
+A deeper binding therefore **replaces** an inherited one rather than adding to it: a binding at `/lending/private` hides the one at `/lending` for that subtree, and the key bound at `/lending` stops working there. Bind both keys at the deeper node when both should work.
+
+That is the more conservative of the two readings, and it is chosen deliberately. An operator who binds a narrow key deep in the tree is drawing a boundary; an additive model would silently keep the broad key working across it. The cost of "replace" is a binding an operator can see is missing and add; the cost of "add" is a boundary that was never real.
+
+A bound node decides for **every** credential, `user` keys included — otherwise binding a path would tighten it for machines while leaving it open to every operator key.
+
+#### The unbound case
+
+An endpoint with no binding on any ancestor is not public and not open to any key. It accepts `user` keys **of the endpoint's own workspace holding `execute`**, so operators and agents keep working on endpoints nobody has bound yet, and it refuses `endpoint` keys outright (`403 endpoint.key_kind_refused`).
+
+That asymmetry is the security property: **an unbound endpoint key authorises nothing.** If an unbound path fell through to "any endpoint key may call it", publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+
+#### Reading results
+
+An endpoint key may read the cursor of executions it started. Ownership is proved by the `endpoint.served` audit row that pairs the **key id** with the **execution id** — not by `pipeline_executions.triggered_by`, which is the key's *owner* and would make two endpoint keys of one person interchangeable. A different endpoint key asking for the same execution is refused.
+
+#### Issuance
+
+`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§12).
+
+Binding and unbinding are audited (`endpoint.key_bound` / `endpoint.key_unbound`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), as is every serve (`endpoint.served`).
 
 ---
 
@@ -1095,3 +1138,4 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 | 2026-08-14 | v2.6 | v1.1 introspection build | §7.6 REST table: new "Introspect a datasource schema" row (`GET /api/v1/datasources/{name}/schema`, `/tables`, `/tables/{t}/columns`) at `author` — the §8.1 connection-test precedent (live connection against a production datasource; consumer is authoring). Sourced from datasources §7A. MCP rows follow with the mcp-server amendment. |
 | 2026-08-15 | v2.7 | surface restructure (part 1) | §7.6: `datasources_get_schema` row removed from the MCP table and `GET /api/v1/datasources/{name}/schema` from the introspection REST row (the bundled whole-schema snapshot is gone — table listings stay lightweight); MCP count 18 → 17 pending the schemas listing. |
 | 2026-09-02 | v2.8 | MCP audit (052) | §10.1: cross-link added — the shared `audit_log` also carries the MCP tool events (`mcp.tool.called` per call, `mcp.tool.write` per mutating call, node runs included), authored by MCP §14 and registered in Enums §15. No auth events changed. |
+| 2026-09-05 | v2.5 | 074 key kinds | New **§7.7**: every API key gains a KIND (`user` \| `endpoint`). An `endpoint` key carries no scopes — its authority is its rows in `endpoint_key_bindings`, walked from the most specific ancestor of the request path, where the first node carrying any binding decides and a deeper binding REPLACES a shallower one (R-EP2). An endpoint key with no binding on any ancestor authorises nothing; it reaches published endpoints and the cursor of executions it started, and is refused everywhere else — centrally in `ScopeInterceptor`, and again in `McpAuthFilter` because `/mcp` is a servlet the interceptor never sees. §7.6 gains two REST rows and four MCP tools. |

@@ -15,6 +15,13 @@ enum class ExecutionTrigger {
 
     /** Spawned by a parent execution's PIPELINE node (metadata-db §4.6 lineage columns). */
     PIPELINE,
+
+    /**
+     * A published endpoint served a `GET /api/x/…` request (074). The execution runs in-process
+     * as the endpoint's workspace; `triggered_by` is the key's owner, and the serve's audit row
+     * carries the key id — which is what lets an endpoint key read its own result and no other.
+     */
+    ENDPOINT,
 }
 
 /**

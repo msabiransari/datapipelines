@@ -98,6 +98,9 @@ class McpServerAutoConfigurationTest {
         // assembled application. Mocked here like every other collaborator.
         @Bean fun datasourceCreateService(): co.datapipelines.application.datasources.DatasourceCreateService = mockk()
 
+        // 074 — the publish service the endpoints_* tools call.
+        @Bean fun endpointPublishService(): co.datapipelines.application.endpoints.EndpointPublishService = mockk()
+
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()

@@ -76,7 +76,23 @@ CREATE TABLE endpoint_key_bindings (
     PRIMARY KEY (path_prefix, api_key_id)
 );
 ALTER TABLE api_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';   -- 'user' | 'endpoint'
+ALTER TABLE api_keys ADD CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint'));
+
+-- Added 2026-09-05 (implementation, owner-accepted) — this migration omitted it, and without it
+-- the very FIRST serve fails on a constraint rather than on anything this design describes.
+-- `pipeline_executions.triggered_via` is a closed CHECK set (V1 §4.6, widened by V3 for
+-- composition), so `ENDPOINT` has to join it. Widened exactly the way V3 did.
+--
+-- The value is 'ENDPOINT', not the design's lowercase "endpoint" (§5.4): every existing trigger
+-- in that column is uppercase and `ExecutionTrigger` is an uppercase enum (enums.md §18).
+ALTER TABLE pipeline_executions DROP CONSTRAINT chk_triggered_via;
+ALTER TABLE pipeline_executions ADD CONSTRAINT chk_triggered_via
+    CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT'));
 ```
+
+> The `CHECK` on `api_keys.kind` is likewise an implementation addition: an enum column carries one
+> by house convention here (`chk_status`, `chk_dialect`, `chk_template_type`), so the database
+> refuses a value the application's enum cannot name.
 
 ### 4.1 Path grammar and matching
 - `path_pattern` = 1–10 segments, each `[a-z0-9][a-z0-9_.-]{0,63}` or a variable `{name}` where
@@ -94,7 +110,7 @@ ALTER TABLE api_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';   -- 'user' |
 ### 4.2 Publish-time validation
 - Pipeline must exist in the endpoint's workspace and have a **released** version.
 - **GET is only for side-effect-free pipelines**: every node of the current released version
-  is `DQL` (with `output.target` in {tempdb, caller}) or `CALCULATOR` (once 072 lands), and every
+  is `DQL` (with `output.target` in {tempdb, caller}) or `CALCULATOR` (072; admitted at the 074 merge), and every
   `PIPELINE` node's child satisfies the same rule transitively. Any `DML`/`DDL` node, or a DQL
   node writing back to a datasource, refuses publication — `endpoint.pipeline_not_readonly`
   (409) with the offending node id. Re-checked on every serve (§5.1), because a later release
@@ -158,7 +174,14 @@ In-process, as the endpoint's workspace and the key's user (`triggered_via = "en
 
 ### 5.5 Configuration (validated at boot, configuration.md §7, `CHECK_COUNT` +1)
 `datapipelines.endpoints.timeout-default-seconds` (30), `timeout-min-seconds` (1),
-`timeout-max-seconds` (300), `page-rows-max` (= result.page-max-rows).
+`timeout-max-seconds` (300).
+
+**Amended 2026-09-05 (implementation, owner-accepted).** This section originally listed a fourth
+key, `page-rows-max`, defined as "= result.page-max-rows". It is gone: `DP-Result-Page-Rows` is
+ONE contract across a published endpoint and `POST /pipelines/{id}/execute` (R-EP4), and both
+clamp to `datapipelines.result.page-max-rows`. A second key that had to equal the first would be a
+second authority for one bound — the thing configuration.md §1 exists to prevent — and an operator
+who retuned one and not the other would get two different clamps on one documented header.
 
 ### 5.6 Status codes, complete
 | Code | When |

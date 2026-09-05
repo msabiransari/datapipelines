@@ -257,7 +257,10 @@ class InMemoryResultStore(
     /** This fake owns its own keyspace — deliberately NOT Redis's, so the two never get confused. */
     override fun keyFor(executionId: UUID): String = "mem:result:$executionId"
 
-    override fun describe(key: String): StoredResultView? = stored[key]
+    override fun describe(
+        key: String,
+        firstPageRows: Int?,
+    ): StoredResultView? = stored[key]
 
     override fun page(
         key: String,
@@ -610,7 +613,10 @@ class LatchedResultStore(
 
     override fun keyFor(executionId: UUID): String = "latched:result:$executionId"
 
-    override fun describe(key: String): StoredResultView? = null
+    override fun describe(
+        key: String,
+        firstPageRows: Int?,
+    ): StoredResultView? = null
 
     override fun page(
         key: String,

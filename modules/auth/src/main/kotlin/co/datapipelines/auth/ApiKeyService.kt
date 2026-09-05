@@ -45,6 +45,7 @@ class ApiKeyService(
      * An empty [scopes] falls back to `datapipelines.auth.api-keys.default-scopes`
      * ([Configuration §3.4]) — the operator's default, not a hard-coded `read`.
      */
+    @Suppress("LongParameterList") // the issuance contract; every argument is a distinct decision
     fun issue(
         ownerId: UUID,
         name: String,
@@ -52,8 +53,13 @@ class ApiKeyService(
         creatorScopes: Set<Scope>,
         workspaceId: UUID,
         expiresAt: Instant? = null,
+        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): IssuedApiKey {
-        val requested = scopes.ifEmpty { defaultScopes() }
+        // §7.7 — an ENDPOINT key carries no scopes by design, so the default-scopes fallback
+        // must not apply to it: falling back would hand it `read` across the whole API and make
+        // "its authority is its bindings" false. Caught by the 074 E2E, which asserted the
+        // minted key's scope set was empty and found `[read]`.
+        val requested = if (kind == ApiKeyKind.ENDPOINT) emptySet() else scopes.ifEmpty { defaultScopes() }
         if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
             throw ScopeInsufficientException(required = overreach, held = creatorScopes)
@@ -65,13 +71,19 @@ class ApiKeyService(
         val fullKey = "$keyId.$secret"
         val hash = secretHasher.hash(fullKey)
 
-        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId)
+        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId, kind)
         authCache.invalidateKey(keyId)
         auditLogger.log(
             event = "auth.api_key.created",
             userId = ownerId,
             keyId = keyId,
-            details = mapOf("name" to name, "scopes" to requested.map { it.wire }, "workspace_id" to workspaceId.toString()),
+            details =
+                mapOf(
+                    "name" to name,
+                    "scopes" to requested.map { it.wire },
+                    "workspace_id" to workspaceId.toString(),
+                    "kind" to kind.wire,
+                ),
         )
         return IssuedApiKey(record = record, plaintext = fullKey)
     }
@@ -125,6 +137,9 @@ class ApiKeyService(
             // no per-request switch exists (design §5.2).
             workspaceName = record.workspaceName,
             workspace = WorkspaceContext(record.workspaceId, record.workspaceName),
+            // §7.7 — what the credential IS travels with it, so every downstream gate reads one
+            // answer rather than re-deriving it.
+            keyKind = record.kind,
         )
     }
 

@@ -29,4 +29,12 @@ fun currentPrincipal(): AuthenticatedPrincipal =
  * `ExecutionRecord.visibleTo` applies the same rule and this mirrors it.
  */
 fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
-    triggeredBy == principal.userId || Scope.satisfies(principal.scopes, Scope.ADMIN)
+    when {
+        // §7.7 — an endpoint key is NOT its owner. `triggeredBy` is a user id, so owner-equality
+        // would let a key bound to /lending read a /payroll key's results merely by sharing an
+        // owner. An endpoint key's visibility is decided by [visibleToEndpointKey] instead, which
+        // needs a repository and therefore cannot live in this pure extension.
+        principal.isEndpointKey -> false
+
+        else -> triggeredBy == principal.userId || Scope.satisfies(principal.scopes, Scope.ADMIN)
+    }

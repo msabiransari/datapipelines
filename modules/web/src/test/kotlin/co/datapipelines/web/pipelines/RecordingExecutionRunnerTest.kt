@@ -25,7 +25,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * [McpRecordingExecutionRunner] — the runner's OWN assembly contract, through the optional
+ * [RecordingExecutionRunner] — the runner's OWN assembly contract, through the optional
  * `executorFactory` seam its two siblings established (the emitter's recording behaviour is
  * [co.datapipelines.web.sse.WebEventEmitterTest]'s subject; the executor's is the dag suite's).
  *
@@ -35,7 +35,7 @@ import java.util.UUID
  * recording-only shape), and the §10.2 result-columns bookkeeping is fire-and-forget —
  * a missing or failing describe never fails the completed execution.
  */
-class McpRecordingExecutionRunnerTest {
+class RecordingExecutionRunnerTest {
     private val templateEngines = mockk<WorkspaceTemplateEngines>()
     private val resultStore = mockk<ResultStore>()
     private val streams = mockk<ExecutionStreamRegistry>(relaxed = true)
@@ -45,7 +45,7 @@ class McpRecordingExecutionRunnerTest {
     private val executionId = UUID.randomUUID()
 
     private fun runner(executor: PipelineExecutor) =
-        McpRecordingExecutionRunner(
+        RecordingExecutionRunner(
             templateEngines = templateEngines,
             datasourceRegistry = mockk(),
             stagingFactory = mockk(),
@@ -107,7 +107,7 @@ class McpRecordingExecutionRunnerTest {
             coEvery { executor.execute(any()) } returns result()
             every { templateEngines.engineFor(workspaceId) } returns mockk()
 
-            runner(executor).run(request(trigger = ExecutionTrigger.REST), WorkspaceContext(workspaceId, "acme"))
+            runner(executor).run(request(trigger = ExecutionTrigger.REST), workspaceId, ExecutionTrigger.MCP)
 
             coVerify {
                 executor.execute(match { it.triggeredVia == ExecutionTrigger.MCP })
@@ -122,7 +122,7 @@ class McpRecordingExecutionRunnerTest {
             coEvery { executor.execute(any()) } returns expected
             every { templateEngines.engineFor(workspaceId) } returns mockk()
 
-            val returned = runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            val returned = runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             returned shouldBe expected
         }
@@ -134,7 +134,7 @@ class McpRecordingExecutionRunnerTest {
             coEvery { executor.execute(any()) } returns result()
             every { templateEngines.engineFor(workspaceId) } returns mockk()
 
-            runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             verify(exactly = 0) { streams.register(any()) }
         }
@@ -147,7 +147,7 @@ class McpRecordingExecutionRunnerTest {
             every { templateEngines.engineFor(workspaceId) } returns mockk()
             every { resultStore.describe("dp:result:$executionId") } returns view(rows = 42, bytes = 512)
 
-            runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             verify { executionRepository.recordResult(executionId, 42L, 512L) }
         }
@@ -159,7 +159,7 @@ class McpRecordingExecutionRunnerTest {
             coEvery { executor.execute(any()) } returns result(resultRef = null)
             every { templateEngines.engineFor(workspaceId) } returns mockk()
 
-            runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             verify(exactly = 0) { executionRepository.recordResult(any(), any(), any()) }
         }
@@ -172,7 +172,7 @@ class McpRecordingExecutionRunnerTest {
             every { templateEngines.engineFor(workspaceId) } returns mockk()
             every { resultStore.describe(any()) } returns null
 
-            runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             verify(exactly = 0) { executionRepository.recordResult(any(), any(), any()) }
         }
@@ -185,7 +185,7 @@ class McpRecordingExecutionRunnerTest {
             every { templateEngines.engineFor(workspaceId) } returns mockk()
             every { resultStore.describe(any()) } throws IllegalStateException("store down")
 
-            val returned = runner(executor).run(request(), WorkspaceContext(workspaceId, "acme"))
+            val returned = runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP)
 
             returned.status shouldBe ExecutionStatus.SUCCESS
         }

@@ -81,16 +81,21 @@ class McpServerWiringTest {
             ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig()),
             CalculatorsListTool(),
             CalculatorsGetTool(),
-        )
+            // 074 — the four published-endpoint tools, appended the way the shipped bean does.
+        ) +
+            EndpointsTools.all(
+                mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
+                mockk<co.datapipelines.pipeline.PipelineRepository>(),
+            )
     }
 
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 24 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same 28 names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist.
      */
     @Test
-    fun `the tool surface is exactly the 24 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the 28 tools the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -100,7 +105,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 24 tools and all three prompts registered`() {
+    fun `the server builds with all 28 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

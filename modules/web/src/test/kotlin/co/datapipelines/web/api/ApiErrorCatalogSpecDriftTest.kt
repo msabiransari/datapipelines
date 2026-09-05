@@ -116,7 +116,7 @@ class ApiErrorCatalogSpecDriftTest {
          * and §13.4 gains `pipeline.node.calculator_failed`, both landed in the SAME commit as
          * their constants and catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 114
+        const val SECTION_13_ROW_COUNT = 129
 
         /**
          * §12's distinct validation codes.

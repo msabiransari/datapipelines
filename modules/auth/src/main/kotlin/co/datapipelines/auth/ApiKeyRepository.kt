@@ -39,6 +39,7 @@ class ApiKeyRepository(
      * (rest-api §16.1), whose `is_revoked` field is only meaningful when both values can appear
      * (gate C, F12c). Owner-scoped in SQL, like everything else here.
      */
+
     fun findByUser(userId: UUID): List<ApiKey> =
         jdbc.query(
             "$SELECT_COLUMNS WHERE k.user_id = :uid ORDER BY k.created_at DESC",
@@ -47,10 +48,28 @@ class ApiKeyRepository(
         )
 
     /**
+     * Live keys with this NAME in this workspace (074, promotion §19.5).
+     *
+     * A list, not a single row: `api_keys.name` carries no uniqueness constraint (metadata-db
+     * §4.2), so a name can legitimately belong to several people in one workspace. The caller
+     * decides what an ambiguous name means; promotion refuses to guess.
+     */
+    fun findByWorkspaceAndName(
+        workspaceId: UUID,
+        name: String,
+    ): List<ApiKey> =
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE k.workspace_id = :workspaceId AND k.name = :name AND k.is_revoked = FALSE",
+            mapOf("workspaceId" to workspaceId, "name" to name),
+            ::map,
+        )
+
+    /**
      * Pins the new key to [workspaceId] — the workspace the creator resolved as active
      * (their membership in it is the caller's check, auth.md §7.4). No default: a key
      * without an explicit workspace decision must not compile.
      */
+    @Suppress("LongParameterList") // one row, spelled out; the alternative is a builder for one call site
     fun insert(
         id: String,
         userId: UUID,
@@ -59,11 +78,12 @@ class ApiKeyRepository(
         scopes: Set<Scope>,
         expiresAt: Instant?,
         workspaceId: UUID,
+        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): ApiKey {
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id)
-            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id)
+            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id, kind)
+            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id, :kind)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", id)
@@ -72,7 +92,8 @@ class ApiKeyRepository(
                 .addValue("key_hash", keyHash)
                 .addValue("scopes", scopes.map { it.wire }.toTypedArray())
                 .addValue("expires_at", expiresAt?.let { java.sql.Timestamp.from(it) })
-                .addValue("workspace_id", workspaceId),
+                .addValue("workspace_id", workspaceId)
+                .addValue("kind", kind.wire),
         )
         return checkNotNull(findById(id)) { "api_keys row '$id' vanished immediately after insert" }
     }
@@ -136,6 +157,10 @@ class ApiKeyRepository(
             expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
             workspaceId = rs.getObject("workspace_id", UUID::class.java),
             workspaceName = rs.getString("workspace_name"),
+            // V11. A row written before the column existed reads as the column's DEFAULT, so
+            // there is no null to tolerate — but fromWire would throw on an unexpected value,
+            // and a key that cannot be classified must fail loudly rather than authenticate.
+            kind = ApiKeyKind.fromWire(rs.getString("kind")),
         )
     }
 }

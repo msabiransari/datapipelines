@@ -57,6 +57,14 @@ class ScopeInterceptor(
                 false
             }
 
+            // §7.7 — an endpoint key carries NO scopes by design, so the matrix cannot judge it.
+            // Its confinement is a route allowlist instead, and its real authorization is the
+            // path bindings (`EndpointAuthorizer`) or, on the cursor, the execution's own audit
+            // trail. Both are enforced by the handlers below this interceptor.
+            principal.isEndpointKey -> {
+                endpointKeyDecision(request, response, principal)
+            }
+
             !Scope.satisfies(principal.scopes, operation.minScope) -> {
                 denyScope(request, response, principal, operation)
             }
@@ -66,6 +74,45 @@ class ScopeInterceptor(
             }
         }
     }
+
+    /**
+     * §7.7 — where an `endpoint`-kind key may go at all.
+     *
+     * The allowlist is the whole of an endpoint key's reach: the published-endpoint surface, and
+     * the two execution reads that let a caller collect a result it started. Everything else is
+     * refused HERE rather than by each handler, so a new route cannot become reachable to
+     * endpoint keys by forgetting a check — the same default-deny reasoning the unannotated-
+     * handler branch above exists for.
+     *
+     * A scope floor is deliberately NOT applied on the allowed routes: an endpoint key's scope
+     * set is empty, so any floor would refuse it everywhere, and its authority is the binding.
+     */
+    private fun endpointKeyDecision(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        principal: AuthenticatedPrincipal,
+    ): Boolean {
+        if (reachableByEndpointKey(request.requestURI)) return true
+        auditLogger.log(
+            event = "auth.scope.denied",
+            userId = principal.userId,
+            keyId = principal.keyId,
+            details = mapOf("reason" to "endpoint_key_off_surface", "path" to request.requestURI),
+        )
+        errorWriter.write(
+            request = request,
+            response = response,
+            status = HTTP_FORBIDDEN,
+            code = ENDPOINT_KEY_KIND_REFUSED,
+            message = "An endpoint key may only call published endpoints and read the results of executions it started.",
+            userMessage = "This kind of API key can't be used here.",
+            details = mapOf("reason" to "endpoint_key_off_surface"),
+        )
+        return false
+    }
+
+    /** The routes §7.7 lets an endpoint key reach. */
+    private fun reachableByEndpointKey(uri: String): Boolean = uri.startsWith(PUBLISHED_ENDPOINT_PREFIX) || EXECUTION_READ.matches(uri)
 
     /** Audits `auth.scope.denied` (§10.1) and writes 403 `auth.scope.insufficient`. */
     private fun denyScope(
@@ -136,6 +183,22 @@ class ScopeInterceptor(
          */
         const val API_PREFIX = "/api/"
         const val PARTIALS_PREFIX = "/partials/"
+
+        /**
+         * The published-endpoint subtree (ruling R-EP1). Engineers own everything beneath it;
+         * the `/api/v1` tree stays the product's.
+         */
+        const val PUBLISHED_ENDPOINT_PREFIX = "/api/x/"
+
+        /**
+         * `GET /api/v1/executions/{id}` and `.../result` — the cursor of an execution an endpoint
+         * key started (§7.7). Whether THIS key started THAT execution is the handler's check, not
+         * this one's: here the question is only "may this credential be on this route".
+         */
+        val EXECUTION_READ = Regex("^/api/v1/executions/[^/]+(/result)?$")
+
+        /** §13.14's code, spelled here because `auth` does not depend on `pipeline-contract`. */
+        const val ENDPOINT_KEY_KIND_REFUSED = "endpoint.key_kind_refused"
 
         private const val HTTP_FORBIDDEN = 403
     }

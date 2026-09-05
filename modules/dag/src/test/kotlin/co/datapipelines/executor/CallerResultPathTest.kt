@@ -242,7 +242,10 @@ class CallerResultPathTest {
     private class VanishingResultStore(
         private val delegate: InMemoryResultStore = InMemoryResultStore(),
     ) : ResultStore by delegate {
-        override fun describe(key: String): StoredResultView? = null
+        override fun describe(
+            key: String,
+            firstPageRows: Int?,
+        ): StoredResultView? = null
 
         override suspend fun materialize(
             executionId: UUID,

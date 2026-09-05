@@ -59,6 +59,8 @@ data class ExecuteLaunch(
     val parametersJson: String,
     val correlationId: UUID,
     val resultTtlSeconds: Long?,
+    /** The client's `DP-Result-Page-Rows` (R-EP4) — how many rows `data_ready` carries inline. */
+    val resultPageRows: Int? = null,
     val idempotencyKey: String?,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
@@ -248,6 +250,7 @@ class ExecutionStreamLauncher(
                         parameters = request.parameters,
                         idempotencyKey = request.idempotencyKey,
                         resultTtlSeconds = request.resultTtlSeconds,
+                        resultPageRows = request.resultPageRows,
                         correlationId = request.correlationId,
                         triggeredVia = ExecutionTrigger.REST,
                         executionId = executionId,

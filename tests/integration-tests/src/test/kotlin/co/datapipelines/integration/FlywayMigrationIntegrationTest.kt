@@ -61,6 +61,8 @@ class FlywayMigrationIntegrationTest {
                 "9|datasource last test outcome|true",
                 // 068 (renumbered V11→V10 at merge: it landed before 066, which now takes V11).
                 "10|datasource credential key version|true",
+                // 074 — published endpoints (066 is shelved, so this takes V11).
+                "11|published endpoints|true",
             )
     }
 
@@ -148,7 +150,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the twelve tables of metadata-db §4`() {
+    fun `creates exactly the fourteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -163,10 +165,13 @@ class FlywayMigrationIntegrationTest {
                 "api_keys",
                 "audit_log",
                 "datasources",
+                // 074 (V11) — the published-endpoint registry and its key bindings.
+                "endpoint_key_bindings",
                 "execution_events",
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
+                "published_endpoints",
                 "template_versions",
                 "templates",
                 "users",
@@ -197,6 +202,7 @@ class FlywayMigrationIntegrationTest {
         indexes shouldContainExactly
             listOf(
                 "api_keys.api_keys_pkey",
+                "api_keys.idx_api_keys_endpoint_kind",
                 "api_keys.idx_api_keys_expires",
                 "api_keys.idx_api_keys_user",
                 "audit_log.audit_log_pkey",
@@ -205,6 +211,8 @@ class FlywayMigrationIntegrationTest {
                 "audit_log.idx_audit_user",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
+                "endpoint_key_bindings.endpoint_key_bindings_pkey",
+                "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
                 "pipeline_executions.idx_executions_correlation",
@@ -218,6 +226,10 @@ class FlywayMigrationIntegrationTest {
                 "pipelines.idx_pipelines_owner",
                 "pipelines.pipelines_pkey",
                 "pipelines.uq_pipelines_workspace_name",
+                "published_endpoints.idx_published_endpoints_pipeline",
+                "published_endpoints.idx_published_endpoints_workspace",
+                "published_endpoints.published_endpoints_path_pattern_key",
+                "published_endpoints.published_endpoints_pkey",
                 "template_versions.idx_template_versions_dialect",
                 "template_versions.template_versions_pkey",
                 "template_versions.uq_template_versions_one_draft",
@@ -262,6 +274,9 @@ class FlywayMigrationIntegrationTest {
 
         checks shouldContainExactly
             listOf(
+                // 074 (V11) — the api_keys.kind enum column. Sorted first, like every other row:
+                // the query is ORDER BY'd and the assertion is order-sensitive.
+                "chk_api_keys_kind",
                 "chk_datasource_dialect",
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",

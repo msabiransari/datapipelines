@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthException
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.pipeline.PipelineErrorCodes
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -55,6 +56,17 @@ class McpAuthFilter(
             reject(request, response, principal)
             return
         }
+        // §7.7 — an ENDPOINT-kind key authorises published endpoints and the cursor of executions
+        // it started, and nothing else. `/mcp` is a SERVLET, so `ScopeInterceptor`'s central
+        // confinement (which only sees MVC handlers) never runs here — the refusal has to be made
+        // again, at this filter. Without it an endpoint key could reach `tools/list` and
+        // enumerate the surface: it could call nothing (a scopeless key fails every tool's scope
+        // check) but it could READ the tool catalogue, which is more than "exactly the endpoints
+        // it is bound to". Found by probing the live stack, not by any test.
+        if (principal.isEndpointKey) {
+            rejectEndpointKey(request, response, principal)
+            return
+        }
         val correlationId = correlationId(request)
         request.setAttribute(McpTransportKeys.PRINCIPAL, principal)
         request.setAttribute(McpTransportKeys.CORRELATION_ID, correlationId)
@@ -62,6 +74,24 @@ class McpAuthFilter(
         // an id to an operator — the same id the tool result carries in `_meta` (§6.3).
         response.setHeader(AuthErrorWriter.CORRELATION_HEADER, correlationId.toString())
         filterChain.doFilter(request, response)
+    }
+
+    /** §7.7 — `/mcp` is not on an endpoint key's surface; refused with the catalogued code. */
+    private fun rejectEndpointKey(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        principal: AuthenticatedPrincipal,
+    ) {
+        log.info("Rejected an endpoint-kind key on /mcp (key={}): it authorises published endpoints only", principal.keyId)
+        errorWriter.write(
+            request = request,
+            response = response,
+            status = HTTP_FORBIDDEN,
+            code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+            message = "An endpoint key may only call published endpoints and read the results of executions it started.",
+            userMessage = "This kind of API key can't be used here.",
+            details = mapOf("reason" to "endpoint_key_off_surface"),
+        )
     }
 
     private fun principal(): AuthenticatedPrincipal? =
@@ -88,5 +118,9 @@ class McpAuthFilter(
     private fun correlationId(request: HttpServletRequest): UUID {
         val header = request.getHeader(AuthErrorWriter.CORRELATION_HEADER)?.trim().orEmpty()
         return runCatching { UUID.fromString(header) }.getOrElse { UUID.randomUUID() }
+    }
+
+    private companion object {
+        private const val HTTP_FORBIDDEN = 403
     }
 }

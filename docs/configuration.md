@@ -284,6 +284,18 @@ Env vars follow §1's derivation rule: `DATAPIPELINES_ORG_CURRENCY_NAME`, `DATAP
 
 **Restart to change.** There is no runtime override and no per-user setting: an org value that could change mid-run would make two nodes of one execution disagree about what year it is. A bad value stops the server (§7) rather than silently defaulting — a wrong fiscal start is a wrong number in every report the deployment produces.
 
+### 3.22 Published endpoints
+
+The timeout bounds for a released pipeline published as a `GET` endpoint under `/api/x` (round 074). `timeout-default-seconds` is what a publish that names no timeout is stored with; the min/max pair clamps every stored `published_endpoints.timeout_seconds` at write time, so retuning the bounds later never makes an existing row unreadable — it only changes what the next publish may ask for.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.endpoints.timeout-default-seconds` | `30` | Timeout a publish that omits one is stored with |
+| `datapipelines.endpoints.timeout-min-seconds` | `1` | Lower clamp for a published endpoint's timeout |
+| `datapipelines.endpoints.timeout-max-seconds` | `300` | Upper clamp, and the longest a serve may block before it answers `202` and leaves the execution running |
+
+**There is deliberately no `page-rows-max` key here.** The `DP-Result-Page-Rows` request header is **one contract** across a published endpoint and `POST /pipelines/{id}/execute`, and both clamp it to `datapipelines.result.page-max-rows` (§3.5). A second key that had to equal the first would be a second authority for one bound, and an operator who retuned one and not the other would get two different clamps on one documented header.
+
 ---
 
 ## 4. Precedence
@@ -477,6 +489,10 @@ datapipelines:
     fiscal-start-date: ${DATAPIPELINES_ORG_FISCAL_START_DATE:01-01}
     week-start: ${DATAPIPELINES_ORG_WEEK_START:monday}
     timezone: ${DATAPIPELINES_ORG_TIMEZONE:UTC}
+  endpoints:
+    timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
+    timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
+    timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -538,6 +554,7 @@ On startup, the app validates:
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
 - The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
+- `endpoints.timeout-min-seconds` ≤ `endpoints.timeout-default-seconds` ≤ `endpoints.timeout-max-seconds`, and the minimum is ≥ 1 (§3.22). Unlike the result TTLs, an ABSENT key is not a violation here — the binder default applies — so only a present, out-of-order triple refuses startup.
 - `datapipelines.workspaces.provisioning-mode` is one of `auto-per-user` | `self-serve` | `closed`.
 - `datapipelines.workspaces.open-join: true` together with `closed` provisioning is refused, naming both keys (§3.17) — open-join is a `self-serve` knob, and under `closed` it would let any authenticated user self-join any workspace, the exact surface `closed` exists to close.
 - Every `datapipelines.auth.trusted-proxies` entry parses as a CIDR (a bare IP is a host CIDR); anything else refuses startup at the auth module's resolver construction — a typo'd range must not silently widen proxy trust.
@@ -560,6 +577,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-05 | v1.12 | 074 published endpoints | New **§3.22 Published endpoints**: `datapipelines.endpoints.timeout-default-seconds` (30) / `-min-seconds` (1) / `-max-seconds` (300); one new §7 rule (min ≤ default ≤ max, min ≥ 1 — the four report together). Deliberately no `page-rows-max`: `DP-Result-Page-Rows` clamps to `result.page-max-rows` on both surfaces (R-EP4). §5 template block appended after `org:`. |
 | 2026-09-04 | v1.11 | 072 calculators | New **§3.21 Organisation**: `datapipelines.org.currency.name` / `.symbol`, `fiscal-start-date` (`MM-DD`), `week-start`, `timezone` — five keys that enter every execution Context as `org_*` (calculators design §0.1/§0.2, [Pipeline Contract §7.2](pipeline-contract.md#72-whats-in-the-context--one-namespace-five-tiers)). §5 template block and one new §7 validation rule (all four org checks report together; a month name in `fiscal-start-date` is refused with a message naming `MM-DD`) |
 | 2026-09-04 | v1.10 | 068 key-provider seam | New **§3.20 credential key provider**: `datapipelines.db.key-provider` (default `env`, so no deployment needs a config edit), plus the `env` provider's optional `encryption-keys` rotation map and `encryption-key-current`. §2's `encryption-key` row now states that it is key version 1, forever. §5 template and §7 updated — one new validation rule: the provider name must be one this build ships, and that provider's own settings must be present and well-formed (an unknown name short-circuits the rest). |
 | 2026-09-02 | v1.9 | 051 auth/config sweep | Added §3.4 `datapipelines.auth.trusted-proxies` (CIDR list, default empty = header ignored; the login limiter and every auth `source_ip` resolve the client through it — R8/T46, deployment.md §6.2) with the §5 template line and two §7 rules (each entry must parse as a CIDR or startup is refused; enforced at the auth module's resolver construction). §3.17: `open-join: true` + `closed` provisioning now refused at startup, naming both keys (T45 — the self-join branch gates on `open-join` alone, so the pair would re-open the membership surface `closed` exists to keep admin-only); §7 gains the rule |

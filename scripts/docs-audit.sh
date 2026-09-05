@@ -153,6 +153,9 @@ for p, t in texts.items():
 # ---- C. error-code catalog -------------------------------------------------
 # Lookbehind rejects sub-paths of longer dotted names (spring.datasource.url,
 # datapipelines.auth.*); lookahead rejects hyphen-continuations (result.ttl-min).
+# `endpoint` joined in 074 on BOTH sides: the alternation below (so endpoint.* error
+# codes are checked against §13.14) and the §15 event extraction (so the endpoint.*
+# AUDIT events are recognised as events rather than demanded as catalog codes).
 # `mcp` joined the alternation in 052 so the mcp.tool.* audit events are checked
 # against Enums §15 exactly like auth.*/datasource.* events — before that the
 # prefix was invisible to check C and a doc could name an unregistered mcp.*
@@ -161,7 +164,7 @@ for p, t in texts.items():
 # catalog domain, and without the prefix a misspelt workspace.* code in any doc
 # passed the mechanical audit — only the drift tests would have caught it.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.
@@ -170,7 +173,7 @@ catalog |= {c for c in re.findall(CODE_RE, texts.get("docs/datasources.md", ""))
 # audit events (enums §15) are events, not error codes — extract only from §15
 enums_txt = texts.get("docs/enums.md", "")
 sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
-events = set(re.findall(r"(?:auth|datasource|mcp)\.[a-z_]+(?:\.[a-z_]+)*",
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))

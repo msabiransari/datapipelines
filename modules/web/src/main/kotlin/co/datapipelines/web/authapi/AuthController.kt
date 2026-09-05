@@ -1,6 +1,8 @@
 package co.datapipelines.web.authapi
 
+import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.auth.ApiKey
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.RequiredScope
@@ -9,6 +11,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
@@ -36,6 +39,19 @@ data class CreateApiKeyRequest(
     val scopes: List<String>? = null,
     @field:JsonProperty("expires_at") @get:JsonProperty("expires_at") @param:JsonProperty("expires_at")
     val expiresAt: Instant? = null,
+    /**
+     * §7.7 — `user` (the default, and every key that existed before 074) or `endpoint`.
+     * Absent means `user`, so every existing client's request means exactly what it did.
+     */
+    @field:JsonProperty("kind") @get:JsonProperty("kind") @param:JsonProperty("kind")
+    val kind: String? = null,
+    /**
+     * §7.7 — the endpoint-tree nodes this key authorises, for `kind: "endpoint"`. Part of
+     * ISSUANCE rather than a second call because the plaintext key is returned exactly once: a
+     * failure between mint and bind would leave an operator holding an unusable secret.
+     */
+    @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
+    val bindings: List<String>? = null,
 )
 
 /**
@@ -60,6 +76,12 @@ class AuthController(
     private val apiKeys: ApiKeyService,
     private val apiKeyRepository: ApiKeyRepository,
     private val users: UserService,
+    /**
+     * Issuance that also writes endpoint bindings (§7.7). Cross-aggregate — a key is `auth`'s and
+     * a binding is the endpoint registry's — so it lives in `modules/application`, like every
+     * other use case that needs more than one aggregate.
+     */
+    private val endpointKeys: EndpointKeyService,
 ) {
     /** §16.1 — the caller's own keys, revoked included (`is_revoked` must be able to vary); never secrets. */
     @GetMapping("/api-keys")
@@ -80,16 +102,25 @@ class AuthController(
                 ?.map { parseScope(it) }
                 ?.toSet()
                 .orEmpty()
+        val kind =
+            body.kind?.let {
+                ApiKeyKind.fromWireOrNull(it)
+                    ?: throw ApiException(
+                        PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                        "Unknown key kind '$it'. Supported: ${ApiKeyKind.WIRE_VALUES.joinToString(", ")}.",
+                        mapOf("kind" to it, "supported" to ApiKeyKind.WIRE_VALUES),
+                    )
+            } ?: ApiKeyKind.DEFAULT
+        // D3 + §7.4: the key pins the creator's ACTIVE workspace (their membership in it is
+        // re-checked inside issue). No request-payload workspace exists in v1 — cross-workspace
+        // key issuance has no surface. §7.7's bindings ride the same call, before the mint.
         val issued =
-            apiKeys.issue(
-                ownerId = principal.userId,
+            endpointKeys.issue(
+                principal = principal,
                 name = body.name,
                 scopes = scopes,
-                creatorScopes = principal.scopes,
-                // D3 + §7.4: the key pins the creator's ACTIVE workspace (their membership in
-                // it is re-checked inside issue). No request-payload workspace exists in v1 —
-                // cross-workspace key issuance has no surface.
-                workspaceId = principal.requireWorkspace().id,
+                kind = kind,
+                bindingPaths = body.bindings.orEmpty(),
                 expiresAt = body.expiresAt,
             )
         return ApiResponse.of(
@@ -97,6 +128,8 @@ class AuthController(
                 "id" to issued.record.id,
                 "name" to issued.record.name,
                 "scopes" to issued.record.scopes.map { it.wire },
+                "kind" to issued.record.kind.wire,
+                "bindings" to body.bindings.orEmpty(),
                 "key" to issued.plaintext,
                 "created_at" to issued.record.createdAt.toString(),
                 "expires_at" to issued.record.expiresAt?.toString(),
@@ -219,6 +252,7 @@ class AuthController(
             "id" to id,
             "name" to name,
             "scopes" to scopes.map { it.wire },
+            "kind" to kind.wire,
             "created_at" to createdAt.toString(),
             "expires_at" to expiresAt?.toString(),
             "last_used_at" to lastUsedAt?.toString(),

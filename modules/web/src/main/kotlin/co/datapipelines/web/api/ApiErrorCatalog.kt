@@ -85,6 +85,10 @@ object ApiErrorCatalog {
             "template.version." to HttpStatus.CONFLICT,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
             "workspace." to HttpStatus.FORBIDDEN,
+            // 074 §13.14 — the request validator is the biggest half of the family and every
+            // one of its codes is a 400, so 400 is the honest default; the publish-time and
+            // resolution-time refusals each name their own status in EXCEPTIONS below.
+            "endpoint." to HttpStatus.BAD_REQUEST,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -171,6 +175,20 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Workspace.IN_USE to HttpStatus.CONFLICT,
             // §13.9 — the T23 mapping: the workspace UNIQUE(name) violation is a 409.
             PipelineErrorCodes.Template.DUPLICATE_NAME to HttpStatus.CONFLICT,
+            // 074 §13.14 / rest-api §19.6 — the published-endpoint status table. Only the
+            // request-validator codes take the family's 400 default.
+            PipelineErrorCodes.Endpoint.PATH_CONFLICT to HttpStatus.CONFLICT,
+            // Publish-time refusal. The SERVE path returns this same code as 503 (§19.4) and
+            // sets that status on its own response rather than through this catalog: the code
+            // says what is wrong, the surface says when it was found.
+            PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Endpoint.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED to HttpStatus.METHOD_NOT_ALLOWED,
+            PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE to HttpStatus.NOT_ACCEPTABLE,
+            PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
         )
 
     /**
@@ -234,10 +252,25 @@ object ApiErrorCatalog {
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",
             "result." to "The results for this run aren't available.",
             "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace owner for access.",
+            // 074 — the request family is the one a caller of a published endpoint sees, so the
+            // family message is written for THEM (a machine client's developer), not for an
+            // author. The publish-time refusals carry their own overrides below.
+            "endpoint.request." to "The request to this endpoint isn't valid. Every problem with it is listed in the error details.",
+            "endpoint." to "This published endpoint couldn't serve the request.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.Endpoint.PATH_CONFLICT to
+                "Another endpoint could already answer this URL. Pick a path that can't collide with it.",
+            PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY to
+                "Only read-only pipelines can be published as a GET endpoint. This one writes somewhere.",
+            PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED to
+                "This endpoint's pipeline has no released version yet. Release it and try again.",
+            PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to
+                "This API key isn't bound to this part of the endpoint tree.",
+            PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to
+                "This kind of API key can't be used here.",
             PipelineErrorCodes.Validation.CYCLE_DETECTED to
                 "Your pipeline has a circular dependency. Remove one of the arrows.",
             PipelineErrorCodes.Execution.NOT_FOUND to

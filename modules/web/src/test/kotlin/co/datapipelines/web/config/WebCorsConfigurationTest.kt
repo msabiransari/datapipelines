@@ -81,6 +81,8 @@ class WebCorsConfigurationTest {
                 co.datapipelines.web.api.CorrelationId.HEADER,
                 co.datapipelines.auth.SecurityConfig.CSRF_HEADER,
                 WebHeaders.RESULT_TTL,
+                // 074 / R-EP4 — the inline first-page size, on both execute surfaces.
+                WebHeaders.RESULT_PAGE_ROWS,
                 org.springframework.http.HttpHeaders.CONTENT_TYPE,
                 WebHeaders.IDEMPOTENCY_KEY,
                 org.springframework.http.HttpHeaders.ACCEPT,
