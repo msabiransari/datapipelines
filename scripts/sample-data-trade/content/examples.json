@@ -92,7 +92,7 @@
   "pipelines": [
     {
       "schema_version": 1,
-      "name": "trade_balance_by_partner",
+      "name": "trade/balance_by_partner",
       "display_name": "Trade balance by partner",
       "description": "Which partners does the US run its largest surpluses and deficits with? Stages the windowed DuckDB trade facts into tempdb and rolls them up per partner: exports, imports, net balance, import/export ratio. Run as-is for the full 2023-2024 sample window.",
       "settings": { "tempdb": { "engine": "H2", "config": {} } },
@@ -123,7 +123,7 @@
     },
     {
       "schema_version": 1,
-      "name": "trade_reconciliation",
+      "name": "trade/reconciliation",
       "display_name": "Mirror statistics: US-reported vs partner-reported",
       "description": "Whose numbers are bigger? Joins what the US says it traded with each partner (DuckDB, Census) against what that partner reports trading with the US (MySQL, UN Comtrade) — the classic mirror-statistics gap, in percent. Three engines: DuckDB facts, MySQL mirror, H2 join. Only the five Comtrade reporters reconcile.",
       "settings": { "tempdb": { "engine": "H2", "config": {} } },
@@ -172,7 +172,7 @@
     },
     {
       "schema_version": 1,
-      "name": "imports_in_partner_currency",
+      "name": "trade/fx/imports_in_partner_currency",
       "display_name": "US imports in the partner's own currency",
       "description": "What did the US actually buy, in the seller's money? Restates monthly US import value (DuckDB, US Census) in each partner's currency at the Federal Reserve's monthly average rate (SQLite, H.10/G.5), and separates the trade move from the currency move: the month-over-month rate change, and the USD-strength effect — the partner-currency difference between valuing this month's imports at last month's rate and at this one's. Three engines: DuckDB facts, SQLite rates, H2 join.",
       "settings": { "tempdb": { "engine": "H2", "config": {} } },

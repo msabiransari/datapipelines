@@ -111,16 +111,19 @@ class ListPartialsRenderTest {
     }
 
     @Test
-    fun `pipelines partial renders the design-system table`() {
+    fun `pipelines partial renders design-system rows, not inline table styles`() {
         val html =
             engine.process(
                 "partials/pipelines",
                 webContext().apply { fillPipelinesModel(listOf(pipelineRecord())) },
             )
 
-        html shouldContain "<table class=\"ds-table\">"
-        // The pipelines table renders no chips — there is nothing to convert to ds-badge.
-        // The migration is only done when the inline table styles are GONE.
+        // 067: search renders IN THE LEFT PANE — full-path rows on ds primitives, not the
+        // full-width table. The migration claim this test guards ("ds-table done, inline
+        // styles gone") carries over to the row shape: badges are ds-badge, and no inline
+        // table styles survive.
+        html shouldContain "class=\"tpl-result\""
+        html shouldContain "ds-badge"
         html shouldNotContain "border-collapse: collapse"
         html shouldNotContain "padding: var(--gap-sm) var(--gap-md); text-align: left"
     }
@@ -199,12 +202,29 @@ class ListPartialsRenderTest {
         html shouldContain "id=\"template-filter-spinner\""
     }
 
-    /** Layout chrome plus PipelineUiController's model, one row so the pager renders. */
+    /**
+     * Layout chrome plus PipelineUiController's model in its BROWSE presentation — what a page
+     * load with no `q` renders since 067. One folder and one root leaf, so the level renders
+     * its rows AND its pager and the guard is not vacuous.
+     */
     private fun WebContext.fillPipelineList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
-        fillPipelinesModel(listOf(pipelineRecord()))
+        setVariable("searching", false)
+        setVariable("prefix", "")
+        setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
+        setVariable(
+            "folders",
+            listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))),
+        )
+        setVariable("foldersTruncated", false)
+        setVariable("pipelines", listOf(pipelineRecord()))
+        setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
+        setVariable("q", "")
+        setVariable("offset", 0)
+        setVariable("hasMore", true)
+        setVariable("total", 30)
     }
 
     /** Layout chrome plus TemplateUiController's model, one row so the pager renders. */
@@ -220,7 +240,14 @@ class ListPartialsRenderTest {
         fillTemplatesModel(listOf(templateRecord()))
     }
 
+    /**
+     * The pipelines model. Since 067 the screen is a TREE, so the fragment is a dispatcher:
+     * these tests exercise the SEARCH presentation (`searching = true`), which is the one that
+     * renders the flat full-path rows and the shared pager against `#pipeline-list-wrapper`.
+     * The browse presentation has its own guard in `PipelineExplorerRenderTest`.
+     */
     private fun WebContext.fillPipelinesModel(rows: List<PipelineRecord>) {
+        setVariable("searching", true)
         setVariable("pipelines", rows)
         setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable("q", "")

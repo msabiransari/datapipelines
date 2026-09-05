@@ -1,0 +1,123 @@
+<!-- ONE level of the pipeline tree (067), as the LEFT pane of the explorer renders it.
+
+     Deliberately the same shape as partials/template-tree-level.html, down to the class
+     names: 067 ships the convention templates already have, so a reader who knows one tree
+     knows the other, one stylesheet dresses both, and the browser-test selectors
+     (details.tpl-folder, summary.tpl-summary, .tpl-leaf) transfer unchanged.
+
+     The tree is backed by server-side prefix queries: this fragment renders the direct
+     sub-folders and the direct pipeline children of one prefix, and expanding a folder issues
+     ONE more request for ONE more level. Nothing here ships the flat list to the browser and
+     nothing assembles a tree in JS — at any size (§9.1).
+
+     Folders are virtual (§3.1): a folder is a name prefix with no table, no column, no id and
+     no CRUD. There is deliberately no New folder / rename / move / delete control anywhere in
+     this file, and no empty-folder state — a folder is derived from the live rows beneath it,
+     so one with nothing beneath it does not exist to be rendered.
+
+     A leaf SELECTS: it swaps the pipeline's settings, parameters and versions into
+     #pipeline-detail on the RIGHT, and nothing in this pane moves. The selection swap is
+     innerHTML into a stable pane outside this fragment — the tree's DOM is untouched by
+     construction.
+
+     Folder expansion is <details>/<summary>: the browser owns open/closed state and the
+     keyboard and screen-reader semantics, and htmx loads the level on the summary's FIRST
+     click only (hx-trigger="click once"). No JS of our own is involved in expansion.
+
+     The root level's id is the screen's long-standing #pipeline-list-wrapper, so browsing
+     inherits the existing SPA swap contract instead of inventing a second one; nested levels
+     get a derived id from PipelineBrowseModel.levelId so a placeholder and the fragment that
+     replaces it cannot disagree.
+
+     ARIA: the ROOT level's list is role=tree; a NESTED level's container is role=group under
+     its folder's treeitem. aria-expanded/aria-selected/tabindex are owned by
+     static/js/template-explorer.js, which serves both explorers and initialises them on load
+     and after every htmx swap (the server cannot know which leaf is selected — selection is
+     client state). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
+
+  <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
+       child, because its folder was derived from that child (§3.1). R10: pipelines are
+       authored through MCP/agents, so this says how to get one rather than offering a button
+       that does not exist. -->
+  <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(pipelines)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No pipelines yet</p>
+      <p class="ds-empty-description">
+        Pipelines are authored through the MCP server — ask your agent to create one. Give it a
+        folder path like <code>nyc/mobility/revenue_by_borough</code>; the folders appear here
+        on their own.
+      </p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(pipelines)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Pipelines' : null">
+
+    <!-- FOLDERS. The count is over live pipelines in the whole subtree, so a folder with
+         nothing beneath it is absent rather than empty. -->
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <!-- The request rides on the SUMMARY, triggered by its own `click`, and targets the
+             placeholder below with `next`. `once`: the level is fetched on first open and then
+             simply shown and hidden. -->
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                 th:attr="hx-get=@{/partials/pipelines(prefix=${f.path})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <!-- The label is the folder's own segment; the FULL prefix always rides on `title`,
+               which is also what a browser test selects on. -->
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">mobility</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.pipelineCount}">6</span>
+        </summary>
+        <!-- Replaced whole by the child level, which carries this same derived id. -->
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES. A leaf SELECTS: its detail swaps into #pipeline-detail on the right
+         (innerHTML). Enter opens the editor; data-editor-url is what the keyboard path reads,
+         and it is the same URL the detail pane's Open button uses. -->
+    <li class="tpl-node" role="none" th:each="p : ${pipelines}">
+      <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false"
+              th:attr="hx-get=@{/partials/pipelines/detail(id=${p.id})},
+                       data-editor-url=@{'/pipelines/' + ${p.id} + '/editor'}"
+              hx-target="#pipeline-detail" hx-swap="innerHTML"
+              hx-sync="#pipeline-detail:replace"
+              hx-indicator="#pipeline-detail-spinner">
+        <!-- The label is the leaf's own segment; the full path always rides on `title`
+             (§9.4's rule for every surface that shows a path-shaped name). -->
+        <span class="tpl-label"
+              th:text="${#strings.isEmpty(prefix)} ? ${p.name} : ${p.name.substring(prefix.length() + 1)}"
+              th:title="${p.name}">revenue_by_borough</span>
+        <span class="ds-badge ds-badge-default" th:text="${'v' + p.currentVersion}">v1</span>
+        <!-- versioning §7: unreleased edits stay visible in the list. The pane keeps the badge
+             compact; the version number and the release action live in the editor. -->
+        <span th:if="${drafts != null && drafts[p.id] != null}" class="ds-badge ds-badge-warning"
+              th:title="'Draft v' + ${drafts[p.id].version} + ' is pending release — release it from the editor to publish.'">draft</span>
+      </button>
+    </li>
+  </ul>
+
+  <!-- Honest overflow rather than a silent cut: sub-folders are a GROUP BY over one path
+       segment and are not paged. -->
+  <p class="tpl-overflow" th:if="${foldersTruncated}">
+    Only the first 200 sub-folders of this level are shown — narrow the view with search.
+  </p>
+
+  <!-- The shared pager, rendered only when it can DO something: a tree renders many levels at
+       once and most hold a handful of rows, so an always-on "Showing 1 of 1" with two dead
+       buttons is noise repeated down the whole screen. The flat search list keeps the
+       unconditional pager — there the count is the answer to the search. -->
+  <th:block th:if="${!#lists.isEmpty(pipelines) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/pipelines(prefix=${prefix}, offset=${offset - 25})},
+                     nextUrl=@{/partials/pipelines(prefix=${prefix}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${pipelines.size()}, ${total})}"></div>
+  </th:block>
+</div>

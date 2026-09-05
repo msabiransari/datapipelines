@@ -15,9 +15,10 @@ REST API and a browser UI. Metadata lives in Postgres (Flyway); results/events i
 
 ## Core concepts
 
-**Pipeline** — a JSON document: `schema_version`, `name` (machine name, `[a-z0-9_]+`),
-`display_name`, `description`, `parameters` (typed input map), and `nodes` (the DAG).
-`id`, `version`, `owner`, timestamps are server-assigned on create.
+**Pipeline** — a JSON document: `schema_version`, `name` (machine name, and a **folder
+path** — see *Folders* below), `display_name`, `description`, `parameters` (typed input
+map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
+create.
 
 **Node** — one SQL step, rendered from a template:
 - `id` — unique within the pipeline, `[a-z0-9_]+`, stable
@@ -80,6 +81,65 @@ quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AN
 
 **Dialects** — seven: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE. Templates are
 dialect-specific; a node's template dialect must match what its `source` can execute.
+
+## Folders — how you NAME a pipeline or a template
+
+Pipelines and templates share one naming grammar and one organising convention. The name IS
+the path; there is no folder object anywhere.
+
+**Grammar (both kinds).** 1–10 `/`-separated segments, each starting `[a-z0-9]` and
+continuing `[a-z0-9_.-]`, ≤ 64 chars per segment, ≤ 200 total. Lower-case only, no `@`, no
+backslash, no `.`/`..` segments, no leading/trailing/double slash. A single-segment name
+(`active_users`) is a valid path that sits at the root.
+
+**Workspace = who may see and run. Root segment = who owns.** The workspace is the isolation
+boundary — membership decides who can read and execute. The root segment is an organising
+claim, not a permission: putting a pipeline under `finance/` grants nobody anything.
+
+**Shape: `<owner>/<area>/<asset>`.** 2–4 levels is typical.
+
+- **A pipeline and the templates it uses share a prefix.** That is the whole payoff — one
+  prefix query shows an area's work whichever kind you browse.
+- **Shared macros live under `<owner>/lib/`** (`nyc/lib/metrics.sql`), beside their owner,
+  not at the root.
+
+**List the roots FIRST, and ask before minting a new one.** Before you create anything:
+
+```
+pipelines_list  {"prefix": ""}     → the roots, each with a count
+templates_list  {"prefix": ""}     → the same, for templates
+pipelines_list  {"prefix": "nyc"}  → one level down: sub-folders + the pipelines directly there
+```
+
+Reuse an existing root. If none fits, **ask the human** — a new root is a claim about how the
+workspace is organised, and there is no rename to take it back. Never mint a root silently.
+
+**`prefix` browses; `q` searches.** `prefix` returns ONE level (`{prefix, folders, pipelines
+|templates, total, has_more}`) — direct sub-folders with counts, plus that level's own
+leaves. `q` is a flat substring search across full paths. Use `prefix` to learn the shape,
+`q` to find a thing you can already half-name.
+
+**Worked example (the shipped demo).** The NYC family keeps its pipelines and the templates
+they read under one prefix:
+
+```
+nyc/mobility/revenue_by_borough      (pipeline)
+nyc/mobility/mobility_briefing       (pipeline — a PIPELINE node invoking borough_od_matrix)
+nyc/mobility/daily_by_zone.sql       (template the pipelines read)
+nyc/lib/metrics.sql                  (shared macros)
+```
+
+A new NYC mobility pipeline goes under `nyc/mobility/`; a first finance pipeline is a new
+root, so you ask.
+
+**What folders are NOT:**
+
+- **Not permissions.** Workspaces are.
+- **Not a rename mechanism.** A name is the asset's identity — child references
+  (`{name, version}`), pins, execution history and promotion all key on it. **Choose the
+  folder at creation**; there is no move, for either kind.
+- **Not a schema dimension.** No folder column, no folder ids. A folder exists exactly as
+  long as something is named under it, and disappears with the last thing in it.
 
 ## Calculators — computing a value the SQL then binds
 
@@ -186,6 +246,10 @@ expected.
 
 ## The golden path (authoring a new pipeline)
 
+0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
+   to see which roots this workspace already uses, then drill in with `{"prefix": "<root>"}`.
+   Reuse a root; ask the human before minting a new one. Everything you create in the steps
+   below goes under the prefix you settle on here — and it cannot be moved later.
 1. **Verify the source.** `datasources_test` (or `datasources_list`/`datasources_get`)
    to confirm name + dialect + connectivity, then introspect the schema:
    `datasources_get_schemas` → `datasources_get_tables(schema)` →
@@ -218,7 +282,7 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
 ```json
 {
   "schema_version": 1,
-  "name": "active_users",
+  "name": "acme/reporting/active_users",
   "display_name": "Active Users",
   "description": "List all active users from local PG",
   "parameters": {},

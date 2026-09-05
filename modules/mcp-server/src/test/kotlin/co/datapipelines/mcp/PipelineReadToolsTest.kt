@@ -2,6 +2,8 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineFolder
+import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -37,7 +39,7 @@ class PipelineReadToolsTest {
     fun `list returns metadata only, never the body`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue)
 
-        val payload = PipelinesListTool(service).call(McpArguments(emptyMap()), ctx)
+        val payload = PipelinesListTool(service, pipelines).call(McpArguments(emptyMap()), ctx)
         val first = (payload as List<*>).first() as Map<*, *>
 
         assertAll(
@@ -53,7 +55,7 @@ class PipelineReadToolsTest {
     fun `q searches name, display name and description case-insensitively`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
-        val hits = PipelinesListTool(service).call(McpArguments(mapOf("q" to "CHURN")), ctx) as List<*>
+        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("q" to "CHURN")), ctx) as List<*>
 
         hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("customer_churn")
     }
@@ -63,7 +65,7 @@ class PipelineReadToolsTest {
         every { pipelines.findAll(any(), McpFixtures.OTHER_USER) } returns emptyList()
 
         val hits =
-            PipelinesListTool(service).call(McpArguments(mapOf("owner" to McpFixtures.OTHER_USER.toString())), ctx) as List<*>
+            PipelinesListTool(service, pipelines).call(McpArguments(mapOf("owner" to McpFixtures.OTHER_USER.toString())), ctx) as List<*>
 
         hits.size shouldBe 0
     }
@@ -72,7 +74,7 @@ class PipelineReadToolsTest {
     fun `the datasource filter is pushed down to SQL`() {
         every { pipelines.findAllByDatasource(any(), "mysql-prod", null) } returns listOf(churn)
 
-        val hits = PipelinesListTool(service).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
+        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("datasource" to "mysql-prod")), ctx) as List<*>
 
         hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("customer_churn")
     }
@@ -81,9 +83,71 @@ class PipelineReadToolsTest {
     fun `limit caps the page`() {
         every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
 
-        val hits = PipelinesListTool(service).call(McpArguments(mapOf("limit" to 1)), ctx) as List<*>
+        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("limit" to 1)), ctx) as List<*>
 
         hits.size shouldBe 1
+    }
+
+    @Test
+    fun `prefix browses ONE level - folders with counts and the level's own leaves`() {
+        // 067. `prefix: ""` is the ROOT: present-but-empty, which is a different request from
+        // an absent prefix (that one is the flat listing).
+        every { pipelines.listFolder(McpFixtures.WORKSPACE_ID, null, 0, 50) } returns
+            PipelineFolderLevel(
+                folders = listOf(PipelineFolder("nyc", "nyc", 6), PipelineFolder("trade", "trade", 3)),
+                foldersTruncated = false,
+                pipelines = listOf(revenue),
+                total = 1,
+                hasMore = false,
+            )
+
+        val payload = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "")), ctx) as Map<*, *>
+
+        assertAll(
+            { payload["prefix"] shouldBe "" },
+            { (payload["folders"] as List<*>).map { (it as Map<*, *>)["path"] } shouldContainExactly listOf("nyc", "trade") },
+            { (payload["folders"] as List<*>).map { (it as Map<*, *>)["pipeline_count"] } shouldContainExactly listOf(6, 3) },
+            { (payload["pipelines"] as List<*>).map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("monthly_revenue") },
+            { payload["total"] shouldBe 1 },
+            { payload["has_more"] shouldBe false },
+        )
+        // The flat listing is NOT consulted for a browse — one level per request, and browse
+        // and search are different presentations.
+        verify(exactly = 0) { pipelines.findAll(any(), any()) }
+    }
+
+    @Test
+    fun `a non-empty prefix asks for exactly that level`() {
+        every { pipelines.listFolder(McpFixtures.WORKSPACE_ID, "nyc/mobility", 0, 50) } returns
+            PipelineFolderLevel(emptyList(), false, listOf(revenue), 1, false)
+
+        PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "nyc/mobility")), ctx)
+
+        verify(exactly = 1) { pipelines.listFolder(McpFixtures.WORKSPACE_ID, "nyc/mobility", 0, 50) }
+    }
+
+    @Test
+    fun `a prefix that is not a legal name answers an empty level and never reaches the database`() {
+        val payload = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("prefix" to "nyc/../etc")), ctx) as Map<*, *>
+
+        assertAll(
+            { payload["prefix"] shouldBe "nyc/../etc" },
+            { (payload["folders"] as List<*>).size shouldBe 0 },
+            { (payload["pipelines"] as List<*>).size shouldBe 0 },
+            { payload["total"] shouldBe 0 },
+        )
+        verify(exactly = 0) { pipelines.listFolder(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `q is unchanged by the browse argument`() {
+        // The regression this guards: making `prefix` the only presentation would silently
+        // break every existing caller that searches.
+        every { pipelines.findAll(any(), null) } returns listOf(revenue, churn)
+
+        val hits = PipelinesListTool(service, pipelines).call(McpArguments(mapOf("q" to "revenue")), ctx) as List<*>
+
+        hits.map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("monthly_revenue")
     }
 
     @Test

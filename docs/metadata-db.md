@@ -185,7 +185,7 @@ Pipeline metadata. One row per pipeline (not per version). See [Pipeline Contrac
 CREATE TABLE pipelines (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id    UUID        NOT NULL REFERENCES workspaces(id),   -- owning workspace (V4)
-    name            TEXT        NOT NULL,            -- machine name, [a-z0-9_]+
+    name            TEXT        NOT NULL,            -- machine name AND folder path; pipeline-contract §3.2
     display_name    TEXT        NOT NULL,
     description     TEXT        NOT NULL DEFAULT '',
     owner_id        UUID        NOT NULL REFERENCES users(id),

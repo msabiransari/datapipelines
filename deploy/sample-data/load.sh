@@ -398,7 +398,7 @@ ALTER USER '$DEMO_USER'@'%' IDENTIFIED BY '$my_pw';
 -- 071 §G: revoke at THIS family's database level only. The global form
 -- (REVOKE ALL PRIVILEGES, GRANT OPTION FROM ...) strips every grant the login
 -- holds, so whichever family's MySQL loader ran LAST removed the other's
--- SELECT and trade_reconciliation could not open dp_sample_trade. Both
+-- SELECT and trade/reconciliation could not open dp_sample_trade. Both
 -- families share one server and one dp_demo_ro login by design.
 REVOKE IF EXISTS ALL PRIVILEGES ON \`$SAMPLE_MYSQL_DB\`.* FROM '$DEMO_USER'@'%';
 GRANT SELECT ON \`$SAMPLE_MYSQL_DB\`.* TO '$DEMO_USER'@'%';

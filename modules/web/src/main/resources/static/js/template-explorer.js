@@ -1,4 +1,7 @@
-// 058 — the templates screen's explorer layer: selection, focus and keyboard.
+// 058 — the explorer layer: selection, focus and keyboard. Since 067 it serves BOTH
+// explorers (templates and pipelines): one tree presentation, one keyboard contract, one
+// file. The pane it operates on is whichever element carries `data-explorer-pane` — a marker,
+// not an id, so each screen keeps its own ids and neither has to know about the other.
 //
 // The 047 tree needed no JS of its own — expansion is <details>/<summary> and htmx, and
 // that is STILL all the expansion needs. What the two-pane layout adds is client state:
@@ -26,7 +29,7 @@
 (function () {
   "use strict";
 
-  var PANE_ID = "template-tree-pane";
+  var PANE_SELECTOR = "[data-explorer-pane]";
   var SELECTABLE = ".tpl-leaf, .tpl-result";
 
   // ------------------------------------------------------------- pure decisions
@@ -58,7 +61,7 @@
   // ------------------------------------------------------------- DOM glue
 
   function pane() {
-    return document.getElementById(PANE_ID);
+    return document.querySelector(PANE_SELECTOR);
   }
 
   function kindOf(el) {
@@ -71,9 +74,10 @@
   // A row is visible when every ancestor <details> above its own is open. Closed levels
   // simply do not render their children, so this is a walk, not a style read.
   function visible(item) {
+    var p = pane();
     var scope = item.tagName === "SUMMARY" ? item.parentElement : item;
     for (var n = scope && scope.parentElement; n; n = n.parentElement) {
-      if (n.id === PANE_ID) return true;
+      if (n === p) return true;
       if (n.tagName === "DETAILS" && !n.open) return false;
     }
     return false;
@@ -136,9 +140,10 @@
   }
 
   function parentFolderOf(item) {
+    var p = pane();
     var scope = item.tagName === "SUMMARY" ? item.parentElement : item;
     for (var n = scope && scope.parentElement; n; n = n.parentElement) {
-      if (n.id === PANE_ID) return null;
+      if (n === p) return null;
       if (n.tagName === "DETAILS") {
         var s = n.querySelector(":scope > summary");
         return s || null;

@@ -1,8 +1,6 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
-import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
 import jakarta.servlet.http.HttpServletRequest
@@ -12,9 +10,17 @@ import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 
+/**
+ * The pipelines screen (ui-screens.md §4.3) — since 067 the **pipelines explorer**: the folder
+ * tree on the left, the selected pipeline on the right.
+ *
+ * The page's first render goes through the same [PipelineBrowseModel] the htmx partial does,
+ * so the screen and the fragment that replaces its list cannot disagree about which
+ * presentation is showing or what it contains.
+ */
 @Controller
 class PipelineUiController(
-    private val pipelines: PipelineService,
+    private val browse: PipelineBrowseModel,
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/pipelines")
@@ -27,26 +33,18 @@ class PipelineUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
         model.addAttribute("scopes", scopes())
-        val offsetRows = maxOf(0, offset ?: 0)
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        // D2: the paging, the truthful total and the draft badges are PipelineService.page's —
-        // this screen, its HTMX partial, the REST listing and `pipelines_list` had four copies.
-        val page = pipelines.page(workspaceId, q, offsetRows, PAGE_SIZE)
-        model.addAttribute("pipelines", page.items)
-        model.addAttribute("drafts", page.drafts)
         model.addAttribute("q", q ?: "")
-        model.addAttribute("offset", offsetRows)
-        model.addAttribute("hasMore", page.hasMore)
-        model.addAttribute("total", page.total)
+        browse.fillWrapper(
+            model,
+            currentPrincipal().requireWorkspace().id,
+            q?.trim()?.takeIf { it.isNotEmpty() },
+            maxOf(0, offset ?: 0),
+        )
         return "pipelines/list"
     }
 
     private fun scopes(): Set<String> {
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
         return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
-    }
-
-    private companion object {
-        const val PAGE_SIZE = 25
     }
 }

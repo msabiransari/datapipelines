@@ -221,7 +221,7 @@
   "pipelines": [
     {
       "schema_version": 1,
-      "name": "revenue_by_borough",
+      "name": "nyc/mobility/revenue_by_borough",
       "display_name": "Revenue by borough",
       "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup — two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
       "settings": {
@@ -295,7 +295,7 @@
     },
     {
       "schema_version": 1,
-      "name": "rainy_vs_dry_ridership",
+      "name": "nyc/mobility/rainy_vs_dry_ridership",
       "display_name": "Rainy vs dry ridership",
       "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) — three engines, one answer. Split by weather and by day type.",
       "settings": {
@@ -393,7 +393,7 @@
     },
     {
       "schema_version": 1,
-      "name": "borough_od_matrix",
+      "name": "nyc/mobility/borough_od_matrix",
       "display_name": "Borough-to-borough trip matrix",
       "description": "Where do the trips that start in each borough actually end up? Rolls 4.9M trip rows down to origin-destination pairs in Postgres, resolves both ends through the SQLite zone lookup, and joins them in tempdb - two engines, one matrix. Filter to a single pickup borough with the borough parameter.",
       "settings": {
@@ -473,7 +473,7 @@
     },
     {
       "schema_version": 1,
-      "name": "airport_access_by_borough",
+      "name": "nyc/mobility/airport_access_by_borough",
       "display_name": "Airport access by borough",
       "description": "Which boroughs ride to JFK, LaGuardia and Newark, what does that trip cost, and how does it compare with the borough's ordinary economics? Five nodes across Postgres and SQLite: a trip-level scan, a zone lookup used at BOTH ends of the journey, a rate-code lookup, a baseline computed in tempdb from the same population as the numerator, and an answer node that reads one against the other.",
       "settings": {
@@ -582,7 +582,7 @@
     },
     {
       "schema_version": 1,
-      "name": "weather_sensitivity_by_borough",
+      "name": "nyc/mobility/weather_sensitivity_by_borough",
       "display_name": "Weather sensitivity by borough",
       "description": "Which boroughs lose riders when it rains, and which barely notice? Joins daily trips by pickup zone (Postgres), daily precipitation, snow, temperature and wind from five NYC-area stations (MySQL), the zone lookup and the weekend/holiday calendar (SQLite) - three source engines staged into one tempdb and split by wet/dry and by day type.",
       "settings": {
@@ -696,7 +696,7 @@
     },
     {
       "schema_version": 1,
-      "name": "mobility_briefing",
+      "name": "nyc/mobility/mobility_briefing",
       "display_name": "Borough mobility briefing",
       "description": "One line per borough: how many trips start there, how many never leave it, and what a trip is worth. Built by COMPOSITION - the first node runs borough_od_matrix as a real child execution, pinned to version 1, and hands its result into this pipeline's tempdb. Every number comes from that one child result, so the share and its denominator are the same population.",
       "settings": {
@@ -724,7 +724,7 @@
           "description": "Run the borough_od_matrix pipeline as a pinned child execution and stage its result.",
           "type": "PIPELINE",
           "pipeline": {
-            "name": "borough_od_matrix",
+            "name": "nyc/mobility/borough_od_matrix",
             "version": 1
           },
           "parameters": {

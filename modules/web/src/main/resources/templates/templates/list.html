@@ -65,7 +65,7 @@
          the RIGHT pane beside it) never move. The RIGHT pane is #template-detail: a leaf's
          selection swaps its innerHTML and nothing else — the whole point of the layout. -->
     <div class="tplx-body">
-      <div class="tplx-tree" id="template-tree-pane">
+      <div class="tplx-tree" id="template-tree-pane" data-explorer-pane>
         <!-- The fragment's own root carries id="template-list-wrapper" in BOTH presentations, so
              the swap target survives every refresh — this div is only a placeholder (§4.6). -->
         <div th:replace="~{partials/templates :: fragment}"></div>

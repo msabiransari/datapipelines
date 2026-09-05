@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -157,6 +158,126 @@ class PipelineRepositoryIntegrationTest {
         repository.appendReleasedVersion(WORKSPACE_ID, UUID.randomUUID(), body, serializer.write(body), owner).shouldBeNull()
 
         countRows("pipeline_versions") shouldBe 0
+    }
+
+    // -------------------------------------------------------------------------------------
+    // 067 — the pipeline tree: one level per request, folders derived from name prefixes
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `listFolder returns ONE level - the root's folders with counts and its flat leaves`() {
+        seed(
+            "nyc/mobility/revenue_by_borough",
+            "nyc/mobility/mobility_briefing",
+            "nyc/weather/rain_vs_dry",
+            "trade/fx/imports_in_partner_currency",
+            "legacy_flat_name",
+        )
+
+        val root = repository.listFolder(WORKSPACE_ID, prefix = null)
+
+        // Folders are the FIRST segment of every multi-segment name, counted over the whole
+        // subtree beneath them — never a subtree of rows.
+        root.folders.map { it.path to it.pipelineCount } shouldContainExactly listOf("nyc" to 3, "trade" to 1)
+        root.folders.map { it.segment } shouldContainExactly listOf("nyc", "trade")
+        // A flat legacy name has no first-segment-plus-remainder, so it is a root LEAF.
+        root.pipelines.map { it.name } shouldContainExactly listOf("legacy_flat_name")
+        root.total shouldBe 1
+        root.hasMore shouldBe false
+        root.foldersTruncated shouldBe false
+
+        // …and one level down is exactly that folder's children — never the root's, never the
+        // grandchildren's rows.
+        val nyc = repository.listFolder(WORKSPACE_ID, prefix = "nyc")
+        nyc.folders.map { it.path to it.pipelineCount } shouldContainExactly listOf("nyc/mobility" to 2, "nyc/weather" to 1)
+        nyc.pipelines.shouldBeEmpty()
+
+        val mobility = repository.listFolder(WORKSPACE_ID, prefix = "nyc/mobility")
+        mobility.folders.shouldBeEmpty()
+        mobility.pipelines.map { it.name } shouldContainExactly
+            listOf("nyc/mobility/mobility_briefing", "nyc/mobility/revenue_by_borough")
+        mobility.total shouldBe 2
+    }
+
+    @Test
+    fun `a pipeline named exactly like another's folder prefix is a leaf beside that folder, neither shadowing the other`() {
+        // §4.3: folders have no identity, so `a/b` (a pipeline) and `a/b/c` (a pipeline under a
+        // virtual folder `a/b`) coexist. The level must show BOTH — a leaf `b` and a folder `b`.
+        seed("a/b", "a/b/c", "a/b/d")
+
+        val level = repository.listFolder(WORKSPACE_ID, prefix = "a")
+
+        level.folders.map { it.segment to it.pipelineCount } shouldContainExactly listOf("b" to 2)
+        level.pipelines.map { it.name } shouldContainExactly listOf("a/b")
+        // And the folder's own level is the two children, with the leaf `a/b` absent from it.
+        repository.listFolder(WORKSPACE_ID, prefix = "a/b").pipelines.map { it.name } shouldContainExactly listOf("a/b/c", "a/b/d")
+    }
+
+    @Test
+    fun `an empty folder is unrepresentable - a soft-deleted subtree takes its folder with it`() {
+        seed("nyc/mobility/only_one")
+        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "nyc/mobility/only_one"))
+
+        repository.listFolder(WORKSPACE_ID).folders.map { it.path } shouldContainExactly listOf("nyc")
+
+        repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
+
+        repository.listFolder(WORKSPACE_ID).folders.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a prefix's own LIKE metacharacters scope to it, not to everything`() {
+        // The prefix is bound AND escaped: a folder literally named `100%_off` must not match
+        // every name in the workspace.
+        seed("100%_off/report", "other/report")
+
+        val level = repository.listFolder(WORKSPACE_ID, prefix = "100%_off")
+
+        level.pipelines.map { it.name } shouldContainExactly listOf("100%_off/report")
+    }
+
+    @Test
+    fun `a level pages its leaves with a truthful total and an honest hasMore`() {
+        seed(*(1..5).map { "nyc/mobility/p$it" }.toTypedArray())
+
+        val first = repository.listFolder(WORKSPACE_ID, prefix = "nyc/mobility", offset = 0, limit = 2)
+        val last = repository.listFolder(WORKSPACE_ID, prefix = "nyc/mobility", offset = 4, limit = 2)
+
+        first.pipelines.map { it.name } shouldContainExactly listOf("nyc/mobility/p1", "nyc/mobility/p2")
+        first.total shouldBe 5
+        first.hasMore shouldBe true
+        last.pipelines.map { it.name } shouldContainExactly listOf("nyc/mobility/p5")
+        last.total shouldBe 5
+        last.hasMore shouldBe false
+    }
+
+    @Test
+    fun `another workspace's tree is invisible`() {
+        seed("nyc/mobility/mine")
+        val otherWorkspace = insertWorkspace("other")
+        jdbc.jdbcTemplate.update(
+            "INSERT INTO pipelines (name, display_name, description, owner_id, current_version, workspace_id)" +
+                " VALUES ('nyc/mobility/theirs', 'Theirs', 'd', '" + owner + "', 1, '" + otherWorkspace + "')",
+        )
+
+        repository.listFolder(WORKSPACE_ID, prefix = "nyc/mobility").pipelines.map { it.name } shouldContainExactly
+            listOf("nyc/mobility/mine")
+    }
+
+    /** Creates one live pipeline per name, at version 1, in [WORKSPACE_ID]. */
+    private fun seed(vararg names: String) {
+        names.forEach { name ->
+            val body = Fixtures.pipeline(name = name)
+            repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
+        }
+    }
+
+    private fun insertWorkspace(name: String): UUID {
+        val id = UUID.randomUUID()
+        jdbc.jdbcTemplate.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES ('" + id + "', '" + name + "', '" + name + "')",
+        )
+        return id
     }
 
     @Test

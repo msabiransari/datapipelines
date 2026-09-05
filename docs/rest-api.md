@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.1 (frozen contract — additive-only changes after this point)
+**Status:** v2.2 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-08-11
+**Last updated:** 2026-09-05
 
 ---
 
@@ -193,6 +193,10 @@ Content-Type: application/json
 
 Note: no `terminal_node_id` field. The result node is the (at most one) node resolving to `output.target: "caller"` — explicitly or by omitting `output`. See [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node).
 
+**`name` is a folder path** (since 2026-09-05, 067): 1–10 `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total — the same grammar template ids take ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)). `finance/payments/daily_settlement` and `monthly_revenue` are both valid; the second is a one-segment path sitting at the tree root, which is why every pre-067 name is still accepted. Folders are virtual — there is no folder resource, no folder id and nothing to create — and a name is immutable, so the folder is chosen once, at creation. A malformed name is `400 pipeline.validation.name_invalid`.
+
+**This changes no route.** A pipeline is addressed by UUID everywhere (`/pipelines/{id}`), so the encoded-slash problem that forced templates' §8 dual addressing ([Template Hierarchy §9.6](template-hierarchy-design.md)) cannot arise here: no pipeline route carries a name in a path segment.
+
 Response: `201 Created`
 
 ```json
@@ -316,7 +320,9 @@ GET /pipelines?owner={user-id}&datasource={name}&q={search}&offset=0&limit=50
 Filters:
 - `owner` — limit to pipelines owned by user.
 - `datasource` — limit to pipelines using this datasource name.
-- `q` — full-text search on name, display_name, description.
+- `q` — full-text search on name, display_name, description. Since names are paths, `q` matches across the **full path**: `q=finance/pay` finds `finance/payments/daily_settlement`.
+
+**Browsing one folder level is not on this endpoint** (067). Folder browsing — a prefix's direct sub-folders with their counts, plus its direct children — is served by the UI fragment `GET /partials/pipelines?prefix=…` and by the MCP `pipelines_list {prefix}` argument ([MCP §6.2.1](mcp-server.md)). Adding `prefix` here is additive per §15.2 and deferred: no REST client has asked for a tree, and the two surfaces that render one already have it.
 
 ### 5.8 Import pipeline
 
@@ -1486,3 +1492,4 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 | 2026-09-02 | v2.2 | 055 promotion | New **§18 promotion endpoints** (receiver): `GET /promotion/inventory?workspace=` and `POST /promotion/push`, additive under v2.0. Authenticated ONLY by the §10.6 pre-shared server key on the `DP-Promotion-Key` header (§3.6's registry gains it) — read on that prefix and no other, and an API key or session cookie does not open the routes. The push is one transaction on the receiver; entries carry §9.2's preserved-version fields and arrive in §10.4 push order. No MCP twin and no schedule (§10.1 D8). |
 | 2026-09-02 | v2.1 | 046 typed templates | Additive: §8.1's create gains optional `type` (`sql` \| `html`, default `sql`, fixed at creation — an `html` template takes no `dialect`); every template response echoes it; §8.5's list gains the `type` filter. No route changes. Per Templates §11.2's amended clause, the `dialect` conditional-requirement relaxation is claimed here explicitly: no existing payload becomes invalid (every stored template backfills to `sql` with its dialect intact). |
 | 2026-09-02 | v2.0 | 043 template addressing | **BREAKING — one addressing form (template-hierarchy-design §9.6).** §8's eight `/{id}` path-addressed template routes are REMOVED and replaced by name-in-query/name-in-body forms (`GET /templates?name=`, `GET /templates/versions?name=&version=`, `PUT /templates` with `id` in the body, `POST /templates/release` + `POST /templates/draft/discard` with `name` in the body, `DELETE /templates?name=`, `POST /templates/render` with `name`+`version` in the body). Measured reason: on the pinned Tomcat an encoded `%2F` in the path is refused `400` below routing and below the security chain, so a hierarchical name (`acme/finance/report`, legal since this round's §4.1 grammar) cannot travel in a path segment at all. `GET /templates` now answers two shapes on one route (single-resource + `404 template.not_found` with `name`, paged list without). Sanctioned break of the v1.4 freeze: the owner confirmed zero callers outside this repo (2026-09-01), so the promise was protecting a population of zero. Datasources and pipelines keep path addressing — their names cannot contain `/`. |
+| 2026-09-05 | v2.2 | 067 pipeline folders | Additive and route-free: §5.1 records that a pipeline `name` is now a **folder path** (the template grammar, [Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)) — every pre-067 name is still valid as a one-segment path, so no request shape changes and no client breaks. §5.7 records that `q` matches across full paths, and that folder BROWSING deliberately stays off REST: it is served by `GET /partials/pipelines?prefix=…` and by MCP `pipelines_list {prefix}`. **No route changes**, because a pipeline is UUID-addressed — the `%2F` problem that forced v2.0 for templates cannot arise here. |

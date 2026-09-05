@@ -96,7 +96,7 @@ for name, want in expected.items():
             f"{name}: rows {got_count} (expected {want['row_count']}), "
             f"sha256 {got_sha[:16]}… (expected {want['row_sha256'][:16]}…)")
     else:
-        print(f"  OK   {name:34s} rows={got_count:<5d} {elapsed:5.1f}s")
+        print(f"  OK   {name:44s} rows={got_count:<5d} {elapsed:5.1f}s")
 
 # Non-vacuity: an empty or unreadable expectations file must fail, not pass silently.
 if checked == 0 and not failures:
