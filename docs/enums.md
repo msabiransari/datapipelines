@@ -71,6 +71,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `DML` | Data Manipulation Language — `INSERT`, `UPDATE`, `DELETE`, `MERGE`. Produces a row count. No `output` block. |
 | `DDL` | Data Definition Language — `CREATE`, `ALTER`, `DROP`, `TRUNCATE`. Produces success/failure. No `output` block. |
 | `PIPELINE` | Executes another pipeline as a child execution (pipeline composition). Carries a `pipeline` ref `{name, version}`, never `source`/`template`; may carry an `output` block only when the pinned child has a caller node ([Pipeline Contract §4.9](pipeline-contract.md#49-json-structure-pipeline-node), §8.5). |
+| `CALCULATOR` | Evaluates a catalog calculator and writes ONE typed value into the execution Context. Carries `kind`, `inputs` and `context_key`, never `source`/`template`/`output` — it runs no SQL and produces no table ([Pipeline Contract §4.10](pipeline-contract.md#410-json-structure-calculator-node), [Calculators](calculators.md)). |
 
 **Reserved for future:** `EXPRESSION`, `HTTP` (non-SQL node types — see [ROADMAP](ROADMAP.md)).
 

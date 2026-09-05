@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import java.io.File
 import java.util.UUID
 
@@ -14,6 +15,9 @@ import java.util.UUID
  * codes therefore proves the rule rather than the fixture.
  */
 internal object Fixtures {
+    /** §0.3's reference sigil, spelled once so no test escapes it by hand. */
+    const val REFERENCE_PREFIX = "$"
+
     val mapper: ObjectMapper = PipelineJson.objectMapper()
 
     fun json(text: String): JsonNode = mapper.readTree(text)
@@ -65,7 +69,41 @@ internal object Fixtures {
         templates: TemplateDryRenderer = StubTemplates(),
         pipelines: PipelineResolver = PipelineResolver { _, _, _ -> null },
         maxCompositionDepth: Int = 5,
-    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth)
+        orgContext: OrgContext = OrgContext.DEFAULTS,
+    ): PipelineValidator = PipelineValidator(datasources, templates, pipelines, maxCompositionDepth, orgContext)
+
+    /** A CALCULATOR node (§4.10) — the shape §12.10's rules are written against. */
+    fun calculatorNode(
+        id: String = "fiscal_q",
+        kind: String? = "fiscal_quarter",
+        inputs: Map<String, JsonNode>? =
+            mapOf("date" to ref("current_date"), "fiscal_start" to ref("org_fiscal_start_date")),
+        contextKey: String? = "run_fiscal_quarter",
+        dependsOn: List<String> = emptyList(),
+    ): Node =
+        Node(
+            id = id,
+            description = "calculator $id",
+            type = NodeType.CALCULATOR,
+            source = "",
+            template = TemplateRef(),
+            output = null,
+            dependsOn = dependsOn,
+            kind = kind,
+            inputs = inputs,
+            contextKey = contextKey,
+        )
+
+    /** A Context reference, as §0.3 spells one: a leading `$` then the key. */
+    fun ref(name: String): JsonNode = JsonNodeFactory.instance.textNode(REFERENCE_PREFIX + name)
+
+    /** A JSON literal for a calculator input. */
+    fun literal(value: String): JsonNode = JsonNodeFactory.instance.textNode(value)
+
+    fun literal(value: Int): JsonNode = JsonNodeFactory.instance.numberNode(value)
+
+    fun literals(vararg values: String): JsonNode =
+        JsonNodeFactory.instance.arrayNode().also { array -> values.forEach { array.add(it) } }
 
     /**
      * Locates a repository file by walking up from the working directory, so tests do not
@@ -185,6 +223,8 @@ internal class StubTemplates(
     private val renders: Map<String, DryRenderOutcome> = emptyMap(),
     /** Per-template id, the declared names the stub reports as interpolated (042 B2). */
     private val interpolated: Map<String, Set<String>> = emptyMap(),
+    /** Per-template id, the `:name` binds the stub reports the body carrying (072, §12.10). */
+    private val bound: Map<String, List<String>> = emptyMap(),
 ) : TemplateDryRenderer {
     /** Contexts the validator passed in, keyed by template id — the §7.4 sample-context evidence. */
     val renderedContexts = mutableMapOf<String, Map<String, Any?>>()
@@ -208,4 +248,9 @@ internal class StubTemplates(
         ref: TemplateRef,
         declared: Set<String>,
     ): List<String> = interpolated[ref.id]?.filter(declared::contains)?.toList() ?: emptyList()
+
+    override fun boundParameters(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): List<String> = bound[ref.id] ?: emptyList()
 }

@@ -110,6 +110,16 @@ data class PipelineCompleted(
     val completedAt: Instant,
     val durationMs: Long,
     val nodeStats: List<NodeStats>,
+    /**
+     * The FULLY RESOLVED Context the nodes saw (calculators design §0.5) — org config, platform
+     * keys, parameters, execute-time inputs and every calculator output, as of the end of the run.
+     *
+     * Carried on the terminal events rather than pushed by the executor, because the executor
+     * owns no database: `WebEventEmitter` is what writes `pipeline_executions`, and it writes this
+     * in the same terminal UPDATE that records the status. Empty on an execution that never
+     * reached the Context — a setup failure — so the row keeps whatever it had.
+     */
+    val contextSnapshot: Map<String, Any?> = emptyMap(),
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = completedAt
     override val type: SseEventType get() = SseEventType.PIPELINE_COMPLETED
@@ -127,6 +137,16 @@ data class PipelineFailed(
     val failedNodeId: String?,
     val error: MappedError,
     val nodeStats: List<NodeStats>,
+    /**
+     * The FULLY RESOLVED Context the nodes saw (calculators design §0.5) — org config, platform
+     * keys, parameters, execute-time inputs and every calculator output, as of the end of the run.
+     *
+     * Carried on the terminal events rather than pushed by the executor, because the executor
+     * owns no database: `WebEventEmitter` is what writes `pipeline_executions`, and it writes this
+     * in the same terminal UPDATE that records the status. Empty on an execution that never
+     * reached the Context — a setup failure — so the row keeps whatever it had.
+     */
+    val contextSnapshot: Map<String, Any?> = emptyMap(),
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = failedAt
     override val type: SseEventType get() = SseEventType.PIPELINE_FAILED
@@ -139,6 +159,16 @@ data class ExecutionAborted(
     val reason: AbortReason,
     val abortedAt: Instant,
     val nodeStats: List<NodeStats>,
+    /**
+     * The FULLY RESOLVED Context the nodes saw (calculators design §0.5) — org config, platform
+     * keys, parameters, execute-time inputs and every calculator output, as of the end of the run.
+     *
+     * Carried on the terminal events rather than pushed by the executor, because the executor
+     * owns no database: `WebEventEmitter` is what writes `pipeline_executions`, and it writes this
+     * in the same terminal UPDATE that records the status. Empty on an execution that never
+     * reached the Context — a setup failure — so the row keeps whatever it had.
+     */
+    val contextSnapshot: Map<String, Any?> = emptyMap(),
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = abortedAt
     override val type: SseEventType get() = SseEventType.EXECUTION_ABORTED

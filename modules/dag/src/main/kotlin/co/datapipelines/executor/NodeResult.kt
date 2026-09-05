@@ -37,6 +37,18 @@ data class NodeResult(
      * node → child execution directly). Null on every other node type.
      */
     val childExecutionId: UUID? = null,
+    /**
+     * CALCULATOR nodes only (§4.10): the Context key the node wrote, and the value it wrote
+     * RENDERED AS TEXT.
+     *
+     * Text, not the typed object, because this travels in `node_stats_json` and in every
+     * `executions_get` response: a `LocalDate` and a `BigDecimal` have one unambiguous rendering
+     * each, and inventing a per-type JSON encoding for a field whose only job is to let a human
+     * or an agent see what the calculator produced would be a second wire contract to keep. The
+     * TYPED value is in the execution's Context snapshot, which is where a machine reads it.
+     */
+    val contextKey: String? = null,
+    val contextValue: String? = null,
 ) {
     companion object {
         /** A successful node's result; the duration is computed from [startedAt] to now. */
@@ -48,6 +60,8 @@ data class NodeResult(
             bytesOutEstimate: Long = NOT_MEASURED,
             completedAt: Instant = Instant.now(),
             childExecutionId: UUID? = null,
+            contextKey: String? = null,
+            contextValue: String? = null,
         ): NodeResult =
             NodeResult(
                 nodeId = nodeId,
@@ -59,6 +73,8 @@ data class NodeResult(
                 durationMs = Duration.between(startedAt, completedAt).toMillis(),
                 callerResultRef = callerResultRef,
                 childExecutionId = childExecutionId,
+                contextKey = contextKey,
+                contextValue = contextValue,
             )
 
         /** The sentinel for a quantity that was not measured — §7.1's `-1`. */
@@ -104,6 +120,19 @@ data class NodeStats(
      */
     @field:JsonProperty("child_execution_id") @get:JsonProperty("child_execution_id") @param:JsonProperty("child_execution_id")
     val childExecutionId: UUID? = null,
+    /**
+     * CALCULATOR nodes only (§4.10): the Context key the node wrote and the value it wrote,
+     * rendered as text. Absent from the JSON for every other node type (NON_NULL inclusion), so
+     * existing consumers see no shape change.
+     *
+     * This pair is what makes a calculator VISIBLE: without it a CALCULATOR node reports
+     * `rows_out: 0` on every surface and an author debugging a wrong quarter has nothing to look
+     * at. `executions_get` and the run detail page both read it from here.
+     */
+    @field:JsonProperty("context_key") @get:JsonProperty("context_key") @param:JsonProperty("context_key")
+    val contextKey: String? = null,
+    @field:JsonProperty("context_value") @get:JsonProperty("context_value") @param:JsonProperty("context_value")
+    val contextValue: String? = null,
 ) {
     companion object {
         /** Projects a succeeded node (§7.2 row 1). */
@@ -117,6 +146,8 @@ data class NodeStats(
                 rowsOut = result.rowsOut,
                 bytesOut = result.bytesOutEstimate,
                 childExecutionId = result.childExecutionId,
+                contextKey = result.contextKey,
+                contextValue = result.contextValue,
             )
 
         /** Synthesizes a failed node (§7.2 row 2). */

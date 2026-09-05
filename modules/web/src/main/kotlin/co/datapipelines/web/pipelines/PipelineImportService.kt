@@ -1,6 +1,9 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.NewPipeline
+import co.datapipelines.pipeline.OrgContext
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
@@ -9,9 +12,11 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.dao.DuplicateKeyException
 import java.time.Instant
@@ -46,6 +51,14 @@ class PipelineImportService(
     private val validator: PipelineValidator,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
+    /**
+     * The RECEIVING deployment's org tier (calculators design §0.5). Defaulted so the many
+     * direct constructions keep compiling; production wires the bound one, which is the whole
+     * point — the check below is about what THIS deployment provides, not what the sender did.
+     */
+    private val orgContext: OrgContext = OrgContext.DEFAULTS,
+    /** Null disables the §0.5 bind scan — the seeder path, whose content is authored here. */
+    private val templates: TemplateDryRenderer? = null,
 ) {
     /** What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). */
     data class Imported(
@@ -79,6 +92,11 @@ class PipelineImportService(
         SERVER_FIELDS.forEach(tree::remove)
 
         val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
+        // BEFORE §12: a body that binds an org key this deployment does not define is a
+        // configuration conflict (409), not an authoring defect (400), and the two have different
+        // people fixing them. The validator would also refuse it — as an unknown reference — so
+        // the order here is what decides which answer the operator gets.
+        refuseMissingContextKeys(pipeline, workspaceId)
         importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
         val canonical = serializer.write(pipeline)
 
@@ -329,6 +347,59 @@ class PipelineImportService(
      * the environment lacks. The all-same-kind case keeps the single mapped code with its set in
      * details under the matching key.
      */
+    /**
+     * §13.2 `pipeline.import.context_key_missing` (calculators design §0.5) — refuse a body that
+     * reads an `org_*` Context key this deployment does not define.
+     *
+     * ## Why the check is scoped to `org_`, and why it is at import
+     *
+     * Org keys are the one Context tier that legitimately DIFFERS between deployments: a sender
+     * may define `org_region` and a receiver may not. Every other tier travels with the body
+     * (parameters, calculator outputs) or is universal (the platform keys). So `org_` is exactly
+     * the prefix where "the body reads a key that is not here" is possible, and restricting the
+     * scan to it means no pipeline that imports today can start failing tomorrow.
+     *
+     * At import rather than at first run because the failure is otherwise INVISIBLE in the shape
+     * that matters: a promoted pipeline whose `:org_currency_symbol` silently resolved to a
+     * default would produce plausible, wrong numbers with no error anywhere. Versioning's
+     * promotion story is the same argument (§11.3): re-run the environment-dependent rules on
+     * the receiver, refuse there, and never let a deployment difference become a data difference.
+     */
+    private fun refuseMissingContextKeys(
+        pipeline: Pipeline,
+        workspaceId: UUID,
+    ) {
+        val provided =
+            orgContext.keys + ContextKeys.PLATFORM + pipeline.parameters.keys +
+                pipeline.nodes.mapNotNull { it.contextKey }
+        val referenced =
+            pipeline.nodes.flatMap { node ->
+                val fromInputs =
+                    node.inputs
+                        .orEmpty()
+                        .values
+                        .flatMap { value -> if (value.isArray) value.toList() else listOf(value) }
+                        .mapNotNull { it.takeIf(JsonNode::isTextual)?.asText() }
+                        .filter { it.startsWith("$") }
+                        .map { it.substring(1) }
+                val fromSql =
+                    templates
+                        ?.takeIf { node.template.id.isNotBlank() }
+                        ?.boundParameters(workspaceId, node.template)
+                        .orEmpty()
+                fromInputs + fromSql
+            }
+        val missing = referenced.filter { it.startsWith(ORG_PREFIX) && it !in provided }.distinct().sorted()
+        if (missing.isEmpty()) return
+        throw ApiException(
+            PipelineErrorCodes.Import.CONTEXT_KEY_MISSING,
+            "Imported pipeline '${pipeline.name}' reads organisation Context key(s) this deployment does not " +
+                "define: ${missing.joinToString()}. Configure them under datapipelines.org.* (Configuration §3.21) " +
+                "or import a body that does not read them.",
+            mapOf("missing_context_keys" to missing, "provided_context_keys" to provided.filter { it.startsWith(ORG_PREFIX) }),
+        )
+    }
+
     private fun importValidation(
         name: String,
         result: ValidationResult,
@@ -362,6 +433,9 @@ class PipelineImportService(
     }
 
     private companion object {
+        /** §0.2 tier 1's key prefix — the one tier that legitimately differs between deployments. */
+        const val ORG_PREFIX = "org_"
+
         val MAPPER = PipelineJson.objectMapper()
 
         /**

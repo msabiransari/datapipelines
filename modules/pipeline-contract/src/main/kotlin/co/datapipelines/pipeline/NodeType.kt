@@ -9,7 +9,8 @@ import com.fasterxml.jackson.annotation.JsonValue
  *
  * The value drives executor behaviour (§8.4): `DQL` stages / returns / writes back a
  * ResultSet, `DML` records an affected-row count, `DDL` records success, `PIPELINE` executes
- * the pinned child pipeline and consumes its result (§8.5). It also decides whether an `output`
+ * the pinned child pipeline and consumes its result (§8.5), and `CALCULATOR` evaluates a pure
+ * catalog function and writes one typed value into the shared Context (§4.10). It also decides whether an `output`
  * block is legal at all — `DQL` always may carry one, `PIPELINE` may when the pinned child has
  * a caller node (§12.9), `DML`/`DDL` never (§12.4).
  *
@@ -31,6 +32,17 @@ enum class NodeType(
 
     /** Executes another pipeline as a child execution (§4.9, §8.5); carries a `pipeline` ref, never `source`/`template`. */
     PIPELINE("PIPELINE"),
+
+    /**
+     * Evaluates a catalog calculator and writes ONE typed value into the execution Context under
+     * `context_key` (§4.10, calculators design §0.3).
+     *
+     * The odd one out on every axis this enum names, and deliberately so: it generates no SQL, so
+     * the class KDoc's "SQL category" does not apply to it; it has no `output` block, because its
+     * output is a Context key and not a table — the field is called `context_key` precisely so
+     * that nobody reads it as one; and it carries no `source`, because it touches no database.
+     */
+    CALCULATOR("CALCULATOR"),
     ;
 
     companion object {

@@ -107,8 +107,14 @@ class ExecutionRepository(
     }
 
     /**
-     * The single terminal UPDATE: status, timings, stats and — when the pipeline had a caller
-     * node — the result's history columns.
+     * The single terminal UPDATE: status, timings, stats, the resolved Context and — when the
+     * pipeline had a caller node — the result's history columns.
+     *
+     * [contextJson] overwrites `parameters_json` with the FULLY RESOLVED Context the nodes saw:
+     * org config, platform keys, parameters, execute-time inputs and every calculator output
+     * (calculators design §0.5). The column name is historical — it held the request's parameter
+     * object as sent — and `dag-executor.md` §8 says so. `COALESCE` keeps the insert-time value
+     * when no snapshot is supplied, so a caller that does not pass one changes nothing.
      *
      * @return true when a row was updated; false when [executionId] is unknown.
      */
@@ -123,11 +129,13 @@ class ExecutionRepository(
         errorJson: String? = null,
         resultRowCount: Long? = null,
         resultSizeBytes: Long? = null,
+        contextJson: String? = null,
     ): Boolean =
         jdbc.update(
             """
             UPDATE pipeline_executions
                SET status = :status,
+                   parameters_json = COALESCE(CAST(:contextJson AS jsonb), parameters_json),
                    completed_at = :completedAt,
                    duration_ms = :durationMs,
                    node_stats_json = CAST(:nodeStatsJson AS jsonb),
@@ -147,6 +155,7 @@ class ExecutionRepository(
                 "errorJson" to errorJson,
                 "resultRowCount" to resultRowCount,
                 "resultSizeBytes" to resultSizeBytes,
+                "contextJson" to contextJson,
             ),
         ) == 1
 

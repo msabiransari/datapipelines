@@ -1,9 +1,16 @@
-// module-structure.md §5.2 — allowed internal deps: typesystem.
+// module-structure.md §5.2 — allowed internal deps: typesystem, calculators.
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     // `api`, not `implementation`: the public API exposes ColumnSchema (§4.2 note).
     api(project(":modules:typesystem"))
+
+    // 072 §12.10: the validator asks the registry whether a `kind` exists and what its inputs
+    // are. `api`, not `implementation`, for the same reason as typesystem above: `CalculatorKind`
+    // and `CalculatorInput` appear in this module's public surface (the MCP catalog tools read
+    // them through it), and the direction is one-way by design — `calculators` knows nothing
+    // about pipelines, JSON literals or error codes.
+    api(project(":modules:calculators"))
 
     implementation(libs.jackson.module.kotlin)
     implementation(libs.spring.boot.starter.jdbc) // PipelineRepository (§8.1)

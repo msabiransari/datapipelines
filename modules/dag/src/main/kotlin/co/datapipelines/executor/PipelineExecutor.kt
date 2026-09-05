@@ -139,7 +139,7 @@ class PipelineExecutor(
         // writes tier 5 into this same map at its DAG position, and every node scheduled after
         // it renders and binds against the value (RunContext's KDoc).
         val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt)
-        val run = ExecutionRun(executionId, request, plan, startedAt)
+        val run = ExecutionRun(executionId, request, plan, startedAt, context)
 
         // §5.1 step 4 before steps 8-10: `execution_started` precedes every allocation whose
         // failure §8.2 names (`staging.creation_failed`, `staging.engine_unavailable`). Creating
@@ -395,6 +395,7 @@ class PipelineExecutor(
                     completedAt = completedAt,
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
         }
@@ -508,6 +509,7 @@ class PipelineExecutor(
                     reason = e.reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
         }
@@ -565,6 +567,7 @@ class PipelineExecutor(
                     reason = reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
             metrics.executionAborted(reason)
@@ -607,6 +610,7 @@ class PipelineExecutor(
         failedNodeId = failedNodeId,
         error = error,
         nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+        contextSnapshot = run.context.snapshot(),
     )
 
     // ------------------------------------------------------------ plumbing
@@ -743,6 +747,13 @@ internal class ExecutionRun(
     val request: ExecuteRequest,
     val plan: ExecutablePipeline,
     val startedAt: Instant,
+    /**
+     * The execution's LIVE Context. Held here so the three terminal events can carry its final
+     * state (calculators design §0.5) without the emit sites reaching back into the executor —
+     * and read as a SNAPSHOT at emit time, because a calculator may still have been writing to it
+     * a moment earlier.
+     */
+    val context: RunContext,
 ) {
     val stats = NodeStatsCollector()
     val warnings = WarningSink()

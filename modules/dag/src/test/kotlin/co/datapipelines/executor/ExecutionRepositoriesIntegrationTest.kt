@@ -108,6 +108,37 @@ class ExecutionRepositoriesIntegrationTest {
     }
 
     @Test
+    fun `the terminal update replaces parameters_json with the resolved Context, and omitting it keeps the old value`() {
+        // 072 §0.5. The column's name is historical (metadata-db §4.6): the row is INSERTED with
+        // the request's parameter object and the terminal update replaces it with what the nodes
+        // actually saw — org config, platform keys, parameters, and every calculator output.
+        // Without this, a completed execution cannot answer "which fiscal quarter did this run
+        // report on?": the caller's parameters do not contain it.
+        val record = running()
+        executions.create(record)
+
+        executions.complete(
+            executionId = record.executionId,
+            status = ExecutionStatus.SUCCESS,
+            completedAt = Instant.now(),
+            durationMs = 10,
+            nodeStatsJson = NODE_STATS_JSON,
+            contextJson = RESOLVED_CONTEXT_JSON,
+        )
+
+        val found = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
+        found.parametersJson shouldContain "run_fiscal_quarter"
+        found.parametersJson shouldContain "org_fiscal_start_date"
+
+        // A caller that supplies no snapshot must not blank the column — the COALESCE is what
+        // keeps every pre-072 completion path (and the abort path with an empty Context) intact.
+        val second = running()
+        executions.create(second)
+        executions.complete(second.executionId, ExecutionStatus.ABORTED, Instant.now(), 5, NODE_STATS_JSON)
+        executions.findById(WORKSPACE_ID, second.executionId).shouldNotBeNull().parametersJson shouldBe PARAMETERS_JSON
+    }
+
+    @Test
     fun `recordResult fills only the result history columns, after complete`() {
         // The P7 path: web's surfaces complete the row on the terminal event (no result
         // size known) and fill these two columns once execute() returns the resultRef.
@@ -347,7 +378,7 @@ class ExecutionRepositoriesIntegrationTest {
             pipelineId = pipelineId,
             pipelineVersion = 1,
             status = ExecutionStatus.RUNNING,
-            parametersJson = """{"start_date": "2026-01-01"}""",
+            parametersJson = PARAMETERS_JSON,
             triggeredBy = userId,
             triggeredVia = ExecutionTrigger.REST,
             correlationId = UUID.randomUUID(),
@@ -392,5 +423,12 @@ class ExecutionRepositoriesIntegrationTest {
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         const val SPACING_MS = 5L
         const val NODE_STATS_JSON = """[{"node_id":"a","status":"SUCCESS"}]"""
+
+        /** What the row is INSERTED with: the request's parameter object, as the caller sent it. */
+        const val PARAMETERS_JSON = """{"start_date": "2026-01-01"}"""
+
+        /** What the terminal update replaces it with (072 §0.5): every tier the nodes saw. */
+        const val RESOLVED_CONTEXT_JSON =
+            """{"org_fiscal_start_date":"09-15","current_date":"2026-08-14","start_date":"2026-01-01","run_fiscal_quarter":4}"""
     }
 }

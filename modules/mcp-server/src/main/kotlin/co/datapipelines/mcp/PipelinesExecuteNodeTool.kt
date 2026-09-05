@@ -205,6 +205,14 @@ class PipelinesExecuteNodeTool(
                 NodeType.PIPELINE -> {
                     standaloneRefused(resolution.version, node.id, "pipeline_node")
                 }
+
+                // 072: a CALCULATOR node runs no SQL, so there is nothing for this debug tool to
+                // execute against a datasource — the same verdict as a PIPELINE node, and the same
+                // code. Its inputs and computed value are visible through `executions_get` after a
+                // real run, and `calculators_get` explains the kind without running anything.
+                NodeType.CALCULATOR -> {
+                    standaloneRefused(resolution.version, node.id, "calculator_node")
+                }
             }
         }
     }
@@ -240,6 +248,11 @@ class PipelinesExecuteNodeTool(
                     "tempdb_source" -> {
                         "Node '$nodeId' reads from tempdb, which exists only inside a full execution — " +
                             "run pipelines_execute to build it."
+                    }
+
+                    "calculator_node" -> {
+                        "Node '$nodeId' is a CALCULATOR node — it evaluates a catalog function and writes a " +
+                            "Context key, and runs no SQL of its own."
                     }
 
                     else -> {

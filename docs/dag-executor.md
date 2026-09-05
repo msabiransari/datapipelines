@@ -861,6 +861,18 @@ The pipeline aggregates these into the response:
 ]
 ```
 
+### 7.3 The Context snapshot — `pipeline_executions.parameters_json`
+
+072 (calculators design §0.5). The terminal UPDATE writes the **fully resolved execution Context** into `parameters_json`: org config, the platform keys, the declared parameters after defaulting, the execute-time inputs, and every `CALCULATOR` node's output — everything the nodes actually saw.
+
+**The column name is historical.** It held the request's `parameters` object as the caller sent it, which was the whole Context when the Context was only parameters. It is not renamed because a rename is a migration, a re-read of every consumer and a break for anything already querying it, in exchange for a better name — and this sentence is cheaper. [Metadata DB §4.6](metadata-db.md#46-pipeline_executions) says the same thing beside the column.
+
+Why the snapshot is worth a column at all: without it a completed execution cannot answer *what fiscal quarter did this run report on?* The parameters the caller sent do not contain the answer — a calculator computed it, from configuration that may since have changed. An execution record that cannot reproduce its own inputs is a record you cannot audit, and a promoted pipeline whose numbers are questioned a month later is exactly when it is asked.
+
+Written from the terminal event (`pipeline_completed` / `pipeline_failed` / `execution_aborted`), each of which carries the snapshot, so the executor stays free of the database. A serialization failure leaves the insert-time value in place rather than losing the terminal UPDATE with it.
+
+Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2), so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
+
 ---
 
 ## 8. Error Propagation

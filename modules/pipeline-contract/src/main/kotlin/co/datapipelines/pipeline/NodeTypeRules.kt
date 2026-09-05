@@ -28,6 +28,12 @@ internal object NodeTypeRules {
                 // block's companion-field shape is the standard §4.7 one, so CompositionRules
                 // reuses [checkOutputCompanions] below.
                 NodeType.PIPELINE -> Unit
+
+                // §12.10 (CalculatorRules) owns the whole shape of a CALCULATOR node — `output`
+                // is refused there together with `source` and `template`, in ONE failure that
+                // names all three. Reporting `output` twice, once from each rule group, would
+                // hand an author two errors for one edit.
+                NodeType.CALCULATOR -> Unit
             }
         }
     }

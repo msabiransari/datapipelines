@@ -69,7 +69,7 @@ class RunContext private constructor(
 
     override fun isEmpty(): Boolean = synchronized(lock) { store.isEmpty() }
 
-    override fun toString(): String = "RunContext(keys=${keys})"
+    override fun toString(): String = "RunContext(keys=$keys)"
 
     companion object {
         /**

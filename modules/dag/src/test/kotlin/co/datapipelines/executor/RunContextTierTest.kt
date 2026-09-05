@@ -148,8 +148,7 @@ class RunContextTierTest {
             startedAt = startedAt,
         )
 
-    private fun orgIn(zone: String): OrgContext =
-        OrgContext.of("Pound", "£", "04-06", "sunday", ZoneId.of(zone).id)
+    private fun orgIn(zone: String): OrgContext = OrgContext.of("Pound", "£", "04-06", "sunday", ZoneId.of(zone).id)
 
     private fun text(value: String): JsonNode = JsonNodeFactory.instance.textNode(value)
 }

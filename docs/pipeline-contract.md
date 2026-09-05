@@ -248,12 +248,15 @@ Note: no `output` block. DML's side effect IS the output.
 |---|---|---|---|
 | `id` | string | yes | Node identifier. `[a-z0-9_]+`. Unique within the pipeline. Stable across versions and environments. |
 | `description` | string | yes | Human-readable. Shown in UI editor. |
-| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`. Drives executor behavior. |
-| `source` | string | yes, except PIPELINE | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9). |
-| `template` | object | yes, except PIPELINE | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9). |
+| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`. Drives executor behavior. |
+| `source` | string | yes, except PIPELINE and CALCULATOR | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
+| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
 | `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
 | `parameters` | object | no | Child parameter bindings on a `PIPELINE` node: each value is a typed literal in the child parameter's §6.3 wire encoding, or `"${parent_param}"` naming a parent parameter of the identical type. See §4.9. |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
+| `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `context_key` | string | CALCULATOR nodes only | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. |
 
 ### 4.7 `output` block reference
@@ -300,6 +303,32 @@ Field rules:
 Deleting a pipeline (soft delete) does **not** affect existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly.
 
 ---
+
+### 4.10 JSON structure (CALCULATOR node)
+
+```json
+{
+  "id": "fiscal_q",
+  "description": "The fiscal quarter this run reports on.",
+  "type": "CALCULATOR",
+  "kind": "fiscal_quarter",
+  "inputs": {"date": "$current_date", "fiscal_start": "$org_fiscal_start_date"},
+  "context_key": "run_fiscal_quarter",
+  "depends_on": []
+}
+```
+
+A CALCULATOR node evaluates one **pure catalog function** ([Calculators](calculators.md)) and writes ONE typed value into the execution Context under `context_key`. It runs no SQL, touches no database, and produces no table. Downstream nodes read the value the way they read any Context key — `:run_fiscal_quarter` in a template, `"$run_fiscal_quarter"` in another calculator's `inputs`.
+
+Field rules:
+
+- `kind` — required: a name in the registry. The catalog is additive and a `kind` never changes meaning, because a `kind` is written into bodies that are versioned, exported and promoted.
+- `inputs` — required (an empty object is legal for a kind with only optional inputs). `"$name"` is a **reference** to a Context key; anything else is a literal typed against the kind's declared input type, which is what makes `"fiscal_start": "09-15"` a per-pipeline override with no config edit. An input the kind declares optional may be omitted, and the kind then applies its documented default.
+- `context_key` — required, per §6.1. It may shadow an org or platform key; it may **never** shadow a declared parameter (§12.10 `calculator_output_collision`), and no two nodes may write the same key.
+- `source`, `template`, `output` — **forbidden**, for the same reason `source`/`template` are forbidden on a PIPELINE node: this node is not the kind of thing they describe.
+- `depends_on` — unchanged, and load-bearing in a way it is not elsewhere: **sequencing is topology**. A reference to another node's `context_key`, and a SQL node binding `:that_key`, are valid only from a node that depends on the producer, directly or transitively (§12.10 `calculator_input_unordered`). Array order means nothing.
+
+At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
 
 ## 5. Settings
 

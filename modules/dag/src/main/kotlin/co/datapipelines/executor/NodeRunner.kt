@@ -1,8 +1,11 @@
 package co.datapipelines.executor
 
+import co.datapipelines.calculators.CalculatorEvaluationException
+import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.pipeline.CalculatorInputResolver
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
@@ -148,6 +151,55 @@ class NodeRunner(
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
 ) {
+    /**
+     * A CALCULATOR node (§4.10, calculators design §0.3): resolve the inputs from the live
+     * Context, evaluate the kind, write the value back under `context_key`.
+     *
+     * The write is the whole point, and it is why [NodeExecutionContext.values] is a live
+     * [RunContext] rather than a snapshot: nodes scheduled after this one render and bind against
+     * the same map, so a downstream `:run_fiscal_quarter` resolves by topology with nothing
+     * passed between the two nodes. Save-time validation (§12.10) has already proved the
+     * reference order, so the value is there when the reader runs.
+     *
+     * `rows_out` is 0 and that is honest — a calculator produces no rows. What it produced
+     * travels as `context_key` / `context_value` on the node's stats, so the run detail page and
+     * `executions_get` can show it.
+     */
+    private fun runCalculator(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult {
+        val kindName = node.kind.orEmpty()
+        val contextKey = node.contextKey.orEmpty()
+        val value =
+            try {
+                val kind = CalculatorRegistry.require(kindName)
+                kind.evaluate(CalculatorInputResolver.resolve(kind, node.inputs.orEmpty(), ctx.values))
+            } catch (e: CalculatorEvaluationException) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Node.CALCULATOR_FAILED,
+                    message = "Calculator '$kindName' on node '${node.id}' failed: ${e.message}",
+                    details =
+                        mapOf(
+                            "node" to node.id,
+                            "kind" to kindName,
+                            "input" to e.input,
+                            "context_key" to contextKey,
+                        ),
+                    cause = e,
+                )
+            }
+        ctx.values.put(contextKey, value)
+        return NodeResult.of(
+            nodeId = node.id,
+            rowsOut = 0,
+            startedAt = startedAt,
+            contextKey = contextKey,
+            contextValue = value?.toString(),
+        )
+    }
+
     /** Executes [node] and returns its result. Throws [NodeFailedSignal] on any failure. */
     suspend fun run(
         node: ExecutableNode,
@@ -163,6 +215,12 @@ class NodeRunner(
                     message = "Pipeline composition is not wired in this runtime.",
                     details = mapOf("node" to node.id),
                 )
+        }
+        // Same reason, one step earlier in the same dispatch: a CALCULATOR node has no template
+        // and no source either. It evaluates a pure catalog function and writes ONE typed value
+        // into the shared Context (§4.10) — everything below this line is about SQL.
+        if (node.type == NodeType.CALCULATOR) {
+            return runCalculator(node, ctx, startedAt)
         }
         val sql = phase(NodePhase.RENDER, node.id) { render(node, ctx) }
         return dispatchRendered(node, ctx, startedAt, sql)
@@ -248,9 +306,17 @@ class NodeRunner(
         // tempdb is not a datasource, so there is no per-datasource override to consider (§5.5).
         val timeout = config.queryTimeoutSecondsFor(null)
         return when (node.type) {
-            NodeType.DQL -> tempdbQuery(node, bound, ctx, startedAt, timeout)
-            NodeType.DML, NodeType.DDL -> tempdbWrite(node, bound, ctx, startedAt, timeout)
-            NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
+            NodeType.DQL -> {
+                tempdbQuery(node, bound, ctx, startedAt, timeout)
+            }
+
+            NodeType.DML, NodeType.DDL -> {
+                tempdbWrite(node, bound, ctx, startedAt, timeout)
+            }
+
+            NodeType.PIPELINE, NodeType.CALCULATOR -> {
+                error("unreachable: ${node.type.wire} dispatched before source resolution")
+            }
         }
     }
 
@@ -538,10 +604,21 @@ class NodeRunner(
             }
         return connection.use { conn ->
             when (node.type) {
-                NodeType.DQL -> datasourceQuery(node, conn, bound, ctx, startedAt, timeout, datasource.dialect)
-                NodeType.DML -> datasourceUpdate(node, conn, bound, ctx, startedAt, timeout)
-                NodeType.DDL -> datasourceDdl(node, conn, bound, ctx, startedAt, timeout)
-                NodeType.PIPELINE -> error("unreachable: PIPELINE dispatched before source resolution")
+                NodeType.DQL -> {
+                    datasourceQuery(node, conn, bound, ctx, startedAt, timeout, datasource.dialect)
+                }
+
+                NodeType.DML -> {
+                    datasourceUpdate(node, conn, bound, ctx, startedAt, timeout)
+                }
+
+                NodeType.DDL -> {
+                    datasourceDdl(node, conn, bound, ctx, startedAt, timeout)
+                }
+
+                NodeType.PIPELINE, NodeType.CALCULATOR -> {
+                    error("unreachable: ${node.type.wire} dispatched before source resolution")
+                }
             }
         }
     }

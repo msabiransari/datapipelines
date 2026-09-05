@@ -233,6 +233,19 @@ class WebEventEmitter(
                 is PipelineFailed -> event.nodeStats
                 is ExecutionAborted -> event.nodeStats
             }
+        // 072 §0.5: the row's `parameters_json` becomes the FULLY RESOLVED Context the nodes saw —
+        // org config, platform keys, parameters, inputs and every calculator output. SseJson's
+        // mapper, not ExecutorJson's: the Context holds java.time values, and the one that cannot
+        // serialize them is exactly how execution_started went missing from the durable record
+        // once before (T36). A serialization failure leaves the insert-time value in place rather
+        // than losing the terminal UPDATE with it.
+        val contextJson =
+            when (event) {
+                is PipelineCompleted -> event.contextSnapshot
+                is PipelineFailed -> event.contextSnapshot
+                is ExecutionAborted -> event.contextSnapshot
+            }.takeIf { it.isNotEmpty() }
+                ?.let { snapshot -> runCatching { SseJson.mapper.writeValueAsString(snapshot) }.getOrNull() }
         runCatching {
             executionRepository.complete(
                 executionId = event.executionId,
@@ -242,6 +255,7 @@ class WebEventEmitter(
                 nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
                 failedNodeId = failedNodeId,
                 errorJson = errorJson,
+                contextJson = contextJson,
             )
         }.onFailure { log.error("pipeline_executions row for execution {} not completed.", event.executionId, it) }
     }
