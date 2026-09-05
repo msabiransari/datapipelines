@@ -1,9 +1,9 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.web.ui.site.SITE_ORIGIN
 import co.datapipelines.web.ui.site.SitePageRenderer
 import co.datapipelines.web.ui.site.SitePages
 import co.datapipelines.web.ui.site.SitemapXml
-import co.datapipelines.web.ui.site.SITE_ORIGIN
 import java.io.File
 
 /**

@@ -22,9 +22,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * surface, and the cache defence on the public side.
  *
  *  - anonymous `GET /` is the marketing site (200, tool count rendered);
- *  - anonymous `GET /docs`, `/docs/{slug}` and `/dashboard` redirect to `/login`
- *    (docs are session-only — reviewer's answer; the dashboard is authenticated);
- *  - signed-in, all three render — including the operations manual itself;
+ *  - anonymous `GET /dashboard` still redirects to `/login` — the private surface did not move;
+ *  - anonymous `GET /docs` and `/docs/{slug}` now render (073 §C) with the PUBLIC chrome and
+ *    no link into the signed-in app;
+ *  - signed-in, the dashboard and the docs render — the docs in the APP chrome, so making them
+ *    public did not evict logged-in readers to the marketing site;
+ *  - `/robots.txt` and `/sitemap.xml` answer anonymously, and EVERY `<loc>` in the sitemap
+ *    answers 200 anonymously — the sweep that makes a generated sitemap trustworthy;
  *  - `/` and the `/site/` assets carry `Cache-Control: public` (033/D1: cache headers, NOT the
  *    login rate limiter — OPEN-ITEMS T46).
  */
@@ -65,8 +69,8 @@ class SiteDocsE2eTest {
     }
 
     @Test
-    fun `anonymous docs and dashboard redirect to login`() {
-        listOf("/docs", "/docs/auth", "/dashboard").forEach { path ->
+    fun `the private surface still redirects anonymous callers to login`() {
+        listOf("/dashboard", "/pipelines", "/settings/api-keys").forEach { path ->
             given()
                 .port(port)
                 .accept("text/html")
@@ -78,6 +82,68 @@ class SiteDocsE2eTest {
                 .statusCode(302)
                 .header("Location", "/login")
         }
+    }
+
+    @Test
+    fun `anonymous docs render with the public chrome, not the application navigation`() {
+        listOf("/docs", "/docs/auth", "/docs/staging").forEach { path ->
+            val response =
+                given()
+                    .port(port)
+                    .accept("text/html")
+                    .redirects()
+                    .follow(false)
+                    .`when`()
+                    .get(path)
+
+            response.statusCode shouldBe 200
+            // The public footer's site map is on every page the site layout renders.
+            response.asString() shouldContain "footer-map"
+            response.asString() shouldContain "rel=\"canonical\" href=\"https://datapipelines.co$path\""
+            // The signed-in navigation must NOT be there: that is the half of this change a
+            // 200 alone would not catch.
+            (response.asString().contains("app-nav")) shouldBe false
+            response.header("Cache-Control") shouldContain "public"
+        }
+    }
+
+    @Test
+    fun `robots and the sitemap answer anonymously, and every listed URL is reachable`() {
+        val robots =
+            given()
+                .port(port)
+                .`when`()
+                .get("/robots.txt")
+        robots.statusCode shouldBe 200
+        robots.asString() shouldContain "Sitemap: https://datapipelines.co/sitemap.xml"
+
+        val sitemap =
+            given()
+                .port(port)
+                .`when`()
+                .get("/sitemap.xml")
+        sitemap.statusCode shouldBe 200
+
+        val locations = LOC.findAll(sitemap.asString()).map { it.groupValues[1] }.toList()
+        // Non-vacuity: 14 registry pages + the docs index + the packaged docs. A sweep over an
+        // empty list is the failure mode this whole test exists to prevent.
+        check(locations.size >= MIN_SITEMAP_URLS) { "the sitemap listed only ${locations.size} URLs" }
+
+        val unreachable =
+            locations.mapNotNull { loc ->
+                val path = loc.removePrefix("https://datapipelines.co").ifEmpty { "/" }
+                val status =
+                    given()
+                        .port(port)
+                        .accept("text/html")
+                        .redirects()
+                        .follow(false)
+                        .`when`()
+                        .get(path)
+                        .statusCode
+                if (status == 200) null else "$path answered $status anonymously"
+            }
+        unreachable shouldBe emptyList()
     }
 
     @Test
@@ -101,7 +167,9 @@ class SiteDocsE2eTest {
             .then()
             .statusCode(200)
 
-        // The operations manual, in-product: deployment.md rendered as HTML.
+        // The operations manual, in-product: deployment.md rendered as HTML, in the APP
+        // chrome — 073 made the docs public without evicting signed-in readers to the
+        // marketing site, and this is the assertion that would catch it if it had.
         val doc =
             given()
                 .port(port)
@@ -110,6 +178,7 @@ class SiteDocsE2eTest {
                 .get("/docs/deployment")
         doc.statusCode shouldBe 200
         doc.asString() shouldContain "doc-body"
+        doc.asString() shouldContain "app-nav"
     }
 
     private fun login(): String {
@@ -141,6 +210,11 @@ class SiteDocsE2eTest {
     }
 
     companion object {
+        private val LOC = Regex("""<loc>([^<]+)</loc>""")
+
+        /** 14 registry pages + the docs index + ~25 packaged docs. */
+        private const val MIN_SITEMAP_URLS = 35
+
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private const val EMAIL = "site-docs@datapipelines.test"

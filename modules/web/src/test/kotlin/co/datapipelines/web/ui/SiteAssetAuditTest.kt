@@ -16,33 +16,53 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  * Also pinned: the design-system manifest survived the migration (the website/ copy of the
  * design system is DELETED; the app's vendored copy — and its SHA-256 manifest — is the
  * one sync target now), and the retired website asset tree is really gone from the repo.
+ *
+ * 073 widened the sweep from the homepage to EVERY template in the `templates/site` directory
+ * plus the two public docs templates: the cluster pages and the shared layout load the same
+ * stylesheets and the same script, and a broken path on one of nine pages is exactly what a
+ * single-page audit stops seeing.
+ *
+ * (Kotlin nests block comments, so a glob written into a KDoc opens one. Spell directories
+ * out here rather than learning that again.)
  */
 class SiteAssetAuditTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
 
-    private val templateSource: String =
-        resolver
-            .getResource("classpath:templates/site/index.html")
-            .inputStream
-            .readBytes()
-            .decodeToString()
+    private val templates: Map<String, String> =
+        (
+            resolver.getResources("classpath*:templates/site/*.html").toList() +
+                resolver.getResources("classpath*:templates/docs/*-public.html").toList()
+        ).filter { it.filename != null }
+            .associate { it.filename!! to it.inputStream.readBytes().decodeToString() }
+
+    @Test
+    fun `the sweep covers every public template`() {
+        // Non-vacuity: nine site templates plus the two public docs views. A resolver that
+        // stopped matching would make both audits below pass by auditing nothing.
+        templates.size shouldBe PUBLIC_TEMPLATES
+    }
 
     @Test
     fun `every asset reference resolves under static resources`() {
-        val refs = assetRefs(templateSource)
+        val refs = templates.flatMap { (name, source) -> assetRefs(source).map { name to it } }
         refs.shouldNotBeEmpty()
 
         val missing =
             refs
-                .filter { it.startsWith("/") }
-                .filter { !resolver.getResource("classpath:static$it").exists() }
-                .map { "template references $it — no static resource serves it" }
+                .filter { it.second.startsWith("/") }
+                .filter { !resolver.getResource("classpath:static${it.second}").exists() }
+                .map { "${it.first} references ${it.second} — no static resource serves it" }
         missing shouldBe emptyList()
     }
 
     @Test
     fun `no asset is loaded from an external or CDN origin`() {
-        val external = assetRefs(templateSource).filter { it.startsWith("http://") || it.startsWith("https://") }
+        val external =
+            templates.flatMap { (name, source) ->
+                assetRefs(source)
+                    .filter { it.startsWith("http://") || it.startsWith("https://") }
+                    .map { "$name loads $it" }
+            }
         external shouldBe emptyList()
     }
 
@@ -73,6 +93,9 @@ class SiteAssetAuditTest {
             .toList()
 
     private companion object {
+        /** index + 7 cluster templates + _layout, and the two docs public views. */
+        const val PUBLIC_TEMPLATES = 12
+
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:th:)?(?:href|src)="([^"]*)"""")
     }

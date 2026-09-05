@@ -101,7 +101,12 @@ class DocsRenderTest {
 
     @Test
     fun `an unknown slug is a 404, never the 500 handler`() {
-        val mv = DocsController(catalog).doc("no-such-doc")
+        val mv =
+            DocsController(catalog).doc(
+                "no-such-doc",
+                org.springframework.ui.ExtendedModelMap(),
+                MockHttpServletResponse(),
+            )
 
         mv.status shouldBe HttpStatus.NOT_FOUND
         mv.viewName shouldBe "error/404"

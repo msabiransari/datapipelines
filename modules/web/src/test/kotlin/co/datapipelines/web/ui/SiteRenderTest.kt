@@ -1,26 +1,26 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.mcp.McpToolCatalog
+import co.datapipelines.web.ui.site.SitePageRenderer
+import co.datapipelines.web.ui.site.SitePages
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.springframework.http.HttpHeaders
-import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
-import org.springframework.mock.web.MockServletContext
 import org.springframework.ui.ExtendedModelMap
-import org.thymeleaf.context.WebContext
-import org.thymeleaf.spring6.SpringTemplateEngine
-import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
-import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
  * The public marketing page (033): renders ANONYMOUSLY (no principal, no workspace — the
  * model is exactly what SiteController hands an anonymous request), with the tool-count
  * fact baked from the catalog, and with chrome free of unresolved expressions (033/B2 —
  * the page has no doc body, so the sweep is whole-page here).
+ *
+ * 073: the render goes through [SitePageRenderer], which calls the REAL controller. Building
+ * the model here instead would have kept passing after the head moved to the SitePages
+ * registry — while serving a page with an empty `<title>`.
  */
 class SiteRenderTest {
     private val templateSource: String =
@@ -30,27 +30,15 @@ class SiteRenderTest {
             .readBytes()
             .decodeToString()
 
-    private val engine =
-        SpringTemplateEngine().apply {
-            setTemplateResolver(
-                ClassLoaderTemplateResolver().apply {
-                    prefix = "templates/"
-                    suffix = ".html"
-                    characterEncoding = "UTF-8"
-                },
-            )
-        }
-
     @Test
     fun `the marketing home renders anonymously with the catalog tool count and no unresolved expressions`() {
         val count = McpToolCatalog.NAMES.size
-        val html =
-            engine.process(
-                "site/index",
-                webContext().apply { setVariable("toolCount", count) },
-            )
+        val html = SitePageRenderer.render(SitePages.HOME)
 
+        // The H1 is unchanged by 073 — the poster's line is the pitch; only the <title> had
+        // to start speaking the searcher's words.
         html shouldContain "Agent-native Data Pipelines"
+        html shouldContain "<title>${SitePages.HOME.title}</title>"
         // The three former hardcoded "18"s now render from the model (033/C4).
         html shouldContain "<span>$count</span> tools cover the full lifecycle"
         html shouldContain "/mcp — $count MCP tools"
@@ -79,6 +67,7 @@ class SiteRenderTest {
 
         view shouldBe "site/index"
         model["toolCount"] shouldBe McpToolCatalog.NAMES.size
+        model["canonicalUrl"] shouldBe SitePages.HOME.canonical
         response.getHeader(HttpHeaders.CACHE_CONTROL) shouldBe "max-age=300, public"
     }
 
@@ -156,13 +145,6 @@ class SiteRenderTest {
         while (dir != null && !java.io.File(dir, "docs").isDirectory) dir = dir.parentFile
         return checkNotNull(dir) { "no ancestor of ${java.io.File("").absolutePath} holds a docs/ directory" }
     }
-
-    private fun webContext(): WebContext =
-        WebContext(
-            JakartaServletWebApplication
-                .buildApplication(MockServletContext())
-                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        )
 
     private companion object {
         /** One feature card, from its opening article tag to its close. */

@@ -51,21 +51,49 @@ object SitePageRenderer {
         val response = MockHttpServletResponse()
         val view =
             when {
-                page.path == SitePages.HOME.path -> siteController.home(model, response)
-                page.path == SitePages.PILLAR.path -> pagesController.pillar(model, response)
-                page.path.startsWith(SitePages.ENGINE_PREFIX) ->
+                page.path == SitePages.HOME.path -> {
+                    siteController.home(model, response)
+                }
+
+                page.path == SitePages.PILLAR.path -> {
+                    pagesController.pillar(model, response)
+                }
+
+                page.path.startsWith(SitePages.ENGINE_PREFIX) -> {
                     checkNotNull(
                         pagesController
                             .engine(page.path.removePrefix(SitePages.ENGINE_PREFIX), model, response)
                             .viewName,
                     ) { "no view for engine page ${page.path}" }
-                page.path == SitePages.ADD_TO_CLAUDE_CODE.path -> pagesController.addToClaudeCode(model, response)
-                page.path == SitePages.AI_DATA_PIPELINE.path -> pagesController.aiDataPipeline(model, response)
-                page.path == SitePages.TEXT_TO_SQL_AGENT.path -> pagesController.textToSqlAgent(model, response)
-                page.path == SitePages.COMPARE_AIRFLOW.path -> pagesController.compareAirflow(model, response)
-                page.path == SitePages.COMPARE_DBT.path -> pagesController.compareDbt(model, response)
-                page.path == SitePages.FEDERATED_QUERY.path -> pagesController.federatedQuery(model, response)
-                else -> error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
+                }
+
+                page.path == SitePages.ADD_TO_CLAUDE_CODE.path -> {
+                    pagesController.addToClaudeCode(model, response)
+                }
+
+                page.path == SitePages.AI_DATA_PIPELINE.path -> {
+                    pagesController.aiDataPipeline(model, response)
+                }
+
+                page.path == SitePages.TEXT_TO_SQL_AGENT.path -> {
+                    pagesController.textToSqlAgent(model, response)
+                }
+
+                page.path == SitePages.COMPARE_AIRFLOW.path -> {
+                    pagesController.compareAirflow(model, response)
+                }
+
+                page.path == SitePages.COMPARE_DBT.path -> {
+                    pagesController.compareDbt(model, response)
+                }
+
+                page.path == SitePages.FEDERATED_QUERY.path -> {
+                    pagesController.federatedQuery(model, response)
+                }
+
+                else -> {
+                    error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
+                }
             }
         return process(view, model)
     }
