@@ -217,6 +217,54 @@ object PipelineErrorCodes {
 
         /** §12.9 — the static reference-tree depth is within the configured maximum. */
         const val COMPOSITION_TOO_DEEP = "pipeline.validation.composition_too_deep"
+
+        /** §12.10 — a CALCULATOR node declares all three of `kind`, `inputs` and `context_key`. */
+        const val CALCULATOR_NODE_INCOMPLETE = "pipeline.validation.calculator_node_incomplete"
+
+        /** §12.10 — no other node type carries `kind`, `inputs` or `context_key`. */
+        const val CALCULATOR_FIELDS_ON_NON_CALCULATOR = "pipeline.validation.calculator_fields_on_non_calculator"
+
+        /** §12.10 — a CALCULATOR node carries no `template`, `source` or `output`. */
+        const val CALCULATOR_NODE_HAS_SQL_FIELDS = "pipeline.validation.calculator_node_has_sql_fields"
+
+        /** §12.10 — `kind` names a kind in the registry (calculators.md §2). */
+        const val CALCULATOR_UNKNOWN = "pipeline.validation.calculator_unknown"
+
+        /** §12.10 — every input the kind declares `required` is present. */
+        const val CALCULATOR_INPUT_MISSING = "pipeline.validation.calculator_input_missing"
+
+        /**
+         * §12.10 — a supplied input name the kind does not declare, or a `$reference` naming a
+         * Context key nothing provides.
+         *
+         * One code for both because they are one authoring mistake seen from two sides: the node
+         * names something that is not there. `details` carries which (`input` / `reference`) and
+         * what WAS available, which is the part an author acts on.
+         */
+        const val CALCULATOR_INPUT_UNKNOWN = "pipeline.validation.calculator_input_unknown"
+
+        /** §12.10 — a literal input's JSON type contradicts the kind's declared input type. */
+        const val CALCULATOR_INPUT_TYPE_MISMATCH = "pipeline.validation.calculator_input_type_mismatch"
+
+        /**
+         * §12.10 — a reference to another node's `context_key` from a node that does not
+         * `depends_on` its producer. Covers both shapes: a calculator's `$ref` and a SQL node's
+         * `:bind`. Sequencing is topology, never array order (§0.3), and without the edge the
+         * reader's value depends on which node the scheduler happened to reach first.
+         */
+        const val CALCULATOR_INPUT_UNORDERED = "pipeline.validation.calculator_input_unordered"
+
+        /**
+         * §12.10 — `context_key` collides with a declared parameter or another node's key.
+         *
+         * Shadowing an org or platform key is legal (§0.2 tier 5); shadowing a PARAMETER is not,
+         * because a parameter is the caller's input and a silently overwritten one makes an
+         * execute request a lie.
+         */
+        const val CALCULATOR_OUTPUT_COLLISION = "pipeline.validation.calculator_output_collision"
+
+        /** §12.10 / §6.1 — `context_key` matches `[a-z_][a-z0-9_]*`. */
+        const val CALCULATOR_OUTPUT_NAME_INVALID = "pipeline.validation.calculator_output_name_invalid"
     }
 
     /** §13.2 — pipeline import. */
@@ -227,6 +275,16 @@ object PipelineErrorCodes {
 
         /** §13.2 / versioning §9.2 — declared body_hash ≠ hash recomputed from the payload body. */
         const val HASH_MISMATCH = "pipeline.import.hash_mismatch"
+
+        /**
+         * §13.2 (072, calculators design §0.5) — the imported body binds a Context key this
+         * deployment does not provide, an `org_*` key the target's yml does not define. HTTP 409.
+         *
+         * Refused rather than defaulted, and refused at IMPORT rather than at the first run: a
+         * promoted pipeline reading a made-up currency or fiscal start produces wrong numbers
+         * with no error anywhere, which is the one failure shape promotion exists to prevent.
+         */
+        const val CONTEXT_KEY_MISSING = "pipeline.import.context_key_missing"
     }
 
     /** §13.3 — pipeline execution (run-time). */
@@ -296,6 +354,16 @@ object PipelineErrorCodes {
          * the parameter.
          */
         const val SQL_PARAMETER_MISSING = "pipeline.node.sql_parameter_missing"
+
+        /**
+         * §13.4 (072) — a CALCULATOR node's evaluation failed. HTTP 500.
+         *
+         * Save-time validation (§12.10) has already refused everything decidable from the body,
+         * so reaching here means the RUN produced the offending value: a `$reference` that
+         * resolved to null, text that did not match its pattern, a zero denominator. The detail
+         * carries the node id, the `kind` and the input at fault.
+         */
+        const val CALCULATOR_FAILED = "pipeline.node.calculator_failed"
 
         /**
          * §13.4 — the run-time composition-depth backstop fired. Reaching it means save-time

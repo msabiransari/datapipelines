@@ -93,6 +93,10 @@ object ApiErrorCatalog {
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
+            // 072 §13.2: a body binding an `org_*` key this deployment does not define. 409, not
+            // 400: the payload is well-formed and was valid where it was authored — it is THIS
+            // deployment's configuration that conflicts with it, and the fix is an operator's.
+            PipelineErrorCodes.Import.CONTEXT_KEY_MISSING to HttpStatus.CONFLICT,
             PipelineErrorCodes.Execution.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Execution.PARAMETER_REQUIRED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE to HttpStatus.BAD_REQUEST,

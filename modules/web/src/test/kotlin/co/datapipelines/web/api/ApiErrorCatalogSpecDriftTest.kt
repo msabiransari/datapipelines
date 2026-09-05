@@ -111,10 +111,19 @@ class ApiErrorCatalogSpecDriftTest {
          * gains `pipeline.promotion.missing_datasources`, `.target_is_authoring` and
          * `.target_unreachable`, each landed in the SAME commit as its constant and catalog
          * row. Re-derived from the merged document's own parse.
+         *
+         * 112 → 114 with 072 (calculators): §13.2 gains `pipeline.import.context_key_missing`
+         * and §13.4 gains `pipeline.node.calculator_failed`, both landed in the SAME commit as
+         * their constants and catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 112
+        const val SECTION_13_ROW_COUNT = 114
 
-        /** §12's distinct validation codes on 2026-09-02 (046 added §12.6's template_type_mismatch). */
-        const val SECTION_12_CODE_COUNT = 48
+        /**
+         * §12's distinct validation codes.
+         *
+         * 48 → 58 with 072: §12.10's ten CALCULATOR-node rules, landed in the SAME commit as
+         * their constants. Re-derived from the document's own parse.
+         */
+        const val SECTION_12_CODE_COUNT = 58
     }
 }

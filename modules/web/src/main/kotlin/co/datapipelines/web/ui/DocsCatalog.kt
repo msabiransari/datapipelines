@@ -183,6 +183,10 @@ class DocsCatalog(
                         "enums",
                         "staging",
                         "dag-executor",
+                        // 072: the calculator catalog is a contract — a `kind` is written into
+                        // versioned, exported, promoted bodies, so it reads beside the pipeline
+                        // contract rather than under Reference.
+                        "calculators",
                     ),
                 "Reference" to
                     listOf("metadata-db", "module-structure", "pipeline-editor", "ui-screens", "roadmap", "readme"),

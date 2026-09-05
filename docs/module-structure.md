@@ -44,6 +44,7 @@ datapipelines/
 │       └── KotlinConventionsPlugin.kt
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
+│   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
 │   ├── templates/                       # [Templates spec]
 │   ├── datasources/                     # [Datasources spec]
@@ -143,15 +144,16 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | Module | Allowed internal dependencies (exhaustive) |
 |---|---|
 | `typesystem` | *(none)* |
-| `pipeline-contract` | `typesystem` |
+| `calculators` | `typesystem` |
+| `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract` |
 | `datasources` | `typesystem` |
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
-| `dag` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging` |
 | `application` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
-| `mcp-server` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
-| `web` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
+| `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
+| `web` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -159,6 +161,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 Notes on the shape (explanatory, not additional rules):
 
 - The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
+- `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -568,6 +571,23 @@ tests shrink to "the controller/tool calls it and maps the result".
 ---
 
 ---
+
+
+### 5.14 `calculators`
+
+**Dependencies (internal):** `typesystem` — and nothing else, ever (see the §4.2 note).
+
+**Dependencies (external):** none.
+
+**Public API:**
+- `CalculatorKind` interface — one pure `inputs → output` function, with its declared input types, output type and worked example
+- `CalculatorInput` / `CalculatorExample` — the declaration shape the catalog doc, the validator and `calculators_list` all read
+- `CalculatorRegistry` — every shipped kind, by `kind`; additive forever (D4)
+- `CalculatorEvaluationException` — a refusal naming the offending input; the executor maps it to `pipeline.node.calculator_failed`
+
+**Why it is its own module.** The kinds are the one part of the system that must be provably free of I/O: the executor evaluates one at an arbitrary DAG position, the validator type-checks its inputs at save time, and a future editor preview would evaluate one with no execution at all. Purity as a build rule (this row) plus a source rule (`CalculatorPurityTest`) is what makes those three uses safe. It deliberately does **not** depend on `pipeline-contract`: JSON literals, `$` references, `context_key` collisions and error codes are contract concerns, and a catalog that knew about them would be a catalog nobody could reuse.
+
+**Tests:** unit tests per kind (boundary values; the fiscal kinds against both a calendar and a non-calendar fiscal start; `add_business_days` across a weekend and a holiday; `tz_shift` across a DST boundary; `date_parse` with a bad pattern), a registry-invariant test, `CalculatorPurityTest`, and `CalculatorRegistrySpecDriftTest` against `docs/calculators.md`.
 
 ## 6. Version Catalog
 

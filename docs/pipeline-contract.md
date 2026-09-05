@@ -750,6 +750,23 @@ The PIPELINE-node rules (§4.9). Everything here is computed against the pinned 
 | `pipeline.validation.pipeline_output_on_sideeffect_child` | `output` absent when the pinned child has zero caller nodes |
 | `pipeline.validation.composition_too_deep` | Static reference-tree depth ≤ configured max (`datapipelines.pipelines.max-composition-depth`, default 5). Computed iteratively, never recursively in graph depth — §12.2's crash-safety rule applies here too. |
 
+### 12.10 Calculator-node validations
+
+The `CALCULATOR`-node rules (§4.10, calculators design §0.3). Every one of them is decided from the body alone — the registry is a deployment constant and the Context's org and platform tiers are configuration — so an author gets the whole verdict at save time, never at 3am.
+
+| Code | Check |
+|---|---|
+| `pipeline.validation.calculator_node_incomplete` | A `CALCULATOR` node declares all three of `kind`, `inputs` and `context_key` |
+| `pipeline.validation.calculator_fields_on_non_calculator` | No other node type carries `kind`, `inputs` or `context_key` |
+| `pipeline.validation.calculator_node_has_sql_fields` | A `CALCULATOR` node carries no `template`, `source` or `output` — it runs no SQL and writes one Context key, not a table |
+| `pipeline.validation.calculator_unknown` | `kind` names a kind in the registry ([Calculators §2](calculators.md)) |
+| `pipeline.validation.calculator_input_missing` | Every input the kind declares `required` is present |
+| `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's `context_key` |
+| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding; a `LIST` input takes a JSON array |
+| `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's `context_key` — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Sequencing is topology, never array order |
+| `pipeline.validation.calculator_output_collision` | `context_key` collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's `context_key` — one writer per key per pipeline |
+| `pipeline.validation.calculator_output_name_invalid` | `context_key` matches §6.1's `[a-z_][a-z0-9_]*` |
+
 ---
 
 ## 13. Error Code Catalog
@@ -767,6 +784,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.import.missing_datasource` | 400 | Imported pipeline references a datasource name not registered in this env (as `source` or `output.datasource`) |
 | `pipeline.import.missing_template` | 400 | Imported pipeline references a template version not present in this env |
 | `pipeline.import.version_conflict` | 409 | Pipeline id+version already exists **with different content** (or the id collides with a soft-deleted pipeline's retained id); a same-hash re-import of an existing released version is an idempotent no-op (preserved-version import rules: [Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
+| `pipeline.import.context_key_missing` | 409 | The imported body binds a Context key this deployment does not provide — an `org_*` key the target's `datapipelines.org.*` block does not define, most often because the body was authored on a deployment with a key this one lacks (Configuration §3.21). Refused rather than silently defaulted: a promoted pipeline reading a made-up currency or fiscal start produces wrong numbers with no error anywhere |
 | `pipeline.import.hash_mismatch` | 400 | Import payload's declared `body_hash` doesn't match the hash recomputed from its body — transfer corruption or canonicalization drift between app versions ([Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
 
 ### 13.3 Pipeline execution (run-time)
@@ -797,6 +815,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
 | `pipeline.node.child_execution_failed` | 500 | A PIPELINE node's child execution failed; the detail carries the child's error code and execution id |
 | `pipeline.node.composition_depth_exceeded` | 500 | Runtime composition-depth backstop hit; indicates a save-time validation gap, since static depth (§12.9) should catch it first |
+| `pipeline.node.calculator_failed` | 500 | A `CALCULATOR` node's evaluation failed. The detail carries the node id, the `kind`, the input at fault and the reason — an unknown `unit`, a `format` that does not compile, text that does not match its pattern, a zero denominator. Save-time validation (§12.10) has already refused everything decidable from the body, so this is a value the run itself produced |
 | `pipeline.node.sql_parameter_missing` | 500 | The rendered SQL references a `:name` bind parameter the execution context does not declare. Raised before anything executes (042: a missing value bound as null would return wrong data instead of an error); the message names the parameter |
 | `pipeline.node.not_found` | 404 | A node-run debug query ([MCP §6.2.20](mcp-server.md#6220-pipelines_execute_node)) named a node id the resolved pipeline version does not hold (037 E2). `details` carries the node id and the version searched — after versioning, "no such node" usually means a typo, since the tool's E5 default already prefers the DRAFT body where authoring happens |
 | `pipeline.node.standalone_execution_refused` | 400 | A node-run debug query refused because the node has no standalone SQL to run (037 §A/E2): its `source` is `tempdb` — the staging database exists only inside a full execution, so use `pipelines_execute` — or it is a PIPELINE node, which runs a child pipeline, not SQL. `details.reason` names which (`tempdb_source` / `pipeline_node`) |
