@@ -15,26 +15,30 @@
        virtual folders, same browse-vs-search rule, same stylesheet. -->
   <div class="tplx-page">
 
-    <div style="display: flex; align-items: center; justify-content: space-between;">
+    <!-- ONE grid child. `.tplx-page` is `grid-template-rows: auto auto minmax(0, 1fr)` —
+         exactly three rows — so the heading and the authoring note travel together; a fourth
+         top-level child pushes the panes into an implicit row and hands the 1fr track to the
+         search box, which renders as ~80px of dead space above the tree (measured at 1440). -->
+    <div>
       <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Pipelines</h1>
-    </div>
 
-    <!-- T108: the disabled "Create Pipeline" button and its "Phase 2 other worktree" tooltip
-         are gone. It promised an affordance the server does not have, and a tooltip naming a
-         worktree is an internal note leaking into the product. This says what is true today
-         and where authoring actually happens. -->
-    <p class="tplx-authoring-note" style="color: var(--text-secondary); font-size: var(--text-sm); margin: var(--gap-xs) 0 var(--gap-md) 0;">
-      Pipelines are authored through agents over the
-      <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it
-      a folder path like <code>nyc/mobility/revenue_by_borough</code>. Creating and editing
-      pipelines in the browser is on the roadmap; this screen browses and opens them.
-    </p>
+      <!-- T108: the disabled "Create Pipeline" button and its "Phase 2 other worktree" tooltip
+           are gone. It promised an affordance the server does not have, and a tooltip naming a
+           worktree is an internal note leaking into the product. This says what is true today
+           and where authoring actually happens. -->
+      <p class="tplx-authoring-note" style="color: var(--text-secondary); font-size: var(--text-sm); margin: var(--gap-xs) 0 0 0;">
+        Pipelines are authored through agents over the
+        <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it
+        a folder path like <code>nyc/mobility/revenue_by_borough</code>. Creating and editing
+        pipelines in the browser is on the roadmap; this screen browses and opens them.
+      </p>
+    </div>
 
     <!-- SPA search control (ui-screens.md §4.3, the 028 §4.5 contract): it re-fetches ONLY the
          list fragment into the stable #pipeline-list-wrapper root, so the control is never
          re-rendered and the search keeps focus and value. A non-empty search switches the LEFT
          pane to a flat list of full paths; clearing it returns to the tree. -->
-    <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
+    <div style="display: flex; gap: var(--gap-md); align-items: center;">
       <input type="search" id="pipeline-filter-q" name="q" th:value="${q}"
              placeholder="Search pipelines..."
              th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'"
