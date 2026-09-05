@@ -78,6 +78,8 @@ All datapipelines custom headers use the `DP-` prefix:
 | `DP-Correlation-Id` | both | Log/trace correlation (§3.4) |
 | `DP-CSRF-Token` | request | CSRF token for cookie-authenticated state-changing requests ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)) |
 | `DP-Result-TTL-Seconds` | request | Client-requested result TTL, clamped by the server (§7.4) |
+| `DP-Result-Page-Rows` | request | Client-requested size of the INLINE first page, clamped to `datapipelines.result.page-max-rows`. **One contract on two surfaces** (ruling R-EP4): `POST /pipelines/{id}/execute`'s `data_ready` and a published endpoint's `200` body (§19) |
+| `DP-Execution-Id` | response | The execution a published endpoint's answer belongs to (§19.4) — present on both the `200` and the `202` |
 | `DP-Promotion-Key` | request | The promotion peer's pre-shared server key, on `/api/v1/promotion/**` and nowhere else (§18, [Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
 Standard headers used as-is: `Idempotency-Key`, `Retry-After`, `RateLimit-*` (§12), `Authorization` (Bearer on `/mcp` only — [Auth §8.5](auth.md#85-mcp-endpoint-mcp)).
@@ -1458,6 +1460,121 @@ Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-impor
 | `pipeline.import.version_conflict` | 409 | That version exists here with different content, as a local DRAFT, or was DISCARDED (§9.2's table) |
 
 The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring` — happen before the request is made and never reach this endpoint.
+
+---
+
+## 19. Published Endpoints
+
+A released pipeline served as a **`GET` API** under `/api/x`, whose response is the `data_ready`
+payload — the first page plus the cursor — with no event handling on the client
+(this section is the contract). Ruling R-EP1: engineers own
+everything beneath `/api/x`; the product's own routes stay under `/api/v1`, and a published path
+can never shadow one. There is **one** handler for the whole subtree and no runtime route
+registration: a published endpoint is a row, not a mapping.
+
+### 19.1 The path grammar
+
+`path_pattern` is 1–10 segments, each a literal `[a-z0-9][a-z0-9_.-]{0,63}` or a variable
+`{name}` matching the parameter grammar `[a-z_][a-z0-9_]*`; at most 200 characters; a leading
+`/`, no trailing slash, no wildcards. It is the same segment grammar hierarchical template names
+use ([Template hierarchy §4](template-hierarchy-design.md)) — one grammar to learn.
+
+**Ambiguity is refused, not resolved.** `/a/{x}` and `/a/b` both match `GET /api/x/a/b`, so
+publishing the second is `409 endpoint.path_conflict` naming the first. Literal-beats-variable
+precedence is deliberately NOT offered in v1: because ambiguity cannot be published, at most one
+pattern can match a request, and a reader of the registry can tell what a URL does by finding the
+one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
+
+### 19.2 What may be published
+
+The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
+be **side-effect-free**: every node of the current released version is `DQL` with `output.target`
+in {`tempdb`, `caller`}, or a `PIPELINE` node whose pinned child satisfies the same rule
+transitively. A `DML`/`DDL` node — or a DQL node writing back to a datasource, which is a write
+wearing a read's type — refuses publication with `409 endpoint.pipeline_not_readonly` naming the
+node.
+
+That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
+preloaded by browsers and followed by crawlers. It is **re-checked on every serve**, because an
+endpoint pins a pipeline and serves its latest released version — a later release can put a write
+under a live URL.
+
+Every path variable must name a declared parameter of that version
+(`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
+query string. `timeout_seconds` is clamped to `datapipelines.endpoints.timeout-min-seconds` /
+`datapipelines.endpoints.timeout-max-seconds` ([Configuration §3.21](configuration.md#321-published-endpoints)).
+
+### 19.3 The request
+
+Authentication is an API key (`DP-API-Key`), never a browser session — this is a machine surface,
+and a session is `401`. Authorisation is the key's hierarchical bindings
+([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
+
+The accepted parameters are the released version's declared ones: **path variables** bind by
+name, and the **query string** supplies the rest. Validation is strict and **reports every defect
+at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carries
+`{parameter, code, message}` per problem, because a client fixes a request once:
+
+- an unknown query parameter is `endpoint.request.parameter_unknown` — deliberately not ignored,
+  since a typo that silently ran the default would return plausible, wrong rows;
+- a repeated key is `endpoint.request.parameter_repeated`, as is a query key that also came from
+  the path (the URL decides, not the query string);
+- a required parameter with no value is `pipeline.execution.parameter_required`, and a value that
+  is not its declared type is `pipeline.execution.invalid_parameter_type` — the existing codes;
+- a value over 4 KB is `endpoint.request.value_too_large`.
+
+Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
+`page-max-rows`) are honoured; an unparseable value reads as absent, because the server clamps
+anyway. `Accept` must admit `application/json` (`*/*` and an absent header do), else `406`.
+
+### 19.4 The response
+
+`200` — the body is the `data_ready` payload of [§6.4.7](#647-data_ready), verbatim:
+`execution_id`, `schema`, `rows`, `row_count`, `total_rows`, `has_more`, `result_url`,
+`expires_at`, `ttl_seconds`. Headers: `DP-Correlation-Id`, `DP-Execution-Id`, and
+`Cache-Control: no-store` — a result is per-execution, so a shared cache holding one would hand a
+second caller another caller's rows.
+
+The execution runs **in-process** through the same recording path an MCP execution uses — never
+HTTP-to-self, never SSE parsing — as the endpoint's workspace, with `triggered_via = ENDPOINT`
+and `triggered_by` = the key's owner. Every serve is audited with the key id, the endpoint, the
+execution id and the outcome.
+
+**`202` on timeout (ruling R-EP3).** When the endpoint's `timeout_seconds` elapses the execution
+is **not** cancelled — it keeps running, and the response is `202` with
+`{execution_id, result_url, status_url, expires_at}`. The cursor `404`s until the result exists
+and `GET /executions/{id}` reports status. A `504` would be a lie in both directions: the upstream
+is fine, and the answer is coming.
+
+### 19.5 Managing endpoints
+
+`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`; bindings owner-or-`admin`), addressed by
+`?path=`. Promotion carries endpoint rows and their bindings **by key name**; a target missing
+that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
+The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
+
+### 19.6 Status codes, complete
+
+| Code | When |
+|---|---|
+| 200 | Result inline — the first page plus the cursor |
+| 202 | The endpoint's timeout elapsed; the execution continues (R-EP3) |
+| 400 | Request validation — every defect at once in `details.errors[]` |
+| 401 | No or invalid API key; a browser session |
+| 403 | Key not bound / wrong workspace / wrong key kind |
+| 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
+| 405 | Any method but `GET`, with `Allow: GET` |
+| 406 | An `Accept` this surface cannot satisfy |
+| 429 | Rate limit or concurrency limit, with `Retry-After` |
+| 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
+| 503 | The pipeline has no released version, or is no longer side-effect-free |
+
+### 19.7 Not in v1
+
+`POST` endpoints (parameters in a body, side-effecting pipelines — the read-only rule is what
+makes `GET` safe, and a write surface needs its own ruling); anonymous or embed tokens for public
+dashboards; per-endpoint rate limits; response caching across callers (results are per execution
+by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); custom domains.
 
 ---
 

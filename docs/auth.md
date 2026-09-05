@@ -692,6 +692,8 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 | Create a workspace (per provisioning mode) | `POST /api/v1/workspaces` — `closed` mode refuses non-admins in-handler (`workspace.creation_forbidden`) | `author` |
 | Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/members`, `DELETE /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}` — workspace `owner` or `admin` enforced in-handler; an API key manages only its pinned workspace (§5.6) | `author` |
 | Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | any authenticated |
+| Serve a published endpoint | `GET /api/x/**` ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses the floor because it carries no scopes at all | `read` |
+| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings (owner-or-`admin` for bindings, enforced in-handler) | `author` |
 
 **MCP tools** (all 22 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
 

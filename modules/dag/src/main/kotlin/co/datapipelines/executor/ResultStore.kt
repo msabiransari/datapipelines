@@ -67,9 +67,17 @@ interface ResultStore {
      * Everything `data_ready` needs, read back **from the stored result** rather than from the
      * ResultSet (§6.4.2): schema, the inline first page, totals, and the expiry.
      *
+     * [firstPageRows] sizes the inline page. Null means the configured
+     * `datapipelines.result.page-size-rows`, which is every caller's behaviour up to 074; the
+     * `DP-Result-Page-Rows` request header (ruling R-EP4) is what supplies a value, clamped by
+     * the surface before it gets here.
+     *
      * @return null when the key is unknown or its TTL has elapsed.
      */
-    fun describe(key: String): StoredResultView?
+    fun describe(
+        key: String,
+        firstPageRows: Int? = null,
+    ): StoredResultView?
 
     /**
      * The store key for [executionId] — the same string [materialize] returns in

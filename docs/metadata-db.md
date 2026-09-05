@@ -494,7 +494,7 @@ CREATE TABLE workspace_members (
 
 ### 4.13 `published_endpoints`
 
-The registry of released pipelines served as `GET` endpoints under `/api/x` (V11, round 074). See REST API §19.
+The registry of released pipelines served as `GET` endpoints under `/api/x` (V11, round 074). See [REST API §19](rest-api.md#19-published-endpoints).
 
 ```sql
 CREATE TABLE published_endpoints (

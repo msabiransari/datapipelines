@@ -30,6 +30,7 @@ import co.datapipelines.web.health.StagingHealthIndicator
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.pipelines.ExecutionStreamLauncher
 import co.datapipelines.web.pipelines.McpRecordingExecutionRunner
+import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.pipelines.SubPipelineExecutionRunner
 import co.datapipelines.web.pipelines.WebIdempotencyMetrics
 import co.datapipelines.web.ratelimit.RateLimiter
@@ -279,7 +280,7 @@ class WebSurfaceConfiguration {
      */
     @Suppress("LongParameterList")
     @Bean
-    fun mcpExecutionRunner(
+    fun recordingExecutionRunner(
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -298,8 +299,8 @@ class WebSurfaceConfiguration {
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
         subPipelineRunner: SubPipelineRunner,
-    ): McpExecutionRunner =
-        McpRecordingExecutionRunner(
+    ): RecordingExecutionRunner =
+        RecordingExecutionRunner(
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
@@ -319,4 +320,12 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
             subPipelineRunner = subPipelineRunner,
         )
+
+    /**
+     * `mcp-server`'s port over the shared runner (074). A thin adapter, so "how an in-process
+     * execution is recorded" has exactly one implementation — the endpoint surface uses the same
+     * [RecordingExecutionRunner] with `ExecutionTrigger.ENDPOINT`.
+     */
+    @Bean
+    fun mcpExecutionRunner(runner: RecordingExecutionRunner): McpExecutionRunner = McpRecordingExecutionRunner(runner)
 }

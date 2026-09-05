@@ -113,6 +113,24 @@ object ScopeMatrix {
          * path with an honest floor — the §5A lane contract, not a shortcut around it.
          */
         CHANGE_OWN_PASSWORD(Scope.READ),
+
+        /**
+         * "Serve a published endpoint" (§7.6/§7.7, 074): `GET /api/x/…`.
+         *
+         * `read` is the FLOOR, not the gate. The real authorisation is the path binding
+         * (`EndpointAuthorizer`), and on an unbound endpoint a `user` key additionally needs
+         * `execute` — enforced there, not here, because "is this key bound to this node" is not
+         * expressible as a scope. An `endpoint`-kind key never reaches this floor at all:
+         * `ScopeInterceptor` exempts it, since it carries no scopes by design (§7.7).
+         */
+        SERVE_PUBLISHED_ENDPOINT(Scope.READ),
+
+        /**
+         * "Manage published endpoints" (§7.6, 074): publishing, unpublishing and binding.
+         * `author` — publishing is an authoring act over a released pipeline. Bindings
+         * additionally require owner-or-admin, which is not a scope and lives in the handler.
+         */
+        MANAGE_ENDPOINTS(Scope.AUTHOR),
     }
 
     /**

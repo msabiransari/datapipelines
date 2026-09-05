@@ -41,6 +41,8 @@ class ScopeMatrixSpecDriftTest {
             "Create a workspace (per provisioning mode)" to ScopeMatrix.RestOperation.WORKSPACE_CREATE,
             "Update a workspace / manage its members" to ScopeMatrix.RestOperation.MANAGE_WORKSPACE,
             "Change own password" to ScopeMatrix.RestOperation.CHANGE_OWN_PASSWORD,
+            "Serve a published endpoint" to ScopeMatrix.RestOperation.SERVE_PUBLISHED_ENDPOINT,
+            "Manage published endpoints" to ScopeMatrix.RestOperation.MANAGE_ENDPOINTS,
         )
 
     @Test

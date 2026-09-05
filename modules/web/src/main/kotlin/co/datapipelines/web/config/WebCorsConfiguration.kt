@@ -112,6 +112,8 @@ class WebCorsConfiguration(
             CorrelationId.HEADER,
             SecurityConfig.CSRF_HEADER,
             WebHeaders.RESULT_TTL,
+            // R-EP4 (074) — a browser client of the execute surface may size its inline page.
+            WebHeaders.RESULT_PAGE_ROWS,
             HttpHeaders.CONTENT_TYPE,
             WebHeaders.IDEMPOTENCY_KEY,
             HttpHeaders.ACCEPT,

@@ -10,6 +10,7 @@ import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.idempotencyKey
+import co.datapipelines.web.config.requestedResultPageRows
 import co.datapipelines.web.config.requestedResultTtlSeconds
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -82,6 +83,10 @@ class PipelineExecuteController(
                 parametersJson = MAPPER.writeValueAsString(parametersNode),
                 correlationId = CorrelationId.currentUuid() ?: UUID.randomUUID(),
                 resultTtlSeconds = request.requestedResultTtlSeconds(),
+                // R-EP4: ONE contract for DP-Result-Page-Rows across this surface and a
+                // published endpoint. A client that learns the header on one must not find it
+                // ignored on the other.
+                resultPageRows = request.requestedResultPageRows(),
                 idempotencyKey = request.idempotencyKey(),
             ),
         )

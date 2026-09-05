@@ -95,14 +95,20 @@ class RedisResultStore(
     /** `dp:result:{execution_id}` — the base key both this class's suffixed keys hang off. */
     override fun keyFor(executionId: UUID): String = baseKey(executionId)
 
-    override fun describe(key: String): StoredResultView? {
+    override fun describe(
+        key: String,
+        firstPageRows: Int?,
+    ): StoredResultView? {
         requireResultKey(key)
         val meta = readMeta(key) ?: return null
+        // The requested size is clamped the same way a cursor `limit` is — one bound for one
+        // documented header, whichever surface asked (R-EP4).
+        val inlineRows = firstPageRows?.let { config.effectiveLimit(it) } ?: config.pageSizeRows
         return StoredResultView(
             key = key,
             executionId = meta.executionId,
             schema = meta.schema,
-            firstPage = readRows(key, 0, config.pageSizeRows.toLong()),
+            firstPage = readRows(key, 0, inlineRows.toLong()),
             totalRows = meta.totalRows,
             bytes = meta.bytes,
             expiresAt = meta.expiresAt,

@@ -414,7 +414,7 @@ class PipelineExecutor(
         resultRef: String,
     ): StoredResultView {
         // §15.2: a Redis read is blocking I/O and belongs on the executor's own pool.
-        val view = withContext(dispatcher.context) { resultStore.describe(resultRef) }
+        val view = withContext(dispatcher.context) { resultStore.describe(resultRef, run.request.resultPageRows) }
         if (view == null) {
             LOG.error("Stored result {} vanished before data_ready; failing execution {}", resultRef, run.executionId)
             val vanished = IllegalStateException("stored result $resultRef is gone or expired before data_ready")

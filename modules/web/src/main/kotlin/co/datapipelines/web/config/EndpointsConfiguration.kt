@@ -10,8 +10,14 @@ import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.executor.ResultConfig
+import co.datapipelines.executor.ResultStore
+import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineResolver
+import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.executions.ExecutionVisibility
+import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -114,6 +120,43 @@ class EndpointsConfiguration {
         pipelineResolver: PipelineResolver,
         pipelineProperties: PipelineProperties,
     ): ReadOnlyPipelineRule = ReadOnlyPipelineRule(pipelineResolver, pipelineProperties.maxCompositionDepth)
+
+    /**
+     * The serving path (§5). It takes the application's execution scope rather than making its
+     * own, so an endpoint's run is drained at shutdown with every other execution — and so the
+     * `202` contract's "the execution keeps running" is true of a scope that outlives the
+     * request but not the application.
+     */
+    @Bean
+    @Suppress("LongParameterList") // one composition root for one request path
+    fun publishedEndpointServeService(
+        registry: EndpointRegistry,
+        bindings: EndpointKeyBindingRepository,
+        authorizer: EndpointAuthorizer,
+        readOnlyRule: ReadOnlyPipelineRule,
+        pipelines: PipelineService,
+        runner: RecordingExecutionRunner,
+        resultStore: ResultStore,
+        resultUrls: ResultUrlFactory,
+        resultConfig: ResultConfig,
+        endpointsProperties: EndpointsProperties,
+        audit: AuditEventSink,
+        executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
+    ): PublishedEndpointServeService =
+        PublishedEndpointServeService(
+            registry = registry,
+            bindings = bindings,
+            authorizer = authorizer,
+            readOnlyRule = readOnlyRule,
+            pipelines = pipelines,
+            runner = runner,
+            resultStore = resultStore,
+            resultUrls = resultUrls,
+            resultConfig = resultConfig,
+            endpointsProperties = endpointsProperties,
+            audit = audit,
+            scope = executionScope,
+        )
 
     @Bean
     fun endpointInvalidationPublisher(
