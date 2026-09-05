@@ -595,6 +595,30 @@ code {
   color: var(--text-secondary);
 }
 
+/* Feature groups (070): four short sub-headings so a reader scanning the section
+   finds promotion under Operate and failures under Run, instead of parsing twenty
+   equal cards. Tokens only — no literal colours, sizes or spacing (cardinal rule 3). */
+
+.feature-group + .feature-group {
+  margin-top: var(--space-10);
+}
+
+.group-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--space-px) solid var(--border-default);
+}
+
+/* The grid's own top margin is sized for a section heading; under a group label
+   it only needs to clear the rule. */
+.feature-group .features-grid {
+  margin-top: var(--space-5);
+}
+
 .features-pointer {
   margin-top: var(--space-8);
   font-size: var(--text-sm);

@@ -77,10 +77,10 @@
           <p class="hero-sub">Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).</p>
           <!-- claim: docs/deployment.md Appendix B -->
           <div class="code-block">
-            <pre><code>./app.sh --start --demo</code></pre>
+            <pre><code>./app.sh --start --demo-nyc</code></pre>
             <button type="button" class="copy-btn" hidden>Copy</button>
           </div>
-          <p class="hero-note">One command, real NYC data.</p>
+          <p class="hero-note">One command, real NYC data. Add <code>--demo-trade</code> for the second family.</p>
           <div class="btn-row">
             <a class="btn btn-primary" th:href="@{/login}">Try Right Now</a>
             <a class="btn btn-secondary" href="#demo">Get started</a>
@@ -120,8 +120,8 @@
               <h3>Point the agent at <code>/mcp</code></h3>
               <!-- claim: docs/mcp-server.md §4.1 -->
               <p>The MCP endpoint authenticates API keys only — <code>DP-API-Key</code> header or <code>Bearer dpk_…</code>. No cookies, no session roulette.</p>
-              <!-- claim: docs/mcp-server.md §6.2.1–6.2.18 -->
-              <p>Exactly <span th:text="${toolCount}">18</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
+              <!-- claim: docs/mcp-server.md §6.2.1–6.2.22 -->
+              <p>Exactly <span th:text="${toolCount}">22</span> tools cover the full lifecycle: introspect datasources, author templates and pipelines, execute, inspect.</p>
             </li>
             <li>
               <h3>Author as a JSON contract</h3>
@@ -143,7 +143,7 @@
           <figure class="how-figure">
             <svg class="diagram" viewBox="0 0 360 536" role="img" aria-labelledby="flow-title flow-desc">
               <title id="flow-title">Agent-to-engine flow</title>
-              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (18 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
+              <desc id="flow-desc" th:text="|An AI agent with a scoped API key talks to the /mcp endpoint (${toolCount} tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.|">An AI agent with a scoped API key talks to the /mcp endpoint (22 tools), authors a pipeline as a versioned JSON contract, which executes against PostgreSQL, MySQL, SQLite and four more dialects through a per-execution staging tempdb, returning row-level results and stable error codes to the agent.</desc>
               <defs>
                 <marker id="dg-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" class="dg-arrowhead"/>
@@ -157,7 +157,7 @@
               <path class="dg-arrow" d="M180 72 V92" marker-end="url(#dg-arrowhead)"/>
 
               <rect class="dg-box-accent" x="30" y="96" width="300" height="56" rx="8"/>
-              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 18 MCP tools</text>
+              <text class="dg-label" x="180" y="120" font-size="14" text-anchor="middle" th:text="|/mcp — ${toolCount} MCP tools|">/mcp — 22 MCP tools</text>
               <text class="dg-sub" x="180" y="138" font-size="11" text-anchor="middle">API-key-only: DP-API-Key or Bearer dpk_…</text>
 
               <path class="dg-arrow" d="M180 152 V172" marker-end="url(#dg-arrowhead)"/>
@@ -210,15 +210,17 @@
         <h2 id="cap-title" class="ds-headline">What's in the box</h2>
         <p class="section-lede">Each card cites the spec section it comes from — view source and spot-check us. Caveats included where they exist — honesty is the brand.</p>
 
-        <div class="features-grid ds-stagger-children">
+        <div class="feature-group">
+          <h3 class="group-title">Author</h3>
+          <div class="features-grid ds-stagger-children">
 
           <article class="card ds-hover-lift">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <h3>Versioned JSON contracts</h3>
             <!-- claim: docs/pipeline-contract.md §3.1, §14, §15 -->
+            <h3>Versioned JSON contracts</h3>
             <p>Pipelines are declarative JSON — <code>schema_version</code>, nodes, <code>depends_on</code>, parameters, settings. Every update mints a new immutable integer version, and the contract is additive-only.</p>
           </article>
 
@@ -226,18 +228,96 @@
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M9 7 4 12l5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <h3>Freemarker SQL templates</h3>
             <!-- claim: docs/templates.md §4.2–§6 -->
-            <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved. Templates version immutably, pipelines pin versions, and library templates import declaratively.</p>
+            <h3>Freemarker SQL templates</h3>
+            <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved. Library templates import declaratively.</p>
+            <!-- claim: docs/templates.md §4.5, §8.4 -->
+            <p>Declared parameters bind as <code>:name</code> on a prepared statement — never interpolated. A template that interpolates a declared parameter into the SQL text instead is refused at save with <code>template.validation.parameter_interpolated</code>, and the message names the bind form to write.<!-- deliberately phrased without a literal dollar-brace: that sequence is how an unresolved Thymeleaf expression looks, and SiteRenderTest sweeps the RENDER for it (an entity is decoded back by the parser) --></p>
           </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 7h9M4 12h7M4 17h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="18" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="18" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <!-- claim: docs/templates.md §5.1, §5.3 -->
+            <h3>Template versions, pinned by hash</h3>
+            <p>Every template version is immutable — body, imports, dialect and engine are frozen once stored, versions are never reused or renumbered, and each carries a content hash. Pipelines pin <code>{name, version}</code>, so a new template version is invisible to them until an author moves the pin.</p>
+            <!-- claim: docs/template-hierarchy-design.md §5.1, §5.3, §6 -->
+            <p>Templates are typed: <code>sql</code> (dialect required) or <code>html</code> (dialect absent, auto-escaping on). The type is fixed at creation and a database constraint enforces the pair.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 6h6l2 2h10v11a1 1 0 0 1-1 1H3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M7 13h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/template-hierarchy-design.md §4.1, §4.3, §4.5 -->
+            <h3>Template hierarchy &amp; explorer</h3>
+            <p>A template's name <em>is</em> its path — <code>acme/finance/monthly_revenue</code>, up to ten segments. Folders are virtual: derived from name prefixes, with no identity, no CRUD and no rename, because a name is an identity every pin depends on.</p>
+            <!-- claim: docs/ui-screens.md §4.6 -->
+            <p>The explorer is a real tree — one server-side prefix query per level, versions on the right, browse and search as two different presentations.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="6" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="18" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8.4 12h7.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M18 4v5M18 15v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/versioning.md §3.1, §3.3, §5.3, §5.4 -->
+            <h3>Draft → release → discard</h3>
+            <p>One draft per entity, at most. Releasing locks the version: <em>we never modify a released pipeline</em> — the next change copies it into a new draft. Discard drops the draft and returns the number to the pool.</p>
+            <!-- claim: docs/ui-screens.md §4.7 -->
+            <p>The editor's version select is read-only for anything but the working version, and <strong>Edit</strong> reuses the existing draft or copies the selected version into a new one — the rule is visible on screen, not just enforced behind it.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 4v10M12 14l-4-4M12 14l4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 18h16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/templates.md §5.4 -->
+            <h3>Used-by: impact before you change</h3>
+            <p>The reverse arrow, answered as two different questions. <em>Who uses this version now?</em> scans every pipeline's working version and names the pipeline, the node id and the version carrying the pin — a fact you can go and change, not a count.</p>
+            <!-- claim: docs/templates.md §5.1, §5.4 -->
+            <p><em>Is it safe to delete?</em> scans every version ever, because historical versions stay executable. Delete is refused with <code>409 template.in_use</code> while any pipeline version pins it.</p>
+          </article>
+
+          </div>
+        </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: the /templates explorer, tree expanded two levels with a leaf selected — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/template-explorer.png}" width="1440" height="900" alt="The templates screen: a tree on the left with the nyc folder expanded into lib, mobility, reference and weather, and mobility expanded again to show seven templates with sql and dialect badges. On the right, the selected template nyc/mobility/od_matrix.sql with its description and a versions table showing v1 RELEASED, in use by 1 pipeline." loading="lazy">
+            </div>
+            <figcaption>The template explorer. A template's name <em>is</em> its path, so the browser is a tree — one server-side query per level, versions on the right.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: the shared zone template's version list with its in-use count — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/template-used-by.png}" width="1440" height="900" alt="The templates screen with sample_zones.sql selected. Its versions table shows version v1, status RELEASED, and an IN USE column reading 6 pipelines." loading="lazy">
+            </div>
+            <figcaption>Used-by, before you change anything: <code>sample_zones.sql</code> v1 is pinned by six pipelines. Delete is refused while that number is not zero.</figcaption>
+          </figure>
+        </div>
+
+
+        <div class="feature-group">
+          <h3 class="group-title">Run</h3>
+          <div class="features-grid ds-stagger-children">
 
           <article class="card ds-hover-lift">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <ellipse cx="12" cy="6" rx="7" ry="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <path d="M5 6v12a7 2.6 0 0 0 14 0V6M5 12a7 2.6 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <h3>Seven SQL dialects</h3>
             <!-- claim: docs/datasources.md §4.1 -->
+            <h3>Seven SQL dialects</h3>
             <p>PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite and H2 — one contract, seven engines.</p>
             <!-- claim: docs/datasources.md §10, docs/deployment.md §3.5 -->
             <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>.</p>
@@ -247,8 +327,8 @@
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M3 5h4l5 7-5 7H3M14 12h7M18 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <h3>Cross-engine staging joins</h3>
             <!-- claim: docs/staging.md §1, §3.1 -->
+            <h3>Cross-engine staging joins</h3>
             <p>Each execution gets its own isolated in-memory H2 tempdb — created at start, destroyed at end. Nodes stage ResultSets there, so downstream nodes join across engines.</p>
           </article>
 
@@ -257,10 +337,154 @@
               <rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <h3>Pipeline composition</h3>
             <!-- claim: docs/pipeline-contract.md §4.9, docs/dag-executor.md §6.6 -->
-            <p>A <code>PIPELINE</code> node executes a version-pinned child pipeline as a linked child execution — in-process, with lineage and family cancellation.</p>
+            <h3>Pipeline composition</h3>
+            <p>A <code>PIPELINE</code> node executes a version-pinned child pipeline as a linked child execution — in-process, with lineage and family cancellation. The child keeps its own execution record, tempdb, stats and stream.</p>
           </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="13" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M11 7.5h3a2 2 0 0 1 2 2V13" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <!-- claim: docs/pipeline-editor.md §5.3 -->
+            <h3>Pipeline graph view</h3>
+            <p>The DAG renders as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and — after a run — elapsed time and rows. Colour carries state, the badge carries type, the ring carries selection.</p>
+            <!-- claim: docs/pipeline-editor.md §11.1 -->
+            <p>It executes, streams, cancels, pages results and switches versions. What it deliberately does not do is author: there is no edit mode in v1, because authoring is agent-first.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M12 7.5v5.5M12 16.2v.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/dag-executor.md §8.4 -->
+            <h3>Failures you can actually read</h3>
+            <p>A failed node carries the catalogued code, the message, the node's own facts (<code>datasource</code>, dialect, <code>template @ version</code>), the rendered SQL in <code>:name</code> form — never a bound value — and the <strong>original exception chain with frames</strong>, root cause last.</p>
+            <!-- claim: docs/rest-api.md §6.4, docs/mcp-server.md §6.2.14, docs/pipeline-editor.md §9 -->
+            <p>The same record, built once, reaches the <code>node_failed</code> SSE event, the stored <code>error_json</code>, the editor's error surface and the agent's <code>executions_get</code>. No surface strips what another shows.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <!-- claim: docs/rest-api.md §6 -->
+            <h3>Live execution streams</h3>
+            <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. No stream resumption — a dropped connection cancels the execution rather than orphaning it.</p>
+          </article>
+
+          </div>
+        </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: the editor on the largest showcase pipeline after a successful run, dock open on Results — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/graph-cards.png}" width="1440" height="900" alt="The pipeline editor for weather_sensitivity_by_borough after a successful run. Node cards carry a green tick, the node name, a DQL badge, the datasource and dialect (sample-trips POSTGRES, sample-weather MYSQL, tempdb H2), the pinned template and version, and a run line reading 5.7 s and 13368 rows. Curved edges join the staging nodes to the answer node. The results dock is open below, showing borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="lazy">
+            </div>
+            <figcaption>The editor after running <code>weather_sensitivity_by_borough</code> — five nodes across Postgres, MySQL and SQLite, staged into one tempdb. Each card carries its own engine, pinned template, elapsed time and row count. The fifth card sits below the results dock at this window size.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: a node's details panel showing the resolved SQL — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/node-inspector.png}" width="1440" height="900" alt="The pipeline editor with the stage_daily_by_zone node selected. A details panel on the right shows the node type DQL, its description, the resolved SQL syntax-highlighted with a :start_date bind parameter visible, and a configuration section giving the source sample-trips, the template nyc/mobility/daily_by_zone.sql at v1, and the output target tempdb table stg_daily_by_zone." loading="lazy">
+            </div>
+            <figcaption>A node's details, with the SQL <em>resolved</em> — rendered server-side, bind parameters still in <code>:name</code> form because values never enter the SQL text.</figcaption>
+          </figure>
+        </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: a real node failure with the exception chain expanded — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/failure-detail.png}" width="1440" height="900" alt="The pipeline editor after a failed run. The failing node's card is outlined in red with a cross badge, showing probe-trips-readonly POSTGRES and its template. Below, the failure detail shows the error code pipeline.node.datasource_connection_failed, the driver message FATAL: password authentication failed for user demo_probe_ro, a correlation id, the node's own facts, the rendered SQL, and an expanded exception section naming the root cause org.postgresql.util.PSQLException with its stack frames." loading="lazy">
+            </div>
+            <figcaption>A node failure, in full: the catalogued code, the driver's own message, the rendered SQL, and the original exception chain with frames. The same record reaches the SSE event, the stored execution and the agent's <code>executions_get</code>. Produced honestly — a throwaway pipeline whose datasource password was rotated out from under it.</figcaption>
+          </figure>
+        </div>
+
+
+        <div class="feature-group">
+          <h3 class="group-title">Operate</h3>
+          <div class="features-grid ds-stagger-children">
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="9" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="15.5" y="9" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8.5 12h7M13 9.5l2.5 2.5L13 14.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <!-- claim: docs/versioning.md §10.1, §10.2, §10.3 -->
+            <h3>Promotion between environments</h3>
+            <p>Push dev → staging → prod from the UI. The screen lists only <strong>released</strong> versions newer than the target's; drafts never leave the authoring environment, and a same-version push is refused as a bug rather than swallowed as a no-op. Templates and child pipelines travel first, as a dependency closure.</p>
+            <!-- claim: docs/versioning.md §10.6, docs/deployment.md §6.3A -->
+            <p>The credential is a <strong>pre-shared server key</strong>, not a principal — no user account, so rotation and offboarding are independent. Absent key means promotion is refused; the receiver validates and never calls back.</p>
+            <!-- claim: docs/auth.md §4.5, docs/versioning.md §10.6 -->
+            <p>Imported rows are stamped with a <code>system</code> service account that cannot log in, and the receiver's audit event records the source environment and a fingerprint of the key — never the key.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="3" y="11" width="18" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M7 19h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/deployment.md §6.2 -->
+            <h3>Multi-instance ready</h3>
+            <p>Instances are symmetric and stateless for API, MCP, UI and auth — no sticky sessions. Only a <em>running</em> execution is pinned to one JVM; cancel works from any instance through Redis, and results, history and the event log are readable from all of them.</p>
+            <!-- claim: docs/datasources.md §5.7 -->
+            <p>Datasource pool invalidation rides a Redis channel: repoint or rotate a credential on one instance and every other evicts its pool and rebuilds from the row, instead of serving stale credentials until restart.</p>
+            <!-- claim: docs/deployment.md §6.2 -->
+            <p>A crashed instance's in-flight executions are swept to <code>ABORTED</code> by an idempotent stale-execution sweep every replica runs.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="6" y="3" width="12" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <!-- claim: docs/auth.md §10, docs/datasources.md §7.4 -->
+            <h3>Append-only audit log</h3>
+            <p>Logins, key lifecycle, scope denials, user admin, workspace events, promotion accept/reject, every MCP tool call and each credential-decryption point — recorded with actor, cause and source IP.</p>
+          </article>
+
+          <article class="card ds-hover-lift">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M3 8h18M7 13l2 2-2 2M12 17h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <!-- claim: docs/pipeline-contract.md §13, docs/rest-api.md §4.2, docs/mcp-server.md §9 -->
+            <h3>Catalogued error contract</h3>
+            <p>Failures arrive as stable <code>{domain}.{entity}.{failure}</code> codes in a uniform error envelope — a catalog enforced against the code by drift tests, and the same codes over MCP. Agents get errors they can branch on, not prose to parse.</p>
+          </article>
+
+          </div>
+        </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: the /promotion screen against a real receiver deployment — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/promotion.png}" width="1440" height="900" alt="The promotion screen. A banner reads: promoting workspace nyc-demo to uat. A table lists seven released pipelines, each with a send checkbox, its version here (v1) and its version on the target (absent). A Promote button sits below, beside a note saying the templates each pipeline pins and the child pipelines it runs are sent with it, in dependency order." loading="lazy">
+            </div>
+            <figcaption>Promotion to one configured higher environment. Only released versions newer than the target's are listed, and each one travels with its closure — the templates it pins and the child pipelines it runs.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: the /executions history with successes, failures and a composed child run — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, filtered by pipeline, status and date range. Rows show both outcomes: SUCCESS rows with durations and row counts, and FAILED rows with no rows returned. One row is annotated as spawned by another execution — the child of a composed pipeline." loading="lazy">
+            </div>
+            <figcaption>Execution history across both outcomes. A composed pipeline's child run is listed in its own right and linked back to the parent that spawned it.</figcaption>
+          </figure>
+        </div>
+
+
+        <div class="feature-group">
+          <h3 class="group-title">Govern</h3>
+          <div class="features-grid ds-stagger-children">
 
           <article class="card ds-hover-lift">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -269,8 +493,8 @@
               <rect x="4" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <rect x="13" y="13" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <h3>Workspaces &amp; team isolation</h3>
             <!-- claim: docs/auth.md §5.6, docs/metadata-db.md §4.12 -->
+            <h3>Workspaces &amp; team isolation</h3>
             <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; roles are owner and member.</p>
             <!-- claim: docs/ui-screens.md §4.13, docs/rest-api.md §17 -->
             <p>The management UI ships: create, switch, manage members, a navbar switcher and add-by-email.</p>
@@ -281,32 +505,21 @@
               <circle cx="8" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <path d="M12 12h9M17 12v3M20 12v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <h3>OIDC SSO + scoped agent keys</h3>
             <!-- claim: docs/auth.md §5.1, §7.1–7.6 -->
+            <h3>OIDC SSO + scoped agent keys</h3>
             <p>Humans sign in through OIDC SSO. Agents get their own API keys with hierarchical scopes — separate principals, separate blast radii.</p>
           </article>
 
           <article class="card ds-hover-lift">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <rect x="4.5" y="10" width="15" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 10V7.5a4 4 0 0 1 8 0V10" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <h3>Live execution streams</h3>
-            <!-- claim: docs/rest-api.md §6 -->
-            <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. No stream resumption — a dropped connection means starting a new execution.</p>
-          </article>
-
-          <article class="card ds-hover-lift">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="6" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="12" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M8.2 6h7.6M7.3 7.9l3.4 8M16.7 7.9l-3.4 8" fill="none" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
-            <h3>Pipeline graph view</h3>
-            <!-- claim: docs/pipeline-editor.md §1, §5–§7, §10 -->
-            <p>The editor renders the pipeline DAG with its settings, parameters and per-node detail. Running a pipeline from inside the editor — and the live node highlighting and result preview that follow from it — is being repaired; today execution is agent- and REST-driven.</p>
-            <!-- claim: docs/pipeline-editor.md §11 -->
-            <p>It's read-only in v1 by design: a visualization surface, not an authoring surface. Authoring is agent-first.</p>
+            <!-- claim: docs/auth.md §5A, §5A.1, §5A.2 -->
+            <h3>Local password accounts</h3>
+            <p>No identity provider? Turn on local accounts and the whole product runs with zero external setup. Hashes are <strong>Argon2id</strong> through the same hasher API keys use; there is no self-registration — an admin creates the account, or config seeds the first admin only.</p>
+            <!-- claim: docs/auth.md §5A.4, §5A.5, §5A.3 -->
+            <p>Every seeded or admin-reset credential is one-time and the app refuses every other screen until it is changed. Unknown email, OIDC-only account and wrong password give the same banner, the same status <em>and the same cost</em> — the no-row path still runs one Argon2 verification, so timing cannot enumerate. Five consecutive failures lock the account without spending any more hashing memory.</p>
           </article>
 
           <article class="card ds-hover-lift">
@@ -314,32 +527,44 @@
               <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
               <path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <h3>Read-only datasource governance</h3>
             <!-- claim: docs/datasources.md §5.7 -->
+            <h3>Read-only datasource governance</h3>
             <p><code>is_readonly</code> forbids write-shaped uses — enforced at save time, at an executor backstop, and as Hikari <code>readOnly</code>. Admin-gated on globals. The flag is a contract, not containment: pair it with a SELECT-only DB user.</p>
           </article>
 
           <article class="card ds-hover-lift">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <rect x="6" y="3" width="12" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M12 3l8 4v5c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M12 10v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="8" r=".9" fill="currentColor"/>
             </svg>
-            <h3>Append-only audit log</h3>
-            <!-- claim: docs/auth.md §10, docs/datasources.md §7.4 -->
-            <p>Logins, key lifecycle, scope denials, user admin, workspace events and credential decryption points — recorded with actor, cause and source IP.</p>
+            <!-- claim: docs/datasources.md §7.1 -->
+            <h3>Encrypted datasource credentials</h3>
+            <p>Passwords are AES-256-GCM encrypted with the row's name bound as additional authenticated data, so a ciphertext moved between rows fails to decrypt. The app refuses to start without a valid key.</p>
+            <!-- claim: docs/key-providers.md §4–§5, docs/datasources.md §7.1.1 -->
+            <p>Every credential carries a key version and <code>datapipelines.db.key-provider</code> selects where the key comes from — one contract test every provider passes.</p>
           </article>
 
-          <article class="card ds-hover-lift">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M3 8h18M7 13l2 2-2 2M12 17h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <h3>Catalogued error contract</h3>
-            <!-- claim: docs/pipeline-contract.md §13, docs/rest-api.md §4.2, docs/mcp-server.md §9 -->
-            <p>Failures arrive as stable <code>{domain}.{entity}.{failure}</code> codes in a uniform error envelope — a catalog enforced against the code by drift tests, and the same codes over MCP. Agents get errors they can branch on, not prose to parse.</p>
-          </article>
-
+          </div>
         </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <!-- screenshot: the workspaces screen with two workspaces and the navbar switcher — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/workspaces.png}" width="1440" height="900" alt="The workspaces screen. A create form at the top, then a table listing two workspaces — nyc-demo, marked active, and analytics-team — each with the viewer's role of owner and Switch and Delete actions. Below, a members table per workspace with an add-by-email field. A workspace switcher sits in the navigation bar." loading="lazy">
+            </div>
+            <figcaption>Workspaces, with the navbar switcher. Every request resolves exactly one workspace, and all authored content is scoped to it.</figcaption>
+          </figure>
+          <figure class="shot">
+            <!-- screenshot: the API keys screen AFTER the once-only secret reveal was dismissed — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/api-keys.png}" width="1440" height="900" alt="The API keys screen listing two keys by name, creation date, last-used date and scope badges reading read and author, each with a Revoke action. No key secret is visible anywhere on the screen." loading="lazy">
+            </div>
+            <figcaption>Agent credentials. The secret is shown exactly once, at creation; afterwards only a prefix, the scopes and the last-used time — which is what this capture was taken to show.</figcaption>
+          </figure>
+        </div>
+
 
         <p class="features-pointer">Charts and dashboards are next — <a href="#roadmap">see the roadmap</a>.</p>
       </div>
@@ -351,7 +576,7 @@
         <p class="kicker">The demo is the quickstart</p>
         <h2 id="demo-title" class="ds-headline">Real NYC data, one command</h2>
         <!-- claim: docs/deployment.md Appendix B -->
-        <p class="section-lede"><code>./app.sh --start --demo</code> builds the jar, downloads the published mobility/v1 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds two example pipelines — <code>revenue_by_borough</code> and <code>rainy_vs_dry_ridership</code>.</p>
+        <p class="section-lede"><code>./app.sh --start --demo-nyc</code> builds the jar, downloads the published mobility/v2 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds 17 templates and six example pipelines into your workspace at first login.</p>
 
         <div class="demo-grid">
           <div class="demo-copy">
@@ -362,8 +587,12 @@
               <li><strong>SQLite</strong> — a reference database.</li>
               <li><strong>Deterministic build</strong> — every source URL and SHA-256 pinned; hash-based sampling, never random.</li>
               <li><strong>Checksummed manifest</strong> — with provenance recorded per source, behind a pre-publication license gate.</li>
+              <!-- claim: scripts/sample-data/README.md (the seeded example pipelines), deploy/sample-data/expected-results-nyc.json -->
+              <li><strong>Six worked pipelines</strong> — up to five nodes, three engines in one run, a composed child pipeline, and a shared template library. Each one has a recorded expected result, checked by <code>check-baselines.sh</code>.</li>
             </ul>
             <p class="demo-note">Same command, same bytes, same rows — every time. Your agent gets a reproducible sandbox with something real to chew on.</p>
+            <!-- claim: docs/deployment.md Appendix B (the demo families table), deploy/sample-data/bootstrap-datasources-census.yml -->
+            <p class="demo-note"><strong>A second family ships beside it.</strong> <code>--demo-trade</code> adds US Census monthly imports and exports at HS-6 grain on <strong>DuckDB</strong> — the demo's fourth engine — UN Comtrade mirror statistics on MySQL, and Federal Reserve H.10 exchange rates on SQLite, with three more example pipelines that reconcile what the United States reports against what its partners report. This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.</p>
           </div>
 
           <figure class="demo-figure">
@@ -404,36 +633,20 @@
 
               <rect class="dg-box" x="30" y="216" width="300" height="52" rx="8"/>
               <text class="dg-label" x="180" y="238" font-size="13" text-anchor="middle">Joined result</text>
-              <text class="dg-sub" x="180" y="255" font-size="10" text-anchor="middle">revenue_by_borough · rainy_vs_dry_ridership</text>
+              <text class="dg-sub" x="180" y="255" font-size="10" text-anchor="middle">weather_sensitivity_by_borough · mobility_briefing</text>
             </svg>
           </figure>
         </div>
-      </div>
-    </section>
-
-    <!-- ============================ SCREENSHOTS ============================ -->
-    <section class="section" id="screenshots" aria-labelledby="shots-title">
-      <div class="container">
-        <p class="kicker">No mockups</p>
-        <h2 id="shots-title" class="ds-headline">What it looks like</h2>
-        <p class="section-lede">Actual screens from the running app. Wide shots scroll sideways on small screens instead of shrinking into confetti.</p>
-
         <div class="shots">
           <figure class="shot">
-            <!-- screenshot: pipeline editor rendering the DAG of the seeded revenue_by_borough pipeline (untouched capture) -->
-            <div class="shot-scroll" tabindex="0" role="group" aria-label="Pipeline editor screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/editor-light.png}" width="1440" height="900" alt="The pipeline editor for revenue_by_borough: a settings and parameters panel on the left, and the pipeline DAG on the right — two staging nodes, stage_trips_monthly and stage_zones, both feeding the borough_revenue node, with the Execute button at top right." loading="lazy">
+            <!-- screenshot: the /datasources registry with each datasource's last connection-test outcome — untouched capture from `./gradlew siteShots` (070 §C) -->
+            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
+              <img th:src="@{/site/img/datasources.png}" width="1440" height="900" alt="The datasources screen listing four registered datasources: probe-trips-readonly (Postgres) whose last test reads failed, and sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) whose last tests read ok. All four are marked global and readonly, each with a Test action." loading="lazy">
             </div>
-            <figcaption>The pipeline editor — the seeded revenue_by_borough DAG, with settings and parameters. Untouched capture of the current build.</figcaption>
-          </figure>
-          <figure class="shot">
-            <!-- screenshot: datasources page — the three seeded global+readonly demo datasources (SQLite reference, Postgres taxi, MySQL weather) -->
-            <div class="shot-scroll" tabindex="0" role="group" aria-label="Datasources screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/datasources.png}" width="1440" height="900" alt="The datasources page listing the three seeded demo datasources — sample-reference (SQLite), sample-trips (Postgres) and sample-weather (MySQL) — all global, all read-only, each with Test and View actions." loading="lazy">
-            </div>
-            <figcaption>Datasources — three engines, one registry, governed read-only. Fewer charts than a BI tool, more honesty.</figcaption>
+            <figcaption>The demo's three datasources — three engines, one registry, every one governed read-only — beside the deliberately broken fourth used for the failure capture above. The last-test outcome is recorded per datasource.</figcaption>
           </figure>
         </div>
+
       </div>
     </section>
 
@@ -506,19 +719,24 @@
 
           <ul class="roadmap-list">
             <li class="roadmap-item">
-              <h3>DuckDB as a sample-data engine and staging engine</h3>
-              <!-- claim: docs/superpowers/specs/2026-08-16-sample-data-design.md D2, docs/ROADMAP.md §2 -->
-              <p>The DuckDB SQL dialect already ships; using it to host sample data and to back the staging tempdb is planned.</p>
+              <h3>Pipeline and template editing in the UI</h3>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Pipeline CRUD and template CRUD in the UI", the first row -->
+              <p>Create, edit and save from the browser. Today both editors display, preview, release and execute; authoring goes through MCP and the REST API. When it lands it rides the existing draft lifecycle — a released version is never the edit target.</p>
             </li>
             <li class="roadmap-item">
-              <h3>Workspace invite / approval workflow</h3>
-              <!-- claim: docs/superpowers/specs/2026-08-16-workspaces-design.md §11 -->
-              <p>Member management already ships (add-by-email, owner/member roles); the invite-and-approval flow on top is planned.</p>
+              <h3>DuckDB as a staging engine</h3>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "DuckDB as staging engine (settings.tempdb.engine: \"DUCKDB\")" -->
+              <p><code>settings.tempdb.engine: "DUCKDB"</code> for large analytical joins. DuckDB already ships as a dialect and, since the trade demo family, as a sample-data engine; backing the staging tempdb with it is what remains.</p>
             </li>
             <li class="roadmap-item">
-              <h3>Per-datasource ACLs</h3>
-              <!-- claim: docs/ROADMAP.md §3.8 -->
-              <p>Fine-grained access per datasource, beyond workspace roles and key scopes.</p>
+              <h3>Auto-created write-back tables</h3>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "Auto-create target table for write-back (output.auto_create: true)" -->
+              <p><code>output.auto_create: true</code> emits a <code>CREATE TABLE IF NOT EXISTS</code> from the ResultSet's own metadata, so writing a result back no longer needs a DDL node in front of it.</p>
+            </li>
+            <li class="roadmap-item">
+              <h3>A shipped KMS key provider</h3>
+              <!-- claim: docs/ROADMAP.md §2 (v1.1 candidates) — "A shipped KMS key provider (AWS KMS, GCP KMS, Azure Key Vault, Vault transit)" -->
+              <p>The contract half already ships: credentials carry a key version, <code>datapipelines.db.key-provider</code> selects the source, and one contract test every implementation passes. What is left is a vendor implementation — a written procedure, not a design.</p>
             </li>
           </ul>
         </div>

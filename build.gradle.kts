@@ -241,6 +241,14 @@ tasks.register("integrationTest") {
 // The browser suite's separate invocation (module-structure §5.12): deliberately NOT
 // part of build/check/verify — it downloads browser binaries on first use and launches
 // chromium, so it is invoked deliberately before a release, never on every build.
+// The screenshot driver is a sibling of the browser suite, registered in the module itself
+// (tests/browser-tests/build.gradle.kts) and reachable from the root as :tests:browser-tests:siteShots.
+tasks.register("siteShots") {
+    group = "documentation"
+    description = "Captures the marketing site screenshots from a running demo deployment (070 §C)."
+    dependsOn(":tests:browser-tests:siteShots")
+}
+
 tasks.register("browserTest") {
     group = "verification"
     description = "Runs the Playwright browser suite of the UI golden paths (tests/browser-tests)."

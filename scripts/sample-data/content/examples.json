@@ -72,9 +72,149 @@
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Compare ridership on rainy versus dry days, by day type",
-      "description": "Runs in tempdb (H2) over stg_trips_daily (Postgres), stg_daily_rain (MySQL) and stg_calendar (SQLite) \u2014 a three-datasource join. Expects a BIGDECIMAL parameter named rain_threshold_mm; a day at or above it counts as rainy. Days with no weather observation count as dry.",
+      "description": "Runs in tempdb (H2) over stg_trips_daily (Postgres), stg_daily_rain (MySQL) and stg_calendar (SQLite) — a three-datasource join. Expects a BIGDECIMAL parameter named rain_threshold_mm; a day at or above it counts as rainy. Days with no weather observation count as dry.",
       "imports": [],
       "body": "SELECT\n    CASE WHEN COALESCE(r.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END AS weather,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END                                   AS day_type,\n    COUNT(*)                                                  AS days,\n    SUM(t.trip_count)                                         AS trip_count,\n    ROUND(AVG(CAST(t.trip_count AS DECIMAL(18,2))), 1)        AS avg_trips_per_day,\n    ROUND(SUM(t.total_revenue), 2)                            AS total_revenue\nFROM stg_trips_daily t\nJOIN stg_calendar c ON CAST(c.cal_date AS DATE) = t.pickup_date\nLEFT JOIN stg_daily_rain r ON r.obs_date = t.pickup_date\nGROUP BY 1, 2\nORDER BY 1, 2",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/lib/metrics.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Shared rate and share metrics (library)",
+      "description": "Library template: per_unit(total, qty[, scale]) and share_pct(part, whole). Both guard the divisor with NULLIF, so an empty bucket yields NULL rather than failing the whole node. Imported by the H2 rollup templates under nyc/mobility/. Takes no parameters - a library never renders on its own.",
+      "imports": [],
+      "body": "<#-- nyc/lib/metrics.sql v1 - the two ratio shapes every borough rollup needs.\n     Library: macro definitions only, no top-level output (templates.md 6.2). -->\n<#macro per_unit total qty scale=2>ROUND(CAST(${total} AS DECIMAL(18,4)) / NULLIF(${qty}, 0), ${scale})</#macro>\n<#macro share_pct part whole>ROUND(100.0 * CAST(${part} AS DECIMAL(18,4)) / NULLIF(${whole}, 0), 1)</#macro>",
+      "is_library": true
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/od_pairs.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Trips by pickup zone, drop-off zone and rate code",
+      "description": "Trip-level scan of the sample-trips Postgres database, rolled up to one row per (pickup zone, drop-off zone, rate code) for the window. This is the shared origin-destination staging source: the zone and rate-code lookups that turn these ids into boroughs, airports and fare bases live in a different engine, which is what makes the join a cross-engine one. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one quarter so the trip-level scan stays a few seconds.",
+      "imports": [],
+      "body": "SELECT\n    t.pu_location_id                  AS pu_location_id,\n    t.do_location_id                  AS do_location_id,\n    t.rate_code_id                    AS rate_code_id,\n    COUNT(*)                          AS trip_count,\n    ROUND(SUM(t.total_amount), 2)     AS total_amount,\n    ROUND(SUM(t.tolls_amount), 2)     AS total_tolls,\n    ROUND(SUM(t.trip_distance_mi), 2) AS total_distance_mi\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pu_location_id, t.do_location_id, t.rate_code_id",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/reference/rate_codes.sql",
+      "engine": "freemarker",
+      "dialect": "SQLITE",
+      "display_name": "TLC rate codes",
+      "description": "Reads the seven-row rate-code lookup from the sample-reference SQLite datasource - the fare basis a trip was metered on (Standard rate, the JFK flat fare, Newark, Nassau or Westchester, Negotiated fare, Group ride, Unknown). Takes no parameters.",
+      "imports": [],
+      "body": "SELECT\n    r.rate_code_id AS rate_code_id,\n    r.description  AS rate_code\nFROM rate_codes r",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/daily_by_zone.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Daily trips by pickup zone",
+      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the grain a weather join needs, which neither shipped rollup has. The raw TLC feed carries implausible rows - the sample holds a trip recorded at 331,688 miles and 91,033 at zero distance - so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is 98.1 percent of the trips and is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one quarter so the trip-level scan stays a few seconds.",
+      "imports": [],
+      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS trip_count,\n    ROUND(SUM(t.total_amount), 2) AS total_amount\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/weather/daily_elements.sql",
+      "engine": "freemarker",
+      "dialect": "MYSQL",
+      "display_name": "Daily weather elements, averaged across stations",
+      "description": "One row per day from the sample-weather MySQL database, with precipitation, snowfall, maximum temperature and wind speed pivoted into columns and averaged across the five NYC-area stations. Expects DATE parameters start_date and end_date.",
+      "imports": [],
+      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm,\n    ROUND(AVG(CASE WHEN o.element = 'SNOW' THEN o.value END), 2) AS snow_mm,\n    ROUND(AVG(CASE WHEN o.element = 'TMAX' THEN o.value END), 1) AS tmax_c,\n    ROUND(AVG(CASE WHEN o.element = 'AWND' THEN o.value END), 1) AS wind_ms\nFROM observations o\nWHERE o.obs_date BETWEEN :start_date AND :end_date\n  AND o.element IN ('PRCP', 'SNOW', 'TMAX', 'AWND')\nGROUP BY o.obs_date",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/borough_baseline.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Borough trip baseline (tempdb)",
+      "description": "Reduces the staged origin-destination pairs to one baseline row per PICKUP borough - the denominator the airport comparison is read against. It is derived from the SAME staged table as the numerator on purpose: a baseline taken from the monthly rollup instead would also count trips whose drop-off zone has no borough, and the resulting share would have a denominator its numerator was never drawn from. Reads only staged tables; takes no parameters of its own.",
+      "imports": [
+        {
+          "id": "nyc/lib/metrics.sql",
+          "version": 1,
+          "alias": "met"
+        }
+      ],
+      "body": "SELECT\n    z.borough                                                          AS borough,\n    SUM(o.trip_count)                                                  AS borough_trip_count,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/> AS borough_revenue_per_trip\nFROM stg_od_pairs o\nJOIN stg_zones z ON z.location_id = o.pu_location_id\nGROUP BY z.borough",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/airport_access.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Airport legs by pickup borough (tempdb)",
+      "description": "The answer node of airport_access_by_borough. Joins the staged origin-destination pairs to the staged zone lookup TWICE - once for the pickup end, once for the drop-off end - keeps only legs whose drop-off zone is an airport, labels them with the staged rate-code lookup - so the share metered on an airport FLAT fare (the JFK and Newark rate codes) rather than the standard meter is an exact count, not a guess at which label sorts last - and reads each borough's airport economics against its own baseline. Reads only staged tables.",
+      "imports": [
+        {
+          "id": "nyc/lib/metrics.sql",
+          "version": 1,
+          "alias": "met"
+        }
+      ],
+      "body": "SELECT\n    pu.borough                                                              AS pickup_borough,\n    dz.zone_name                                                            AS airport,\n    SUM(o.trip_count)                                                       AS airport_trips,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>       AS revenue_per_trip,\n    <@met.per_unit total=\"SUM(o.total_distance_mi)\" qty=\"SUM(o.trip_count)\"/>  AS miles_per_trip,\n    <@met.per_unit total=\"SUM(o.total_tolls)\" qty=\"SUM(o.trip_count)\"/>        AS tolls_per_trip,\n    MAX(b.borough_revenue_per_trip)                                          AS borough_revenue_per_trip,\n    <@met.share_pct part=\"SUM(o.trip_count)\" whole=\"MAX(b.borough_trip_count)\"/> AS pct_of_borough_trips,\n    SUM(CASE WHEN rc.rate_code IN ('JFK', 'Newark') THEN o.trip_count ELSE 0 END) AS flat_fare_trips,\n    <@met.share_pct part=\"SUM(CASE WHEN rc.rate_code IN ('JFK', 'Newark') THEN o.trip_count ELSE 0 END)\" whole=\"SUM(o.trip_count)\"/> AS pct_flat_fare\nFROM stg_od_pairs o\nJOIN stg_zones pu ON pu.location_id = o.pu_location_id\nJOIN stg_zones dz ON dz.location_id = o.do_location_id\nLEFT JOIN stg_borough_baseline b ON b.borough = pu.borough\nLEFT JOIN stg_rate_codes rc ON rc.rate_code_id = o.rate_code_id\nWHERE dz.service_zone IN ('Airports', 'EWR')\nGROUP BY pu.borough, dz.zone_name\nORDER BY SUM(o.trip_count) DESC",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/od_matrix.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Borough-to-borough trip matrix (tempdb)",
+      "description": "The answer node of borough_od_matrix. Resolves both ends of every staged origin-destination pair through the staged zone lookup and rolls the result up to a borough-by-borough matrix. Reads only staged tables; the pickup-borough filter is bound from the pipeline's borough parameter.",
+      "imports": [
+        {
+          "id": "nyc/lib/metrics.sql",
+          "version": 1,
+          "alias": "met"
+        }
+      ],
+      "body": "SELECT\n    pu.borough                                                             AS pickup_borough,\n    dz.borough                                                             AS dropoff_borough,\n    SUM(o.trip_count)                                                      AS trip_count,\n    ROUND(SUM(o.total_amount), 2)                                          AS total_amount,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>      AS revenue_per_trip,\n    <@met.per_unit total=\"SUM(o.total_distance_mi)\" qty=\"SUM(o.trip_count)\"/> AS miles_per_trip\nFROM stg_od_pairs o\nJOIN stg_zones pu ON pu.location_id = o.pu_location_id\nJOIN stg_zones dz ON dz.location_id = o.do_location_id\nWHERE :pickup_borough = 'All' OR pu.borough = :pickup_borough\nGROUP BY pu.borough, dz.borough\nORDER BY pu.borough, SUM(o.trip_count) DESC",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/weather_sensitivity.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Ridership by borough, weather and day type (tempdb)",
+      "description": "The answer node of weather_sensitivity_by_borough. Joins four staged tables from three source engines - daily trips by zone (Postgres), daily weather (MySQL), the zone lookup and the weekend/holiday calendar (SQLite) - and splits each borough's ridership by wet/dry and by day type. Grouped on ordinals because the wet/dry expression carries a bound parameter (templates.md 8.4).",
+      "imports": [
+        {
+          "id": "nyc/lib/metrics.sql",
+          "version": 1,
+          "alias": "met"
+        }
+      ],
+      "body": "SELECT\n    z.borough                                                                            AS borough,\n    CASE WHEN COALESCE(w.precip_mm, 0) >= :rain_threshold_mm THEN 'wet' ELSE 'dry' END   AS weather,\n    CASE WHEN c.is_holiday = 1 THEN 'holiday'\n         WHEN c.is_weekend = 1 THEN 'weekend'\n         ELSE 'workday' END                                                              AS day_type,\n    COUNT(DISTINCT d.pickup_date)                                                        AS days,\n    SUM(d.trip_count)                                                                    AS trip_count,\n    <@met.per_unit total=\"SUM(d.trip_count)\" qty=\"COUNT(DISTINCT d.pickup_date)\" scale=0/> AS trips_per_day,\n    <@met.per_unit total=\"SUM(d.total_amount)\" qty=\"SUM(d.trip_count)\"/>                   AS revenue_per_trip\nFROM stg_daily_by_zone d\nJOIN stg_zones z    ON z.location_id = d.pu_location_id\nJOIN stg_calendar c ON CAST(c.cal_date AS DATE) = d.pickup_date\nLEFT JOIN stg_daily_weather w ON w.obs_date = d.pickup_date\nGROUP BY 1, 2, 3\nORDER BY 1, 2, 3",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/mobility/briefing.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Borough briefing over the composed matrix (tempdb)",
+      "description": "The answer node of mobility_briefing. Reads the borough-by-borough matrix produced by the CHILD pipeline (delivered into tempdb by the PIPELINE node) and reduces it to one line per borough: trips, the share that never leaves the borough, and revenue per trip. Every number comes from the one child result, so the numerator and the denominator are the same population.",
+      "imports": [
+        {
+          "id": "nyc/lib/metrics.sql",
+          "version": 1,
+          "alias": "met"
+        }
+      ],
+      "body": "SELECT\n    o.pickup_borough                                                       AS borough,\n    MAX(z.zone_count)                                                      AS pickup_zones,\n    SUM(o.trip_count)                                                      AS trip_count,\n    SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END) AS trips_within_borough,\n    <@met.share_pct part=\"SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END)\" whole=\"SUM(o.trip_count)\"/> AS pct_within_borough,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>      AS revenue_per_trip\nFROM stg_od_matrix o\nLEFT JOIN (SELECT borough, COUNT(*) AS zone_count FROM stg_zones GROUP BY borough) z\n       ON z.borough = o.pickup_borough\nGROUP BY o.pickup_borough\nORDER BY SUM(o.trip_count) DESC",
       "is_library": false
     }
   ],
@@ -83,7 +223,7 @@
       "schema_version": 1,
       "name": "revenue_by_borough",
       "display_name": "Revenue by borough",
-      "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup \u2014 two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
+      "description": "Which NYC borough earns the most yellow-taxi revenue, and which tips best. Joins the Postgres trip rollup to the SQLite zone lookup — two different database engines, staged into tempdb and joined there. Run it as-is for the full 2024 calendar year.",
       "settings": {
         "tempdb": {
           "engine": "H2"
@@ -157,7 +297,7 @@
       "schema_version": 1,
       "name": "rainy_vs_dry_ridership",
       "display_name": "Rainy vs dry ridership",
-      "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) \u2014 three engines, one answer. Split by weather and by day type.",
+      "description": "Do New Yorkers take more taxis when it rains? Joins daily trip counts (Postgres), daily precipitation from five NYC weather stations (MySQL) and a weekend/holiday calendar (SQLite) — three engines, one answer. Split by weather and by day type.",
       "settings": {
         "tempdb": {
           "engine": "H2"
@@ -247,6 +387,387 @@
             "stage_trips_daily",
             "stage_daily_rain",
             "stage_calendar"
+          ]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "borough_od_matrix",
+      "display_name": "Borough-to-borough trip matrix",
+      "description": "Where do the trips that start in each borough actually end up? Rolls 4.9M trip rows down to origin-destination pairs in Postgres, resolves both ends through the SQLite zone lookup, and joins them in tempdb - two engines, one matrix. Filter to a single pickup borough with the borough parameter.",
+      "settings": {
+        "tempdb": {
+          "engine": "H2"
+        }
+      },
+      "parameters": {
+        "start_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-07-01",
+          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "end_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-09-30",
+          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "pickup_borough": {
+          "type": "STRING",
+          "required": false,
+          "default": "All",
+          "description": "Restrict the matrix to one pickup borough - Manhattan, Brooklyn, Queens, Bronx, Staten Island or EWR. The default 'All' matches every borough."
+        }
+      },
+      "nodes": [
+        {
+          "id": "stage_od_pairs",
+          "description": "Stage trips by pickup and drop-off zone from the sample-trips Postgres database.",
+          "type": "DQL",
+          "source": "sample-trips",
+          "template": {
+            "id": "nyc/mobility/od_pairs.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_od_pairs"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_zones",
+          "description": "Stage the taxi-zone lookup from the sample-reference SQLite database.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "sample_zones.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_zones"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "od_matrix",
+          "description": "Resolve both ends of every pair through the zone lookup and roll up borough by borough.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/mobility/od_matrix.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "caller"
+          },
+          "depends_on": [
+            "stage_od_pairs",
+            "stage_zones"
+          ]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "airport_access_by_borough",
+      "display_name": "Airport access by borough",
+      "description": "Which boroughs ride to JFK, LaGuardia and Newark, what does that trip cost, and how does it compare with the borough's ordinary economics? Five nodes across Postgres and SQLite: a trip-level scan, a zone lookup used at BOTH ends of the journey, a rate-code lookup, a baseline computed in tempdb from the same population as the numerator, and an answer node that reads one against the other.",
+      "settings": {
+        "tempdb": {
+          "engine": "H2"
+        }
+      },
+      "parameters": {
+        "start_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-07-01",
+          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "end_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-09-30",
+          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        }
+      },
+      "nodes": [
+        {
+          "id": "stage_od_pairs",
+          "description": "Stage trips by pickup and drop-off zone from the sample-trips Postgres database.",
+          "type": "DQL",
+          "source": "sample-trips",
+          "template": {
+            "id": "nyc/mobility/od_pairs.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_od_pairs"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_zones",
+          "description": "Stage the taxi-zone lookup from the sample-reference SQLite database.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "sample_zones.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_zones"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_rate_codes",
+          "description": "Stage the rate-code lookup from the sample-reference SQLite database.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "nyc/reference/rate_codes.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_rate_codes"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "borough_baseline",
+          "description": "Reduce the staged pairs to one baseline row per pickup borough, in tempdb.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/mobility/borough_baseline.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_borough_baseline"
+          },
+          "depends_on": [
+            "stage_od_pairs",
+            "stage_zones"
+          ]
+        },
+        {
+          "id": "airport_access",
+          "description": "Keep the airport-bound legs, label the fare basis, and read each borough against its own baseline.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/mobility/airport_access.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "caller"
+          },
+          "depends_on": [
+            "stage_od_pairs",
+            "stage_zones",
+            "stage_rate_codes",
+            "borough_baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "weather_sensitivity_by_borough",
+      "display_name": "Weather sensitivity by borough",
+      "description": "Which boroughs lose riders when it rains, and which barely notice? Joins daily trips by pickup zone (Postgres), daily precipitation, snow, temperature and wind from five NYC-area stations (MySQL), the zone lookup and the weekend/holiday calendar (SQLite) - three source engines staged into one tempdb and split by wet/dry and by day type.",
+      "settings": {
+        "tempdb": {
+          "engine": "H2"
+        }
+      },
+      "parameters": {
+        "start_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-07-01",
+          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "end_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-09-30",
+          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "rain_threshold_mm": {
+          "type": "BIGDECIMAL",
+          "precision": 6,
+          "scale": 1,
+          "required": false,
+          "default": "2.5",
+          "description": "Average daily precipitation, in millimetres, at or above which a day counts as wet."
+        }
+      },
+      "nodes": [
+        {
+          "id": "stage_daily_by_zone",
+          "description": "Stage daily trips by pickup zone from the sample-trips Postgres database.",
+          "type": "DQL",
+          "source": "sample-trips",
+          "template": {
+            "id": "nyc/mobility/daily_by_zone.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_daily_by_zone"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_daily_weather",
+          "description": "Stage daily precipitation, snow, temperature and wind from the sample-weather MySQL database.",
+          "type": "DQL",
+          "source": "sample-weather",
+          "template": {
+            "id": "nyc/weather/daily_elements.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_daily_weather"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_zones",
+          "description": "Stage the taxi-zone lookup from the sample-reference SQLite database.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "sample_zones.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_zones"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_calendar",
+          "description": "Stage the weekend/holiday calendar from the sample-reference SQLite database.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "sample_calendar.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_calendar"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "weather_sensitivity",
+          "description": "Join all four staged tables in tempdb and split each borough by weather and day type.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/mobility/weather_sensitivity.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "caller"
+          },
+          "depends_on": [
+            "stage_daily_by_zone",
+            "stage_daily_weather",
+            "stage_zones",
+            "stage_calendar"
+          ]
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "name": "mobility_briefing",
+      "display_name": "Borough mobility briefing",
+      "description": "One line per borough: how many trips start there, how many never leave it, and what a trip is worth. Built by COMPOSITION - the first node runs borough_od_matrix as a real child execution, pinned to version 1, and hands its result into this pipeline's tempdb. Every number comes from that one child result, so the share and its denominator are the same population.",
+      "settings": {
+        "tempdb": {
+          "engine": "H2"
+        }
+      },
+      "parameters": {
+        "start_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-07-01",
+          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "end_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-09-30",
+          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        }
+      },
+      "nodes": [
+        {
+          "id": "od_matrix",
+          "description": "Run the borough_od_matrix pipeline as a pinned child execution and stage its result.",
+          "type": "PIPELINE",
+          "pipeline": {
+            "name": "borough_od_matrix",
+            "version": 1
+          },
+          "parameters": {
+            "start_date": "${start_date}",
+            "end_date": "${end_date}",
+            "pickup_borough": "All"
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_od_matrix"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_zones",
+          "description": "Stage the taxi-zone lookup so the briefing can count each borough's pickup zones.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "sample_zones.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_zones"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "briefing",
+          "description": "Reduce the child's matrix to one briefing line per borough.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/mobility/briefing.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "caller"
+          },
+          "depends_on": [
+            "od_matrix",
+            "stage_zones"
           ]
         }
       ]
