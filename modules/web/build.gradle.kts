@@ -161,12 +161,18 @@ tasks.named("check") {
     dependsOn("editorJsTest")
 }
 
-// 033 Decision 3 — S3 cold fallback for the marketing site. `websiteExport` renders
-// templates/site/index.html (the SAME template the app serves) with its facts baked, and
-// copies the assets the rendered page references, into build/website-export/ — ready for
-// an emergency `aws s3 sync` (procedure in docs/deployment.md). The renderer lives in the
-// test source set (SiteExportMain) because the offline Thymeleaf render needs spring-test's
-// mock web context; drop this block if the fallback rots unused.
+// 033 Decision 3 — S3 cold fallback for the marketing site. `websiteExport` renders the
+// public site through the SAME templates AND the same controllers the app serves, and copies
+// the assets those pages reference, into build/website-export/ — ready for an emergency
+// `aws s3 sync` (procedure in docs/deployment.md). The renderer lives in the test source set
+// (SiteExportMain, delegating to SitePageRenderer) because the offline Thymeleaf render needs
+// spring-test's mock web context; drop this block if the fallback rots unused.
+//
+// 073 widened it from one page to the whole public surface: the homepage, every intent-cluster
+// page, the public docs index and every packaged doc, each written as <path>/index.html, plus
+// robots.txt and a sitemap.xml. The exported sitemap carries no lastmod — the build timestamp
+// comes from a Spring bean this process does not have, and an invented date is worse than an
+// absent optional field.
 val websiteExportAssets =
     tasks.register<Copy>("websiteExportAssets") {
         group = "distribution"
@@ -178,7 +184,7 @@ val websiteExportAssets =
 
 tasks.register<JavaExec>("websiteExport") {
     group = "distribution"
-    description = "Renders the marketing site to static HTML + assets under build/website-export (033 S3 cold fallback)."
+    description = "Renders the public site (pages, docs, robots, sitemap) + assets under build/website-export (033 fallback)."
     dependsOn("testClasses", websiteExportAssets)
     mainClass.set("co.datapipelines.web.ui.SiteExportMainKt")
     classpath = sourceSets["test"].runtimeClasspath
