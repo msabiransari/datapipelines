@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/mcp-server-for-sql-databases}">SQL MCP server</a></li>
+      <li aria-current="page" th:text="${engine.displayName}">Engine</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="engine-title">
+    <div class="container">
+      <p class="kicker" th:text="|${engine.dialect} dialect|">DIALECT</p>
+      <h1 id="engine-title" class="ds-display" th:text="|${engine.displayName} MCP server|">Engine MCP server</h1>
+      <p class="section-lede">
+        Give Claude Code, Cursor or any MCP client a
+        <span th:text="${engine.displayName}">engine</span> connection it cannot abuse: read-only by default,
+        one scoped key per agent, every call audited, and the database password never leaves your deployment.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Client setup, step by step</a>
+        <a class="btn btn-secondary" th:href="@{/mcp-server-for-sql-databases}">All six engines</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="facts-title">
+    <div class="container">
+      <p class="kicker">Driver and dialect</p>
+      <h2 id="facts-title" class="ds-headline">What ships, and what you supply</h2>
+      <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
+      <table class="facts-table">
+        <caption>The dialect catalog and driver matrix rows for this engine.</caption>
+        <tbody>
+          <tr><th scope="row">Dialect constant</th><td><code th:text="${engine.dialect}">DIALECT</code></td></tr>
+          <tr><th scope="row">JDBC driver</th><td><code th:text="${engine.driver}">driver</code></td></tr>
+          <tr><th scope="row">Driver license</th><td th:text="${engine.license}">license</td></tr>
+          <tr>
+            <th scope="row">In the published image?</th>
+            <td th:text="${engine.bundled} ? 'Yes — bundled' : 'No'">Yes</td>
+          </tr>
+          <tr th:if="${!engine.bundled}">
+            <th scope="row">How to supply it</th>
+            <td th:text="${engine.otherwise}">how</td>
+          </tr>
+          <tr><th scope="row">JDBC URL shape</th><td><code th:text="${engine.jdbcUrlExample}">jdbc:…</code></td></tr>
+        </tbody>
+      </table>
+      <!-- claim: docs/deployment.md §3.5 -->
+      <p th:if="${!engine.bundled}">
+        The driver is not redistributed in the image for license reasons. Supplying it is the operator's
+        act of accepting that license — and registering a datasource for a dialect whose driver is absent
+        fails at save time with <code>datasource.driver_not_loaded</code>, a packaging error that says so.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="connect-title">
+    <div class="container">
+      <p class="kicker">Copy, paste, done</p>
+      <h2 id="connect-title" class="ds-headline">Connect your agent</h2>
+      <!-- claim: docs/mcp-server.md §3.2, docs/mcp-server.md §4.1 -->
+      <p class="section-lede">
+        The endpoint is <code>POST {host}/mcp</code> over Streamable HTTP, and the credential is an API key in
+        <code>DP-API-Key</code> or <code>Authorization: Bearer dpk_…</code>. Session cookies are rejected there,
+        so the config is the same whichever engine you registered — the engine is a datasource, not a server.
+      </p>
+
+      <h3>Claude Code</h3>
+      <div class="code-block">
+        <pre><code>claude mcp add --transport http datapipelines https://your-host/mcp \
+  --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <h3>Cursor — <code>~/.cursor/mcp.json</code></h3>
+      <div class="code-block">
+        <pre><code>{
+  "mcpServers": {
+    "datapipelines": {
+      "url": "https://your-host/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <h3>GitHub Copilot in VS Code — <code>.vscode/mcp.json</code></h3>
+      <div class="code-block">
+        <pre><code>{
+  "servers": {
+    "datapipelines": {
+      "type": "http",
+      "url": "https://your-host/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <p class="demo-note">
+        The endpoint and the header are ours and specified above; the surrounding file shape belongs to each
+        client and is what its own documentation prescribes. <a th:href="@{/add-mcp-server-to-claude-code}">The
+        full walkthrough</a> covers minting the key and checking that the tool list came back.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="register-title">
+    <div class="container">
+      <p class="kicker">Registering the database</p>
+      <h2 id="register-title" class="ds-headline">
+        A <span th:text="${engine.displayName}">engine</span> datasource, read-only, credentials encrypted
+      </h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/datasources.md §5.7 -->
+          <h3>The read-only flag refuses writes</h3>
+          <p>Flag the datasource read-only and the three write-shaped uses — a DML node's source, a DDL node's source, and writing a node's output back to it — are refused at save time and again at execution time, against the live row.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §5.7 -->
+          <h3>Use a SELECT-only login as well</h3>
+          <p>The flag is contract; the database credential is containment. For anything that must not change, create a SELECT-only user — the documented pattern, and what the demo's own datasources run under.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7.1 -->
+          <h3>The password is encrypted at rest</h3>
+          <p>AES-256-GCM in the metadata database, with the datasource name bound as additional authenticated data. The application refuses to start without a valid encryption key.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.1 -->
+          <h3>The agent introspects before it writes SQL</h3>
+          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code> exist so the agent grounds its SQL in your real schema instead of guessing at it.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" th:if="${engine.demo != null}" aria-labelledby="demo-title">
+    <div class="container">
+      <p class="kicker">Working example</p>
+      <h2 id="demo-title" class="ds-headline">A seeded pipeline that reads this engine</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">
+        <code th:text="${engine.demo}">pipeline</code> ships with the NYC demo — one command, real data, and a
+        <span th:text="${engine.displayName}">engine</span> datasource among its sources.
+        <a th:href="@{${engine.demoHref}}">See what it does</a>.
+      </p>
+      <div class="code-block">
+        <pre><code>./app.sh --start --demo-nyc</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="other-title">
+    <div class="container">
+      <h2 id="other-title" class="ds-headline">The other engines</h2>
+      <ul class="engine-links">
+        <li th:each="e : ${engines}" th:if="${e.slug != engine.slug}">
+          <a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a>
+        </li>
+      </ul>
+      <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
+         <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>

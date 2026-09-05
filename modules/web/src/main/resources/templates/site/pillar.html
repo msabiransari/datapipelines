@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">SQL MCP server</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="pillar-title">
+    <div class="container">
+      <p class="kicker">MCP server for SQL databases</p>
+      <h1 id="pillar-title" class="ds-display">One SQL MCP server for six database engines</h1>
+      <p class="section-lede">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add it to Claude Code or Cursor</a>
+        <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pain-title">
+    <div class="container">
+      <h2 id="pain-title" class="ds-headline">Don't point an agent at production with write credentials</h2>
+      <p class="section-lede">The fast way to give a coding agent database access is to paste a connection string into a config file. It works on the first afternoon and creates four problems you keep.</p>
+      <ul class="fact-list">
+        <li><strong>The credential can write.</strong> Most database logins that can read a table can also drop it. An agent that misreads a schema does not need bad intent to do damage.</li>
+        <li><strong>Database passwords sprawl across laptops.</strong> Every developer's MCP config is another copy, in plain text, outside any inventory.</li>
+        <li><strong>Revoking one person means rotating a shared password</strong> — and then finding every config that held it.</li>
+        <li><strong>There is no audit trail.</strong> The database sees one login. It cannot tell you which agent, on whose behalf, ran what.</li>
+      </ul>
+      <p>This server is the other shape: the credentials live in the deployment, the agent gets a key, and the key is the thing you scope, revoke and audit.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="gov-title">
+    <div class="container">
+      <p class="kicker">What "governed" means here</p>
+      <h2 id="gov-title" class="ds-headline">Read-only by default, scoped keys, every call audited</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/datasources.md §5.7 -->
+          <h3>Read-only is enforced, not advisory</h3>
+          <p>A datasource flagged read-only refuses the three write-shaped uses in the pipeline contract — a DML node's source, a DDL node's source, and any node writing its output back to a datasource. The check runs at save time and again at execution time against the live row, so flipping the flag takes effect on the next run, not on the next cache expiry.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §5.7 -->
+          <h3>And the credential still does the real work</h3>
+          <p>The flag is contract, not containment: the documented pattern is a SELECT-only database user for any datasource whose data must not change. The flag gives the agent a fast, machine-readable refusal; the credential gives the guarantee. The demo's own datasources have both.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §7.1–7.6 -->
+          <h3>One scoped key per agent</h3>
+          <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, and carry hierarchical scopes — <code>read</code>, <code>execute</code>, <code>author</code>, <code>admin</code>. A key's scopes can never exceed its creator's at issue time.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §7.3, docs/auth.md §11.4 -->
+          <h3>Revocation is a checkbox, not a rotation</h3>
+          <p>Revoke one agent's key and that agent stops working within about a minute — the validation cache's TTL. No shared password to rotate, and nobody else is interrupted.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §10.1, docs/mcp-server.md §14 -->
+          <h3>Every tool call is audited</h3>
+          <p>The dispatcher writes <code>mcp.tool.called</code> for every call and <code>mcp.tool.write</code> for every mutating one, into the same audit log that carries logins, key issuance and datasource decryptions.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §4.1 -->
+          <h3>API keys only on <code>/mcp</code></h3>
+          <p>The endpoint accepts <code>DP-API-Key</code> or <code>Authorization: Bearer dpk_…</code> and rejects browser session cookies outright. A browser-embedded MCP client authenticates like any other agent — there is no cookie path to borrow.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/datasources.md §7.1 -->
+          <h3>Credentials never sit on a laptop</h3>
+          <p>Datasource passwords are AES-256-GCM encrypted in the metadata database with the datasource name bound as additional authenticated data, and the app refuses to start without a valid key.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/staging.md §1 -->
+          <h3>Cross-database joins land nothing</h3>
+          <p>A pipeline that reads two engines stages each result set into an in-memory database created for that one execution, joins there, and destroys it when the execution ends. <a th:href="@{/federated-query}">How the staging join works</a>.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="engines-title">
+    <div class="container">
+      <p class="kicker">Pick your engine</p>
+      <h2 id="engines-title" class="ds-headline">Connect Claude Code to Postgres, MySQL, SQL Server, Oracle, SQLite or DuckDB</h2>
+      <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
+      <p class="section-lede">One server speaks all six. Each page carries that engine's dialect constant, its JDBC driver and license, whether the driver ships in the published image, and the client config to paste.</p>
+      <div class="engine-grid">
+        <article class="engine-card" th:each="e : ${engines}">
+          <h3><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></h3>
+          <p><code th:text="${e.dialect}">DIALECT</code> &middot; <span th:text="${e.driver}">driver</span></p>
+          <p class="engine-card-note" th:text="${e.bundled} ? 'Driver ships in the published image' : 'Driver user-supplied — ' + ${e.license}">note</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="tools-title">
+    <div class="container">
+      <p class="kicker">The surface</p>
+      <h2 id="tools-title" class="ds-headline">The <span th:text="${toolCount}">22</span> MCP tools an agent gets</h2>
+      <!-- claim: docs/mcp-server.md §6.1 -->
+      <p class="section-lede">Discovery, authoring, execution and result reading — the full lifecycle, in <code>tools/list</code> order. <span th:text="${readCount}">16</span> of them read; <span th:text="${mutatingCount}">6</span> can write, and those are the ones the audit log flags with <code>mcp.tool.write</code>.</p>
+      <ul class="tool-list">
+        <li th:each="t : ${toolNames}"><code th:text="${t}">tool</code></li>
+      </ul>
+      <!-- claim: docs/mcp-server.md §3.2 -->
+      <p>All of them over one endpoint: <code>POST {host}/mcp</code>, Streamable HTTP, stateless by default.</p>
+      <p><a th:href="@{/docs/mcp-server}">Read the MCP server specification &rarr;</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="next-title">
+    <div class="container">
+      <h2 id="next-title" class="ds-headline">Where to go next</h2>
+      <ul class="fact-list">
+        <li><a th:href="@{/add-mcp-server-to-claude-code}">Add the MCP server to Claude Code, Cursor or Copilot</a> — the config block per client, and how to mint the key.</li>
+        <li><a th:href="@{/federated-query}">Federated query without a warehouse</a> — the cross-database join, with the SQL the demo actually runs.</li>
+        <li><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here</a> — what the agent authors, and what reviews it.</li>
+        <li><a th:href="@{/docs/datasources}">Datasources specification</a> — dialects, pools, the read-only flag, credential encryption.</li>
+      </ul>
+    </div>
+  </section>
+
+</th:block>
+</html>

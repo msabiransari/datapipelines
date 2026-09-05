@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">AI data pipeline</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="ai-title">
+    <div class="container">
+      <p class="kicker">Agentic data engineering</p>
+      <h1 id="ai-title" class="ds-display">An AI data pipeline you would let someone else run</h1>
+      <p class="section-lede">
+        An agent writing SQL in a chat window produces an answer. An AI <em>data pipeline</em> has to produce
+        something else: an artefact your team can read, review, version, rerun next month, and explain to whoever
+        asks. Four things make the difference, and none of them is the model.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="schema-title">
+    <div class="container">
+      <p class="kicker">One</p>
+      <h2 id="schema-title" class="ds-headline">The agent reads your real schema before it writes SQL</h2>
+      <!-- claim: docs/mcp-server.md §6.1 -->
+      <p class="section-lede">
+        Four of the <span th:text="${toolCount}">22</span> tools exist for exactly this:
+        <code>datasources_get_schemas</code>, <code>datasources_get_tables</code>,
+        <code>datasources_get_columns</code> and <code>datasources_preview_rows</code>. The agent grounds its query
+        in the columns that exist and the values they actually hold, instead of inferring a schema from table names.
+      </p>
+      <!-- claim: docs/mcp-server.md §6.2.19 -->
+      <p>
+        Introspection is a read, and it is scoped like everything else — the server builds the statement and quotes
+        every identifier itself; the agent supplies names, never SQL fragments.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="artefact-title">
+    <div class="container">
+      <p class="kicker">Two</p>
+      <h2 id="artefact-title" class="ds-headline">What it produces is a JSON contract, not a transcript</h2>
+      <!-- claim: docs/pipeline-contract.md §3.1 -->
+      <p class="section-lede">
+        A pipeline is declarative JSON: nodes, their dependencies, their parameters, where each one reads and where
+        its output goes. The SQL lives in named templates the pipeline references. Both diff like code in review,
+        because they are code.
+      </p>
+      <!-- claim: docs/templates.md §7.2, docs/templates.md §8.4 -->
+      <p>
+        Values reach the SQL as bound parameters, never as interpolated strings — the template engine refuses the
+        interpolated form outright. That rule is not there for tidiness; it is what keeps an agent-authored query
+        from becoming an injection surface.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="version-title">
+    <div class="container">
+      <p class="kicker">Three</p>
+      <h2 id="version-title" class="ds-headline">Every change is a version, and a release is immutable</h2>
+      <!-- claim: docs/versioning.md §3.1, docs/versioning.md §3.2 -->
+      <p class="section-lede">
+        Editing a released pipeline never edits it: the first write copies it into a draft, and the release you were
+        running keeps running. There is one draft per entity at a time, and releasing locks it. What ran last quarter
+        is still exactly what ran last quarter.
+      </p>
+      <!-- claim: docs/versioning.md §10.1 -->
+      <p>
+        Moving a release into a higher environment is a human, UI-triggered action — there is no MCP tool for
+        promotion and no schedule. An agent can author and run; a person promotes.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="run-title">
+    <div class="container">
+      <p class="kicker">Four</p>
+      <h2 id="run-title" class="ds-headline">It runs governed, and the failure is readable</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/datasources.md §5.7 -->
+          <h3>Read-only unless you said otherwise</h3>
+          <p>A datasource flagged read-only refuses write-shaped nodes at save time and again at execution, against the live row. The documented pattern pairs it with a SELECT-only database user.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/auth.md §10.1, docs/mcp-server.md §14 -->
+          <h3>Every call is in the audit log</h3>
+          <p><code>mcp.tool.called</code> for each call, <code>mcp.tool.write</code> for each mutating one — beside the login, key-issuance and decryption events.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §6 -->
+          <h3>Execution is observable while it runs</h3>
+          <p>Per-milestone events stream over SSE with heartbeats, so the agent — and the human watching — know which node is running rather than waiting on a spinner.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §13 -->
+          <h3>Failures carry stable codes</h3>
+          <p>Every refusal is a catalogued <code>{domain}.{entity}.{failure}</code> code with details, not a stack trace. An agent can branch on the code; a person can search for it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/mcp-server.md §6.2.15 -->
+          <h3>Results come back as rows</h3>
+          <p><code>executions_get_result</code> returns the actual data through a paged cursor, so the agent verifies its own work instead of reporting success.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/staging.md §1 -->
+          <h3>Multi-source joins land nothing</h3>
+          <p>Each source is read in place and staged into an in-memory database created for that one execution, then destroyed. <a th:href="@{/federated-query}">The federated-query story</a>.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="not-title">
+    <div class="container">
+      <h2 id="not-title" class="ds-headline">What this is not</h2>
+      <ul class="fact-list">
+        <li><strong>Not an ETL tool.</strong> Nothing is moved on a schedule into a warehouse you then have to keep in sync. Sources are read where they live.</li>
+        <li><strong>Not a no-code builder.</strong> The artefact is SQL and JSON, on purpose, because that is what survives review.</li>
+        <li><strong>Not a model.</strong> Bring your own agent. This is the surface it works against and the governance it works under.</li>
+      </ul>
+      <p><a th:href="@{/text-to-sql-agent}">How this compares with a text-to-SQL tool &rarr;</a> &middot;
+         <a th:href="@{/compare/airflow}">vs Airflow &rarr;</a> &middot;
+         <a th:href="@{/compare/dbt}">vs dbt &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>

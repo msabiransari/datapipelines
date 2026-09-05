@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li><a th:href="@{/mcp-server-for-sql-databases}">SQL MCP server</a></li>
+      <li aria-current="page">Add to Claude Code</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="add-title">
+    <div class="container">
+      <p class="kicker">Client setup</p>
+      <h1 id="add-title" class="ds-display">Add an MCP server to Claude Code, Cursor or Copilot</h1>
+      <p class="section-lede">
+        This page sets up <strong>one particular MCP server</strong> — datapipelines.co's, the one that puts your
+        SQL databases behind scoped, audited, read-only-by-default credentials. It is not a general directory of
+        MCP servers. If you came looking for how the <code>mcp add</code> mechanics work, they are the same either
+        way, and the four steps below are the whole job.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="step1-title">
+    <div class="container">
+      <p class="kicker">Step 1</p>
+      <h2 id="step1-title" class="ds-headline">Have a server to point at</h2>
+      <!-- claim: docs/deployment.md Appendix B -->
+      <p class="section-lede">Self-hosted, so the first step is yours. The quickstart brings up the app, Postgres, Redis and a seeded demo with real NYC taxi data in one command:</p>
+      <div class="code-block">
+        <pre><code>./app.sh --start --demo-nyc</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <!-- claim: docs/deployment.md §3.5 -->
+      <p>For your own databases, register a datasource per engine — Postgres, SQL Server, SQLite and DuckDB drivers ship in the published image; the MySQL and Oracle drivers you supply, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="step2-title">
+    <div class="container">
+      <p class="kicker">Step 2</p>
+      <h2 id="step2-title" class="ds-headline">Mint a key for that one agent</h2>
+      <!-- claim: docs/ui-screens.md §4.10 -->
+      <p class="section-lede">
+        Sign in and open <strong>Settings &rarr; API keys</strong>. Give the key the agent's name, tick the scopes it
+        needs, and copy it — the plaintext is shown <em>once</em>, and the panel says so. Afterwards the list shows the
+        prefix only.
+      </p>
+      <!-- claim: docs/auth.md §7.5 -->
+      <p>Scopes are hierarchical, and the smallest one that does the job is the right one:</p>
+      <table class="facts-table">
+        <caption>The scope to pick, by what the agent is for.</caption>
+        <thead>
+          <tr><th scope="col">Scope</th><th scope="col">Give it when the agent should…</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>read</code></th><td>browse pipelines, templates, datasources and past executions</td></tr>
+          <tr><th scope="row"><code>execute</code></th><td>also run pipelines and read their results</td></tr>
+          <tr><th scope="row"><code>author</code></th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
+          <tr><th scope="row"><code>admin</code></th><td>manage users and global datasources — no MCP tool requires it</td></tr>
+        </tbody>
+      </table>
+      <!-- claim: docs/ui-screens.md §4.10, docs/auth.md §7.4 -->
+      <p>A key's scopes can never exceed the scopes of whoever issued it, and the checkbox list you see is filtered to your own. Revoking is per-key and takes effect within about a minute — no shared password to rotate.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="step3-title">
+    <div class="container">
+      <p class="kicker">Step 3</p>
+      <h2 id="step3-title" class="ds-headline">Paste one config block</h2>
+      <!-- claim: docs/mcp-server.md §3.2, docs/mcp-server.md §4.1 -->
+      <p class="section-lede">
+        Every client needs the same two facts: the endpoint <code>POST {host}/mcp</code>, over Streamable HTTP, and
+        an API key in <code>DP-API-Key</code> — or in <code>Authorization: Bearer dpk_…</code>, for clients that can
+        only set the standard header. Both route through the identical validation path. Browser session cookies are
+        rejected on <code>/mcp</code>, deliberately.
+      </p>
+
+      <h3>Claude Code</h3>
+      <div class="code-block">
+        <pre><code>claude mcp add --transport http datapipelines https://your-host/mcp \
+  --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <h3>Cursor — <code>~/.cursor/mcp.json</code></h3>
+      <div class="code-block">
+        <pre><code>{
+  "mcpServers": {
+    "datapipelines": {
+      "url": "https://your-host/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <h3>GitHub Copilot in VS Code — <code>.vscode/mcp.json</code></h3>
+      <div class="code-block">
+        <pre><code>{
+  "servers": {
+    "datapipelines": {
+      "type": "http",
+      "url": "https://your-host/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <h3>Claude Desktop and other JSON-configured clients</h3>
+      <div class="code-block">
+        <pre><code>{
+  "mcpServers": {
+    "datapipelines": {
+      "url": "https://your-host/mcp",
+      "headers": { "Authorization": "Bearer dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+
+      <p class="demo-note">
+        The URL and the header are ours, and specified above. The file names and the JSON shape around them belong
+        to each client and change when its vendor changes them — check the client's own documentation if a block
+        here is refused, and tell us so we can fix the page.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="step4-title">
+    <div class="container">
+      <p class="kicker">Step 4</p>
+      <h2 id="step4-title" class="ds-headline">Check that the tools came back</h2>
+      <!-- claim: docs/mcp-server.md §6.1 -->
+      <p class="section-lede">
+        Ask the agent to list its tools. A working connection reports <span th:text="${toolCount}">22</span> from this
+        server, starting with <code>pipelines_list</code> and <code>datasources_list</code>. Nothing else needs
+        configuring: capabilities come from the standard <code>initialize</code> handshake.
+      </p>
+      <!-- claim: docs/mcp-server.md §4.2 -->
+      <h3>If it does not connect</h3>
+      <ul class="fact-list">
+        <li><strong><code>401 auth.api_key.missing</code></strong> — the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
+        <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong> — wrong, revoked, expired, or the owning user is deactivated.</li>
+        <li><strong><code>403 auth.scope.insufficient</code></strong> — the key is real and too small for what the agent tried. Mint one at the next scope up rather than widening the one you have.</li>
+        <li><strong>Silent rejection of a browser session</strong> — expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
+      </ul>
+      <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
+         <a th:href="@{/docs/auth}">Authentication and scopes &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>
