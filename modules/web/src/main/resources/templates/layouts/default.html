@@ -105,7 +105,10 @@
     </th:block>
   </div>
 
-  <main class="app-container app-main">
+  <!-- 065 §A: the 1600px .app-container cap is right for prose pages — lists,
+       settings, docs — and wrong for the ONE surface that scales with width. A page
+       opts out by setting `fullBleed`; only the pipeline editor does. -->
+  <main class="app-container app-main" th:classappend="${fullBleed} ? 'app-main-bleed' : null">
     <th:block th:replace="${content}"/>
   </main>
 

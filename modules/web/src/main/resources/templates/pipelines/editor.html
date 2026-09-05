@@ -24,6 +24,10 @@
        it to render the pending-release affordances and to pin Execute to the draft version. -->
   <script type="application/json" id="pipeline-lifecycle" th:utext="${lifecycleJson}"></script>
 
+  <!-- 065 §B/§C: the two pane state machines, pure (no DOM) so node --test owns
+       their transition tables; init.js keeps the DOM effects. -->
+  <script th:src="@{/js/pipeline-editor/dock.js}"></script>
+  <script th:src="@{/js/pipeline-editor/inspector.js}"></script>
   <script th:src="@{/js/pipeline-editor/init.js}"></script>
   <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
   <script th:src="@{/js/pipeline-editor/graph.js}"></script>
@@ -152,21 +156,23 @@
         <div id="pe-live-region" class="sr-only" aria-live="polite" role="status"></div>
       </section>
 
-      <!-- Right sidebar: Node details -->
-      <aside class="pe-details-panel" x-bind:class="{ 'pe-details-visible': selectedNode }" aria-label="Node details">
-        <template x-if="!selectedNode">
-          <div class="pe-details-body">
-            <div class="ds-empty">
-              <p class="ds-empty-title">Select a node</p>
-              <p class="ds-empty-description">Click a node in the graph to see its details and rendered SQL.</p>
-            </div>
-          </div>
-        </template>
+      <!-- 065 §C — the node inspector: an OVERLAY inside .pe-layout, not the 320px
+           fixed drawer. It opens only from a card's own button (or Enter/Space on the
+           selected node), spans `clamp(720px, 60%, 1200px)` of the layout so the SQL
+           statement gets a box worth reading, closes on × or Esc, and hands focus back
+           to the control that opened it. The scrim covers the CANVAS only — the left
+           sidebar is context, not chrome, and stays live under it. The old "Select a
+           node" empty state is gone with the always-present drawer: the panel does not
+           exist until a node has been chosen, so it has nothing to be empty about. -->
+      <div class="pe-inspector-scrim" x-show="inspector.open" @click="closeNodeDetails()" aria-hidden="true"></div>
+      <aside class="pe-details-panel" id="pe-details-panel" x-show="inspector.open"
+             x-cloak role="dialog" aria-modal="false" aria-label="Node details">
         <template x-if="selectedNode">
-          <div>
+          <div class="pe-details-frame">
             <div class="pe-details-header">
               <h2 class="pe-details-title" x-text="selectedNode.id"></h2>
-              <button class="pe-details-close" @click="selectedNode = null" aria-label="Close details">&times;</button>
+              <button class="pe-details-close" id="pe-details-close" type="button"
+                      @click="closeNodeDetails()" aria-label="Close details">&times;</button>
             </div>
             <div class="pe-details-body">
               <!-- Identity -->
@@ -193,8 +199,10 @@
               </div>
 
               <!-- SQL — the node's rendered SQL, resolved server-side from its PINNED
-                   template (contract §2.3: SQL lives in template entities, not nodes) -->
-              <div class="pe-details-section">
+                   template (contract §2.3: SQL lives in template entities, not nodes).
+                   065 §C: this section is the panel's growing one — the marker class
+                   is what gives the statement a box floored at 40% of the panel. -->
+              <div class="pe-details-section pe-details-section-sql">
                 <h3 class="pe-details-heading">SQL
                   <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
                 </h3>
@@ -312,93 +320,154 @@
       </aside>
     </div>
 
-    <!-- Result panel -->
-    <div x-show="resultPanel.visible" class="pe-result-panel" role="region" aria-label="Execution results">
-      <div class="pe-result-header">
-        <h2>Results</h2>
-        <button class="pe-details-close" @click="resultPanel.visible = false" aria-label="Close results">&times;</button>
-      </div>
-
-      <!-- 057/T85: the execution-level failure record — the same rendering the node inspector
-           gets, in the place the engineer is already looking when the run ends. -->
-      <template x-if="resultPanel.failure">
-        <div class="pe-result-failure" x-data="{ view: failureView(resultPanel.failure) }">
-          <div class="pe-failure-summary">
-            <span class="ds-badge ds-badge-danger" x-text="view.code"></span>
-            <span class="pe-failure-message" x-text="view.message"></span>
-          </div>
-          <div class="pe-failure-meta">
-            <span x-show="view.correlationId">correlation id <code class="pe-error-corr" x-text="view.correlationId"></code></span>
-            <span x-show="view.nodeLine" x-text="view.nodeLine"></span>
-          </div>
-          <template x-if="view.sql">
-            <div class="pe-field">
-              <label class="pe-label">SQL</label>
-              <div class="pe-sql-block">
-                <pre class="pe-sql"><code class="pe-sql-code" x-text="view.sql"></code></pre>
-              </div>
-            </div>
-          </template>
-          <template x-if="view.chain">
-            <details class="pe-error-exception" open>
-              <summary>Exception <span class="pe-error-root" x-text="'· root: ' + view.rootCause"></span></summary>
-              <template x-for="(level, idx) in view.chain" :key="idx">
-                <div class="pe-error-level">
-                  <div class="pe-error-level-title" x-text="(idx === 0 ? 'Root cause: ' : 'Caused by: ') + level.cls"></div>
-                  <div class="pe-error-level-message" x-text="level.message"></div>
-                  <pre class="pe-error-frames" x-text="level.frames.join('\n')"></pre>
-                </div>
-              </template>
-            </details>
-          </template>
-          <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-copy"
-                  x-bind:data-copy="view.copyText" data-copy-label="Failure detail">
-            Copy failure detail
+    <!-- 065 §B — the bottom dock: ONE pane, two tabs, three states (hidden /
+         minimized / open). There is NO close: the owner's complaint was that the
+         results panel's × lost the pane with no way back short of re-running, so
+         the control minimises to the header strip and the canvas reclaims the rest.
+         Results and Errors are different objects with different lifetimes — the
+         057 failure record used to render INSIDE the results body and now has its
+         own tab, the per-RUN view beside the inspector's per-NODE one. The dock is
+         a flex child of .pe-root (not a fixed overlay), which is what lets the
+         graph above it actually grow when it minimises. State lives in dock.js. -->
+    <section class="pe-dock" x-show="dock.state !== 'hidden'" x-cloak
+             x-bind:class="dock.state === 'minimized' ? 'pe-dock-minimized' : 'pe-dock-open'"
+             aria-label="Execution results and errors">
+      <div class="pe-dock-header">
+        <div class="pe-dock-tabs" role="tablist" aria-label="Execution output">
+          <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-results"
+                  aria-controls="pe-dock-panel-results"
+                  x-bind:aria-selected="dock.tab === 'results' ? 'true' : 'false'"
+                  x-bind:class="{ 'pe-dock-tab-active': dock.tab === 'results' && dock.state === 'open' }"
+                  @click="dock.selectTab('results')">
+            Results
+            <span class="pe-dock-stale" x-show="dock.resultsStale">previous run</span>
+          </button>
+          <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-errors"
+                  aria-controls="pe-dock-panel-errors"
+                  x-bind:aria-selected="dock.tab === 'errors' ? 'true' : 'false'"
+                  x-bind:class="{ 'pe-dock-tab-active': dock.tab === 'errors' && dock.state === 'open' }"
+                  @click="dock.selectTab('errors')">
+            Errors
+            <span class="ds-badge ds-badge-danger pe-dock-badge" x-show="dock.errors.length > 0"
+                  x-text="dock.errors.length"></span>
           </button>
         </div>
-      </template>
-
-      <div x-show="resultPanel.ttlSeconds > 0 && !resultPanel.failure" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
-      <div x-show="resultPanel.expired && !resultPanel.failure" class="pe-result-expired-card">
-        <p>Result expired — re-run the pipeline to see the latest data.</p>
+        <!-- One control, two labels: minimise while open, restore while minimised.
+             The glyphs are the sprite's own (#minus / #maximize) — 064 re-vendors
+             the design system in parallel, so this round adds no sprite symbols. -->
+        <button type="button" class="pe-dock-toggle" x-show="dock.state === 'open'"
+                @click="dock.minimise()" aria-label="Minimise results">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#minus"></use></svg>
+        </button>
+        <button type="button" class="pe-dock-toggle" x-show="dock.state === 'minimized'"
+                @click="dock.restore()" aria-label="Restore results">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
+        </button>
       </div>
-      <div x-show="!resultPanel.expired && resultPanel.data && !resultPanel.failure">
-        <div class="pe-result-table-container">
-          <table class="ds-table">
-            <thead>
-              <tr>
-                <template x-for="col in resultPanel.columns" :key="col">
-                  <th x-text="col"></th>
-                </template>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-for="row in resultPanel.rows" :key="row.__idx">
+
+      <!-- Results: today's body, unchanged — TTL line, expired card, .ds-table,
+           the 027b-frozen paging row and the downloads. -->
+      <div class="pe-dock-body" id="pe-dock-panel-results" role="tabpanel"
+           aria-labelledby="pe-dock-tab-results"
+           x-show="dock.state === 'open' && dock.tab === 'results'">
+        <div x-show="resultPanel.ttlSeconds > 0" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
+        <div x-show="resultPanel.expired" class="pe-result-expired-card">
+          <p>Result expired — re-run the pipeline to see the latest data.</p>
+        </div>
+        <div x-show="!resultPanel.expired && resultPanel.data">
+          <div class="pe-result-table-container">
+            <table class="ds-table">
+              <thead>
                 <tr>
                   <template x-for="col in resultPanel.columns" :key="col">
-                    <td x-text="row[col]"></td>
+                    <th x-text="col"></th>
                   </template>
                 </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-        <div class="pe-result-actions">
-          <!-- Client-side cursor paging over a stored result (027b C, frozen):
-               prevPage/nextPage and hasPrev/hasNext keep their exact bindings;
-               limit-authoritative, total_rows-denominated arithmetic lives in
-               result.js. This row is restyled, not rewired. -->
-          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
-          <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
-          <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
-          <div class="pe-result-downloads">
-            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
-            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
-            <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
+              </thead>
+              <tbody>
+                <template x-for="row in resultPanel.rows" :key="row.__idx">
+                  <tr>
+                    <template x-for="col in resultPanel.columns" :key="col">
+                      <td x-text="row[col]"></td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="pe-result-actions">
+            <!-- Client-side cursor paging over a stored result (027b C, frozen):
+                 prevPage/nextPage and hasPrev/hasNext keep their exact bindings;
+                 limit-authoritative, total_rows-denominated arithmetic lives in
+                 result.js. This row is restyled, not rewired. -->
+            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
+            <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
+            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+            <div class="pe-result-downloads">
+              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <!-- Errors: one entry per failed node of this run, newest LAST. The 057
+           markup is the results panel's verbatim, driven by the same
+           failureView(record) — same record, two homes, both read-only. -->
+      <div class="pe-dock-body" id="pe-dock-panel-errors" role="tabpanel"
+           aria-labelledby="pe-dock-tab-errors"
+           x-show="dock.state === 'open' && dock.tab === 'errors'">
+        <div class="ds-empty" x-show="dock.errors.length === 0">
+          <p class="ds-empty-title">No failures in this run.</p>
+        </div>
+        <template x-for="entry in dock.errors" :key="entry.key">
+          <div class="pe-dock-error">
+            <!-- The summary line: `node id · code`, the two facts that tell an
+                 engineer which entry to open before reading any of them. -->
+            <div class="pe-dock-error-summary">
+              <code class="pe-error-code" x-text="(entry.nodeId || '—') + ' · ' + (entry.record.code || 'unknown')"></code>
+            </div>
+            <template x-if="entry.record">
+              <div class="pe-result-failure" x-data="{ view: failureView(entry.record) }">
+                <div class="pe-failure-summary">
+                  <span class="ds-badge ds-badge-danger" x-text="view.code"></span>
+                  <span class="pe-failure-message" x-text="view.message"></span>
+                </div>
+                <div class="pe-failure-meta">
+                  <span x-show="view.correlationId">correlation id <code class="pe-error-corr" x-text="view.correlationId"></code></span>
+                  <span x-show="view.nodeLine" x-text="view.nodeLine"></span>
+                </div>
+                <template x-if="view.sql">
+                  <div class="pe-field">
+                    <label class="pe-label">SQL</label>
+                    <div class="pe-sql-block">
+                      <pre class="pe-sql"><code class="pe-sql-code" x-text="view.sql"></code></pre>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="view.chain">
+                  <details class="pe-error-exception" open>
+                    <summary>Exception <span class="pe-error-root" x-text="'· root: ' + view.rootCause"></span></summary>
+                    <template x-for="(level, idx) in view.chain" :key="idx">
+                      <div class="pe-error-level">
+                        <div class="pe-error-level-title" x-text="(idx === 0 ? 'Root cause: ' : 'Caused by: ') + level.cls"></div>
+                        <div class="pe-error-level-message" x-text="level.message"></div>
+                        <pre class="pe-error-frames" x-text="level.frames.join('\n')"></pre>
+                      </div>
+                    </template>
+                  </details>
+                </template>
+                <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-copy"
+                        x-bind:data-copy="view.copyText" data-copy-label="Failure detail">
+                  Copy failure detail
+                </button>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </section>
 
     <!-- Error modal -->
     <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="errorModal.hide()">

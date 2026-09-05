@@ -93,8 +93,8 @@ function editorWith(nodes, over = {}) {
   return {
     nodes: nodes.map((id) => ({ id })),
     errorModal: { visible: false, message: "" },
-    resultPanel: { visible: false },
-    resultPanelInstance: null,
+    inspector: { open: false },
+    closeNodeDetails() {},
     selectedNode: null,
     ...over,
   };
@@ -126,17 +126,26 @@ test("the arrows still move one option at a time", () => {
   assert.equal(first.getAttribute("tabindex"), "-1");
 });
 
-test("Escape closes topmost-first: modal, then result panel, then details, then nothing", () => {
+// 065 §B/§C rewrote the Escape ladder: the dock has NO close and Escape is a
+// no-op on it, so the order is modal → inspector → nothing. The middle rung
+// (ResultPanel.hide) is gone on purpose — losing the results to the key that
+// closes the panel above them is the defect this round exists to remove.
+test("Escape closes topmost-first: modal, then the inspector, then nothing — never the dock", () => {
   const { window, dom } = loadA11y();
-  let resultHides = 0;
+  let dockTouched = 0;
+  let closes = 0;
   const editor = editorWith(["a"], {
     errorModal: { visible: true, message: "boom" },
-    resultPanel: { visible: true },
-    resultPanelInstance: {
-      hide() {
-        resultHides += 1;
-        editor.resultPanel.visible = false;
+    inspector: { open: true },
+    dock: {
+      state: "open",
+      minimise() {
+        dockTouched += 1;
       },
+    },
+    closeNodeDetails() {
+      closes += 1;
+      editor.inspector.open = false;
     },
     selectedNode: { id: "a" },
   });
@@ -150,15 +159,58 @@ test("Escape closes topmost-first: modal, then result panel, then details, then 
 
   esc();
   assert.equal(editor.errorModal.visible, false, "the modal is topmost");
-  assert.equal(resultHides, 0, "one surface per press");
+  assert.equal(closes, 0, "one surface per press");
 
   esc();
-  assert.equal(resultHides, 1);
-  assert.notEqual(editor.selectedNode, null, "details still open");
+  assert.equal(closes, 1, "the inspector is the next rung");
+  assert.equal(editor.inspector.open, false);
 
-  esc();
-  assert.equal(editor.selectedNode, null);
+  const third = esc();
+  assert.equal(third.prevented, false, "with nothing open, Escape is not consumed");
+  assert.equal(editor.dock.state, "open", "Escape never touches the dock");
+  assert.equal(dockTouched, 0, "…and never calls minimise on it");
+});
 
-  const fourth = esc();
-  assert.equal(fourth.prevented, false, "with nothing open, Escape is not consumed");
+// 065 §C — the focus race the live DOM check found (2026-09-04, demo stack): the
+// list mirror focuses the selected row, the inspector focuses its close button, and
+// with both firing in one turn the hidden <li> won at 2 of 3 zoom levels. The open
+// path passes moveFocus=false; the tabindex still moves, only focus() is withheld.
+// A keyboard user is the only one who meets this, which is why it needs a test and
+// not a comment.
+test("a11ySyncNode withholds focus when asked, but still moves the roving tabindex", () => {
+  const { window, dom } = loadA11y();
+  window.setupA11y(editorWith(["a", "b"]));
+  const [first, second] = dom.children;
+
+  window.a11ySyncNode("b", false);
+  assert.equal(second.getAttribute("aria-selected"), "true");
+  assert.equal(second.getAttribute("tabindex"), "0", "the roving tabindex still follows the selection");
+  assert.equal(first.getAttribute("tabindex"), "-1");
+  assert.equal(second.focused, false, "…but focus stays where the caller put it — the panel is taking it");
+
+  // The default is unchanged: a plain selection still carries focus to the row.
+  window.a11ySyncNode("a");
+  assert.equal(first.focused, true);
+});
+
+// 065 §C keyboard parity: the node list's Enter/Space is the card button's twin —
+// it OPENS the inspector, and hands it the row as the focus-return element. A
+// plain click on the row still only selects.
+test("Enter on a node row opens the inspector and offers the row as the focus return point", () => {
+  const { window, dom } = loadA11y();
+  const opened = [];
+  const editor = editorWith(["a", "b"], {
+    openNodeDetails(id, trigger) {
+      opened.push([id, trigger]);
+    },
+    selectNodeById() {
+      throw new Error("Enter must OPEN, not merely select");
+    },
+  });
+  window.setupA11y(editor);
+  const [first] = dom.children;
+  first.fire("keydown", key("Enter"));
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][0], "a");
+  assert.equal(opened[0][1], first, "the row itself is the focus return element");
 });

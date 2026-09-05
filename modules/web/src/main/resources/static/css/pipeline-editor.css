@@ -3,9 +3,14 @@
 
 :root {
   --pe-sidebar-width: 280px;
-  /* The inspector rail keeps 041's shared detail width (059 §B) — the template
-     editor's rail and this one are the same rail token, not two coincidences. */
-  --pe-details-width: var(--app-detail-width, 320px);
+  /* 065 §C: the inspector is no longer a rail. 041's shared 320px detail width
+     rendered the SQL statement at ~35 characters with a horizontal scrollbar —
+     the one section the panel exists for was the one it could not show. The
+     overlay takes 60% of .pe-layout, floored so a laptop still gets a readable
+     statement and capped so a 2560px monitor does not get a full-screen wall.
+     The three numbers are the geometry itself (like --pe-card-w above and
+     --app-content-max in app.css), declared ONCE here. */
+  --pe-inspector-width: clamp(720px, 60%, 1200px);
   --pe-toolbar-height: 48px;
   --pe-banner-height: auto;
   --pe-gap: var(--gap-md, 16px);
@@ -108,15 +113,16 @@
 /* ---- Three-panel layout ---- */
 .pe-layout {
   display: grid;
-  grid-template-columns: var(--pe-sidebar-width) 1fr 0;
+  /* 065 §C: TWO tracks. The inspector used to own a third one that the
+     `has-details` class widened, so opening a node re-laid-out the graph and
+     the canvas lost 320px of the width the owner asked to get back. It is an
+     overlay now — .pe-layout is its containing block (position: relative), and
+     the grid never moves. */
+  grid-template-columns: var(--pe-sidebar-width) 1fr;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   position: relative;
-  transition: grid-template-columns var(--pe-transition);
-}
-
-.pe-layout.has-details {
-  grid-template-columns: var(--pe-sidebar-width) 1fr var(--pe-details-width);
 }
 
 /* ---- Left sidebar ---- */
@@ -256,6 +262,37 @@
   line-height: var(--leading-snug, 1.375);
 }
 
+/* 065 §C — the card's open affordance, top-right. The html-label container is
+ * pointer-events:none so the canvas keeps pan, zoom, drag and tap; this button
+ * re-enables them FOR ITSELF, which is the whole of what makes a clickable
+ * control legal inside the overlay. It rides the same pan/zoom transform as the
+ * card, so it works unchanged at fit, 50% and 200%. */
+.pe-card-open {
+  position: absolute;
+  top: var(--gap-xs, 4px);
+  right: var(--gap-xs, 4px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap-xs, 4px);
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pe-card-open:hover {
+  background: var(--surface-raised, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.pe-card-open:focus-visible {
+  outline: 2px solid var(--node-selected-ring, #2563eb);
+  outline-offset: 1px;
+}
+
 /* 1. Name — the title: body size, semibold, AT MOST two lines, ellipsis only after
  *    that (the clamp); the full name always rides on `title`. */
 .pe-card-title {
@@ -267,6 +304,10 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+  /* 065 §C: keep the title clear of the open button in the card's top-right
+     corner. The button is out of flow, so without this reservation a two-line
+     name runs under it. */
+  padding-inline-end: var(--gap-lg, 24px);
 }
 
 /* 2. Type badge — TYPE moved here from the retired per-type shapes (059 amends §5.3):
@@ -516,23 +557,48 @@
   border-width: 0;
 }
 
-/* ---- Right details panel ---- */
+/* ---- The node inspector (065 §C) ----
+ * An overlay panel INSIDE .pe-layout, anchored right, full layout height, over
+ * the canvas — not a fixed 100vh drawer hanging off the viewport. The scrim
+ * covers the CANVAS column only: the left sidebar carries the pipeline's
+ * settings and parameters, which is context for what the panel is showing, so
+ * it stays visible and interactive underneath. */
+[x-cloak] {
+  display: none !important;
+}
+
+.pe-inspector-scrim {
+  position: absolute;
+  inset: 0;
+  /* Start after the sidebar track — the sidebar is not covered. */
+  left: var(--pe-sidebar-width);
+  background: var(--surface-scrim, rgba(0, 0, 0, 0.32));
+  z-index: var(--z-fixed, 300);
+}
+
 .pe-details-panel {
-  position: fixed;
+  position: absolute;
   top: 0;
-  right: calc(-1 * var(--pe-details-width));
-  width: var(--pe-details-width);
-  height: 100vh;
+  right: 0;
+  bottom: 0;
+  width: var(--pe-inspector-width);
+  max-width: 100%;
   background: var(--surface-default, #fff);
   border-left: 1px solid var(--border-default, #e5e7eb);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   z-index: var(--z-drawer, 400);
-  transition: right var(--pe-transition);
   box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1);
 }
 
-.pe-details-visible {
-  right: 0;
+/* The panel's own column: a fixed header, a scrolling body. The body scrolls,
+   not the panel, so the close button stays reachable on a long SQL statement. */
+.pe-details-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 .pe-details-header {
@@ -564,8 +630,60 @@
   color: var(--text-primary, #111827);
 }
 
+/* The body is a COLUMN FLEX so the SQL section can be floored at a share of the
+   panel: a percentage flex-basis in a column resolves against the container's
+   height, and the container's height is definite (the frame is the panel's, the
+   panel's is .pe-layout's). A plain `min-height: 40%` would have computed to
+   auto here — the containing blocks have no definite height — which is exactly
+   the kind of rule that looks right and does nothing. */
 .pe-details-body {
   padding: var(--pe-gap);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pe-details-body > .pe-details-section {
+  flex: 0 0 auto;
+}
+
+/* 065 §C — the point of the exercise. The SQL section takes 40% of the panel as
+   its floor and every spare pixel above that; the statement spans the panel's
+   full width, does NOT wrap (wrapping destroys the indentation that carries the
+   query's shape — the screenshot showed it breaking at ~35 characters), and
+   scrolls inside its own box in both directions. The highlighter's spans and the
+   `H2 · file.sql @ v1 · Copy` meta row are untouched: this is a box, not a
+   renderer. */
+.pe-details-body > .pe-details-section-sql {
+  /* grow: 1 — take every spare pixel; SHRINK: 0 — and never give any back.
+     The shrink factor is the whole floor. With the flex default of `1 1 40%`
+     a node whose other sections are tall squeezed this one to 17px (measured
+     live, 2026-09-04: 411px relaxed → 17px under pressure, with a 28-line
+     statement still inside it) — the exact defect this round exists to remove,
+     reintroduced by one digit. `1 0 40%` holds 334px in the same test. */
+  flex: 1 0 40%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pe-details-section-sql #pe-node-sql,
+.pe-details-section-sql .pe-sql-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.pe-details-section-sql .pe-sql {
+  flex: 1;
+  min-height: 0;
+  white-space: pre;
+  overflow: auto;
+  max-height: none;
 }
 
 .pe-details-section {
@@ -807,35 +925,126 @@
   word-break: break-all;
 }
 
-/* ---- Result panel ---- */
-.pe-result-panel {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  max-height: 40vh;
-  background: var(--surface-default, #fff);
-  border-top: 1px solid var(--border-default, #e5e7eb);
-  z-index: var(--z-drawer, 400);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+/* ---- The bottom dock (065 §B): Results | Errors, minimisable ----
+ * IN FLOW, as the last flex child of .pe-root — not the old `position: fixed`
+ * panel. That is the whole mechanism behind "the canvas reclaims the rest":
+ * .pe-layout is `flex: 1`, so whatever the dock stops using, the graph gets.
+ * A fixed overlay could only ever cover the canvas, never give it back. */
+.pe-dock {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  background: var(--surface-default, #fff);
+  border-top: 1px solid var(--border-default, #e5e7eb);
 }
 
-.pe-result-header {
+/* Today's open height, unchanged: the 40vh ceiling the result panel had. */
+.pe-dock-open {
+  max-height: 40vh;
+}
+
+/* Minimised is the HEADER STRIP and nothing else — one row, sized by its own
+   content, no magic number. */
+.pe-dock-minimized {
+  max-height: none;
+}
+
+.pe-dock-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--gap-sm, 8px) var(--pe-gap);
+  gap: var(--gap-sm, 8px);
+  padding: var(--gap-xs, 4px) var(--pe-gap);
   border-bottom: 1px solid var(--border-default, #e5e7eb);
+  flex: 0 0 auto;
 }
 
-.pe-result-header h2 {
+.pe-dock-minimized .pe-dock-header {
+  border-bottom: none;
+}
+
+.pe-dock-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+}
+
+.pe-dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs, 4px);
+  padding: var(--gap-sm, 8px) var(--gap-md, 16px);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
   font-size: var(--text-sm, 0.875rem);
-  font-weight: var(--weight-semibold, 600);
-  margin: 0;
+  font-weight: var(--weight-medium, 500);
+  color: var(--text-secondary, #6b7280);
+}
+
+.pe-dock-tab:hover {
   color: var(--text-primary, #111827);
 }
+
+.pe-dock-tab-active {
+  color: var(--text-primary, #111827);
+  border-bottom-color: var(--accent-primary, #2563eb);
+}
+
+.pe-dock-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* "previous run": the Results tab is still showing a page from an earlier
+   execution, because a new run has started and its data has not landed. */
+.pe-dock-stale {
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-normal, 400);
+  color: var(--text-muted, #9ca3af);
+  font-style: italic;
+}
+
+.pe-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap-xs, 4px);
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: none;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+}
+
+.pe-dock-toggle:hover {
+  background: var(--surface-raised, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.pe-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* One failed node per entry, newest last; the 057 record renders below its
+   `node id · code` summary line. */
+.pe-dock-error {
+  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
+}
+
+.pe-dock-error:last-child {
+  border-bottom: none;
+}
+
+.pe-dock-error-summary {
+  padding: var(--gap-sm, 8px) var(--gap-md, 16px) 0;
+  font-size: var(--text-sm, 0.875rem);
+}
+
+/* ---- Result body (inside the dock's Results tab) ---- */
 
 .pe-result-ttl {
   font-size: var(--text-xs, 0.75rem);
@@ -853,9 +1062,10 @@
 
 .pe-result-table-container {
   /* Scroll only — .ds-table supplies the border, radius and background (032);
-     any border/radius left here would draw a second frame. */
+     any border/radius left here would draw a second frame. The vertical bound is
+     the DOCK's (.pe-dock-body scrolls) — the old `calc(40vh - 100px)` guessed at
+     a fixed panel's chrome height and produced two nested scrollers. */
   overflow-x: auto;
-  max-height: calc(40vh - 100px);
   padding: var(--gap-sm, 8px);
 }
 
@@ -936,7 +1146,7 @@
 /* ---- Responsive ---- */
 @media (max-width: 1024px) {
   .pe-layout {
-    grid-template-columns: 0 1fr 0;
+    grid-template-columns: 0 1fr;
   }
 
   .pe-sidebar {
@@ -955,29 +1165,22 @@
     transform: translateX(0);
   }
 
-  .pe-layout.has-details {
-    grid-template-columns: 0 1fr var(--pe-details-width);
+  /* The sidebar track has collapsed to 0 — the scrim covers the whole layout. */
+  .pe-inspector-scrim {
+    left: 0;
+  }
+}
+
+@media (max-width: 1200px) {
+  /* Below the clamp's 720px floor plus a usable canvas, the inspector takes the
+     pane: a 720px overlay on a 1000px layout leaves a 280px sliver of graph,
+     which is neither the panel's job nor a view of anything. */
+  :root {
+    --pe-inspector-width: 100%;
   }
 }
 
 @media (max-width: 768px) {
-  .pe-layout {
-    grid-template-columns: 0 1fr 0;
-  }
-
-  .pe-layout.has-details {
-    grid-template-columns: 0 1fr var(--pe-details-width);
-  }
-
-  .pe-details-panel {
-    width: 100%;
-    right: -100%;
-  }
-
-  .pe-details-visible {
-    right: 0;
-  }
-
   .pe-sidebar {
     width: 100%;
   }

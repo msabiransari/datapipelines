@@ -10,6 +10,10 @@
 
     if (editor.graph) editor.graph.resetAll();
     editor.nodeStates = {};
+    // 065 §B "execute started": this run's Errors list empties and the dock stays
+    // exactly where the user left it. A Results tab still holding the previous
+    // run's page is LABELLED as such until data_ready replaces it.
+    if (editor.handleExecutionStarted) editor.handleExecutionStarted();
 
     if (editor.sseHandler) {
       editor.sseHandler.connect(null, pipelineId);
