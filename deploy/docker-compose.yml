@@ -152,6 +152,17 @@ services:
       DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES:-60}
       DATAPIPELINES_EXECUTIONS_ERROR_DETAIL: ${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:-full}
       DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:-json}
+
+      # 072 — the organisation facts (configuration.md §3.21). Every one of these lands in
+      # EVERY execution's Context as an `org_*` key, so a deployment that cannot set them
+      # runs every pipeline against the shipped defaults with nothing to say so. The
+      # currency symbol's default is written `$$`: a lone `$` is Compose's interpolation
+      # sigil, and `$$` is its escape for a literal one (the container receives `$`).
+      DATAPIPELINES_ORG_CURRENCY_NAME: ${DATAPIPELINES_ORG_CURRENCY_NAME:-Dollar}
+      DATAPIPELINES_ORG_CURRENCY_SYMBOL: ${DATAPIPELINES_ORG_CURRENCY_SYMBOL:-$$}
+      DATAPIPELINES_ORG_FISCAL_START_DATE: ${DATAPIPELINES_ORG_FISCAL_START_DATE:-01-01}
+      DATAPIPELINES_ORG_WEEK_START: ${DATAPIPELINES_ORG_WEEK_START:-monday}
+      DATAPIPELINES_ORG_TIMEZONE: ${DATAPIPELINES_ORG_TIMEZONE:-UTC}
       DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:-false}
       DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}
       DATAPIPELINES_DEPLOYMENT_NAME: ${DATAPIPELINES_DEPLOYMENT_NAME:-}
