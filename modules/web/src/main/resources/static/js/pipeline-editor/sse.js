@@ -168,6 +168,13 @@
       case "execution_started":
         if (payload.execution_id) self.executionId = payload.execution_id;
         if (editor.graph) editor.graph.resetAll();
+        // 072: the frame carries the RESOLVED Context at execution start — org config,
+        // the platform keys and the parameters (pipeline-contract §7.2 tiers 1-4). The
+        // inspector uses it to show a CALCULATOR node's `$org_fiscal_start_date` as
+        // `$org_fiscal_start_date → 09-15`, which is the difference between reading the
+        // body and knowing what the run actually did. Calculator OUTPUTS (tier 5) arrive
+        // later, one per node_completed, and are merged in there.
+        if (editor.contextValues) editor.contextValues = payload.parameters || {};
         editor.isExecuting = true;
         editor.setBanner("", "");
         break;
@@ -197,6 +204,13 @@
             duration_ms: payload.duration_ms,
             rows_out: payload.rows_out,
           });
+        }
+        // 072: a CALCULATOR node's whole output is one value. Recorded per node for the
+        // inspector's Calculator section, and merged into the Context so a LATER node's
+        // `$reference` to it resolves on screen the way it resolved in the run.
+        if (payload.context_key) {
+          if (editor.nodeValues) editor.nodeValues[payload.node_id] = payload.context_value;
+          if (editor.contextValues) editor.contextValues[payload.context_key] = payload.context_value;
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "success";
         editor.announceStatus("Node " + payload.node_id + " completed");

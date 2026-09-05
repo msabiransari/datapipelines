@@ -9,7 +9,13 @@
    * lived here drew the same `#db` the type glyph draws on every db-backed card,
    * twice at card scale. Generic glyphs only — never a vendor logo; the engine's
    * identity is the source line's TEXT. */
-  var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow" };
+  // 072: a CALCULATOR node touches no database, so `db` — iconForType's fallback — would
+   // be actively misleading on it. `file` is the one glyph in the vendored subset that no
+   // other node type claims, which is what the 059b rule actually needs: ONE glyph per card,
+   // distinguishable from its neighbours at card scale, with the badge text beside it saying
+   // CALCULATOR. It is a stand-in: the honest glyph is a `calculator`, and adding it means
+   // extending `static/vendor/icons/lucide-sprite.svg`, which this round is fenced out of.
+   var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow", CALCULATOR: "file" };
 
   function iconForType(type) {
     return TYPE_ICONS[String(type || "").toUpperCase()] || "db";
@@ -536,6 +542,8 @@
     var type = (n.type || "").toUpperCase();
     if (type === "PIPELINE") {
       classes.push("pipeline-node");
+    } else if (type === "CALCULATOR") {
+      classes.push("calculator-node");
     } else if (type === "DQL" || type === "DML" || type === "DDL") {
       classes.push("type-" + type.toLowerCase());
     }
@@ -564,6 +572,12 @@
     };
     if (type === "PIPELINE") {
       data.sourceLabel = n.pipeline && n.pipeline.name ? n.pipeline.name : "pipeline";
+    } else if (type === "CALCULATOR") {
+      // The facts line the 072 brief asks for: `kind → context_key`. It occupies the slot
+      // a SQL node uses for `datasource · dialect`, because it answers the same question
+      // — what does this node work on, and what does it leave behind — and a card whose
+      // second line is blank reads as a card that failed to load.
+      data.sourceLabel = (n.kind || "?") + " \u2192 " + (n.context_key || "?");
     } else if (n.source === "tempdb") {
       var engine =
         settings && settings.tempdb && settings.tempdb.engine ? settings.tempdb.engine : "H2";

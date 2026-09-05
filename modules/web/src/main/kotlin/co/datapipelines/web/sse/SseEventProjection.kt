@@ -91,6 +91,11 @@ class SseEventProjection(
             // Design §7: a PIPELINE node's completion links to the child execution it spawned.
             // Conditional so every other node type's payload is byte-for-byte what it was.
             event.stats.childExecutionId?.let { put("child_execution_id", it) }
+            // 072, same discipline: a CALCULATOR node's completion carries what it computed.
+            // Without it the editor shows `rows_out: 0` for a node whose entire output is one
+            // value, and an author debugging a wrong quarter has nothing on screen to read.
+            event.stats.contextKey?.let { put("context_key", it) }
+            event.stats.contextValue?.let { put("context_value", it) }
         }
 
     private fun nodeFailedPayload(event: NodeFailed) =

@@ -198,11 +198,50 @@
                 </template>
               </div>
 
+              <!-- 072 §0.6 — a CALCULATOR node, READ-ONLY. No picker, no form, nothing
+                   editable: authoring a calculator is MCP's job this round (R10), and the
+                   editor's contract is only that the graph must not break on a node type it
+                   has never seen. What it shows is what an author cannot get anywhere else
+                   on this screen: the kind, each input as the body writes it BESIDE what the
+                   last run resolved it to, and the value the node produced. -->
+              <template x-if="selectedNode.type === 'CALCULATOR'">
+                <div class="pe-details-section pe-calculator">
+                  <h3 class="pe-details-heading">Calculator</h3>
+                  <div class="pe-field">
+                    <label class="pe-label">Kind</label>
+                    <div class="pe-value"><code x-text="selectedNode.kind || '—'"></code></div>
+                  </div>
+                  <div class="pe-field">
+                    <label class="pe-label">Context Key</label>
+                    <div class="pe-value"><code x-text="selectedNode.context_key || '—'"></code></div>
+                  </div>
+                  <template x-if="calculatorInputs(selectedNode).length">
+                    <div class="pe-field">
+                      <label class="pe-label">Inputs</label>
+                      <ul class="pe-calc-inputs">
+                        <template x-for="input in calculatorInputs(selectedNode)" :key="input.name">
+                          <li class="pe-calc-input">
+                            <span class="pe-calc-input-name" x-text="input.name"></span>
+                            <code class="pe-calc-input-expr" x-text="input.expression"></code>
+                            <span class="pe-calc-input-resolved" x-show="input.resolved !== null"
+                                  x-text="'\u2192 ' + input.resolved"></span>
+                          </li>
+                        </template>
+                      </ul>
+                    </div>
+                  </template>
+                  <div class="pe-field" x-show="calculatorValue(selectedNode) !== null">
+                    <label class="pe-label">Computed Value</label>
+                    <div class="pe-value"><code class="pe-calc-value" x-text="calculatorValue(selectedNode)"></code></div>
+                  </div>
+                </div>
+              </template>
+
               <!-- SQL — the node's rendered SQL, resolved server-side from its PINNED
                    template (contract §2.3: SQL lives in template entities, not nodes).
                    065 §C: this section is the panel's growing one — the marker class
                    is what gives the statement a box floored at 40% of the panel. -->
-              <div class="pe-details-section pe-details-section-sql">
+              <div class="pe-details-section pe-details-section-sql" x-show="selectedNode.type !== 'CALCULATOR'">
                 <h3 class="pe-details-heading">SQL
                   <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
                 </h3>
@@ -214,11 +253,11 @@
               <!-- Configuration -->
               <div class="pe-details-section">
                 <h3 class="pe-details-heading">Configuration</h3>
-                <div class="pe-field">
+                <div class="pe-field" x-show="selectedNode.type !== 'CALCULATOR'">
                   <label class="pe-label">Source</label>
                   <div class="pe-value" x-text="selectedNode.source || '—'" x-bind:title="selectedNode.source || ''"></div>
                 </div>
-                <div class="pe-field" x-show="selectedNode.type !== 'PIPELINE'">
+                <div class="pe-field" x-show="selectedNode.type !== 'PIPELINE' && selectedNode.type !== 'CALCULATOR'">
                   <label class="pe-label">Template</label>
                   <!-- §9.4: a template name is a PATH now. `acme/finance/monthly_revenue @ v3`
                        in a 320px inspector truncates to one line, and the full reference rides

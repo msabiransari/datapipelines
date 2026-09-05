@@ -88,6 +88,13 @@
       /* 057: node_id → the wire error object from that node's node_failed (the inspector
          renders it while the node's runtime state is "failed"). */
       nodeErrors: {},
+      /* 072: the resolved execution Context — seeded from execution_started (org config,
+         platform keys, parameters) and extended by each CALCULATOR node's completion.
+         The inspector resolves a `$reference` through it; empty before the first run,
+         which is why every read below falls back to showing the reference itself. */
+      contextValues: {},
+      /* 072: node_id → the value a CALCULATOR node computed, as text. */
+      nodeValues: {},
       selectedNode: null,
       /* 065 §B/§C: the two panes' state machines, both pure modules (dock.js,
          inspector.js) so `node --test` owns their transition tables and this file
@@ -456,6 +463,10 @@
        */
       outputText: function (node) {
         if (!node) return "—";
+        // 072: a CALCULATOR node has no `output` block at all — its output IS the Context
+        // key, and printing "side effect" for a node that produced a value would be a lie
+        // in the one field an author reads to find out what it produced.
+        if (node.type === "CALCULATOR") return "context key " + (node.context_key || "—");
         if (node.type === "DML" || node.type === "DDL") return "side effect";
         if (!node.output) {
           return node.type === "DQL" ? "returns result to caller (default)" : "side effect";
@@ -470,6 +481,40 @@
           );
         }
         return JSON.stringify(o);
+      },
+
+      /*
+       * 072 §0.6 — the inspector's read-only view of a CALCULATOR node's inputs.
+       *
+       * Each entry is `{name, expression, resolved}`. `expression` is what the BODY says —
+       * `$org_fiscal_start_date`, or a literal — and `resolved` is what the last run
+       * actually used, which is the whole value of showing both: an author looking at a
+       * wrong quarter needs to know whether the reference resolved to what they assumed.
+       * Before any run there is no Context, so `resolved` is null and the panel shows the
+       * expression alone rather than an em-dash that reads like a missing value.
+       */
+      calculatorInputs: function (node) {
+        if (!node || node.type !== "CALCULATOR" || !node.inputs) return [];
+        var self = this;
+        return Object.keys(node.inputs).map(function (name) {
+          var raw = node.inputs[name];
+          var expression = typeof raw === "string" ? raw : JSON.stringify(raw);
+          var resolved = null;
+          if (typeof raw === "string" && raw.charAt(0) === "$") {
+            var key = raw.slice(1);
+            if (Object.prototype.hasOwnProperty.call(self.contextValues, key)) {
+              resolved = String(self.contextValues[key]);
+            }
+          }
+          return { name: name, expression: expression, resolved: resolved };
+        });
+      },
+
+      /** The value a CALCULATOR node computed in the last run, or null before one. */
+      calculatorValue: function (node) {
+        if (!node || node.type !== "CALCULATOR") return null;
+        var value = this.nodeValues[node.id];
+        return value === undefined || value === null ? null : String(value);
       },
 
       /*
