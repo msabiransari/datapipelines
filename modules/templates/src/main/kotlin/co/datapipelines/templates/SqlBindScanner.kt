@@ -40,5 +40,10 @@ object SqlBindScanner {
     private val BIND = Regex("""(?<![:\w]):([a-z_][a-z0-9_]*)""")
 
     /** Every distinct `:name` in [body], in first-seen order. */
-    fun scan(body: String): List<String> = BIND.findAll(body).map { it.groupValues[1] }.distinct().toList()
+    fun scan(body: String): List<String> =
+        BIND
+            .findAll(body)
+            .map { it.groupValues[1] }
+            .distinct()
+            .toList()
 }

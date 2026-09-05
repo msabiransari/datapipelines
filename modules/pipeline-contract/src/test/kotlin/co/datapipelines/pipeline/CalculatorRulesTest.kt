@@ -102,7 +102,11 @@ class CalculatorRulesTest {
         val result = validate(Fixtures.pipeline(nodes = listOf(Fixtures.calculatorNode(kind = "fiscal_fortnight"))))
 
         result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Validation.CALCULATOR_UNKNOWN)
-        result.withCode(PipelineErrorCodes.Validation.CALCULATOR_UNKNOWN).single().message.contains("calculators_list") shouldBe true
+        result
+            .withCode(PipelineErrorCodes.Validation.CALCULATOR_UNKNOWN)
+            .single()
+            .message
+            .contains("calculators_list") shouldBe true
     }
 
     // ---- inputs ----

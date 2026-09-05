@@ -286,7 +286,7 @@ internal object CalculatorRules {
         if (reference in deploymentKeys || reference in pipeline.parameters) return
         val writer = keyToWriter[reference]
         when {
-            writer == null ->
+            writer == null -> {
                 into.add(
                     Validation.CALCULATOR_INPUT_UNKNOWN,
                     path,
@@ -298,9 +298,11 @@ internal object CalculatorRules {
                         "reference" to reference.truncateForError(),
                     ),
                 )
+            }
 
-            writer != node.id && !ancestors.reaches(node.id, writer) ->
+            writer != node.id && !ancestors.reaches(node.id, writer) -> {
                 unordered(path, node, reference, writer, into)
+            }
         }
     }
 
@@ -340,11 +342,9 @@ internal object CalculatorRules {
             if (value.isContainerNode) typeMismatch(path, node, kind, input, "a scalar value", into)
             return
         }
-        when (ParameterCoercion.coerce(type, value)) {
-            is ParameterCoercion.Outcome.Coerced -> Unit
-
-            is ParameterCoercion.Outcome.Rejected ->
-                typeMismatch(path, node, kind, input, "a ${type.wire} value (§6.3 wire encoding)", into)
+        val outcome = ParameterCoercion.coerce(type, value)
+        if (outcome is ParameterCoercion.Outcome.Rejected) {
+            typeMismatch(path, node, kind, input, "a ${type.wire} value (§6.3 wire encoding)", into)
         }
     }
 

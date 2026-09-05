@@ -66,7 +66,6 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     IdempotencyProperties::class,
     PipelineProperties::class,
     ExecutionsProperties::class,
-    OrgProperties::class,
 )
 class DomainConfiguration {
     @Bean
@@ -300,14 +299,6 @@ class DomainConfiguration {
      */
     @Bean
     fun pipelineResolver(repository: PipelineRepository): PipelineResolver = repositoryPipelineResolver(repository)
-
-    /**
-     * The org tier of every execution Context (calculators design §0.1/§0.2), projected off the
-     * bound properties onto the plain value object `pipeline-contract` declares — so neither the
-     * validator nor the executor reads Spring configuration itself.
-     */
-    @Bean
-    fun orgContext(properties: OrgProperties): co.datapipelines.pipeline.OrgContext = properties.toContext()
 
     @Bean
     fun pipelineValidator(

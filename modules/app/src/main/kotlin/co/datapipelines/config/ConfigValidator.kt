@@ -652,8 +652,7 @@ class ConfigValidator(
         }
 
         /** True when `MM-DD` names a day the calendar has — `02-30` and `13-01` do not. */
-        private fun isCalendarDay(value: String): Boolean =
-            runCatching { java.time.MonthDay.parse("--$value") }.isSuccess
+        private fun isCalendarDay(value: String): Boolean = runCatching { java.time.MonthDay.parse("--$value") }.isSuccess
 
         /** True for a zone id this JVM's tz database knows; a fixed offset (`+02:00`) is not one. */
         private fun isIanaZone(value: String): Boolean = value in java.time.ZoneId.getAvailableZoneIds()

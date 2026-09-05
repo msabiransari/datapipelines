@@ -337,17 +337,6 @@ class PipelineImportService(
         )
 
     /**
-     * Re-labels environment-dependency failures with the §13.2 import codes; every other failure
-     * keeps its §13.1 code and the exhaustive list (§17.2).
-     *
-     * ## Mixed failures (gate C, F10)
-     * When missing-datasource AND missing-template failures occur together, the primary code is
-     * `pipeline.import.missing_datasource` and `details` carries **both** sets —
-     * `missing_datasources` and `missing_templates` — so one response tells the author everything
-     * the environment lacks. The all-same-kind case keeps the single mapped code with its set in
-     * details under the matching key.
-     */
-    /**
      * §13.2 `pipeline.import.context_key_missing` (calculators design §0.5) — refuse a body that
      * reads an `org_*` Context key this deployment does not define.
      *
@@ -399,6 +388,18 @@ class PipelineImportService(
             mapOf("missing_context_keys" to missing, "provided_context_keys" to provided.filter { it.startsWith(ORG_PREFIX) }),
         )
     }
+
+    /**
+     * Re-labels environment-dependency failures with the §13.2 import codes; every other failure
+     * keeps its §13.1 code and the exhaustive list (§17.2).
+     *
+     * ## Mixed failures (gate C, F10)
+     * When missing-datasource AND missing-template failures occur together, the primary code is
+     * `pipeline.import.missing_datasource` and `details` carries **both** sets —
+     * `missing_datasources` and `missing_templates` — so one response tells the author everything
+     * the environment lacks. The all-same-kind case keeps the single mapped code with its set in
+     * details under the matching key.
+     */
 
     private fun importValidation(
         name: String,

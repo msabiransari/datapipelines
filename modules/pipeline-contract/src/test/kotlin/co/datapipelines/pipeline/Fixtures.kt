@@ -102,8 +102,7 @@ internal object Fixtures {
 
     fun literal(value: Int): JsonNode = JsonNodeFactory.instance.numberNode(value)
 
-    fun literals(vararg values: String): JsonNode =
-        JsonNodeFactory.instance.arrayNode().also { array -> values.forEach { array.add(it) } }
+    fun literals(vararg values: String): JsonNode = JsonNodeFactory.instance.arrayNode().also { array -> values.forEach { array.add(it) } }
 
     /**
      * Locates a repository file by walking up from the working directory, so tests do not

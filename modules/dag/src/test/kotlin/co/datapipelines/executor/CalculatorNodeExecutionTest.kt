@@ -159,15 +159,15 @@ class CalculatorNodeExecutionTest {
         }
     }
 
+    /**
+     * `date` is a LITERAL, deliberately. Referencing `$current_date` would make the expected
+     * quarter depend on the day the suite runs — and it would pass anyway most weeks, which is
+     * worse than failing: the first draft of this test did exactly that, and only the snapshot
+     * assertion noticed. `fiscal_start` stays a reference, so the org tier is still exercised.
+     */
     private fun calculatorNode(
         kind: String = "fiscal_quarter",
-        inputs: Map<String, JsonNode> =
-            // `date` is a LITERAL, deliberately. Referencing `$current_date` would make the
-            // expected quarter depend on the day the suite runs — and it would pass anyway most
-            // weeks, which is worse than failing: the first draft of this test did exactly that
-            // and only the snapshot assertion below noticed. `fiscal_start` stays a reference, so
-            // the org tier is still exercised.
-            mapOf("date" to text(AS_OF.toString()), "fiscal_start" to ref(OrgContext.FISCAL_START_DATE)),
+        inputs: Map<String, JsonNode> = mapOf("date" to text(AS_OF.toString()), "fiscal_start" to ref(OrgContext.FISCAL_START_DATE)),
     ): Node =
         Node(
             id = "fiscal_q",

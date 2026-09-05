@@ -69,13 +69,16 @@ object CalculatorInputResolver {
                     "Input '${input.name}' takes a scalar value; a JSON ${node.nodeType} has no canonical reading.",
                 )
         return when (val outcome = ParameterCoercion.coerce(type, node)) {
-            is ParameterCoercion.Outcome.Coerced -> outcome.value
+            is ParameterCoercion.Outcome.Coerced -> {
+                outcome.value
+            }
 
-            is ParameterCoercion.Outcome.Rejected ->
+            is ParameterCoercion.Outcome.Rejected -> {
                 throw CalculatorEvaluationException(
                     input.name,
                     "Input '${input.name}' must be a ${type.wire} value: ${outcome.reason}.",
                 )
+            }
         }
     }
 
