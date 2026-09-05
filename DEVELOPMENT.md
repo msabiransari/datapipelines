@@ -523,6 +523,11 @@ Sharing is safe because of a rule the suites already follow: **each spec cleans 
 - if your assertions are global (exact-set listings, whole-table counts) or your suite re-seeds the shared `acme`/`globex` fixture world, call `E2eClean.beforeSeeding()` from your first-test seed hook;
 - if you need the schema in a partial migration state, take `SharedPostgres.scratchDatabase("your_name")` — a fresh empty database on the same container.
 
+**Pooled or unpooled — pick deliberately.** `SharedPostgres` offers two sources on the one container and they are not interchangeable. (`pooledDataSource()` currently exists in `pipeline-contract`, `templates` and `datasources`, the modules whose suites asked for it; copy the same dozen lines into another module's `SharedPostgres` when a suite there needs it, rather than leaving an unused accessor in every module.) `SharedPostgres.dataSource()` is unpooled: a new *physical* connection per `getConnection()`, so two instances give two genuinely independent sessions. `SharedPostgres.pooledDataSource()` is a four-connection Hikari pool built with the container and closed at JVM exit.
+
+- A suite whose assertion is about **connection or transaction identity** — the concurrency races in `PipelineRepositoryIntegrationTest`, the two-session auth suites (`LocalAuthServiceTest`, `AuthRepositoriesIntegrationTest`, `LocalAdminSeederTest`, `BootstrapActorProvisioningIntegrationTest`) — **must** stay on the unpooled source. A pool may hand both callers the same connection and serialise statements that were meant to race, which turns the guard green without testing anything.
+- Every other suite should take the pooled source: an unpooled fixture pays a TCP connect plus a Postgres authentication handshake for *every statement*, which is the whole cost of a fixture-heavy suite (round 060 measured one 602-insert fixture at 19.2 s unpooled, 1.16 s pooled).
+
 ### 9.2 Reusing test containers across runs (opt-in, OFF by default)
 
 The shared containers declare `withReuse(true)`. This is a **no-op** unless you opt in per machine by adding to `~/.testcontainers.properties`:

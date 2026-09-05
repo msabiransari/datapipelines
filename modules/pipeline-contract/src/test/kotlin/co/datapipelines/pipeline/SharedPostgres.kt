@@ -1,9 +1,12 @@
 package co.datapipelines.pipeline
 
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.PostgreSQLContainer
 import java.sql.DriverManager
+import javax.sql.DataSource
 
 /**
  * ONE Postgres container for this module's whole test JVM (round 060) — the singleton
@@ -47,6 +50,9 @@ internal object SharedPostgres {
     private const val USER = "dp"
     private const val PASSWORD = "dp"
 
+    /** Small on purpose — see [pooledDataSource]. */
+    private const val POOL_SIZE = 4
+
     /** The shared container, started and migrated on first touch. */
     val postgres: PostgreSQLContainer<*> by lazy {
         PostgreSQLContainer(IMAGE)
@@ -66,6 +72,46 @@ internal object SharedPostgres {
         DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password).apply {
             setDriverClassName(postgres.driverClassName)
         }
+
+    /**
+     * A small **pooled** [DataSource] on the shared container: built on first touch (which
+     * starts the container), reused by every suite that asks for it, closed at JVM exit —
+     * i.e. it lives exactly as long as the container does.
+     *
+     * ## Pooled and unpooled are NOT interchangeable — do not "simplify" one of them away
+     *
+     * [dataSource] hands out a **new physical connection per `getConnection()`**. That is a
+     * cost — a fixture-heavy suite pays a TCP connect plus a Postgres authentication
+     * handshake for every single statement — but it is also a **semantic**: a suite whose
+     * assertion is about two INDEPENDENT SESSIONS is only meaningful on separate physical
+     * connections, because a pool can hand two callers the same connection and serialise
+     * statements that were meant to race. The concurrency tests in
+     * `PipelineRepositoryIntegrationTest` and the two-session suites in `modules/auth`
+     * (`LocalAuthServiceTest`, `AuthRepositoriesIntegrationTest`, `LocalAdminSeederTest`,
+     * `BootstrapActorProvisioningIntegrationTest`) therefore keep [dataSource].
+     *
+     * Everything else — ordinary fixture writes and reads — takes [pooledDataSource] and pays
+     * the handshake once for the whole JVM instead of once per statement (round 062; round
+     * 060 measured the same cure at 19.2 s → 1.16 s on a 602-insert fixture).
+     *
+     * [POOL_SIZE] is deliberately tiny: the suites on this pool run their own tests
+     * sequentially, so the pool exists to RETAIN a connection, not to widen concurrency.
+     */
+    fun pooledDataSource(): DataSource = pool
+
+    /** Backing pool for [pooledDataSource]; touching it starts the container. */
+    private val pool: HikariDataSource by lazy {
+        HikariDataSource(
+            HikariConfig().apply {
+                jdbcUrl = postgres.jdbcUrl
+                username = postgres.username
+                password = postgres.password
+                driverClassName = postgres.driverClassName
+                maximumPoolSize = POOL_SIZE
+                poolName = "shared-postgres-pipeline-contract"
+            },
+        ).also { created -> Runtime.getRuntime().addShutdownHook(Thread(created::close)) }
+    }
 
     /**
      * A fresh EMPTY database on the shared container, for a suite that builds a partial or
