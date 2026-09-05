@@ -65,10 +65,13 @@
   resize: horizontal;
 }
 
-/* The detail pane scrolls inside itself; the versions table can be long. */
+/* The detail pane scrolls inside itself; the versions table can be long.
+   The pane split is a border-default line (WCAG 1.4.11, 064): a pane boundary is a
+   component boundary — never a tint alone, and never just the grid gap. */
 .tplx-detail {
   min-height: 0;
   overflow-y: auto;
+  border-left: 1px solid var(--border-default);
 }
 
 /* C′1 (059, 2026-09-02): the SELECTED template renders at the TOP, aligned with the
@@ -175,10 +178,13 @@ details[open] > .tpl-summary::before {
 }
 
 /* The selected row — selection state is aria-selected, owned by template-explorer.js,
-   the same pattern the pipeline editor's node list uses. */
+   the same pattern the pipeline editor's node list uses. The 3px accent bar in the
+   focus token carries selection when the tint fails (WCAG 1.4.11, 064): a tint alone
+   cannot reach 3:1 without turning grey. */
 .tpl-leaf[aria-selected="true"],
 .tpl-result[aria-selected="true"] {
   background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--border-focus);
 }
 
 .tpl-leaf:focus-visible,

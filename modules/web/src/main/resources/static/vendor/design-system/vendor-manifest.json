@@ -1,7 +1,7 @@
 {
   "design-system": {
     "package": "@acme/design-tokens",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "source": "../design-system-starter/dist/",
     "files": [
       "tokens.css",
@@ -20,20 +20,20 @@
       "themes/ocean.css"
     ],
     "sha256": {
-      "tokens.css": "0d86fc432d63ebbf277d4645163e392c317da8f3cbdfcb4d7a51339fa7078250",
+      "tokens.css": "c29587fbcd6a179136933d2c5e14a14599d6b9f6682cc081957a4b5ad93807b8",
       "base.css": "23b89cc846804dd328189f42b7fdaf62f8c41b2c2bc04de5476028814ecf1636",
       "motion.css": "1f32f4f6018752b434ad30114710ca10c7dfe514e5419003325da824c8ff608b",
       "primitives.css": "e8704e4d09d04be0b1048a9816e54cb756481012099d71fdb46129e9e2cb685b",
       "icons.css": "68b21794e9c5e0c6586fd30dae189d63e716cbeaa49a434f46a5db47b827a622",
-      "themes/saas.css": "9454fac9cdc475a43c62d05b7bb6bc996ac7782b5fde3d5e90212c2a125e6f0a",
-      "themes/light.css": "0802ba391d3cc209e5f95da35a418e6bbc48ec96b096b2531a6492cb592e1c10",
-      "themes/dark.css": "fd01b40df5dc541a6db1fa46bf3a4fb719a391f08217cb2a8653c6ea74c5240a",
-      "themes/professional.css": "aff747e63a5b09eda860bc2cd9c62c71c3bb3f9662dd4b6c17de2ad76cd65f97",
-      "themes/auto.css": "761999df995d7923caa1a591bef407071cef7bdb1be3f609eedc2537c4d8dcc0",
-      "themes/healthcare.css": "bf9884df97173d4b7b2384522c6ac53200cc07b71f3844a5f2ac1f400701d16a",
-      "themes/minimal.css": "2e6f8feafe8619672c37b302b7f86814547897dd492ff250c08297fbb1346b48",
-      "themes/forest.css": "b0c676a2d2e1e5899e629a62b47a6ae42ed35a3e6a17bd25a36c2d258d5f4637",
-      "themes/ocean.css": "5d207a206c223ccc32ec6f1f9d56b93b9d5735f8943b118d06345cec36212065"
+      "themes/saas.css": "18209b1ca2670a81fa35e697d5cf69d921d62fff141480090d3c2ceadc4aacf1",
+      "themes/light.css": "1cffafddaeddd5713b6c5b7ac45984f2ce528fcea7aa9bae01ba8effa96a5227",
+      "themes/dark.css": "62223e91a516da0da86de3e867d3164badb6610df7fcd2ec47b07b286ca045c3",
+      "themes/professional.css": "7b782e7404736cc5d065041dd4d0ee9337cbaaad95d765822f06c3200324a39c",
+      "themes/auto.css": "1574bc009ec0dff0ebb4cfb7e22091a7a349277766ad7f13e33f2fa56dcacd59",
+      "themes/healthcare.css": "3d988215a95bb2937dfcd120e22254a599e5bb666026dfa0254b9288061aabed",
+      "themes/minimal.css": "c69c4933ba6d65c3570ac641f8962a8f9c78ebf522b1ec84ecb92249b20feb28",
+      "themes/forest.css": "31125a2db7994a9fbb774d79fbfe02eeae306b96573e59a03b4c9937fbff6d08",
+      "themes/ocean.css": "db66b72c9862a66c4544eca3206140fa3aa70e3b28c8b1a8088b36dfed64a8eb"
     },
     "license": "MIT"
   },
