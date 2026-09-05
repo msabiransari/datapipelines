@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.util.UUID
 
 /**
@@ -31,10 +30,15 @@ class DatasourceRegistryIntegrationTest {
 
     private val encryptor = testEncryptor()
 
-    /** Binds the JDBC template to the module's shared, already-migrated container. */
+    /**
+     * Binds the JDBC template to the module's shared, already-migrated container, over its
+     * **pooled** source (round 062). This template carries only the metadata-schema fixtures
+     * and reads; the pools this suite is actually about are the ones the registry builds for
+     * the datasources UNDER test, which are untouched by this and stay real Hikari pools.
+     */
     @BeforeAll
     fun connect() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())
     }
 
     @BeforeEach
@@ -718,6 +722,4 @@ class DatasourceRegistryIntegrationTest {
                 UUID::class.java,
             ),
         )
-
-    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }

@@ -60,10 +60,16 @@ class PipelineRepositoryIntegrationTest {
     /**
      * Binds the JDBC template to the module's shared, already-migrated container — the
      * migrations are applied once per JVM by [SharedPostgres], not per class.
+     *
+     * **Pooled** (round 062): every statement this template runs is a fixture write or a
+     * read whose outcome does not depend on which physical connection carried it, and the
+     * unpooled source charged each one a fresh connect + authentication handshake. The two
+     * concurrency tests below do NOT use this template — they build their own repositories on
+     * [dataSource], which is unpooled precisely so their two writers race.
      */
     @BeforeAll
     fun connect() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())
     }
 
     @BeforeEach
@@ -1173,11 +1179,13 @@ class PipelineRepositoryIntegrationTest {
         )
 
     /**
-     * A fresh `DataSource` on the shared container.
+     * A fresh **unpooled** `DataSource` on the shared container — used by the two concurrency
+     * tests and by nothing else.
      *
      * `DriverManagerDataSource` hands out a new physical connection per `getConnection()`, so
      * two instances give the concurrency test two genuinely independent sessions — a shared
-     * pooled connection would serialise the two inserts and prove nothing.
+     * pooled connection would serialise the two inserts and prove nothing. This is why
+     * [SharedPostgres] keeps both sources: see `SharedPostgres.pooledDataSource`.
      */
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 

@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.util.UUID
 
 /**
@@ -42,10 +41,16 @@ class TemplateRepositoryIntegrationTest {
     /** The V4-seeded `default` workspace this suite re-seeds after every truncate — a pinned literal, not a guess. */
     private val workspaceId: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
 
-    /** Binds the JDBC template to the module's shared, already-migrated container. */
+    /**
+     * Binds the JDBC template to the module's shared, already-migrated container, over its
+     * **pooled** source (round 062): every statement here is a fixture write or an ordinary
+     * read, and nothing in this suite asserts anything about connection or transaction
+     * identity, so paying a fresh connect + authentication handshake per statement bought
+     * nothing. `SharedPostgres.dataSource()` — unpooled — stays for the suites that do.
+     */
     @BeforeAll
     fun connect() {
-        jdbc = NamedParameterJdbcTemplate(dataSource())
+        jdbc = NamedParameterJdbcTemplate(SharedPostgres.pooledDataSource())
     }
 
     @BeforeEach
@@ -808,6 +813,4 @@ class TemplateRepositoryIntegrationTest {
 
     private fun existsRows(table: String): Int =
         checkNotNull(jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
-
-    private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
 }
