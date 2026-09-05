@@ -16,6 +16,7 @@ import co.datapipelines.executor.NodeExecutionContext
 import co.datapipelines.executor.PipelineExecutionFailed
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
+import co.datapipelines.executor.RunContext
 import co.datapipelines.executor.StoredResult
 import co.datapipelines.executor.WarningSink
 import co.datapipelines.executor.WritebackRunner
@@ -145,7 +146,7 @@ class SubPipelineExecutionRunnerTest {
             executionId = parentExecutionId,
             staging = staging,
             handle = InMemoryCancellationRegistry().register(parentExecutionId),
-            values = values,
+            values = RunContext.of(values),
             warnings = WarningSink(),
             resultTtlSeconds = 300,
             renderBudgetChars = 4096,

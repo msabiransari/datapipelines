@@ -42,6 +42,12 @@ data class ExecutableNode(
     val pipeline: PipelineNodeRef?,
     /** PIPELINE nodes only: the child parameter map — literals and `${parent_param}` references (§4.9). */
     val parameters: Map<String, JsonNode>?,
+    /** CALCULATOR nodes only: the catalog kind (§4.10). */
+    val kind: String? = null,
+    /** CALCULATOR nodes only: the kind's inputs — `$references` and literals, still as JSON (§4.10). */
+    val inputs: Map<String, JsonNode>? = null,
+    /** CALCULATOR nodes only: the Context key this node writes (§4.10). */
+    val contextKey: String? = null,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
@@ -59,6 +65,9 @@ data class ExecutableNode(
                 dependsOn = node.dependsOn.toSet(),
                 pipeline = node.pipeline,
                 parameters = node.parameters,
+                kind = node.kind,
+                inputs = node.inputs,
+                contextKey = node.contextKey,
             )
     }
 }

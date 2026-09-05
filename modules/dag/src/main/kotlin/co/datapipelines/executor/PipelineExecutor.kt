@@ -13,7 +13,6 @@ import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
-import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
@@ -135,8 +134,12 @@ class PipelineExecutor(
         // Binding runs before the stream opens, and stays there: a rejected parameter is a 400
         // with no execution at all, and §8.2 catalogues no executor code for it. Everything the
         // catalogue DOES cover moves below the emit (F9).
-        val context = ParameterBinder(request.pipeline.parameters).bindOrThrow(request.parameters)
-        val run = ExecutionRun(executionId, request, plan, startedAt)
+        // §7.1 steps 1-4 / calculators §0.2: org config, then the platform keys, then the
+        // declared parameters resolved against the request's inputs. LIVE — a CALCULATOR node
+        // writes tier 5 into this same map at its DAG position, and every node scheduled after
+        // it renders and binds against the value (RunContext's KDoc).
+        val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt)
+        val run = ExecutionRun(executionId, request, plan, startedAt, context)
 
         // §5.1 step 4 before steps 8-10: `execution_started` precedes every allocation whose
         // failure §8.2 names (`staging.creation_failed`, `staging.engine_unavailable`). Creating
@@ -147,7 +150,7 @@ class PipelineExecutor(
                 executionId = executionId,
                 pipelineId = request.pipelineId,
                 pipelineVersion = request.pipelineVersion,
-                parameters = context.asMap(),
+                parameters = context.snapshot(),
                 correlationId = request.correlationId,
                 startedAt = startedAt,
             ),
@@ -160,7 +163,7 @@ class PipelineExecutor(
             // executor's own pool, never on whatever thread the caller happened to arrive on.
             val opened = withContext(dispatcher.context) { stagingFactory.create(executionId, stagingEngineFor(request.pipeline)) }
             staging = opened
-            val ctx = nodeContext(request, opened, handle, run, context.asMap())
+            val ctx = nodeContext(request, opened, handle, run, context)
             return withTimeout(config.executionTimeoutSeconds.seconds) {
                 coroutineScope {
                     handle.bind(coroutineContext.job)
@@ -392,6 +395,7 @@ class PipelineExecutor(
                     completedAt = completedAt,
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
         }
@@ -505,6 +509,7 @@ class PipelineExecutor(
                     reason = e.reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
         }
@@ -562,6 +567,7 @@ class PipelineExecutor(
                     reason = reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+                    contextSnapshot = run.context.snapshot(),
                 ),
             )
             metrics.executionAborted(reason)
@@ -604,6 +610,7 @@ class PipelineExecutor(
         failedNodeId = failedNodeId,
         error = error,
         nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
+        contextSnapshot = run.context.snapshot(),
     )
 
     // ------------------------------------------------------------ plumbing
@@ -678,7 +685,7 @@ class PipelineExecutor(
         staging: Staging,
         handle: CancellationHandle,
         run: ExecutionRun,
-        values: Map<String, Any?>,
+        values: RunContext,
     ): NodeExecutionContext {
         // B2: the pipeline's `settings.tempdb.config.max_memory_mb` may only ever LOWER the
         // operator's global ceiling, never raise it. Save-time validation only checks `> 0`, so an
@@ -740,6 +747,13 @@ internal class ExecutionRun(
     val request: ExecuteRequest,
     val plan: ExecutablePipeline,
     val startedAt: Instant,
+    /**
+     * The execution's LIVE Context. Held here so the three terminal events can carry its final
+     * state (calculators design §0.5) without the emit sites reaching back into the executor —
+     * and read as a SNAPSHOT at emit time, because a calculator may still have been writing to it
+     * a moment earlier.
+     */
+    val context: RunContext,
 ) {
     val stats = NodeStatsCollector()
     val warnings = WarningSink()

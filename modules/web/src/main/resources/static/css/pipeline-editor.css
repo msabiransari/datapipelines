@@ -727,6 +727,47 @@
   color: var(--text-muted, #9ca3af);
 }
 
+/* ---- Calculator section (072 §0.6) — read-only, so there is nothing here but type ----
+   Every value is a design token: a calculator input list is text and the theme owns text.
+   The input row is a three-part line — name, the expression the body carries, and what the
+   last run resolved it to — laid out so the resolved half is legible as an ANSWER rather
+   than as more of the expression. */
+.pe-calc-inputs {
+  list-style: none;
+  padding: 0;
+  margin: 2px 0 0;
+}
+
+.pe-calc-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs, 4px);
+  padding: 2px 0;
+  font-size: var(--text-sm, 0.875rem);
+}
+
+.pe-calc-input-name {
+  color: var(--text-muted, #9ca3af);
+}
+
+.pe-calc-input-name::after {
+  content: ":";
+}
+
+.pe-calc-input-expr {
+  color: var(--text-primary, #111827);
+}
+
+.pe-calc-input-resolved {
+  color: var(--text-secondary, #6b7280);
+}
+
+.pe-calc-value {
+  color: var(--text-primary, #111827);
+  font-weight: var(--font-weight-medium, 500);
+}
+
 /* ---- Node SQL section (032) ---- */
 .pe-sql-block {
   display: flex;

@@ -1,10 +1,12 @@
-// module-structure.md §5.8 — allowed internal deps: typesystem, pipeline-contract,
+// module-structure.md §5.8 — allowed internal deps: typesystem, calculators, pipeline-contract,
 // templates, datasources, dag, auth, application. `web` is NOT a dependency and must not become
 // one: mcp-server is a thin adapter over the same service layer, never over HTTP.
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem"))
+    // 072: `calculators_list` / `calculators_get` project the registry straight onto the wire.
+    implementation(project(":modules:calculators"))
     implementation(project(":modules:pipeline-contract"))
     implementation(project(":modules:templates"))
     implementation(project(":modules:datasources"))

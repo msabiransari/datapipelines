@@ -39,6 +39,13 @@ class PipelineValidator(
     private val templates: TemplateDryRenderer,
     private val pipelines: PipelineResolver,
     private val maxCompositionDepth: Int,
+    /**
+     * The deployment's org tier (calculators design §0.1). Defaulted so a test or an in-memory
+     * editor model keeps constructing this class with four arguments; production passes the
+     * bound one, which is what makes the save-time dry render see the same `org_*` keys the
+     * executor will (§0.2) — and what makes the import re-run on the TARGET a real check.
+     */
+    private val orgContext: OrgContext = OrgContext.DEFAULTS,
 ) {
     /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
@@ -53,10 +60,11 @@ class PipelineValidator(
         StructuralRules.check(pipeline, datasources, collector)
         DagRules.check(pipeline, collector)
         NodeTypeRules.check(pipeline, collector)
-        ReferenceRules.check(pipeline, datasources, templates, workspaceId, collector)
+        ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector)
         ParameterRules.check(pipeline, collector)
         SettingsRules.check(pipeline, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, collector)
+        CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector)
         return collector.toResult()
     }
 

@@ -266,6 +266,24 @@ Where the AES data keys for `datasources.password_encrypted` come from ([Datasou
 
 **Rotating.** Generate a key (`openssl rand -base64 32`), add it as version N+1, set `encryption-key-current: N+1`, restart. New writes carry N+1; rows written under earlier versions keep decrypting, and are rewritten under the current key the next time their password is saved. Keep the old keys configured until no row still carries their version — [Datasources §7.3](datasources.md#73-key-rotation) has the one SQL query that answers that.
 
+### 3.21 Organisation
+
+The organisation's own facts — its currency, when its fiscal year starts, which day its week starts on, which timezone "today" means. They are **configuration, not pipeline data**: identical for every pipeline in the deployment, changed about once a decade, and a value that differs between deployments must be visible in the deployment's yml rather than copied into every body.
+
+Every key here enters every execution's Context as an `org_*` key — the yml path minus the `datapipelines.org.` prefix, with dots and dashes as `_` ([Pipeline Contract §7.2](pipeline-contract.md#72-whats-in-the-context--one-namespace-five-tiers)). A node binds `:org_currency_symbol`; a `CALCULATOR` node references `$org_fiscal_start_date`. None of them is a secret, and a pipeline may override any of them by declaring a parameter of the same name.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.org.currency.name` | `Dollar` | The currency amounts are reported in. Context key `org_currency_name` |
+| `datapipelines.org.currency.symbol` | `$` | Rendered beside amounts. Context key `org_currency_symbol` |
+| `datapipelines.org.fiscal-start-date` | `01-01` | `MM-DD` — the day the fiscal year starts; `01-01` is the calendar year. Month names are refused (§7). `02-29` is accepted and resolves to 02-28 in a non-leap year. Context key `org_fiscal_start_date` |
+| `datapipelines.org.week-start` | `monday` | `monday` \| `sunday` — which day a week starts on for week bucketing. Context key `org_week_start` |
+| `datapipelines.org.timezone` | `UTC` | An IANA zone id. `current_date` is evaluated in it, so a deployment in Sydney on a UTC host still sees its own today. Context key `org_timezone` |
+
+Env vars follow §1's derivation rule: `DATAPIPELINES_ORG_CURRENCY_NAME`, `DATAPIPELINES_ORG_CURRENCY_SYMBOL`, `DATAPIPELINES_ORG_FISCAL_START_DATE`, `DATAPIPELINES_ORG_WEEK_START`, `DATAPIPELINES_ORG_TIMEZONE`.
+
+**Restart to change.** There is no runtime override and no per-user setting: an org value that could change mid-run would make two nodes of one execution disagree about what year it is. A bad value stops the server (§7) rather than silently defaulting — a wrong fiscal start is a wrong number in every report the deployment produces.
+
 ---
 
 ## 4. Precedence
@@ -449,6 +467,16 @@ datapipelines:
   bootstrap:
     datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
     examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
+
+  # §3.21 — organisation facts. Appended AFTER the whole datapipelines: tree, never inserted
+  # between its children: a 2-space block placed mid-tree re-parents whatever follows it.
+  org:
+    currency:
+      name: ${DATAPIPELINES_ORG_CURRENCY_NAME:Dollar}
+      symbol: ${DATAPIPELINES_ORG_CURRENCY_SYMBOL:$}
+    fiscal-start-date: ${DATAPIPELINES_ORG_FISCAL_START_DATE:01-01}
+    week-start: ${DATAPIPELINES_ORG_WEEK_START:monday}
+    timezone: ${DATAPIPELINES_ORG_TIMEZONE:UTC}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -517,6 +545,7 @@ On startup, the app validates:
 - `datapipelines.bootstrap.examples-file` is not set while `datapipelines.workspaces.provisioning-mode` is anything but `auto-per-user` (§3.18) — the violation names both keys. Only `auto-per-user` provisions the personal workspace the examples are seeded into, so any other mode (the shipped default included) leaves the configured file permanently unseeded. A mode that is misspelled is reported by the mode check alone, not twice.
 - No OIDC provider is **named** `bootstrap`, `local` or `system`. Those are the `users.provider` values the system writes for identities it creates itself (§6.1 bootstrap actor, §5A local accounts, [Auth §4.5](auth.md#45-the-system-service-account-r7) system service account), and a provider's configured name is written to that column verbatim — an external provider under any of them would be indistinguishable from them, and for `system` that indistinguishability is the whole of the account's safety argument. The reservation is case-insensitive and applies to an entry with a blank `client-id` too.
 - **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
+- **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **Deployment posture (§3.19):** the deployment `name` and the authoring state are logged once at boot (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
@@ -531,6 +560,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.11 | 072 calculators | New **§3.21 Organisation**: `datapipelines.org.currency.name` / `.symbol`, `fiscal-start-date` (`MM-DD`), `week-start`, `timezone` — five keys that enter every execution Context as `org_*` (calculators design §0.1/§0.2, [Pipeline Contract §7.2](pipeline-contract.md#72-whats-in-the-context--one-namespace-five-tiers)). §5 template block and one new §7 validation rule (all four org checks report together; a month name in `fiscal-start-date` is refused with a message naming `MM-DD`) |
 | 2026-09-04 | v1.10 | 068 key-provider seam | New **§3.20 credential key provider**: `datapipelines.db.key-provider` (default `env`, so no deployment needs a config edit), plus the `env` provider's optional `encryption-keys` rotation map and `encryption-key-current`. §2's `encryption-key` row now states that it is key version 1, forever. §5 template and §7 updated — one new validation rule: the provider name must be one this build ships, and that provider's own settings must be present and well-formed (an unknown name short-circuits the rest). |
 | 2026-09-02 | v1.9 | 051 auth/config sweep | Added §3.4 `datapipelines.auth.trusted-proxies` (CIDR list, default empty = header ignored; the login limiter and every auth `source_ip` resolve the client through it — R8/T46, deployment.md §6.2) with the §5 template line and two §7 rules (each entry must parse as a CIDR or startup is refused; enforced at the auth module's resolver construction). §3.17: `open-join: true` + `closed` provisioning now refused at startup, naming both keys (T45 — the self-join branch gates on `open-join` alone, so the pair would re-open the membership surface `closed` exists to keep admin-only); §7 gains the rule |
 | 2026-08-05 | v1.0 | initial draft | Complete configuration reference: 6 required keys + OIDC, ~30 optional keys, full application.yml template, dev profile, startup validation |

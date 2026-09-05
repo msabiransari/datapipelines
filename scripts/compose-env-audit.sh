@@ -91,7 +91,11 @@ for name in sorted(bound):
 for name, value in sorted(passed.items()):
     m = re.match(r"^\$\{" + name + r"(?::-?([^}]*))?\}$", value)
     if m:
-        default = m.group(1) or ""
+        # `$$` is Compose's escape for a literal `$` — the container receives one dollar.
+        # Comparing the raw text would report a diverged default for a value that is, in the
+        # only place it matters (the process environment), identical. 072: the org currency
+        # symbol is the first default in the file that needed it.
+        default = (m.group(1) or "").replace("$$", "$")
         if default != bound.get(name):
             failures.append(f"2 compose default for {name} is '{default}' but application.yml ships "
                             f"'{bound.get(name)}' — the compose default must mirror the app default")

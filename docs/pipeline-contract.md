@@ -248,12 +248,15 @@ Note: no `output` block. DML's side effect IS the output.
 |---|---|---|---|
 | `id` | string | yes | Node identifier. `[a-z0-9_]+`. Unique within the pipeline. Stable across versions and environments. |
 | `description` | string | yes | Human-readable. Shown in UI editor. |
-| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`. Drives executor behavior. |
-| `source` | string | yes, except PIPELINE | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9). |
-| `template` | object | yes, except PIPELINE | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9). |
+| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`. Drives executor behavior. |
+| `source` | string | yes, except PIPELINE and CALCULATOR | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
+| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
 | `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
 | `parameters` | object | no | Child parameter bindings on a `PIPELINE` node: each value is a typed literal in the child parameter's §6.3 wire encoding, or `"${parent_param}"` naming a parent parameter of the identical type. See §4.9. |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
+| `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `context_key` | string | CALCULATOR nodes only | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. |
 
 ### 4.7 `output` block reference
@@ -300,6 +303,32 @@ Field rules:
 Deleting a pipeline (soft delete) does **not** affect existing pinned references — the pinned version keeps resolving — but blocks NEW references at save time (`pipeline_reference_deleted`, §12.9). This mirrors template deletion exactly.
 
 ---
+
+### 4.10 JSON structure (CALCULATOR node)
+
+```json
+{
+  "id": "fiscal_q",
+  "description": "The fiscal quarter this run reports on.",
+  "type": "CALCULATOR",
+  "kind": "fiscal_quarter",
+  "inputs": {"date": "$current_date", "fiscal_start": "$org_fiscal_start_date"},
+  "context_key": "run_fiscal_quarter",
+  "depends_on": []
+}
+```
+
+A CALCULATOR node evaluates one **pure catalog function** ([Calculators](calculators.md)) and writes ONE typed value into the execution Context under `context_key`. It runs no SQL, touches no database, and produces no table. Downstream nodes read the value the way they read any Context key — `:run_fiscal_quarter` in a template, `"$run_fiscal_quarter"` in another calculator's `inputs`.
+
+Field rules:
+
+- `kind` — required: a name in the registry. The catalog is additive and a `kind` never changes meaning, because a `kind` is written into bodies that are versioned, exported and promoted.
+- `inputs` — required (an empty object is legal for a kind with only optional inputs). `"$name"` is a **reference** to a Context key; anything else is a literal typed against the kind's declared input type, which is what makes `"fiscal_start": "09-15"` a per-pipeline override with no config edit. An input the kind declares optional may be omitted, and the kind then applies its documented default.
+- `context_key` — required, per §6.1. It may shadow an org or platform key; it may **never** shadow a declared parameter (§12.10 `calculator_output_collision`), and no two nodes may write the same key.
+- `source`, `template`, `output` — **forbidden**, for the same reason `source`/`template` are forbidden on a PIPELINE node: this node is not the kind of thing they describe.
+- `depends_on` — unchanged, and load-bearing in a way it is not elsewhere: **sequencing is topology**. A reference to another node's `context_key`, and a SQL node binding `:that_key`, are valid only from a node that depends on the producer, directly or transitively (§12.10 `calculator_input_unordered`). Array order means nothing.
+
+At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
 
 ## 5. Settings
 
@@ -391,27 +420,46 @@ The Context is a **runtime in-memory map** — never serialized in the Pipeline 
 
 ### 7.1 Lifecycle
 
-1. Pipeline execution starts.
+1. Pipeline execution starts. The executor seeds the Context with the **org tier** — the
+   deployment's `datapipelines.org.*` values (Configuration §3.21) — and then the **platform
+   tier**: `current_date`, `current_timestamp`, `execution_id`.
 2. Executor reads pipeline input parameters (from REST/MCP call).
 3. Executor validates each parameter against the pipeline's `parameters` schema. Defaults applied for missing optional params.
-4. Executor constructs the **initial Context**: `Map<String, Any?>` where keys are parameter names and values are typed Kotlin objects (Date, BigDecimal, Boolean, String, etc.).
-5. (Future v2: Calculators run, reading from Context and writing additional keys back to Context.)
-6. For each node, in topological order:
-   a. The template engine renders the node's template against the **current Context**.
-   b. The rendered SQL executes against the node's `source`.
-   c. Behavior depends on `type` and `output.target` (see §8).
-7. The caller node's ResultSet (the node resolving to `output.target: "caller"`, if any) is the pipeline's result. Pipelines with no caller node return execution stats only.
+4. Executor overlays the resolved parameters onto the Context: `Map<String, Any?>` where keys are context keys and values are typed Kotlin objects (Date, BigDecimal, Boolean, String, etc.). A declared parameter that spells an org or platform key the same way **is** the override.
+5. For each node, in topological order:
+   a. The template engine renders the node's template against the **current Context**, and the rendered SQL's `:key` binds resolve against it too.
+   b. A `CALCULATOR` node (§4.10) evaluates its kind and writes its `context_key` into the Context; every node that `depends_on` it, directly or transitively, sees the value.
+   c. The rendered SQL executes against the node's `source`.
+   d. Behavior depends on `type` and `output.target` (see §8).
+6. The caller node's ResultSet (the node resolving to `output.target: "caller"`, if any) is the pipeline's result. Pipelines with no caller node return execution stats only.
+7. The **fully resolved Context** — every tier, calculator outputs included — is persisted with the execution ([DAG Executor §8](dag-executor.md)).
 
-### 7.2 What's in the Context (v1)
+### 7.2 What's in the Context — one namespace, five tiers
 
-- All declared pipeline `parameters` (input values, after defaulting).
-- (Future) Calculator outputs.
+Every value a node can bind is a typed Context key matching §6.1's `[a-z_][a-z0-9_]*`. A node
+binds `:key` without knowing which tier supplied it; the tier only decides who wins when two of
+them spell a key the same way. Lowest precedence first:
+
+| # | Tier | Keys | Who sets it |
+|---|---|---|---|
+| 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
+| 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
+| 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
+| 4 | **execute-time inputs** | declared parameters only (§6.3) | the caller's `parameters` object |
+| 5 | **calculator outputs** | each `CALCULATOR` node's `context_key` (§4.10) | the node, at its DAG position |
+
+A calculator output may shadow an org or platform key; it may **never** shadow a declared
+parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
+(§12.10). Org and platform keys are deployment constants, so the save-time dry render knows them:
+a template binding `:org_currency_symbol` validates without the pipeline declaring anything.
+None of them is a secret.
 
 ### 7.3 What's NOT in the Context
 
 - Upstream node outputs (those are tempdb tables OR external-datasource tables, referenced by name in SQL).
 - Connection credentials or env-specific values.
-- Execution metadata (`execution_id`, timing, etc.) — those are separate.
+- Execution metadata beyond the platform tier's three keys — timings, node stats and the result's
+  location travel on the execution record, not in a namespace templates render against.
 
 ### 7.4 Template variable resolution
 
@@ -731,6 +779,23 @@ The PIPELINE-node rules (§4.9). Everything here is computed against the pinned 
 | `pipeline.validation.pipeline_output_on_sideeffect_child` | `output` absent when the pinned child has zero caller nodes |
 | `pipeline.validation.composition_too_deep` | Static reference-tree depth ≤ configured max (`datapipelines.pipelines.max-composition-depth`, default 5). Computed iteratively, never recursively in graph depth — §12.2's crash-safety rule applies here too. |
 
+### 12.10 Calculator-node validations
+
+The `CALCULATOR`-node rules (§4.10, calculators design §0.3). Every one of them is decided from the body alone — the registry is a deployment constant and the Context's org and platform tiers are configuration — so an author gets the whole verdict at save time, never at 3am.
+
+| Code | Check |
+|---|---|
+| `pipeline.validation.calculator_node_incomplete` | A `CALCULATOR` node declares all three of `kind`, `inputs` and `context_key` |
+| `pipeline.validation.calculator_fields_on_non_calculator` | No other node type carries `kind`, `inputs` or `context_key` |
+| `pipeline.validation.calculator_node_has_sql_fields` | A `CALCULATOR` node carries no `template`, `source` or `output` — it runs no SQL and writes one Context key, not a table |
+| `pipeline.validation.calculator_unknown` | `kind` names a kind in the registry ([Calculators §2](calculators.md)) |
+| `pipeline.validation.calculator_input_missing` | Every input the kind declares `required` is present |
+| `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's `context_key` |
+| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding; a `LIST` input takes a JSON array |
+| `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's `context_key` — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Sequencing is topology, never array order |
+| `pipeline.validation.calculator_output_collision` | `context_key` collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's `context_key` — one writer per key per pipeline |
+| `pipeline.validation.calculator_output_name_invalid` | `context_key` matches §6.1's `[a-z_][a-z0-9_]*` |
+
 ---
 
 ## 13. Error Code Catalog
@@ -748,6 +813,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.import.missing_datasource` | 400 | Imported pipeline references a datasource name not registered in this env (as `source` or `output.datasource`) |
 | `pipeline.import.missing_template` | 400 | Imported pipeline references a template version not present in this env |
 | `pipeline.import.version_conflict` | 409 | Pipeline id+version already exists **with different content** (or the id collides with a soft-deleted pipeline's retained id); a same-hash re-import of an existing released version is an idempotent no-op (preserved-version import rules: [Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
+| `pipeline.import.context_key_missing` | 409 | The imported body binds a Context key this deployment does not provide — an `org_*` key the target's `datapipelines.org.*` block does not define, most often because the body was authored on a deployment with a key this one lacks (Configuration §3.21). Refused rather than silently defaulted: a promoted pipeline reading a made-up currency or fiscal start produces wrong numbers with no error anywhere |
 | `pipeline.import.hash_mismatch` | 400 | Import payload's declared `body_hash` doesn't match the hash recomputed from its body — transfer corruption or canonicalization drift between app versions ([Versioning §9.2](versioning.md#92-import-with-preserved-versions)) |
 
 ### 13.3 Pipeline execution (run-time)
@@ -778,6 +844,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.writeback_target_missing` | 500 | Target table for write-back doesn't exist (preceding DDL node didn't run, or table not pre-created) |
 | `pipeline.node.child_execution_failed` | 500 | A PIPELINE node's child execution failed; the detail carries the child's error code and execution id |
 | `pipeline.node.composition_depth_exceeded` | 500 | Runtime composition-depth backstop hit; indicates a save-time validation gap, since static depth (§12.9) should catch it first |
+| `pipeline.node.calculator_failed` | 500 | A `CALCULATOR` node's evaluation failed. The detail carries the node id, the `kind`, the input at fault and the reason — an unknown `unit`, a `format` that does not compile, text that does not match its pattern, a zero denominator. Save-time validation (§12.10) has already refused everything decidable from the body, so this is a value the run itself produced |
 | `pipeline.node.sql_parameter_missing` | 500 | The rendered SQL references a `:name` bind parameter the execution context does not declare. Raised before anything executes (042: a missing value bound as null would return wrong data instead of an error); the message names the parameter |
 | `pipeline.node.not_found` | 404 | A node-run debug query ([MCP §6.2.20](mcp-server.md#6220-pipelines_execute_node)) named a node id the resolved pipeline version does not hold (037 E2). `details` carries the node id and the version searched — after versioning, "no such node" usually means a typo, since the tool's E5 default already prefers the DRAFT body where authoring happens |
 | `pipeline.node.standalone_execution_refused` | 400 | A node-run debug query refused because the node has no standalone SQL to run (037 §A/E2): its `source` is `tempdb` — the staging database exists only inside a full execution, so use `pipelines_execute` — or it is a PIPELINE node, which runs a child pipeline, not SQL. `details.reason` names which (`tempdb_source` / `pipeline_node`) |

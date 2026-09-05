@@ -298,3 +298,115 @@ test("exactly ONE glyph svg per card, PLUS the open-details button's icon (065 r
   assert.equal(g.iconForType("DDL"), "boxes");
   assert.equal(g.iconForType("PIPELINE"), "workflow");
 });
+
+// 072 — a CALCULATOR node on the graph. Read-only rendering, and the one property that
+// matters most is negative: the graph must not BREAK on a node type it has never seen.
+// A pipeline authored through MCP arrives in this editor whole, and a card that renders
+// blank (or a canvas that throws) would make the editor useless for exactly the pipelines
+// the round exists to enable.
+
+test("a CALCULATOR node gets its own card class, badge and facts line — kind → context_key", () => {
+  const g = loadGraph();
+  const els = g.buildElements(
+    [
+      {
+        id: "fiscal_q",
+        type: "CALCULATOR",
+        kind: "fiscal_quarter",
+        context_key: "run_fiscal_quarter",
+        inputs: { date: "$current_date", fiscal_start: "$org_fiscal_start_date" },
+        depends_on: [],
+      },
+    ],
+    { tempdb: { engine: "H2" } },
+  );
+
+  assert.equal(els[0].classes.includes("calculator-node"), true, "the stylesheet and the a11y sweep read the class");
+  // The facts line answers the same question a SQL card's `datasource · dialect` answers:
+  // what does this node work on, and what does it leave behind.
+  assert.equal(els[0].data.sourceLabel, "fiscal_quarter → run_fiscal_quarter");
+  assert.equal(els[0].data.template, null, "a calculator pins no template");
+
+  const card = g.buildCardHtml(els[0].data);
+  assert.match(card, /pe-card-badge">CALCULATOR</);
+  assert.match(card, /fiscal_quarter → run_fiscal_quarter/);
+});
+
+test("a CALCULATOR card carries exactly one type glyph, and it is not the database one", () => {
+  const g = loadGraph();
+  // The 059b rule holds for the new type too: one glyph per card, plus 065's open button.
+  const card = g.buildCardHtml({ id: "fiscal_q", label: "fiscal_q", type: "CALCULATOR", state: "idle" });
+  const glyphs = card.match(/<use href="\/vendor\/icons\/lucide-sprite\.svg#([a-z-]+)"/g) || [];
+  assert.equal(glyphs.length, 2, "one type glyph + the open-details button's icon");
+  assert.equal(
+    card.includes("lucide-sprite.svg#db"),
+    false,
+    "a calculator touches no database; #db is iconForType's fallback and would be actively misleading",
+  );
+  assert.equal(g.iconForType("CALCULATOR"), "file");
+});
+
+test("an UNKNOWN node type still renders a card rather than breaking the graph", () => {
+  const g = loadGraph();
+  // The forward-compatibility property, pinned. A pipeline body can outlive this editor
+  // build — a receiver on an older version renders one every promotion — and the failure
+  // mode must be a plain card, never a throw or an empty box.
+  const els = g.buildElements([{ id: "future", type: "HTTP", depends_on: [] }], {});
+  const card = g.buildCardHtml(els[0].data);
+  assert.match(card, /pe-card-badge">HTTP</);
+  assert.match(card, /lucide-sprite\.svg#db/, "the documented fallback glyph");
+  assert.match(card, /pe-card-port-in/);
+});
+
+test("a node_completed frame for a calculator records its value and merges it into the Context", () => {
+  const SseHandler = loadSseHandler();
+  const editor = {
+    isExecuting: true,
+    nodeStates: {},
+    nodeErrors: {},
+    contextValues: {},
+    nodeValues: {},
+    graph: { setNodeState() {}, setEdgesToNodeActive() {}, setEdgesFromNodeActive() {}, setNodeStats() {}, resetAll() {} },
+    setBanner() {},
+    announceStatus() {},
+  };
+  const handler = new SseHandler(editor);
+
+  handler.dispatch(
+    "execution_started",
+    JSON.stringify({ execution_id: "e1", parameters: { org_fiscal_start_date: "09-15", current_date: "2026-08-14" } }),
+  );
+  handler.dispatch(
+    "node_completed",
+    JSON.stringify({ node_id: "fiscal_q", duration_ms: 2, rows_out: 0, context_key: "run_fiscal_quarter", context_value: "4" }),
+  );
+
+  assert.equal(editor.nodeValues.fiscal_q, "4", "the inspector's Computed Value reads this");
+  assert.equal(
+    editor.contextValues.run_fiscal_quarter,
+    "4",
+    "and a LATER node's $run_fiscal_quarter resolves on screen the way it resolved in the run",
+  );
+  assert.equal(editor.contextValues.org_fiscal_start_date, "09-15", "execution_started seeded the org tier");
+});
+
+test("a node_completed frame for an ORDINARY node touches neither map", () => {
+  const SseHandler = loadSseHandler();
+  const editor = {
+    isExecuting: true,
+    nodeStates: {},
+    nodeErrors: {},
+    contextValues: { seeded: "yes" },
+    nodeValues: {},
+    graph: { setNodeState() {}, setEdgesToNodeActive() {}, setEdgesFromNodeActive() {}, setNodeStats() {} },
+    setBanner() {},
+    announceStatus() {},
+  };
+  new SseHandler(editor).dispatch(
+    "node_completed",
+    JSON.stringify({ node_id: "report", duration_ms: 12, rows_out: 366 }),
+  );
+
+  assert.deepEqual(editor.nodeValues, {}, "no context_key on the frame, no entry");
+  assert.deepEqual(editor.contextValues, { seeded: "yes" });
+});

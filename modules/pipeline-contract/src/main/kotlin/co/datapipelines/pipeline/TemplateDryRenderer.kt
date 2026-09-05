@@ -57,6 +57,22 @@ interface TemplateDryRenderer {
         ref: TemplateRef,
         declared: Set<String>,
     ): List<String>
+
+    /**
+     * 072 — every `:name` bind parameter the referenced template body carries.
+     *
+     * §12.10's ordering rule needs it: a SQL node binding a CALCULATOR node's `context_key` is
+     * correct only when it `depends_on` the node that writes it, and that is decidable at save
+     * time only if the bind names are visible. The import check needs it too, to refuse a body
+     * binding an `org_*` key the receiving deployment does not define.
+     *
+     * Empty when the reference resolves to no stored version — [lookup] reports that with its
+     * own outcome, and returning a failure shape here would duplicate a verdict §12.6 owns.
+     */
+    fun boundParameters(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): List<String>
 }
 
 /** What the registry knows about a `{id, version}` reference. */

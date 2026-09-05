@@ -161,6 +161,42 @@ class PipelineEditorRenderTest {
         html shouldNotContain "JSON.stringify(selectedNode.output)"
     }
 
+    @Test
+    fun `a CALCULATOR node gets its own read-only section, and the SQL and Template fields step aside`() {
+        val html = render()
+
+        // 072 §0.6: read-only means read-only. The section shows the four things an author
+        // cannot get anywhere else on this screen — the kind, the context key, each input
+        // beside what the last run resolved it to, and the computed value — and there is no
+        // picker, no form control and no save path anywhere in it (R10 stands).
+        html shouldContain "selectedNode.type === 'CALCULATOR'"
+        html shouldContain "Context Key"
+        html shouldContain "Computed Value"
+        html shouldContain "calculatorInputs(selectedNode)"
+        html shouldContain "calculatorValue(selectedNode)"
+        html shouldContain "pe-calc-input-resolved"
+
+        // The fields that would be empty or false for a calculator are gated OFF, not left
+        // to render "—": a Template row on a node that pins no template invites the reader
+        // to go looking for one, and the SQL section would sit there loading forever.
+        html shouldContain "x-show=\"selectedNode.type !== 'CALCULATOR'\""
+        html shouldContain "selectedNode.type !== 'PIPELINE' && selectedNode.type !== 'CALCULATOR'"
+    }
+
+    @Test
+    fun `the calculator section carries no editing affordance`() {
+        // The negative half of R10, asserted rather than assumed. A future edit that adds an
+        // input or a select to this section trips here first.
+        val section =
+            render()
+                .substringAfter("<template x-if=\"selectedNode.type === 'CALCULATOR'\">")
+                .substringBefore("</template>")
+
+        listOf("<input", "<select", "<textarea", "x-model", "@click").forEach {
+            section shouldNotContain it
+        }
+    }
+
     private fun render(): String =
         engine.process(
             "pipelines/editor",

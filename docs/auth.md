@@ -697,12 +697,12 @@ This matrix is the ONLY place operation-level scope requirements are defined. [R
 
 | Tool | Min scope |
 |---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result` | `read` |
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get` | `read` |
 | `pipelines_execute` | `execute` |
 | `pipelines_create`, `pipelines_update`, `templates_create`, `templates_render` | `author` |
 | `datasources_test`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `datasources_create`, `pipelines_execute_node` | `author` |
 
-(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. All 22 tools operate inside the API key's pinned workspace, design §9.)
+(`datasources_create` (068) is the ONE datasource write on the MCP surface; update and delete stay UI/REST-only. It calls the same service `POST /api/v1/datasources` does, so the workspaces D8 gates are identical: workspace-bound creation is `author` + the gates, and `global: true` requires `admin` — admin-ness is a D8 rule, not a scope, so it does not appear in this matrix. 22 of the 24 tools operate inside the API key's pinned workspace (design §9); `calculators_list` and `calculators_get` (072) are the two exceptions, and only because they touch no workspace data at all — the calculator catalog is a property of the BUILD, identical for every caller.)
 
 **UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs `/partials/**` with the same default-deny as `/api/**` and `/mcp`: an unannotated partial is refused, and a mutating partial enforces its twin's floor (a `read` key cannot register a datasource through `POST /partials/datasources`).
 

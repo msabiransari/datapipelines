@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 22 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 24 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -187,6 +187,8 @@ Tools are named `{domain}_{action}`:
 - `executions_list`
 - `executions_get`
 - `executions_get_result`
+- `calculators_list`
+- `calculators_get`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -831,6 +833,49 @@ Returns the [Datasources §3.2](datasources.md#32-json-structure-response--get-a
 
 **Suggested next call:** `datasources_test` on the new name. Creation validates and builds a test pool, but the tool does not probe on your behalf.
 
+#### 6.2.23 `calculators_list`
+
+The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators §2](calculators.md), [Pipeline Contract §4.10](pipeline-contract.md#410-json-structure-calculator-node)). The tool an agent calls **before** authoring a calculator node: a `kind` and its input names are the two things it cannot guess, and getting them from a 400 one at a time is a slow way to learn a fixed list.
+
+```json
+{
+  "name": "calculators_list",
+  "description": "The catalog of calculator kinds a CALCULATOR node can evaluate: every kind with its typed inputs (name, type, required, whether it takes a JSON array, and its default when optional), its output type, and one worked example. Call this before authoring a CALCULATOR node — the kind names and input names are not guessable. Also returns the Context keys every pipeline can reference without declaring anything: the deployment's org_* values and the platform keys current_date, current_timestamp and execution_id. Read-only.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}
+```
+
+**Scope:** `read` — and read in the strongest sense the surface has: the answer is a property of the BUILD, identical for every caller, every key and every workspace. No workspace scoping applies because there is no workspace data in it.
+
+**Response:** `kinds` (each with `kind`, `display_name`, `description`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
+
+#### 6.2.24 `calculators_get`
+
+One kind's full definition — the same entry `calculators_list` returns, for a caller that already knows the name.
+
+```json
+{
+  "name": "calculators_get",
+  "description": "One calculator kind's full definition: display name, description, typed inputs, output type and a worked example. Use it when you know the kind and need its exact input names and types. An unknown kind is refused with the catalogued names in the error detail. Read-only.",
+  "inputSchema": {
+    "type": "object",
+    "required": ["kind"],
+    "properties": {
+      "kind": {"type": "string", "description": "The kind name, e.g. fiscal_quarter."}
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Scope:** `read`.
+
+**Errors:** an unknown kind is `pipeline.validation.calculator_unknown` with `known_kinds` in the detail — deliberately the SAME code a rejected `pipelines_create` returns for a bad `kind`, so an agent sees one fact about the world rather than two unrelated failures.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -937,7 +982,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 22 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 24 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1165,6 +1210,7 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-04 | v1.19 | 072 calculators | Tool surface 22 → **24**: new §6.2.23 `calculators_list` and §6.2.24 `calculators_get` (both scope `read`, non-mutating), projecting the `CalculatorRegistry` catalog — typed inputs, output type and a worked example per kind, plus the org and platform Context keys a body may reference without declaring anything. `pipelines_create` / `pipelines_update` need no new arguments (a CALCULATOR node is part of the body) but their descriptions now name the type and point at `calculators_list`. `executions_get` needed no change and gained two things anyway: `parameters` is now the fully resolved Context after the run (org keys, platform keys, parameters, calculator outputs — [DAG Executor §7.3](dag-executor.md#73-the-context-snapshot--pipeline_executionsparameters_json)) and each CALCULATOR node's `node_stats` entry carries `context_key`/`context_value`. §5.1's static-surface count and §8's admission rule updated. |
 | 2026-09-04 | v1.18 | 068 datasources_create | Tool surface 21 → **22**: new §6.2.22 `datasources_create` (scope `author`, **mutating**), which calls the same `DatasourceCreateService` `POST /api/v1/datasources` does — one payload binder, one set of workspaces D8 rules, one duplicate-name refusal. `global: true` still requires admin, refused with `datasource.validation.workspace_forbidden`. The result is the datasources §3.2 shape with `password_set: true` and no password at any depth. The tool's description carries the accepted trade-off: a password passed through an agent transits its context, transcript and client logging — prefer the UI or REST for a real credential. §4.1, §5.1, §6.1 and §8's admission-rule counts updated, and §14's "no datasource management tools" omission narrowed to update/delete. |
 | 2026-09-02 | v1.17 | 040 template used-by | Tool surface 20 → **21**: new §6.2.21 `templates_used_by` (which pipelines pin a template version in their working version — one reference per node with the carrying pipeline version; scope `read`, 040 D7). §6.2.2 `pipelines_get` gains `upgrade_available` (omit-when-empty; node/template/pinned/latest-released rows; surfaced, never applied). §6.1, §5.1 and §8 admission-rule counts updated. |
 | 2026-08-05 | v1.0 | initial draft | Initial MCP server spec: streamable HTTP transport, API key auth, 15 tools, 8 resource types, 3 prompts, error model |

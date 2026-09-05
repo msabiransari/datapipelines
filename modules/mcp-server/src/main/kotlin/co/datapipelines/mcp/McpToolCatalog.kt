@@ -65,6 +65,10 @@ object McpToolCatalog {
             Entry("executions_list", mutating = false),
             Entry("executions_get", mutating = false),
             Entry("executions_get_result", mutating = false),
+            // 072 — the calculator catalog. Read, and read in the strongest sense: they return a
+            // property of the BUILD, identical for every caller and every workspace.
+            Entry("calculators_list", mutating = false),
+            Entry("calculators_get", mutating = false),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

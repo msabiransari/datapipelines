@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.executor.ErrorDetail
+import co.datapipelines.pipeline.OrgContext
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 /**
@@ -185,4 +186,49 @@ data class ExecutionsProperties(
         require(staleTimeoutMinutes > 0) { "datapipelines.executions.stale-timeout-minutes must be > 0" }
         require(eventRetentionDays > 0) { "datapipelines.executions.event-retention-days must be > 0" }
     }
+}
+
+/**
+ * The `datapipelines.org.*` keys ([Configuration §3.21](../../../../../../../docs/configuration.md),
+ * calculators design §0.1).
+ *
+ * Organisation facts — currency, fiscal year start, week start, timezone — are configuration,
+ * not pipeline data. Every value here enters every execution's Context as an `org_*` key
+ * (§0.2 tier 1), so a node binds `:org_currency_symbol` and a CALCULATOR node references
+ * `$org_fiscal_start_date` without any pipeline declaring anything.
+ *
+ * Defaults here MUST equal configuration.md §3.21 — that document is the single authority, and
+ * a binding class that quietly disagrees with it is a second authority.
+ * `WebPropertiesSpecDriftTest` fails the build on any divergence.
+ *
+ * No `init` block validates the values, unlike this file's other classes: `ConfigValidator`
+ * owns §7 for these keys and reports **every** violation in one startup message, where a
+ * `require` here would abort binding on the first bad value and hand the operator one defect
+ * at a time.
+ */
+@ConfigurationProperties(prefix = "datapipelines.org")
+data class OrgProperties(
+    val currency: Currency = Currency(),
+    /** `MM-DD` — the day the organisation's fiscal year starts; `01-01` is the calendar year. */
+    val fiscalStartDate: String = "01-01",
+    /** `monday` | `sunday` — which day a week starts on for the week-bucketing kinds. */
+    val weekStart: String = "monday",
+    /** An IANA zone id. `current_date` is evaluated in it (§0.2 tier 2). */
+    val timezone: String = "UTC",
+) {
+    /** `datapipelines.org.currency.*`. */
+    data class Currency(
+        val name: String = "Dollar",
+        val symbol: String = "$",
+    )
+
+    /** The org tier of the execution Context, as every consumer addresses it (§0.2 tier 1). */
+    fun toContext(): OrgContext =
+        OrgContext.of(
+            currencyName = currency.name,
+            currencySymbol = currency.symbol,
+            fiscalStartDate = fiscalStartDate,
+            weekStart = weekStart,
+            timezone = timezone,
+        )
 }

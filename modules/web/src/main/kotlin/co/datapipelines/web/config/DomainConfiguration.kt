@@ -306,12 +306,14 @@ class DomainConfiguration {
         dryRenderer: TemplateDryRenderer,
         pipelines: PipelineResolver,
         properties: PipelineProperties,
+        orgContext: co.datapipelines.pipeline.OrgContext,
     ): PipelineValidator =
         PipelineValidator(
             datasources,
             dryRenderer,
             pipelines,
             properties.maxCompositionDepth,
+            orgContext,
         )
 
     /**
@@ -346,7 +348,18 @@ class DomainConfiguration {
     fun pipelineImportService(
         pipelines: PipelineRepository,
         validator: PipelineValidator,
-    ): PipelineImportService = PipelineImportService(pipelines, validator)
+        orgContext: co.datapipelines.pipeline.OrgContext,
+        dryRenderer: TemplateDryRenderer,
+    ): PipelineImportService =
+        PipelineImportService(
+            pipelines = pipelines,
+            validator = validator,
+            // 072 §0.5: the RECEIVER's org tier and its template bodies, so an imported body that
+            // reads an `org_*` key this deployment does not define is refused here rather than
+            // producing plausible wrong numbers on its first run.
+            orgContext = orgContext,
+            templates = dryRenderer,
+        )
 
     @Bean
     fun templateImportService(

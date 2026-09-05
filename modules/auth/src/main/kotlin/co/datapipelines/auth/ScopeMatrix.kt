@@ -155,6 +155,10 @@ object ScopeMatrix {
             // not a scope (auth.md §7.6: admin-ness is not a scope).
             "datasources_create" to Scope.AUTHOR,
             "pipelines_execute_node" to Scope.AUTHOR,
+            // 072 — the calculator catalog is a property of the build: no workspace data, no
+            // customer rows, the same answer for every caller. `read` is the honest floor.
+            "calculators_list" to Scope.READ,
+            "calculators_get" to Scope.READ,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

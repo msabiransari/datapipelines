@@ -92,6 +92,19 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.executions.error-detail") shouldBe props.errorDetail.wire
     }
 
+    @Test
+    fun `org property defaults match configuration-md section 3-21`() {
+        val props = OrgProperties()
+        documented.getValue("datapipelines.org.currency.name") shouldBe props.currency.name
+        // The `$` symbol is why ROW_REGEX's default cell admits it: a currency symbol IS the
+        // default, and a guard that could not read it would silently drop the key from the
+        // parse and turn its assertion into a `getValue` failure nobody would read as drift.
+        documented.getValue("datapipelines.org.currency.symbol") shouldBe props.currency.symbol
+        documented.getValue("datapipelines.org.fiscal-start-date") shouldBe props.fiscalStartDate
+        documented.getValue("datapipelines.org.week-start") shouldBe props.weekStart
+        documented.getValue("datapipelines.org.timezone") shouldBe props.timezone
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables
@@ -102,6 +115,6 @@ class WebPropertiesSpecDriftTest {
          * whichever cell happened to sit in the default position.
          */
         val ROW_REGEX =
-            Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""")
+            Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9$\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""")
     }
 }

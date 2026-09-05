@@ -73,12 +73,13 @@ class PipelineDeserializerTest {
 
     @Test
     fun `the type_invalid message names every catalogued wire value`() {
-        // §12.4's allowed-set, restated in the failure itself: the enum gaining `PIPELINE`
-        // (four values now) must show up in what the author is told.
+        // §12.4's allowed-set, restated in the failure itself: the enum gaining `PIPELINE`, and
+        // then `CALCULATOR` (five values now), must show up in what the author is told — a
+        // pre-scan whose message lags the enum sends an author looking for a type that exists.
         val outcome = deserializer.read(pipelineJson(node(null, type = "SELECT")))
 
         val failure = (outcome as DeserializationOutcome.Rejected).result.failures.single()
-        failure.message shouldContain "[DQL, DML, DDL, PIPELINE]"
+        failure.message shouldContain "[DQL, DML, DDL, PIPELINE, CALCULATOR]"
         failure.details["allowed"] shouldBe NodeType.WIRE_VALUES
     }
 

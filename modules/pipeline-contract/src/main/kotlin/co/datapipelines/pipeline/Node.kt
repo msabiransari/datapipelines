@@ -18,7 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode
  * default" (dag-executor §4.1). That rule needs `type` and `output` together, which a
  * per-property deserializer cannot see — hence the explicit [fromJson] creator.
  *
- * For DML / DDL / PIPELINE nodes an omitted `output` stays `null`: a DML/DDL side effect *is*
+ * For DML / DDL / PIPELINE / CALCULATOR nodes an omitted `output` stays `null`: a DML/DDL side effect *is*
  * the output (§4.4/§4.5), and a PIPELINE node whose pinned child has no caller node is
  * side-effect-only (§4.9). A present block is a validation failure (§12.4, §12.9), not a shape
  * this class silently normalises away.
@@ -44,6 +44,35 @@ data class Node(
     val pipeline: PipelineNodeRef? = null,
     @field:JsonProperty("parameters") @get:JsonProperty("parameters") @param:JsonProperty("parameters")
     val parameters: Map<String, JsonNode>? = null,
+    /**
+     * CALCULATOR nodes only (§4.10): the catalog kind this node evaluates.
+     *
+     * Nullable, with a null default, and the class's `NON_NULL` inclusion keeps it off the wire
+     * for every other node — which is what makes this change **body-hash neutral**: an existing
+     * pipeline's canonical JSON is byte-identical after the three fields exist, so no stored
+     * version's hash moves and no release has to be re-signed (versioning §9.2).
+     */
+    @field:JsonProperty("kind") @get:JsonProperty("kind") @param:JsonProperty("kind")
+    val kind: String? = null,
+    /**
+     * CALCULATOR nodes only (§4.10): the kind's inputs, by input name.
+     *
+     * A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal
+     * typed against the kind's declared input type. Kept as raw [JsonNode] for the same reason
+     * [Parameter.default] is: §12.10's type check is a rule about the JSON shape the author
+     * wrote, and binding it to a Kotlin type here would erase the distinction the rule checks.
+     */
+    @field:JsonProperty("inputs") @get:JsonProperty("inputs") @param:JsonProperty("inputs")
+    val inputs: Map<String, JsonNode>? = null,
+    /**
+     * CALCULATOR nodes only (§4.10): the Context key this node writes.
+     *
+     * Deliberately not called `output`: `output` is a §4.7 block naming a TABLE, and a calculator
+     * produces a value that downstream nodes bind as `:context_key`. Two different things with
+     * one name is how an author ends up looking for a table that was never created.
+     */
+    @field:JsonProperty("context_key") @get:JsonProperty("context_key") @param:JsonProperty("context_key")
+    val contextKey: String? = null,
 ) {
     /** The resolved execution target (§4.8) — a registered datasource, or the tempdb literal. */
     @get:JsonIgnore
@@ -83,6 +112,9 @@ data class Node(
             @JsonProperty("depends_on") dependsOn: List<String>?,
             @JsonProperty("pipeline") pipeline: PipelineNodeRef?,
             @JsonProperty("parameters") parameters: Map<String, JsonNode>?,
+            @JsonProperty("kind") kind: String?,
+            @JsonProperty("inputs") inputs: Map<String, JsonNode>?,
+            @JsonProperty("context_key") contextKey: String?,
         ): Node =
             Node(
                 id = id.orEmpty(),
@@ -97,6 +129,12 @@ data class Node(
                 dependsOn = dependsOn ?: emptyList(),
                 pipeline = pipeline,
                 parameters = parameters,
+                // Absent stays absent, never "" or an empty map: §12.10 must be able to tell a
+                // CALCULATOR node that omitted `context_key` from one that declared it blank, and
+                // an ordinary DQL node must serialize back byte-identically (body-hash neutrality).
+                kind = kind,
+                inputs = inputs,
+                contextKey = contextKey,
             )
     }
 }

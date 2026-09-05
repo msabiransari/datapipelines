@@ -116,13 +116,19 @@ allprojects {
 // ---------------------------------------------------------------------------
 val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":modules:typesystem" to emptySet(),
-    ":modules:pipeline-contract" to setOf(":modules:typesystem"),
+    // 072 calculators §0.4/C12 — layer 0 beside typesystem. The empty-but-for-typesystem row IS
+    // the purity guarantee: a kind that could reach a database or an HTTP client would stop being
+    // a pure function of its inputs, and the executor's freedom to evaluate one anywhere depends
+    // on that. Adding a second entry here is the change a reviewer must refuse.
+    ":modules:calculators" to setOf(":modules:typesystem"),
+    ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract"),
     ":modules:datasources" to setOf(":modules:typesystem"),
     ":modules:staging" to setOf(":modules:typesystem"),
     ":modules:auth" to setOf(":modules:typesystem"),
     ":modules:dag" to setOf(
         ":modules:typesystem",
+        ":modules:calculators",
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",
@@ -142,6 +148,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
+        ":modules:calculators",
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",
@@ -151,6 +158,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ),
     ":modules:web" to setOf(
         ":modules:typesystem",
+        ":modules:calculators",
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",

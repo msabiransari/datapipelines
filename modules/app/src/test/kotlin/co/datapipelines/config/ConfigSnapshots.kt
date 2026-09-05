@@ -46,6 +46,14 @@ internal object ConfigSnapshots {
             bootstrapDatasourcesFile = null,
             bootstrapExamplesFile = null,
             bootstrapAdminEmail = null,
+            // §3.21 — the shipped org defaults. The baseline must be VALID, and an unset org
+            // block is not: every one of the five keys has a default in application.yml, so a
+            // null here would mean a deployment whose yml lost the block entirely.
+            orgCurrencyName = "Dollar",
+            orgCurrencySymbol = "$",
+            orgFiscalStartDate = "01-01",
+            orgWeekStart = "monday",
+            orgTimezone = "UTC",
             activeProfiles = emptySet(),
             vendoredThemes = setOf("saas", "high-contrast"),
         )

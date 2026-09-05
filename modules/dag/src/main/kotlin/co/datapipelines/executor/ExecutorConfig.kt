@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.pipeline.OrgContext
+
 /**
  * The executor's resolved runtime settings (dag-executor.md §5.3).
  *
@@ -32,6 +34,12 @@ package co.datapipelines.executor
  *   the rendered SQL, [ErrorDetail.STRUCTURED] omits both and keeps the catalogued code,
  *   message, details and node context. Default FULL: a self-hosted product whose users are
  *   engineers (057/T85).
+ * @property orgContext `datapipelines.org.*` (Configuration §3.21, calculators design §0.1) —
+ *   tier 1 of every Context this executor builds. It rides here, with the executor's other
+ *   already-resolved settings, rather than as a constructor argument of [PipelineExecutor]:
+ *   four call sites build executors (the bean-of-record and three per-run ones) and every one
+ *   of them already threads an [ExecutorConfig], so this is the seam that reaches all four
+ *   without adding a field to three `web` classes that have no other interest in it.
  */
 data class ExecutorConfig(
     val maxParallelNodes: Int = 4,
@@ -44,6 +52,7 @@ data class ExecutorConfig(
     val maxCompositionDepth: Int = 5,
     val errorDetail: ErrorDetail = ErrorDetail.FULL,
     val result: ResultConfig = ResultConfig(),
+    val orgContext: OrgContext = OrgContext.DEFAULTS,
 ) {
     init {
         require(maxParallelNodes > 0) { "maxParallelNodes must be positive, was $maxParallelNodes" }
