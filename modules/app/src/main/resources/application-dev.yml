@@ -48,3 +48,15 @@ datapipelines:
   observability:
     logging:
       format: console               # human-readable in dev
+
+  # Organisation facts (configuration.md §3.21). Spelled out in dev even though every value
+  # equals the shipped default: this is the block a developer edits to try a non-calendar
+  # fiscal year (`fiscal-start-date: 09-15`) or a non-UTC deployment locally, and §6 documents
+  # the dev setup as the file, not as a diff against production.
+  org:
+    currency:
+      name: Dollar
+      symbol: $
+    fiscal-start-date: 01-01
+    week-start: monday
+    timezone: UTC

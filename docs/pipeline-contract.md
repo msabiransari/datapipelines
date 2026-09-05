@@ -391,27 +391,46 @@ The Context is a **runtime in-memory map** — never serialized in the Pipeline 
 
 ### 7.1 Lifecycle
 
-1. Pipeline execution starts.
+1. Pipeline execution starts. The executor seeds the Context with the **org tier** — the
+   deployment's `datapipelines.org.*` values (Configuration §3.21) — and then the **platform
+   tier**: `current_date`, `current_timestamp`, `execution_id`.
 2. Executor reads pipeline input parameters (from REST/MCP call).
 3. Executor validates each parameter against the pipeline's `parameters` schema. Defaults applied for missing optional params.
-4. Executor constructs the **initial Context**: `Map<String, Any?>` where keys are parameter names and values are typed Kotlin objects (Date, BigDecimal, Boolean, String, etc.).
-5. (Future v2: Calculators run, reading from Context and writing additional keys back to Context.)
-6. For each node, in topological order:
-   a. The template engine renders the node's template against the **current Context**.
-   b. The rendered SQL executes against the node's `source`.
-   c. Behavior depends on `type` and `output.target` (see §8).
-7. The caller node's ResultSet (the node resolving to `output.target: "caller"`, if any) is the pipeline's result. Pipelines with no caller node return execution stats only.
+4. Executor overlays the resolved parameters onto the Context: `Map<String, Any?>` where keys are context keys and values are typed Kotlin objects (Date, BigDecimal, Boolean, String, etc.). A declared parameter that spells an org or platform key the same way **is** the override.
+5. For each node, in topological order:
+   a. The template engine renders the node's template against the **current Context**, and the rendered SQL's `:key` binds resolve against it too.
+   b. A `CALCULATOR` node (§4.10) evaluates its kind and writes its `context_key` into the Context; every node that `depends_on` it, directly or transitively, sees the value.
+   c. The rendered SQL executes against the node's `source`.
+   d. Behavior depends on `type` and `output.target` (see §8).
+6. The caller node's ResultSet (the node resolving to `output.target: "caller"`, if any) is the pipeline's result. Pipelines with no caller node return execution stats only.
+7. The **fully resolved Context** — every tier, calculator outputs included — is persisted with the execution ([DAG Executor §8](dag-executor.md)).
 
-### 7.2 What's in the Context (v1)
+### 7.2 What's in the Context — one namespace, five tiers
 
-- All declared pipeline `parameters` (input values, after defaulting).
-- (Future) Calculator outputs.
+Every value a node can bind is a typed Context key matching §6.1's `[a-z_][a-z0-9_]*`. A node
+binds `:key` without knowing which tier supplied it; the tier only decides who wins when two of
+them spell a key the same way. Lowest precedence first:
+
+| # | Tier | Keys | Who sets it |
+|---|---|---|---|
+| 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
+| 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
+| 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
+| 4 | **execute-time inputs** | declared parameters only (§6.3) | the caller's `parameters` object |
+| 5 | **calculator outputs** | each `CALCULATOR` node's `context_key` (§4.10) | the node, at its DAG position |
+
+A calculator output may shadow an org or platform key; it may **never** shadow a declared
+parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
+(§12.10). Org and platform keys are deployment constants, so the save-time dry render knows them:
+a template binding `:org_currency_symbol` validates without the pipeline declaring anything.
+None of them is a secret.
 
 ### 7.3 What's NOT in the Context
 
 - Upstream node outputs (those are tempdb tables OR external-datasource tables, referenced by name in SQL).
 - Connection credentials or env-specific values.
-- Execution metadata (`execution_id`, timing, etc.) — those are separate.
+- Execution metadata beyond the platform tier's three keys — timings, node stats and the result's
+  location travel on the execution record, not in a namespace templates render against.
 
 ### 7.4 Template variable resolution
 

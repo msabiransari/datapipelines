@@ -49,7 +49,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 17
+        internal const val CHECK_COUNT = 18
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -76,6 +76,12 @@ class ConfigValidator(
         /** §3.10 — the directory the UI theme is validated against, on the classpath. */
         internal const val THEME_ROOT = "static/vendor/design-system"
 
+        /** §3.21 — the legal `datapipelines.org.week-start` values. */
+        private val WEEK_STARTS = setOf("monday", "sunday")
+
+        /** §3.21 — `MM-DD`, shape only; [isCalendarDay] then asks the calendar. */
+        private val FISCAL_START_DATE = Regex("\\d{2}-\\d{2}")
+
         private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1")
 
         /** The §7 rules, against a snapshot. Pure — every branch is unit-tested without Spring. */
@@ -98,6 +104,7 @@ class ConfigValidator(
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkRedisAuthWarning(snapshot, warnings)
+            checkOrgSettings(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -599,6 +606,58 @@ class ConfigValidator(
             }
         }
 
+        /**
+         * §7 / §3.21 — the organisation facts (calculators design §0.1).
+         *
+         * Every value here enters every execution's Context, so a bad one is not a startup
+         * inconvenience: it is a wrong number in every report the deployment produces. All four
+         * rules report together, like the rest of §7 — an operator fixing a fiscal start and a
+         * timezone one restart at a time is the cost this validator exists to remove.
+         *
+         * `fiscal-start-date` is `MM-DD` and a real calendar day. `MonthDay` is the parser
+         * precisely because it is the type: it refuses `02-30` and `13-01` on the calendar, and
+         * it accepts `02-29`, which the fiscal kinds resolve to 02-28 in a non-leap year
+         * (`MonthDay.atYear`). A month NAME (`SEP-15`) fails the same parse, and the message
+         * names the `MM-DD` form because "text could not be parsed" sends nobody anywhere.
+         */
+        private fun checkOrgSettings(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            val fiscal = snapshot.orgFiscalStartDate?.trim()
+            if (fiscal.isNullOrEmpty() || !FISCAL_START_DATE.matches(fiscal) || !isCalendarDay(fiscal)) {
+                violations +=
+                    "datapipelines.org.fiscal-start-date is '${fiscal.orEmpty()}' (§3.21); it must be MM-DD — " +
+                    "a two-digit month and a two-digit day that exist on the calendar, e.g. 01-01 or 09-15. " +
+                    "Month names are not accepted."
+            }
+            val weekStart = snapshot.orgWeekStart?.trim()?.lowercase()
+            if (weekStart !in WEEK_STARTS) {
+                violations +=
+                    "datapipelines.org.week-start is '${snapshot.orgWeekStart.orEmpty()}' (§3.21); " +
+                    "it must be one of ${WEEK_STARTS.joinToString(" | ")}."
+            }
+            val timezone = snapshot.orgTimezone?.trim()
+            if (timezone.isNullOrEmpty() || !isIanaZone(timezone)) {
+                violations +=
+                    "datapipelines.org.timezone is '${timezone.orEmpty()}' (§3.21); it must be an IANA zone id, " +
+                    "e.g. UTC or Europe/London."
+            }
+            if (snapshot.orgCurrencyName.isNullOrBlank()) {
+                violations += "datapipelines.org.currency.name is blank (§3.21); it names the deployment's currency."
+            }
+            if (snapshot.orgCurrencySymbol.isNullOrBlank()) {
+                violations += "datapipelines.org.currency.symbol is blank (§3.21); it is rendered beside amounts."
+            }
+        }
+
+        /** True when `MM-DD` names a day the calendar has — `02-30` and `13-01` do not. */
+        private fun isCalendarDay(value: String): Boolean =
+            runCatching { java.time.MonthDay.parse("--$value") }.isSuccess
+
+        /** True for a zone id this JVM's tz database knows; a fixed offset (`+02:00`) is not one. */
+        private fun isIanaZone(value: String): Boolean = value in java.time.ZoneId.getAvailableZoneIds()
+
         /** §7 — passwordless Redis off loopback is a WARNING, not a refusal. */
         private fun checkRedisAuthWarning(
             snapshot: ConfigSnapshot,
@@ -661,6 +720,13 @@ class ConfigValidator(
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
                 promotionTargetKeySet =
                     !environment.getProperty("datapipelines.deployment.promotion.target.server-key").isNullOrBlank(),
+                // §3.21 (calculators design §0.1) — org facts. Raw strings so a malformed value
+                // becomes a NAMED violation here instead of a binder crash at bean creation.
+                orgCurrencyName = environment.getProperty("datapipelines.org.currency.name"),
+                orgCurrencySymbol = environment.getProperty("datapipelines.org.currency.symbol"),
+                orgFiscalStartDate = environment.getProperty("datapipelines.org.fiscal-start-date"),
+                orgWeekStart = environment.getProperty("datapipelines.org.week-start"),
+                orgTimezone = environment.getProperty("datapipelines.org.timezone"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
             )
@@ -814,6 +880,12 @@ internal data class ConfigSnapshot(
     val promotionTargetBaseUrl: String? = null,
     /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
     val promotionTargetKeySet: Boolean = false,
+    /** §3.21 — org facts, raw. Never secrets; they are in every Context and every report. */
+    val orgCurrencyName: String? = null,
+    val orgCurrencySymbol: String? = null,
+    val orgFiscalStartDate: String? = null,
+    val orgWeekStart: String? = null,
+    val orgTimezone: String? = null,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -847,6 +919,11 @@ internal data class ConfigSnapshot(
             "localLockoutDurationMinutes=$localLockoutDurationMinutes, " +
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
+            "orgCurrencyName=$orgCurrencyName, " +
+            "orgCurrencySymbol=$orgCurrencySymbol, " +
+            "orgFiscalStartDate=$orgFiscalStartDate, " +
+            "orgWeekStart=$orgWeekStart, " +
+            "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes)"
 }

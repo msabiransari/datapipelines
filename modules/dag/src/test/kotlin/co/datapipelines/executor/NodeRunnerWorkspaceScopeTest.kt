@@ -109,7 +109,7 @@ class NodeRunnerWorkspaceScopeTest {
             executionId = executionId,
             staging = staging,
             handle = handle,
-            values = emptyMap(),
+            values = RunContext.of(emptyMap()),
             warnings = warnings,
             resultTtlSeconds = 300,
             renderBudgetChars = ExecutorConfig().renderOutputBudgetChars(),

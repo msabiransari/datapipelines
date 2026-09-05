@@ -45,7 +45,12 @@ data class NodeExecutionContext(
     val executionId: UUID,
     val staging: Staging,
     val handle: CancellationHandle,
-    val values: Map<String, Any?>,
+    /**
+     * The execution's LIVE Context ([RunContext]) — org config, platform keys, parameters and,
+     * as the run proceeds, each CALCULATOR node's output. Deliberately not a snapshot: a node
+     * scheduled after a calculator must render and bind against the value the calculator wrote.
+     */
+    val values: RunContext,
     val warnings: WarningSink,
     /** Already-clamped effective result TTL for this execution (REST §7.4). */
     val resultTtlSeconds: Long,

@@ -273,3 +273,21 @@ datapipelines:
   bootstrap:
     datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
     examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
+
+  # Organisation facts (configuration.md §3.21, calculators design §0.1). Every value below
+  # enters every execution's Context as `org_<path with dots and dashes as _>` — a node binds
+  # it as `:org_currency_symbol`, a CALCULATOR node references it as `$org_fiscal_start_date`.
+  # These change once a decade; restart-to-change is the accepted trade. A bad value refuses
+  # startup (§7): `fiscal-start-date` must be a real `MM-DD` calendar day, `week-start` is
+  # `monday`|`sunday`, `timezone` is an IANA id, and neither currency field may be blank.
+  #
+  # APPENDED AFTER the whole `datapipelines:` tree, never inserted between its children: a
+  # 2-space block placed mid-tree closes its predecessor and silently re-parents whatever
+  # follows it (MISTAKES.md). `OrgConfigKeysSpecDriftTest` asserts the neighbours still bind.
+  org:
+    currency:
+      name: ${DATAPIPELINES_ORG_CURRENCY_NAME:Dollar}
+      symbol: ${DATAPIPELINES_ORG_CURRENCY_SYMBOL:$}
+    fiscal-start-date: ${DATAPIPELINES_ORG_FISCAL_START_DATE:01-01}
+    week-start: ${DATAPIPELINES_ORG_WEEK_START:monday}
+    timezone: ${DATAPIPELINES_ORG_TIMEZONE:UTC}

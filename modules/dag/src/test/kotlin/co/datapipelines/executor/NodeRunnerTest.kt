@@ -675,7 +675,7 @@ class NodeRunnerTest {
             executionId = executionId,
             staging = staging,
             handle = handle,
-            values = values,
+            values = RunContext.of(values),
             warnings = warnings,
             resultTtlSeconds = 300,
             renderBudgetChars = renderBudget,

@@ -86,7 +86,7 @@ class AuditCauseIntegrationTest {
             executionId = executionId,
             staging = Fixtures.stagingFactory().create(executionId),
             handle = InMemoryCancellationRegistry().register(executionId),
-            values = emptyMap(),
+            values = RunContext.of(emptyMap()),
             warnings = WarningSink(),
             resultTtlSeconds = 300,
             renderBudgetChars = ExecutorConfig().renderOutputBudgetChars(),

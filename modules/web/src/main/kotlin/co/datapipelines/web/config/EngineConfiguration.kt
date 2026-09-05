@@ -77,6 +77,7 @@ class EngineConfiguration {
         pipelines: PipelineProperties,
         executions: ExecutionsProperties,
         result: ResultConfig,
+        org: co.datapipelines.pipeline.OrgContext,
     ): ExecutorConfig =
         ExecutorConfig(
             maxParallelNodes = executor.maxParallelNodes,
@@ -93,6 +94,9 @@ class EngineConfiguration {
             // every surface (not just the executor) carries the record.
             errorDetail = executions.errorDetail,
             result = result,
+            // §3.21 (calculators §0.1): tier 1 of every execution Context. Resolved once here,
+            // like every other executor setting — the executor never reads config itself.
+            orgContext = org,
         )
 
     /** Closed on shutdown: the pool's threads are daemons, but the drain should still be orderly. */

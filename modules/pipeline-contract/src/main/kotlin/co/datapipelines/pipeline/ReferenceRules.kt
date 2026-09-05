@@ -19,9 +19,14 @@ internal object ReferenceRules {
         datasources: DatasourceRegistry,
         templates: TemplateDryRenderer,
         workspaceId: java.util.UUID,
+        orgContext: OrgContext,
         into: FailureCollector,
     ) {
-        val sampleContext = ParameterBinder(pipeline.parameters).sampleContext()
+        // §0.2's tiers, as the save-time render sees them: org config and the platform keys are
+        // deployment constants, so a template binding `:org_currency_symbol` or `:current_date`
+        // validates without the pipeline declaring anything — and a declared parameter of the
+        // same name still wins, because it is applied last (tier 3 over tiers 1-2).
+        val sampleContext = ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters).sampleContext()
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.PIPELINE) {
                 // §12.9 (CompositionRules) owns a PIPELINE node's references: it carries no
