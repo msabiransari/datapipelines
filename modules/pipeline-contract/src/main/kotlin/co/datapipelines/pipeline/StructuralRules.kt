@@ -35,15 +35,26 @@ internal object StructuralRules {
         )
     }
 
+    /**
+     * §12.1 `name_invalid` over the §3.2 name — since 067 a **path**, not a flat identifier
+     * ([PipelineNameGrammar]).
+     *
+     * The rule is character-for-character the template grammar, because a folder is a name
+     * prefix and nothing else: `nyc/mobility/revenue_by_borough` can only sit beside
+     * `nyc/mobility/daily_by_zone.sql` if both kinds of asset spell a path the same way.
+     * Node ids, output tables and parameter names keep their own narrower rules — see
+     * [checkNodeIdentifiers] and [ParameterRules].
+     */
     private fun checkName(
         pipeline: Pipeline,
         into: FailureCollector,
     ) {
-        if (IDENTIFIER.matches(pipeline.name)) return
+        if (isValidPipelineName(pipeline.name)) return
         into.add(
             Validation.NAME_INVALID,
             "name",
-            "Pipeline name '${pipeline.name.truncateForError()}' must match [a-z0-9_]+, length 1-63.",
+            "Pipeline name '${pipeline.name.truncateForError()}' must be a path of 1-10 '/'-separated segments, " +
+                "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total.",
             mapOf("value" to pipeline.name.truncateForError()),
         )
     }

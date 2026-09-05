@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.3 (frozen contract — additive-only changes after this point)
+**Status:** v1.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-09-05
 
 ---
 
@@ -211,7 +211,8 @@ List pipelines the caller has access to.
     "properties": {
       "owner": {"type": "string", "description": "Filter by owner user ID."},
       "datasource": {"type": "string", "description": "Filter by datasource name."},
-      "q": {"type": "string", "description": "Full-text search on name and description."},
+      "q": {"type": "string", "description": "Full-text search on name and description. Searches across full paths; use prefix to browse instead."},
+      "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
     }
   }
@@ -219,6 +220,25 @@ List pipelines the caller has access to.
 ```
 
 Returns: array of pipeline metadata objects. Datasource references are per-node and are read from the body via `pipelines_get` — the listing does not aggregate them.
+
+**Two presentations, chosen by `prefix`** (067). Pipeline names are folder paths ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)), so an agent needs to BROWSE as well as search:
+
+- **`prefix` absent** — the flat listing above, under `owner`/`datasource`/`q`. Unchanged.
+- **`prefix` present** (`""` is the ROOT) — **one level** of the tree, and the return shape is an object rather than an array:
+
+  ```jsonc
+  {
+    "prefix": "nyc",
+    "folders": [{"path": "nyc/mobility", "segment": "mobility", "pipeline_count": 6}],
+    "pipelines": [ /* the level's own leaves, same metadata objects */ ],
+    "total": 0,
+    "has_more": false
+  }
+  ```
+
+  `folders` are the prefix's DIRECT sub-folders with their whole-subtree counts; `pipelines` are its direct children only. Never a subtree, never the whole list. `owner`, `datasource` and `q` are ignored while `prefix` is present — browse and search are different presentations. A prefix that is not a legal pipeline name answers an empty level, not an error.
+
+**When to use which:** `prefix` to discover structure ("what roots exist? what is under `finance`?"), `q` to find something by name across full paths. Start a naming decision with `prefix: ""`.
 
 **Scope:** `read`.
 
@@ -301,7 +321,7 @@ Create a new pipeline.
     "type": "object",
     "required": ["name", "display_name", "nodes"],
     "properties": {
-      "name": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+      "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){0,9}$", "description": "Machine name, and a FOLDER PATH: 1-10 lower-case '/'-separated segments (finance/payments/daily_settlement). The root segment says who owns it — list the existing roots with pipelines_list {prefix: ''} and reuse one; ASK before minting a new root. Keep a pipeline under the same prefix as the templates it uses. There is no rename: the name is the pipeline's identity, so choose the folder now."},
       "display_name": {"type": "string"},
       "description": {"type": "string"},
       "parameters": {"type": "object", "description": "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter declaration point: the full parameter map, defaults applied, is the render context for every template the pipeline references."},
@@ -346,6 +366,7 @@ List templates.
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"]},
       "type": {"type": "string", "enum": ["sql", "html"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."},
       "q": {"type": "string"},
+      "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
     }
@@ -354,6 +375,25 @@ List templates.
 ```
 
 Returns: array of template metadata (`id`, `version`, `type`, `dialect`, `display_name`, `description`, `is_library`; `dialect` is null for `html` templates, since 046). A template's `description` is the only place it can hint at the parameters it expects — templates declare none ([Templates §3.2](templates.md#32-field-reference)).
+
+**Two presentations, chosen by `prefix`** (067). Template ids have been paths since 043 and the templates browser has rendered them as a tree since 047, but this tool had no way to browse a folder at all until now:
+
+- **`prefix` absent** — the flat listing above. Unchanged.
+- **`prefix` present** (`""` is the ROOT) — **one level**, the same shape `pipelines_list` returns with `prefix`, keyed `templates` instead of `pipelines` and `template_count` instead of `pipeline_count`:
+
+  ```jsonc
+  {
+    "prefix": "nyc",
+    "folders": [{"path": "nyc/mobility", "segment": "mobility", "template_count": 7}],
+    "templates": [ /* the level's own leaves, same metadata objects */ ],
+    "total": 0,
+    "has_more": false
+  }
+  ```
+
+  `dialect` and `type` still narrow both halves, so a folder whose whole subtree is filtered out is absent rather than empty. `is_library` narrows the level's leaves only — a folder count is over the whole subtree, and quietly subtracting library templates from it would make the tree disagree with what expanding the folder shows. `q` is ignored while `prefix` is present.
+
+**When to use which:** `prefix` to browse, `q` to search. A pipeline and the templates it uses should share a prefix — see [Template Hierarchy §15](template-hierarchy-design.md).
 
 **Scope:** `read`.
 
@@ -1230,3 +1270,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-08-28 | v1.14 | workspaces surfaces slice | §2 principle 6 + §5.1 `instructions`: the workspace context statement (key-pinned scope; other workspaces absent, not hidden). §6.2.10/§6.2.11 descriptions + Returns gain `workspace`/`readonly`; datasource listings/by-name reads are workspace-scoped (bound + global — the REST §9.2/§9.3 predicate). §7.2.3/§7.3: the same scoping for datasource resources and `resources/list`. No new tools, no inputSchema changes. |
 | 2026-09-01 | v1.15 | agent data visibility (037) | Tool surface 18 → **20**: new §6.2.19 `datasources_preview_rows` (≤50 wire-encoded rows of one table, `order_by` as `{column, direction}` objects, service-built + dialect-quoted statements, readonly datasources valid) and §6.2.20 `pipelines_execute_node` (ONE node's rendered SQL on its own datasource — a debug query, not an execution: no history/SSE/idempotency, DML/DDL for real, tempdb-source and PIPELINE nodes refused with `pipeline.node.standalone_execution_refused`, unknown node `pipeline.node.not_found`, E5 draft-if-exists version default with status always stated). §6.1, §5.1, §8 admission-rule counts updated. Both `author`: the first tools returning arbitrary customer row data (037 F). |
 | 2026-09-02 | v1.16 | MCP audit (052) | New **§14 Audit** (normative, ruling R4): `mcp.tool.called` (every call, since the original build) registered + `mcp.tool.write` (NEW — exactly one per catalog-declared mutating call, node runs included, after the tool returns on success and failure; scope refusals excluded because the tool never ran). Emitted at the dispatcher, not per-tool. Mutating is a declared catalog-entry property guarded by `McpToolCatalogBindingTest`. Never SQL/row data/parameter values. §13 gains the mutating-call checklist line. Both events registered in Enums §15 the same commit (docs-audit check C). No tool surface change. |
+| 2026-09-05 | v1.18 | pipeline folders (067) | Additive arguments only — **no new tool names**, the surface stays 21. `pipelines_list` and `templates_list` each gain **`prefix`**: absent = the flat listing (unchanged); present (`""` = the root) = ONE level of the folder tree, returning `{prefix, folders[{path, segment, *_count}], pipelines|templates[], total, has_more}`. `q`/`owner`/`datasource` are ignored while browsing; an illegal prefix answers an empty level, not an error. This closes a real gap for templates, which have had path ids since 043 and no way to browse a folder over MCP (verified 2026-09-04). `pipelines_create`/`pipelines_update` `name` patterns widen to the path grammar — rendered from `PipelineNameGrammar.pattern` itself, so the schema and the server rule cannot drift — with a description telling the agent to list the roots first and ask before minting one. §6.2.1 and §6.2.6 document browse-vs-search. |

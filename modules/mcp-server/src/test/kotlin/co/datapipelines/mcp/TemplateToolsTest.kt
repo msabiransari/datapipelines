@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
@@ -63,6 +64,50 @@ class TemplateToolsTest {
             { dialect.captured shouldBe Dialect.MYSQL },
             { q.captured shouldBe "revenue" },
         )
+    }
+
+    @Test
+    fun `prefix browses ONE level - the gap that made the folder convention unusable`() {
+        // 067: templates have had path names since 043 and a tree browser since 047, but this
+        // tool had no way to browse a folder at all (verified 2026-09-04). `prefix: ""` is the
+        // ROOT — present-but-empty, a different request from an absent prefix.
+        every { templates.listChildFolders(McpFixtures.WORKSPACE_ID, null, null, null, 200) } returns
+            listOf(TemplateFolder("nyc", "nyc", 9), TemplateFolder("trade", "trade", 4))
+        every { templates.listChildTemplates(McpFixtures.WORKSPACE_ID, null, null, null, 0, 51) } returns
+            listOf(McpFixtures.template())
+        every { templates.countChildTemplates(McpFixtures.WORKSPACE_ID, null, null, null) } returns 1
+
+        val payload = TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "")), readCtx) as Map<*, *>
+
+        assertAll(
+            { payload["prefix"] shouldBe "" },
+            { (payload["folders"] as List<*>).map { (it as Map<*, *>)["path"] } shouldContainExactly listOf("nyc", "trade") },
+            { (payload["folders"] as List<*>).map { (it as Map<*, *>)["template_count"] } shouldContainExactly listOf(9, 4) },
+            { (payload["templates"] as List<*>).size shouldBe 1 },
+            { payload["total"] shouldBe 1 },
+            { payload["has_more"] shouldBe false },
+        )
+        // Browse never falls through to the flat listing.
+        verify(exactly = 0) { templates.list(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a prefix level still honours the dialect and type filters`() {
+        every { templates.listChildFolders(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null, 200) } returns emptyList()
+        every { templates.listChildTemplates(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null, 0, 51) } returns emptyList()
+        every { templates.countChildTemplates(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null) } returns 0
+
+        TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "nyc", "dialect" to "MYSQL")), readCtx)
+
+        verify(exactly = 1) { templates.listChildFolders(McpFixtures.WORKSPACE_ID, "nyc", Dialect.MYSQL, null, 200) }
+    }
+
+    @Test
+    fun `a prefix that is not a legal template name answers an empty level and never reaches the database`() {
+        val payload = TemplatesListTool(templates).call(McpArguments(mapOf("prefix" to "nyc/../etc")), readCtx) as Map<*, *>
+
+        (payload["templates"] as List<*>).size shouldBe 0
+        verify(exactly = 0) { templates.listChildFolders(any(), any(), any(), any(), any()) }
     }
 
     @Test

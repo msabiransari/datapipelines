@@ -69,6 +69,21 @@ internal object CompositionRules {
             )
             return
         }
+        // 067: a child reference names a pipeline, so it obeys the SAME §3.2 path grammar the
+        // referenced pipeline's own name does. Reported here and the probe skipped: a name the
+        // grammar refuses cannot be in the registry either, and `pipeline_not_found` would send
+        // the author looking for a missing pipeline instead of at a malformed name.
+        if (!isValidPipelineName(ref.name)) {
+            into.add(
+                Validation.NAME_INVALID,
+                "nodes[$index].pipeline.name",
+                "PIPELINE node '${node.id.truncateForError()}' references '${ref.name.truncateForError()}', which is not a " +
+                    "legal pipeline name: a path of 1-10 '/'-separated segments, each [a-z0-9][a-z0-9_.-], " +
+                    "at most 64 chars, 200 total.",
+                mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
+            )
+            return
+        }
         if (ref.name == pipeline.name) {
             into.add(
                 Validation.PIPELINE_SELF_REFERENCE,

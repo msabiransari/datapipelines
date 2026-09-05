@@ -1,0 +1,55 @@
+<!-- Search results: a FLAT list of full paths (template-hierarchy-design §9.2, decided),
+     rendered in the explorer's LEFT pane (067).
+
+     Not a tree pruned to matching leaves. Pruning requires walking the ancestors of every
+     match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list
+     of full paths is what someone searching `nyc/mob` actually wants to see. Clearing `q`
+     returns to the tree — partials/pipelines dispatches on exactly that.
+
+     A result row SELECTS, exactly like a tree leaf: its detail swaps into #pipeline-detail on
+     the right, and Enter opens the editor. The rows are role=option in a role=listbox — this
+     is a result list, not a tree, so it does not wear tree machinery.
+
+     The ROOT carries id="pipeline-list-wrapper", the same stable swap target the tree's root
+     level carries, so the search box and the pager address one id in both presentations
+     (ui-screens.md §4.3). -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="pipeline-list-wrapper">
+  <th:block th:if="${#lists.isEmpty(pipelines)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No pipelines match your search</p>
+      <div class="ds-empty-actions">
+        <button class="ds-button ds-button-secondary ds-button-sm"
+                th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'">Clear search</button>
+      </div>
+    </div>
+  </th:block>
+
+  <ul class="tpl-results" role="listbox" aria-label="Search results"
+      th:unless="${#lists.isEmpty(pipelines)}">
+    <li role="none" th:each="p : ${pipelines}">
+      <button type="button" class="tpl-result" role="option" aria-selected="false"
+              th:attr="hx-get=@{/partials/pipelines/detail(id=${p.id})},
+                       data-editor-url=@{'/pipelines/' + ${p.id} + '/editor'}"
+              hx-target="#pipeline-detail" hx-swap="innerHTML"
+              hx-sync="#pipeline-detail:replace"
+              hx-indicator="#pipeline-detail-spinner">
+        <!-- The FULL path, and it rides on `title` too — a deep path in a narrow pane
+             truncates, and the truncated text must never be the only copy (§9.4). -->
+        <span class="tpl-path" th:text="${p.name}" th:title="${p.name}">nyc/mobility/revenue_by_borough</span>
+        <span class="ds-badge ds-badge-default" th:text="${'v' + p.currentVersion}">v1</span>
+        <!-- versioning §7 (the 035 regression): unreleased — often agent — work must be
+             VISIBLE from first paint. The flat list has room for the version number, so it
+             says the whole thing; the tree's leaf keeps the compact badge. -->
+        <span th:if="${drafts != null && drafts[p.id] != null}" class="ds-badge ds-badge-warning"
+              th:text="'draft v' + ${drafts[p.id].version} + ' pending release'"
+              title="A draft exists; release it from the editor to publish."></span>
+      </button>
+    </li>
+  </ul>
+
+  <th:block th:unless="${#lists.isEmpty(pipelines)}"
+            th:with="prevUrl=@{/partials/pipelines(q=${q}, offset=${offset - 25})},
+                     nextUrl=@{/partials/pipelines(q=${q}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#pipeline-list-wrapper', ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${pipelines.size()}, ${total})}"></div>
+  </th:block>
+</div>

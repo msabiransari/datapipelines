@@ -206,17 +206,31 @@ class TemplateHtmxRenderAuditTest {
         setVariable("currentPath", "/")
     }
 
-    /** PipelineUiController's model — ONE row, or the pager never renders and the guard is vacuous. */
+    /**
+     * PipelineUiController's model — the BROWSE presentation, which is what a page load with
+     * no `q` renders since 067 (the screen is a tree). One folder and one root leaf, so the
+     * level renders its rows AND its pager and the guard is not vacuous; `levelId` is what the
+     * pager's `hx-target` is built from, so an absent one would target `#null`.
+     */
     private fun WebContext.fillPipelineList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
         setVariable("dialects", emptyList<String>())
+        setVariable("searching", false)
+        setVariable("prefix", "")
+        setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
+        setVariable(
+            "folders",
+            listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))),
+        )
+        setVariable("foldersTruncated", false)
+        setVariable("drafts", emptyMap<UUID, co.datapipelines.pipeline.PipelineVersionDetail>())
         setVariable(
             "pipelines",
             listOf(
                 PipelineRecord(
                     id = UUID.randomUUID(),
-                    name = "my-pipeline",
+                    name = "nyc/mobility/revenue_by_borough",
                     displayName = "My Pipeline",
                     description = "A test pipeline",
                     ownerId = UUID.randomUUID(),

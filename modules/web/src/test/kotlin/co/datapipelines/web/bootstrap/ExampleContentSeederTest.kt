@@ -3,12 +3,17 @@ package co.datapipelines.web.bootstrap
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.web.TestRepoFiles
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -44,6 +49,20 @@ class ExampleContentSeederTest {
 
     private fun seeder(examplesFile: String?) = ExampleContentSeeder(BootstrapProperties(examplesFile = examplesFile), pipelines, templates)
 
+    /** A file mixing a path name and a legacy flat one — the transparency fixture. */
+    private val pathShapedExamples =
+        """
+        {
+          "templates": [
+            {"id": "nyc/mobility/revenue.sql", "dialect": "POSTGRES", "display_name": "Revenue", "description": "d", "body": "SELECT 1"}
+          ],
+          "pipelines": [
+            {"schema_version": 1, "name": "nyc/mobility/revenue_by_borough", "display_name": "Revenue by borough", "nodes": []},
+            {"schema_version": 1, "name": "legacy_flat_name", "display_name": "Legacy", "nodes": []}
+          ]
+        }
+        """.trimIndent()
+
     private val examples =
         """
         {
@@ -56,6 +75,85 @@ class ExampleContentSeederTest {
           ]
         }
         """.trimIndent()
+
+    /**
+     * 067 §E — the SHIPPED demo content, read from the repo, not from a fixture.
+     *
+     * The two `content/examples.json` files are the files the artifact build COPIES, so this
+     * is the build input that says "a fresh workspace seeds pipelines under folder roots".
+     * It asserts the names the artifact will carry, the grammar the server will enforce on
+     * them, and the one PIPELINE child reference that had to move with its child.
+     */
+    @Test
+    fun `the shipped example files name every pipeline under a folder root`() {
+        val families =
+            mapOf(
+                "scripts/sample-data/content/examples.json" to "nyc",
+                "scripts/sample-data-trade/content/examples.json" to "trade",
+            )
+
+        val allNames =
+            families.flatMap { (path, root) ->
+                val names = mapper.readTree(TestRepoFiles.read(path)).get("pipelines").map { it.get("name").asText() }
+                // Non-vacuity: an empty file would satisfy every assertion below by having
+                // nothing to check.
+                names.shouldNotBeEmpty()
+                names.forEach { name ->
+                    withClue(name) {
+                        PipelineNameGrammar.matches(name) shouldBe true
+                        name.substringBefore('/') shouldBe root
+                        // A folder, not a flat name that happens to start with the root.
+                        name.contains('/') shouldBe true
+                    }
+                }
+                names
+            }
+
+        allNames shouldContainExactlyInAnyOrder
+            listOf(
+                "nyc/mobility/revenue_by_borough",
+                "nyc/mobility/rainy_vs_dry_ridership",
+                "nyc/mobility/borough_od_matrix",
+                "nyc/mobility/airport_access_by_borough",
+                "nyc/mobility/weather_sensitivity_by_borough",
+                "nyc/mobility/mobility_briefing",
+                "trade/balance_by_partner",
+                "trade/reconciliation",
+                "trade/fx/imports_in_partner_currency",
+            )
+    }
+
+    @Test
+    fun `the PIPELINE child reference moved with its child`() {
+        // The composition the demo ships: `mobility_briefing` invokes `borough_od_matrix`.
+        // A rename that moved the child and not the reference would seed a workspace whose
+        // briefing pipeline fails §12.9 `pipeline_not_found` at save — i.e. a login that 500s.
+        val doc = mapper.readTree(TestRepoFiles.read("scripts/sample-data/content/examples.json"))
+        val briefing = doc.get("pipelines").single { it.get("name").asText() == "nyc/mobility/mobility_briefing" }
+
+        val refs = briefing.get("nodes").mapNotNull { it.get("pipeline")?.get("name")?.asText() }
+
+        refs shouldBe listOf("nyc/mobility/borough_od_matrix")
+    }
+
+    @Test
+    fun `seeding hands the import service path-shaped names verbatim - it neither rewrites nor namespaces them`() {
+        // The other half of §E: an ALREADY-SEEDED workspace, holding the old flat names, is
+        // left alone. Two facts make that true and neither is a guess — (1) provisioning runs
+        // the seeder exactly once per new workspace and never again
+        // (`PersonalWorkspaceSeedingTest.seeding does not re-run for a workspace a previous
+        // login already provisioned`), and (2) the seeder is TRANSPARENT to names: it forwards
+        // whatever the file says, so it has no code path that could rename anything. This
+        // pins (2).
+        val pipelineBodies = mutableListOf<String>()
+        every { templates.import(any(), workspaceId, userId) } returns emptyList()
+        every { pipelines.import(capture(pipelineBodies), workspaceId, userId) } returns mockk()
+
+        seeder(file(pathShapedExamples)).seed(workspaceId, userId)
+
+        pipelineBodies.map { mapper.readTree(it).get("name").asText() } shouldBe
+            listOf("nyc/mobility/revenue_by_borough", "legacy_flat_name")
+    }
 
     @Test
     fun `templates are imported as one import body, then each pipeline, into the new workspace`() {

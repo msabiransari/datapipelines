@@ -128,6 +128,14 @@ data class DatasourceRef(
 class PipelineRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
+    /**
+     * The 067 tree read (see [listFolder]) — constructed here, so nothing else has to wire it,
+     * and HANDED this class's own row projection and mapper rather than owning a second copy
+     * of the `pipelines` column list. The companion stays private; the collaborator gets the
+     * two values it needs and nothing else.
+     */
+    private val tree = PipelineTreeQueries(jdbc, SELECT_COLUMNS, MAPPER)
+
     /** The pipeline's metadata row, or null when it does not exist, is soft-deleted, or lives in another workspace. */
     fun findById(
         workspaceId: UUID,
@@ -257,6 +265,26 @@ class PipelineRepository(
             mapOf("workspaceId" to workspaceId, "datasourceName" to datasourceName),
             DATASOURCE_REF_MAPPER,
         )
+
+    /**
+     * **One level** of the pipeline tree under [prefix] — its direct sub-folders and its
+     * direct pipeline children, never a subtree (067; template-hierarchy-design §8, §9.2).
+     *
+     * The public entry point stays here, on the repository every caller already holds; the
+     * three SQL statements it composes live in [PipelineTreeQueries], which owns them
+     * together because they share one predicate and must never disagree. That split is
+     * deliberate and is NOT the one this class's KDoc argues against: the version-lifecycle
+     * statements are inseparable because they carry write invariants between them, while the
+     * tree read is three read-only queries over `pipelines` that participate in no invariant
+     * outside themselves.
+     */
+    fun listFolder(
+        workspaceId: UUID,
+        prefix: String? = null,
+        offset: Int = 0,
+        limit: Int = PipelineFolderLevel.DEFAULT_PAGE_LIMIT,
+        folderLimit: Int = PipelineFolderLevel.MAX_PAGE_LIMIT,
+    ): PipelineFolderLevel = tree.level(workspaceId, prefix, offset, limit, folderLimit)
 
     /** Count of live pipelines in the workspace. */
     fun countAll(workspaceId: UUID): Int =

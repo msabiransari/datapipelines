@@ -4,8 +4,12 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.PipelineFolder
+import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionRecord
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -19,23 +23,24 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * [PipelinePartialController] — the two listing paths and the truthful-total rule (034 E3),
- * not the template (ListPartialsRenderTest renders the fragment). Unfiltered pages ask the
- * repository for size+1 and countAll for the total; a `q` search filters in memory over the
- * FULL list — which is only correct because the filter must match columns the repository
- * query does not know (description). The drafts attribute feeds the "pending release" badge
- * (versioning §7) — its absence would silently hide agent work.
+ * [PipelinePartialController] — the two listing presentations, the one-level-per-request rule,
+ * and the detail pane.
+ *
+ * The 067 shape: `prefix` absent is the WRAPPER (search when `q` is non-empty, the tree's root
+ * otherwise); `prefix` present — empty string included — is exactly ONE tree level. The
+ * truthful-total rule (034 E3) and the drafts attribute that feeds the "pending release" badge
+ * (versioning §7) survive both presentations; the badge's absence would silently hide agent
+ * work, which is why it is asserted rather than assumed.
  */
 class PipelinePartialControllerTest {
-    private val pipelines = mockk<PipelineRepository>()
-
-    // 056 made the controller a thin caller of PipelineService; the mock repository still drives
-    // it, wrapped in the real service the way every other post-056 web test does (TestSupport).
-    private val controller = PipelinePartialController(co.datapipelines.web.pipelineServiceOver(pipelines))
+    private val repository = mockk<PipelineRepository>()
+    private val service = co.datapipelines.web.pipelineServiceOver(repository)
+    private val controller = PipelinePartialController(service, PipelineBrowseModel(service, repository))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
     private val model = ExtendedModelMap()
+    private val pageSize = PipelineBrowseModel.PAGE_SIZE
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -60,8 +65,9 @@ class PipelinePartialControllerTest {
         name: String,
         displayName: String = name,
         description: String = "",
+        id: UUID = UUID.randomUUID(),
     ) = PipelineRecord(
-        id = UUID.randomUUID(),
+        id = id,
         name = name,
         displayName = displayName,
         description = description,
@@ -72,93 +78,161 @@ class PipelinePartialControllerTest {
         updatedAt = Instant.EPOCH,
     )
 
+    private fun level(
+        folders: List<PipelineFolder> = emptyList(),
+        pipelines: List<PipelineRecord> = emptyList(),
+        total: Int = pipelines.size,
+        hasMore: Boolean = false,
+    ) = PipelineFolderLevel(folders, foldersTruncated = false, pipelines = pipelines, total = total, hasMore = hasMore)
+
     @Test
-    fun `unfiltered - fetches size plus one, total from countAll, hasMore from the overflow`() {
-        every { pipelines.findAll(workspaceId, null, any(), any()) } returns List(26) { record("p$it") }
-        every { pipelines.countAll(workspaceId) } returns 100
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
+    fun `no prefix and no q - the wrapper renders the tree's ROOT level`() {
+        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
+            level(folders = listOf(PipelineFolder("nyc", "nyc", 6), PipelineFolder("trade", "trade", 3)), total = 0)
 
-        controller.list(model, q = null, offset = 0)
+        controller.list(model, q = null, prefix = null, offset = 0) shouldBe "partials/pipelines"
 
-        verify { pipelines.findAll(workspaceId, null, 26, 0) }
-        (model["pipelines"] as List<*>).size shouldBe 25
-        model["total"] shouldBe 100
-        model["hasMore"] shouldBe true
+        model["searching"] shouldBe false
+        model["levelId"] shouldBe PipelineBrowseModel.ROOT_LEVEL_ID
+        @Suppress("UNCHECKED_CAST")
+        (model["folders"] as List<PipelineFolderView>).map { it.path to it.pipelineCount } shouldBe
+            listOf("nyc" to 6, "trade" to 3)
     }
 
     @Test
-    fun `unfiltered - a negative offset is clamped to zero`() {
-        every { pipelines.findAll(workspaceId, null, any(), any()) } returns emptyList()
-        every { pipelines.countAll(workspaceId) } returns 0
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
+    fun `a prefix renders exactly ONE level - the level view, not the wrapper`() {
+        every { repository.listFolder(workspaceId, "nyc/mobility", 0, pageSize) } returns
+            level(pipelines = listOf(record("nyc/mobility/revenue_by_borough")))
+        every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
 
-        controller.list(model, q = null, offset = -5)
+        controller.list(model, q = null, prefix = "nyc/mobility", offset = 0) shouldBe "partials/pipeline-tree-level"
 
-        verify { pipelines.findAll(workspaceId, null, 26, 0) }
-        model["offset"] shouldBe 0
+        model["prefix"] shouldBe "nyc/mobility"
+        // Its own id, derived once, so the folder's placeholder and this fragment agree.
+        model["levelId"] shouldBe PipelineBrowseModel.levelId("nyc/mobility")
+        verify(exactly = 1) { repository.listFolder(workspaceId, "nyc/mobility", 0, pageSize) }
+    }
+
+    @Test
+    fun `an EMPTY prefix is present, and means the root level - not an absent prefix`() {
+        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
+
+        controller.list(model, q = null, prefix = "", offset = 0) shouldBe "partials/pipeline-tree-level"
+
+        model["prefix"] shouldBe ""
+        model["levelId"] shouldBe PipelineBrowseModel.ROOT_LEVEL_ID
+    }
+
+    @Test
+    fun `q is ignored while prefix is present - browse and search are different presentations`() {
+        every { repository.listFolder(workspaceId, "nyc", 0, pageSize) } returns level()
+
+        controller.list(model, q = "revenue", prefix = "nyc", offset = 0)
+
+        verify(exactly = 0) { repository.findAll(workspaceId) }
+    }
+
+    @Test
+    fun `a prefix that is not a legal pipeline name renders an EMPTY level and never queries`() {
+        // Not a 400: a level that cannot exist is an ordinary empty level, the same answer the
+        // templates browser gives. What it must NOT be is an arbitrary-length LIKE pattern.
+        controller.list(model, q = null, prefix = "nyc/../etc", offset = 0) shouldBe "partials/pipeline-tree-level"
+
+        model["prefix"] shouldBe "nyc/../etc"
+        (model["folders"] as List<*>).size shouldBe 0
+        (model["pipelines"] as List<*>).size shouldBe 0
+        model["total"] shouldBe 0
+        verify(exactly = 0) { repository.listFolder(any(), any(), any(), any()) }
     }
 
     @Test
     fun `a search filters in memory across name, display name and description`() {
-        every { pipelines.findAll(workspaceId) } returns
+        every { repository.findAll(workspaceId) } returns
             listOf(
-                record("revenue_monthly", "Monthly Revenue"),
-                record("churn", "Churn Model", description = "revenue impact cohorts"),
+                record("nyc/mobility/revenue_monthly", "Monthly Revenue"),
+                record("nyc/churn", "Churn Model", description = "revenue impact cohorts"),
                 record("etl_nightly", "Nightly ETL"),
             )
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
+        every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
 
-        controller.list(model, q = "revenue", offset = 0)
+        controller.list(model, q = "revenue", prefix = null, offset = 0)
 
-        val shown = model["pipelines"] as List<*>
-        shown.size shouldBe 2
+        model["searching"] shouldBe true
+        (model["pipelines"] as List<*>).size shouldBe 2
         model["total"] shouldBe 2
         model["hasMore"] shouldBe false
     }
 
     @Test
-    fun `a blank search is not a search`() {
-        every { pipelines.findAll(workspaceId, null, any(), any()) } returns emptyList()
-        every { pipelines.countAll(workspaceId) } returns 0
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
-
-        controller.list(model, q = "   ", offset = 0)
-
-        verify(exactly = 0) { pipelines.findAll(workspaceId) }
-    }
-
-    @Test
     fun `search paging drops and takes over the filtered list`() {
-        every { pipelines.findAll(workspaceId) } returns List(30) { record("p$it") }
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
+        every { repository.findAll(workspaceId) } returns List(30) { record("nyc/p$it") }
+        every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
 
-        controller.list(model, q = "p", offset = 25)
+        controller.list(model, q = "nyc", prefix = null, offset = 25)
 
         (model["pipelines"] as List<*>).size shouldBe 5
         model["hasMore"] shouldBe false
     }
 
     @Test
-    fun `the drafts map for the page's ids feeds the pending-release badge`() {
-        val pageIds = List(3) { UUID.randomUUID() }
-        every { pipelines.findAll(workspaceId, null, any(), any()) } returns
-            pageIds.map { record("p").let { r -> r.copy(id = it) } }
-        every { pipelines.countAll(workspaceId) } returns 3
-        every { pipelines.findDrafts(workspaceId, pageIds) } returns emptyMap()
+    fun `the drafts map for the level's ids feeds the pending-release badge`() {
+        val ids = List(3) { UUID.randomUUID() }
+        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
+            level(pipelines = ids.map { record("p", id = it) }, total = 3)
+        every { repository.findDrafts(workspaceId, ids) } returns emptyMap()
 
-        controller.list(model, q = null, offset = 0)
+        controller.list(model, q = null, prefix = null, offset = 0)
 
-        verify { pipelines.findDrafts(workspaceId, pageIds) }
+        verify { repository.findDrafts(workspaceId, ids) }
         model["drafts"] shouldBe emptyMap<Any, Any>()
         model["q"] shouldBe ""
     }
 
     @Test
-    fun `the partial view name is returned`() {
-        every { pipelines.findAll(workspaceId, null, any(), any()) } returns emptyList()
-        every { pipelines.countAll(workspaceId) } returns 0
-        every { pipelines.findDrafts(workspaceId, any()) } returns emptyMap()
+    fun `a negative offset is clamped to zero`() {
+        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns level()
 
-        controller.list(model, q = null, offset = 0) shouldBe "partials/pipelines"
+        controller.list(model, q = null, prefix = null, offset = -5)
+
+        model["offset"] shouldBe 0
+    }
+
+    @Test
+    fun `the detail pane carries the working version, its parameters and every version`() {
+        val id = UUID.randomUUID()
+        val body =
+            """
+            {"schema_version":1,"name":"nyc/mobility/revenue_by_borough","display_name":"Revenue","description":"d",
+             "settings":{"tempdb":{"engine":"H2"}},
+             "parameters":{"start_date":{"type":"DATE","required":false,"default":"2024-01-01"}},
+             "nodes":[{"id":"a","type":"DQL","source":"pg","template":{"id":"t.sql","version":1},"output":{"target":"caller"}}]}
+            """.trimIndent()
+        every { repository.findById(workspaceId, id) } returns record("nyc/mobility/revenue_by_borough", id = id)
+        every { repository.findDraftDetail(workspaceId, id) } returns null
+        every { repository.findCurrentVersionDetail(workspaceId, id) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", Instant.EPOCH, userId)
+        every { repository.findVersionBody(workspaceId, id, 1) } returns body
+        every { repository.listVersions(workspaceId, id) } returns
+            listOf(PipelineVersionRecord(id, 1, PipelineVersionStatus.RELEASED, "h", Instant.EPOCH, userId))
+
+        controller.detail(model, id) shouldBe "partials/pipeline-detail"
+
+        (model["pipeline"] as PipelineRecord).name shouldBe "nyc/mobility/revenue_by_borough"
+        model["workingVersion"] shouldBe 1
+        model["draftVersion"] shouldBe null
+        model["nodeCount"] shouldBe 1
+        (model["parameters"] as Map<*, *>).keys shouldBe setOf("start_date")
+        (model["versions"] as List<*>).size shouldBe 1
+    }
+
+    @Test
+    fun `an id that no longer names a live pipeline renders the quiet not-found pane`() {
+        val id = UUID.randomUUID()
+        every { repository.findById(workspaceId, id) } returns null
+
+        controller.detail(model, id) shouldBe "partials/pipeline-detail"
+
+        model["pipeline"] shouldBe null
+        verify(exactly = 0) { repository.listVersions(any(), any()) }
     }
 }

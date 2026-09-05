@@ -33,4 +33,11 @@ class UiConfig {
     /** 047: the templates screen's one model, shared by the page and the partial controllers. */
     @Bean
     fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
+
+    /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
+    @Bean
+    fun pipelineBrowseModel(
+        pipelines: co.datapipelines.pipeline.PipelineService,
+        repository: co.datapipelines.pipeline.PipelineRepository,
+    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository)
 }

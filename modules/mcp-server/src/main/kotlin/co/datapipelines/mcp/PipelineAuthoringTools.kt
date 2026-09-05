@@ -2,11 +2,28 @@ package co.datapipelines.mcp
 
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
+
+/**
+ * The `name` argument's description on both write tools (§6.2.4, §6.2.5).
+ *
+ * 067 made the name a FOLDER PATH, and the schema's `pattern` is
+ * [PipelineNameGrammar.pattern] itself — read from the validator, never retyped beside it, so
+ * what an agent is told and what the server enforces cannot drift. The prose is what a regex
+ * cannot say: which folder to choose, and that choosing one is a decision taken once, because
+ * there is no rename.
+ */
+internal const val NAME_ARG_DESC: String =
+    "Machine name, and a FOLDER PATH: 1-10 lower-case '/'-separated segments " +
+        "(finance/payments/daily_settlement). The root segment says who owns it — list the existing roots with " +
+        "pipelines_list {prefix: ''} and reuse one; ASK before minting a new root. Keep a pipeline under the same " +
+        "prefix as the templates it uses. There is no rename: the name is the pipeline's identity, so choose the " +
+        "folder now."
 
 /**
  * The **wire shapes** `pipelines_create` and `pipelines_update` share (§6.2.4, §6.2.5): the §3
@@ -138,7 +155,7 @@ class PipelinesCreateTool(
               "type": "object",
               "required": ["name", "display_name", "nodes"],
               "properties": {
-                "name": {"type": "string", "pattern": "^[a-z0-9_]+${'$'}"},
+                "name": {"type": "string", "pattern": "${PipelineNameGrammar.pattern}", "description": "${NAME_ARG_DESC}"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
@@ -211,7 +228,7 @@ class PipelinesUpdateTool(
               "properties": {
                 "id": {"type": "string", "format": "uuid", "description": "Pipeline to update."},
                 "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — pipelines_get or the previous update's result. A mismatch is a 409 conflict; re-read and rebase."},
-                "name": {"type": "string", "pattern": "^[a-z0-9_]+${'$'}"},
+                "name": {"type": "string", "pattern": "${PipelineNameGrammar.pattern}", "description": "${NAME_ARG_DESC}"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},

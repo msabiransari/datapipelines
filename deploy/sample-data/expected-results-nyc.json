@@ -6,7 +6,7 @@
   "how": "Executed against the published mobility/v2 artifacts in an isolated stack (APP_COMPOSE_PROJECT=site, APP_HOST_PORT=8085) through POST /api/v1/pipelines/{id}/execute with an author-scoped API key, every pipeline at its DEFAULT parameters. row_sha256 is sha256 over json.dumps(rows, sort_keys=True, separators=(',',':')) of the full result page - one canonical encoding on both sides, so no collation or float formatting can make two equal results differ.",
   "checked_by": "deploy/sample-data/check-baselines.sh",
   "pipelines": {
-    "revenue_by_borough": {
+    "nyc/mobility/revenue_by_borough": {
       "row_count": 6,
       "columns": [
         "borough",
@@ -19,7 +19,7 @@
       "row_sha256": "6bfee923773661ce87bb220d38e1cb44251886813f2a73084f174bff685bbefe",
       "observed_seconds": 6.17
     },
-    "rainy_vs_dry_ridership": {
+    "nyc/mobility/rainy_vs_dry_ridership": {
       "row_count": 6,
       "columns": [
         "weather",
@@ -32,7 +32,7 @@
       "row_sha256": "097c408cefdad7d79b3b062017a7c8703a352c190dd0af77ebee6433b28825d8",
       "observed_seconds": 4.41
     },
-    "borough_od_matrix": {
+    "nyc/mobility/borough_od_matrix": {
       "row_count": 27,
       "columns": [
         "pickup_borough",
@@ -45,7 +45,7 @@
       "row_sha256": "d3f16810e1c7ea5d2b278cbf6ebbd0a4244944bb4fe03de6a56e39cf34cfd2b6",
       "observed_seconds": 7.91
     },
-    "airport_access_by_borough": {
+    "nyc/mobility/airport_access_by_borough": {
       "row_count": 13,
       "columns": [
         "pickup_borough",
@@ -62,7 +62,7 @@
       "row_sha256": "3ab8325f6b217fd40bb4d184446820d28d877d3c48e6d37683e65a6b750df51e",
       "observed_seconds": 10.91
     },
-    "weather_sensitivity_by_borough": {
+    "nyc/mobility/weather_sensitivity_by_borough": {
       "row_count": 29,
       "columns": [
         "borough",
@@ -76,7 +76,7 @@
       "row_sha256": "c030bbb8f70292b23ce6a4bc50621023a25777d0673b311d4d719373a4cd221e",
       "observed_seconds": 4.62
     },
-    "mobility_briefing": {
+    "nyc/mobility/mobility_briefing": {
       "row_count": 6,
       "columns": [
         "borough",

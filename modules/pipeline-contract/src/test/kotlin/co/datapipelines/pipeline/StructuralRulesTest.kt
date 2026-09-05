@@ -84,13 +84,22 @@ class StructuralRulesTest {
     }
 
     @Test
-    fun `pipeline names must match the frozen identifier rule`() {
-        listOf("Monthly_Revenue", "monthly revenue", "monthly-revenue", "", "a".repeat(64)).forEach { name ->
-            validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldContain Validation.NAME_INVALID
-        }
-        listOf("a", "monthly_revenue_2026", "a".repeat(63)).forEach { name ->
-            validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldNotContain Validation.NAME_INVALID
-        }
+    fun `pipeline names must match the §3-2 path grammar`() {
+        // 067: the name is a PATH now — the template grammar, character for character. The
+        // exhaustive rule-by-rule coverage lives in PipelineNameGrammarTest; what this pins is
+        // that StructuralRules is the call site that enforces it.
+        listOf("Monthly_Revenue", "monthly revenue", "", "nyc//mobility", "/nyc", "nyc/", "nyc/../etc", "_helper")
+            .forEach { name ->
+                withClue(name) {
+                    validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldContain Validation.NAME_INVALID
+                }
+            }
+        listOf("a", "monthly_revenue_2026", "monthly-revenue", "a".repeat(64), "nyc/mobility/revenue_by_borough")
+            .forEach { name ->
+                withClue(name) {
+                    validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldNotContain Validation.NAME_INVALID
+                }
+            }
     }
 
     @Test

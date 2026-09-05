@@ -1,0 +1,117 @@
+<!-- The RIGHT pane's content: the SELECTED pipeline (067).
+
+     Swapped (innerHTML) into #pipeline-detail by /partials/pipelines/detail; selection never
+     re-renders the tree, by construction: this fragment contains no tree markup, no tree swap
+     target and no out-of-band swap — the render guard pins exactly that.
+
+     READ-ONLY (R10). There is no create, rename, move, delete or edit control here. A
+     pipeline's name is its identity (§4.5) and the editor owns every write, so the one action
+     is "Open in editor".
+
+     `pipeline` is null when the id no longer names a live pipeline (deleted in another tab, a
+     stale pane): the pane says so quietly rather than rendering a header full of nothing.
+
+     The version shown is the WORKING version (versioning §7) — the draft when one exists, else
+     the current released — so opening the editor from here shows what this pane just showed. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="detail" class="tplx-detail-content">
+  <th:block th:if="${pipeline == null}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">Pipeline not found</p>
+      <p class="ds-empty-description">
+        No live pipeline with that id in this workspace — it may have been deleted.
+      </p>
+    </div>
+  </th:block>
+
+  <th:block th:if="${pipeline != null}">
+    <header class="tplx-detail-header">
+      <!-- The FULL path, and it rides on `title` too — this is the one place the whole screen
+           shows it untruncated. -->
+      <h2 class="tplx-detail-path" th:text="${pipeline.name}" th:title="${pipeline.name}">nyc/mobility/revenue_by_borough</h2>
+      <p class="tplx-detail-meta">
+        <span th:text="${pipeline.displayName}">Revenue by borough</span>
+        <span th:if="${!#strings.isEmpty(pipeline.description)}"
+              class="tplx-detail-description" th:text="${pipeline.description}">What this pipeline answers.</span>
+      </p>
+      <div class="tplx-detail-badges">
+        <span class="ds-badge ds-badge-default" th:text="${'v' + workingVersion}">v1</span>
+        <span class="ds-badge ds-badge-default" th:text="${nodeCount + (nodeCount == 1 ? ' node' : ' nodes')}">3 nodes</span>
+        <span th:if="${draftVersion != null}" class="ds-badge ds-badge-warning"
+              th:text="'draft v' + ${draftVersion} + ' pending release'"
+              title="A draft exists; release it from the editor to publish."></span>
+        <span class="htmx-indicator ds-spinner" id="pipeline-detail-spinner" aria-hidden="true"></span>
+        <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open"
+           th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open in editor</a>
+      </div>
+    </header>
+
+    <!-- SETTINGS (§5). The staging engine is the one setting worth a pane: it decides where
+         every tempdb node's data lands, and it is the first thing someone reads a pipeline to
+         find out. Absent settings render nothing at all — an empty settings table would be
+         noise, not information. -->
+    <th:block th:if="${settings != null and settings.tempdb != null}">
+      <h3 class="tplx-detail-section">Settings</h3>
+      <table class="ds-table tpl-versions-table">
+        <tbody>
+          <tr>
+            <td>tempdb engine</td>
+            <td th:text="${settings.tempdb.engine}">H2</td>
+          </tr>
+        </tbody>
+      </table>
+    </th:block>
+
+    <!-- PARAMETERS (§6). The declared parameters ARE the pipeline's calling convention — what
+         an execute call may pass and what every template renders against — so they belong in
+         the pane rather than one click deeper in the editor. -->
+    <h3 class="tplx-detail-section">Parameters</h3>
+    <p class="ds-empty-description" th:if="${#maps.isEmpty(parameters)}">This pipeline declares no parameters.</p>
+    <table class="ds-table tpl-versions-table" th:unless="${#maps.isEmpty(parameters)}">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Required</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="e : ${parameters}">
+          <td th:text="${e.key}">start_date</td>
+          <td th:text="${e.value.type}">DATE</td>
+          <td th:text="${e.value.required} ? 'yes' : 'no'">no</td>
+          <td th:text="${e.value.default == null} ? '—' : ${e.value.default.asText()}">2024-01-01</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- VERSIONS, newest first, with their lifecycle badges (versioning §6). A version is
+         immutable, so nothing here is editable in place. -->
+    <h3 class="tplx-detail-section">Versions</h3>
+    <table class="ds-table tpl-versions-table">
+      <thead>
+        <tr>
+          <th class="num">Version</th>
+          <th>Status</th>
+          <th class="num">Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="v : ${versions}">
+          <td class="num" th:text="${'v' + v.version}">v1</td>
+          <td>
+            <span class="ds-badge"
+                  th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-warning'"
+                  th:text="${v.status}">RELEASED</span>
+          </td>
+          <td class="num" th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
+          <td>
+            <a class="ds-button ds-button-ghost ds-button-sm"
+               th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </th:block>
+</div>

@@ -46,7 +46,7 @@ class McpProtocolIntegrationTest {
     init {
         McpServerFactory.server(
             transport = transport,
-            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(service, usage), PipelinesListTool(service)), auditLogger),
+            dispatcher = McpToolDispatcher(listOf(PipelinesGetTool(service, usage), PipelinesListTool(service, pipelines)), auditLogger),
             prompts = McpPromptCatalog(),
             catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
             reader = McpResourceReader(pipelines, templates, datasources, executions, events),

@@ -166,19 +166,19 @@ login, through the same `ExampleContentSeeder` → import-service path a REST ca
 app's own save-time validation in `./gradlew build`, so a broken example fails the build
 rather than somebody's first login.
 
-Two of them (`revenue_by_borough`, `rainy_vs_dry_ridership`) are the original pair. The
-other four are the **showcase set** (070): they exist to be recognisable as real work —
+Two of them (`nyc/mobility/revenue_by_borough`, `nyc/mobility/rainy_vs_dry_ridership`) are
+the original pair. The other four are the **showcase set** (070): they exist to be recognisable as real work —
 several nodes, more than one engine, a staging join, declared parameters, composition, and
 a library template — and their results are what the marketing page quotes.
 
 | Pipeline | The question it answers | Nodes | Engines | Parameters | Expected result |
 |---|---|---|---|---|---|
-| `revenue_by_borough` | Which borough earns the most yellow-taxi revenue, and which tips best? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date` | 6 rows, `6bfee9237736…`, ~6 s |
-| `rainy_vs_dry_ridership` | Do New Yorkers take more taxis when it rains? | 4 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 6 rows, `097c408cefda…`, ~4 s |
-| `borough_od_matrix` | Where do the trips that start in each borough actually end up? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date`, `pickup_borough` | 27 rows, `d3f16810e1c7…`, ~8 s |
-| `airport_access_by_borough` | Which boroughs ride to JFK, LaGuardia and Newark, what does it cost, and how does that compare with the borough's ordinary economics? | 5 | Postgres + SQLite → H2 | `start_date`, `end_date` | 13 rows, `3ab8325f6b21…`, ~11 s |
-| `weather_sensitivity_by_borough` | Which boroughs lose riders when it rains, and which barely notice? | 5 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 29 rows, `c030bbb8f702…`, ~5 s |
-| `mobility_briefing` | Per borough: how many trips start there, how many never leave it, what a trip is worth. | 3 (one is a `PIPELINE` node) | composition over `borough_od_matrix` | `start_date`, `end_date` | 6 rows, `4760c5d87db6…`, ~6 s |
+| `nyc/mobility/revenue_by_borough` | Which borough earns the most yellow-taxi revenue, and which tips best? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date` | 6 rows, `6bfee9237736…`, ~6 s |
+| `nyc/mobility/rainy_vs_dry_ridership` | Do New Yorkers take more taxis when it rains? | 4 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 6 rows, `097c408cefda…`, ~4 s |
+| `nyc/mobility/borough_od_matrix` | Where do the trips that start in each borough actually end up? | 3 | Postgres + SQLite → H2 | `start_date`, `end_date`, `pickup_borough` | 27 rows, `d3f16810e1c7…`, ~8 s |
+| `nyc/mobility/airport_access_by_borough` | Which boroughs ride to JFK, LaGuardia and Newark, what does it cost, and how does that compare with the borough's ordinary economics? | 5 | Postgres + SQLite → H2 | `start_date`, `end_date` | 13 rows, `3ab8325f6b21…`, ~11 s |
+| `nyc/mobility/weather_sensitivity_by_borough` | Which boroughs lose riders when it rains, and which barely notice? | 5 | Postgres + MySQL + SQLite → H2 | `start_date`, `end_date`, `rain_threshold_mm` | 29 rows, `c030bbb8f702…`, ~5 s |
+| `nyc/mobility/mobility_briefing` | Per borough: how many trips start there, how many never leave it, what a trip is worth. | 3 (one is a `PIPELINE` node) | composition over `nyc/mobility/borough_od_matrix` | `start_date`, `end_date` | 6 rows, `4760c5d87db6…`, ~6 s |
 
 The default window is **2024-07-01 … 2024-09-30** (one quarter), which is what keeps the
 trip-level scans in single-digit seconds; the sample covers 2023-01-01 … 2024-12-31 and any

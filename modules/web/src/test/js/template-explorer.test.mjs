@@ -21,6 +21,12 @@ globalThis.window = {};
 globalThis.document = {
   readyState: "complete",
   addEventListener: function () {},
+  // 067: the script finds its pane by the `data-explorer-pane` MARKER (one file, two
+  // explorers) rather than by a hard-coded id, so the stub answers querySelector. A stub
+  // that lags the production lookup does not fail loudly here — `init()` runs at require
+  // time and threw `document.querySelector is not a function` into node:test's output while
+  // the assertions below still passed, which is exactly the shape that hides a real break.
+  querySelector: function () { return null; },
   getElementById: function () { return null; },
 };
 require(path.resolve(here, "../../main/resources/static/js/template-explorer.js"));

@@ -699,7 +699,7 @@ the `-Pmysql` build for you.
    is shown exactly once.
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
    It can list the seeded pipelines, read the three sample datasources' schemas,
-   and execute `revenue_by_borough` or `rainy_vs_dry_ridership` immediately —
+   and execute `nyc/mobility/revenue_by_borough` or `nyc/mobility/rainy_vs_dry_ridership` immediately —
    see [MCP Server](mcp-server.md).
 
 ### What the demo profile turns on

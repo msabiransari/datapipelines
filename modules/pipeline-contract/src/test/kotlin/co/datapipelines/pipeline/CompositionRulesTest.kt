@@ -203,6 +203,27 @@ class CompositionRulesTest {
     // ------------------------------------------------------------------ helpers
 
     /** The default child: one required DATE parameter, one optional STRING, one caller node. */
+    @Test
+    fun `a child reference may name a path, and one that breaks the grammar is name_invalid`() {
+        // 067: a child reference names a pipeline, so it takes the §3.2 PATH grammar. Both
+        // halves matter — the folder round is useless if a composed pipeline cannot reference a
+        // child under a root, and a malformed name must not masquerade as a missing pipeline.
+        val pathChild = Fixtures.pipeline(name = PATH_CHILD, nodes = listOf(Fixtures.node(output = NodeOutput.Caller)))
+        val pathResolver =
+            PipelineResolver { _, name, version ->
+                if (name == PATH_CHILD && version == 1) ResolvedPipeline(pathChild, false) else null
+            }
+
+        validatorWith(pathResolver)
+            .validate(parent(ref = PipelineNodeRef(PATH_CHILD, 1), parameters = null), workspaceId)
+            .failures shouldContainExactly emptyList()
+
+        val malformed = validatorWith(resolver(child())).validate(parent(ref = PipelineNodeRef("nyc/../secrets", 1)), workspaceId)
+
+        malformed.withCode(Validation.NAME_INVALID).single().path shouldBe "nodes[0].pipeline.name"
+        malformed.codes shouldContainExactly listOf(Validation.NAME_INVALID)
+    }
+
     private fun child(
         parameters: Map<String, Parameter> = childParameters(),
         caller: Boolean = true,
@@ -275,5 +296,8 @@ class CompositionRulesTest {
         const val CHILD = "monthly_revenue_component"
         const val GRANDCHILD = "daily_revenue_component"
         const val CHILD_VERSION = 4
+
+        /** 067: a child under a folder root — the shape the demo's `mobility_briefing` now uses. */
+        const val PATH_CHILD = "nyc/mobility/borough_od_matrix"
     }
 }

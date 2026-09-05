@@ -400,4 +400,104 @@ All nine decisions are settled; this doc is decision-complete. Decision 9 was cl
 
 ---
 
+## 14. Pipelines take the same convention (067, 2026-09-05)
+
+Written into this document rather than a new one because it is the same design, applied to
+the other asset: **the same grammar, the same virtual folders, the same prefix queries, the
+same browse-vs-search rule, the same explorer.** Decisions 1–9 above are the decisions; §14
+records only where pipelines differ, and every difference is smaller than it looks.
+
+### 14.1 What is identical
+
+- **Grammar.** `pipelines.name` is §4.1, character for character. A pipeline and the
+  templates it uses can only share a prefix — `nyc/mobility/revenue_by_borough` beside
+  `nyc/mobility/daily_by_zone.sql` — if both spell a path the same way. The rule lives in
+  `PipelineNameGrammar`, and `PipelineNameGrammarSpecDriftTest` asserts it against §4.1's own
+  grammar block AND against §4.6's gate SQL, so the two copies cannot drift apart.
+- **Folders are virtual** (§3.1): a name prefix, no table, no column, no id, no CRUD, no
+  empty-folder state. `PipelineRepository.listFolder` derives one level per request.
+- **Uniqueness and identity** (§4.3): `uq_pipelines_workspace_name` is unchanged, the full
+  path IS the name, and `a/b` and `a/b/c` coexist.
+- **No rename, no move** (§4.5): a pipeline's name is its identity — child references
+  (`{name, version}`), execution history and promotion all key on it. Restructuring is
+  create-the-new-path.
+- **UI** (§9): the pipelines screen is an explorer — tree left, selected pipeline right — one
+  level per request, flat full-path list on search. It reuses the templates explorer's
+  stylesheet, class names and keyboard layer.
+- **Workspaces remain the isolation boundary.** Folders organise; they are not permissions.
+
+### 14.2 The one narrowing, and why it needs no gate (normative)
+
+The pre-067 rule was `[a-z0-9_]{1,63}`. §4.1 is wider in every respect that matters (`/`,
+`.`, `-`, 200 chars) with exactly one narrowing, measured exhaustively over the old rule's
+alphabet in `PipelineNameGrammarTest`: **a name whose first character is `_`** (segments must
+start alphanumeric, which is what forbids `.` and `..` segments without a special-case list).
+
+Templates needed §4.6's migration abort for their equivalent narrowing. Pipelines do not, and
+the reason is a difference in the CALL SITES rather than optimism about the same situation:
+
+| | Template name | Pipeline name |
+|---|---|---|
+| Validated at save | yes (`TemplateValidator`) | yes (`StructuralRules`) |
+| Re-validated at render | **yes** — `RegistryTemplateLoader.parseKey`, and prologue synthesis | **no** |
+| Addressed over HTTP | by name (§9.6 forced REST v2.0) | by **UUID** (`/api/v1/pipelines/{id}`) — `%2F` cannot arise |
+| Effect of a stored now-illegal name | already-released pipelines stop **executing** | the next **save** is refused, with `name_invalid` naming the value |
+
+So a legacy `_scratch` pipeline keeps listing, keeps opening and keeps executing. The
+remediation, when its owner next wants to edit it, is the §4.5 one: create it at a legal path
+and let the old name be deprecated. There is no migration, no pre-check, and no `%2F` problem
+— which is why 067 is a smaller round than 043 despite shipping the same convention.
+
+### 14.3 Deferred, deliberately
+
+- **Per-workspace `allowed_roots` policy.** A guardrail ("this workspace may only create under
+  `finance/`"), not a Context value: it belongs to a settings store that does not exist yet.
+  Until it does, §15's "ask before minting a root" is a convention the agent follows, not a
+  rule the server enforces.
+- **Folder rename / move** — §4.5 stands for both asset kinds.
+- **Pipeline rename** — same reason: the name is the identity.
+
+---
+
+## 15. The folder convention (normative for agents)
+
+§4.1 says what a name MAY be. This says what it SHOULD be, and it is written for the agent,
+because the agent is who names things here — pipelines are authored over MCP, not in the UI.
+It is restated verbatim in `.agents/skills/datapipelines/SKILL.md`.
+
+### 15.1 Workspace = who may see and run. Root segment = who owns.
+
+The two are different questions and folders answer only the second. A workspace is the
+isolation boundary — membership decides who can read a pipeline and who can execute it. A
+root segment is an organising claim: `finance/…` is finance's, `core/…` is shared. Putting a
+pipeline under `finance/` grants nobody anything, and moving it would not revoke anything.
+
+### 15.2 Shape: `<owner>/<area>/<asset>`
+
+- 2–4 levels is typical; 10 is the ceiling and nothing needs it.
+- **A pipeline and the templates it uses share a prefix.** `nyc/mobility/revenue_by_borough`
+  reads `nyc/mobility/daily_by_zone.sql`. This is the whole payoff: one prefix query shows an
+  area's work, whichever asset kind you are browsing.
+- **Shared macros live under `<owner>/lib/`** — `nyc/lib/metrics.sql`. A library that everyone
+  imports sits beside its owner, not at the root.
+
+### 15.3 List the roots first; ask before minting a new one
+
+Before creating a pipeline or a template, call `pipelines_list {prefix: ""}` and
+`templates_list {prefix: ""}`. Reuse an existing root. If none fits, **ask the human** — a new
+root is a claim about how the workspace is organised, and §4.5 means it cannot be taken back.
+Never mint a root silently.
+
+### 15.4 What folders are NOT
+
+- **Not permissions.** Workspaces are (§14.1). A folder grants and denies nothing.
+- **Not a rename mechanism.** §4.5 stands: choose the folder at creation, because there is no
+  move. This is the reason §15.3 asks before minting rather than after.
+- **Not a schema dimension.** No `folder` column, no folder rows, no folder ids (§3.1). A
+  folder exists exactly as long as something is named under it.
+
+---
+
 *Design settled in conversation, 2026-09-01: path-in-name hierarchy; generic store with `type: sql|html`; no component taxonomy at template level; `dialect` nullable and SQL-only; runtime-only operations; dashboards deferred to a separate design.*
+
+*Extended 2026-09-05 (067): §14 applies the same convention to pipelines; §15 states the convention the agent follows when it names either kind of asset.*

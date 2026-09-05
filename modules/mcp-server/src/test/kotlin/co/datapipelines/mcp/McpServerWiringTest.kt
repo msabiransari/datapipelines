@@ -53,7 +53,7 @@ class McpServerWiringTest {
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
         return listOf(
-            PipelinesListTool(service),
+            PipelinesListTool(service, pipelines),
             PipelinesGetTool(service, usage),
             PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
             PipelinesExecuteNodeTool(

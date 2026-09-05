@@ -91,7 +91,7 @@ class McpServerAutoConfiguration {
         // configuration declares the bean `web` consumes; this module builds its own).
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         return listOf(
-            PipelinesListTool(pipelineService),
+            PipelinesListTool(pipelineService, pipelines),
             PipelinesGetTool(pipelineService, usage),
             PipelineExecuteTool(
                 pipelines = pipelineService,

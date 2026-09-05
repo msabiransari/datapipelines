@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.21
+**Status:** v1.22
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-04
+**Last updated:** 2026-09-05
 
 ---
 
@@ -122,18 +122,24 @@ Content:
 - **My pipelines** (top 5 by updated_at): name, description, version. Clickable → pipeline editor.
 - **Quick stats**: total pipelines, total executions today, success rate.
 
-### 4.3 Pipeline List
+### 4.3 Pipelines Explorer
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /pipelines` |
 | Auth required | Yes (`read`) |
-| Purpose | Search, filter, browse all pipelines |
-| Design primitives | `.ds-table`, `.ds-input`, `.ds-badge`, `.ds-button` |
-| JS | None |
-| htmx | Yes — search filter and pagination (`hx-get="/partials/pipelines"` into the fragment-root `#pipeline-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh) via the `#pipeline-filter-q` search input (`input changed delay:300ms`, `#pipeline-filter-spinner` indicator) and the shared §5 pager — full pattern in §5 |
+| Purpose | Browse the pipeline folder tree, search across full paths, open a pipeline in the editor |
+| Design primitives | `.ds-table`, `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the tree/two-pane chrome is `template-tree.css` (`tplx-*`, `tpl-*`), shared with §4.6 |
+| JS | `static/js/template-explorer.js` — selection, focus and keyboard, shared with §4.6; it finds its pane by the `data-explorer-pane` marker, so both explorers use one file. Expansion itself is `<details>` + htmx and needs no JS |
+| htmx | Yes — **one level per request** (`hx-get="/partials/pipelines?prefix=…"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's own `.tpl-level` placeholder with `outerHTML`); leaf selection (`hx-get="/partials/pipelines/detail?id=…"` into `#pipeline-detail`, `innerHTML`, `hx-sync=replace`); search and pagination (`hx-get="/partials/pipelines"` into the fragment-root `#pipeline-list-wrapper`, `outerHTML`) via the `#pipeline-filter-q` search input (`input changed delay:300ms`, `#pipeline-filter-spinner` indicator) and the shared §5 pager — full pattern in §5 |
 
-Content: search bar, table of pipelines (name, display name, description, version, last updated). "Create Pipeline" button (requires `author` scope) → opens create modal. There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
+Since 067 pipeline names are **folder paths** ([Template Hierarchy §14](template-hierarchy-design.md)), so this screen is the pipelines **explorer**: the folder tree on the left, the selected pipeline on the right. It is the same shape §4.6 gave templates, deliberately — same server-side prefix levels, same virtual folders, same browse-vs-search rule, same stylesheet and keyboard layer.
+
+- **Browse (no `q`)** renders one tree level per request. A folder shows its own segment as the label with the FULL prefix on `title`, and a badge counting the live pipelines beneath it. Folders are virtual — derived from name prefixes — so there is **no New folder / rename / move / delete control anywhere, and no empty-folder state**: a folder with nothing beneath it does not exist to be rendered.
+- **Search (non-empty `q`)** replaces the tree with a **flat list of full paths**, not a tree pruned to matches (§9.2's decided rule in the hierarchy design). Clearing the box returns to the tree — the same dispatcher fragment answers both, so that is true by construction.
+- **The detail pane** shows the working version's badges, the tempdb setting, the declared parameters (the pipeline's calling convention), every version with its RELEASED/DRAFT badge, and **Open in editor**. A selection swaps `#pipeline-detail`'s innerHTML and touches nothing in the tree.
+- **The screen is READ-ONLY.** The pre-067 "Create Pipeline" button was permanently `disabled` and its tooltip read "Pipeline editor — Phase 2 other worktree" — an affordance the server does not have, advertised with an internal note. Both are gone (T108), replaced by a sentence saying pipelines are authored through agents over the MCP server, with a link to that spec and the fact that browser authoring is on the roadmap.
+- There is deliberately **no datasource filter**: the one shipped before v1.12 was labelled datasources but populated from `${dialects}`, the controller never had the parameter, and `PipelineRecord` carries no datasource field — serving it needs a join through the pipeline definition, so it was deleted rather than half-wired (deferred).
 
 ### 4.4 Pipeline Editor
 
@@ -387,7 +393,7 @@ Content: a single static page (`templates/site/index.html` + `static/site/**`), 
 | `/ai-data-pipeline` | `site/ai-data-pipeline.html` | What an agent-authored pipeline is here: real schemas in, a versioned JSON artefact out, run governed |
 | `/text-to-sql-agent` | `site/text-to-sql-agent.html` | The after-state a text-to-SQL tool leaves out. States plainly that we do not generate SQL |
 | `/compare/airflow`, `/compare/dbt` | `site/compare-airflow.html`, `site/compare-dbt.html` | Honest comparisons, each leading with "use them instead when…" |
-| `/federated-query` | `site/federated-query.html` | The staging join, with `revenue_by_borough`'s real SQL and the limits of an in-memory staging database |
+| `/federated-query` | `site/federated-query.html` | The staging join, with `nyc/mobility/revenue_by_borough`'s real SQL and the limits of an in-memory staging database |
 
 Chrome is shared: `templates/site/_layout.html` owns the `<head>`, the header and the footer site map, and the homepage uses its header/footer fragments — two copies of a nav is how one of them stops linking a page that exists. The footer's engine column is built from the registry, so a seventh engine page is linked from every page the moment its row lands.
 
@@ -600,3 +606,4 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | 2026-08-31 | v1.13 | toast application rollout | Every mutation now reports its outcome through the §5.1 toast — successes AND refusals. §5.1 rewritten: the `response-targets` prescription is gone (the extension was never loaded; the layout's `hx-target-error` was dead config and is removed) and replaced by the four delivery shapes — A (content + OOB toast), B (toast-only, `hx-swap="none"`), C (refusal: real 4xx + `HX-Retarget: #toast` + `HX-Reswap: beforeend`, admitted by `toast.js`'s new `bridgeErrors`, the twelve-line `htmx:beforeSwap` bridge that exists because htmx never swaps 4xx/5xx on its own), and D (the ONE client-side builder `DpToast.show`, for stream-borne events with no HTTP response; `createElement` + `textContent` only). Toasts bound for the stack travel WRAPPED in the new `partials/toast-oob` fragment, because htmx swaps a non-`outerHTML` OOB element's children, not the element. The hard rule is carved into §5.1: a 6s toast never carries anything the user must keep — one-time secrets stay in their persistent inline panels and toasts only point at them. Previously INVISIBLE refusals are now delivered: admin user-create 400/409 (§4.12, Shape C), the unknown-theme 400 (§4.11, Shape C), and the password-change failures (§4.14 — field-level validation, so they stay inline, delivered by the screen's own `htmx:responseError` listener, the one screen where Shape B and inline errors coexist). §4.5 register drops `HX-Redirect`: success closes the modal, refreshes the list and toasts without a page reload, while the modal refusal stays inline (the screen keeps its own error path — no `HX-Retarget`). §4.10: creating a key now refreshes the key table out-of-band (the table markup is one extracted fragment, `settings/api-keys :: keysTable` — swapped at TABLE level, because a `tbody` OOB element nested in the response is destroyed by the browser's fragment parser: table-only tags outside table context are dropped tokens) and the dead `HX-Trigger: keyRevoked` header is gone. §4.9 cancel toasts; its `ResponseStatusException` refusals stay full error pages (recorded gap: `UiExceptionHandler` has no htmx-aware branch). §4.13's redirect flash renders as a server-side toast in the layout's `#toast` stack instead of the banner, copy verbatim. New guards: `ToastOobFragmentRenderTest` (nesting), `ToastMarkupParityTest` + `toast.test.mjs` (one markup contract, server and client), and the `bridgeErrors`/`show` JS tests under `editorJsTest`. |
 | 2026-08-31 | v1.14 | execute page redesign (032) | §4.4 Pipeline Editor expanded from the bare pointer into the rows that touch this document's shared contracts: the new `READ_RESOURCES` node-SQL read partial (`GET /partials/pipelines/{id}/nodes/{nodeId}/sql`, spec §8.3) with the deliberately-NOT-a-toast copy confirmation (live region + 1.5s label swap); the result grid moved onto the shared `.ds-table` (bespoke `.pe-result-table` styles deleted; paging stays the client-side cursor contract, restyled to the shared pager's look); and the SSE terminal events land on §5.1's Shape D — `pipeline_completed`/`execution_aborted` toast via `DpToast.show` (stream-borne, no HTTP response), `pipeline_failed` keeps the error modal — with all three announcing on the live region. No §5.1 amendment was needed: Shape D already existed (v1.13) and the copy button does not use it. |
 | 2026-09-03 | v1.20 | datasource credentials (061/T84) | §4.5 gains the **Last test** column: an `ok`/`failed`/`never tested` badge with the timestamp and the driver's message on hover, from the datasource row's stored outcome ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). It exists because listing never connects — on 2026-09-02 this screen showed a datasource as fine while every execution failed at CONNECT. The §5.1 Search rule follows the new column (`ok` / `failed` / `never tested` all match). No polling is added. §4.5's delete note now points at the any-version in-use guard (T79). |
+| 2026-09-05 | v1.22 | pipeline folders (067) | §4.3 becomes the **Pipelines Explorer**: pipeline names are folder paths, so the flat table is a tree LEFT + selected pipeline RIGHT — the §4.6 shape, reusing `template-tree.css` and `template-explorer.js` (which now finds its pane by a `data-explorer-pane` marker rather than a hard-coded id, so one file serves both screens). One level per request; a non-empty `q` is a flat list of full paths; the detail pane is read-only and carries settings, parameters, versions and Open in editor. **T108:** the permanently-`disabled` "Create Pipeline" button and its "Phase 2 other worktree" tooltip are deleted — an affordance the server does not have, advertised with an internal note — replaced by a sentence naming MCP as the authoring path and the roadmap as the plan. |
