@@ -16,16 +16,19 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
- * T40 cause 2's regression guard: the layout loads Bootstrap AFTER the design system
- * but BEFORE `app.css`, and `app.css` restores the token-painted body canvas.
+ * Stylesheet load-order contract for the app layout (succeeds T40 cause 2's guard).
  *
- * Bootstrap's reboot declares `body { background-color: var(--bs-body-bg); ... }` —
- * concrete white for every theme. Loaded last (the pre-027 order), it painted `<body>`
- * white under EVERY theme: dark chrome over a white page (024 T40), and the light
- * themes' `--surface-page` canvas silently masked by Bootstrap's. The design intent is
- * `base.css`'s own `html` rule (background-color: var(--surface-page)); the fix is the
- * documented §3.4 order — design system first, Bootstrap, then app CSS — plus an app.css
- * body rule that re-asserts the tokens over Bootstrap's reboot.
+ * 076 §C removed Bootstrap 5.3.8 from the app entirely: no app template ever used a
+ * Bootstrap class, and the defaults its reboot silently provided are now owned by
+ * base.css plus the "076 §C" element-defaults section at the end of app.css. The order
+ * contract that remains: the design-system vendor sheets load BEFORE `app.css`, and no
+ * `webjars/bootstrap` reference exists anywhere in the rendered layout.
+ *
+ * The body-canvas assertion survives the removal on purpose: app.css's `body` rule
+ * re-asserting `background-color: var(--surface-page); color: var(--text-primary)` was
+ * born as the guard against Bootstrap's reboot painting `<body>` white under every
+ * theme (024 T40), and it stays meaningful as the standing guard over any future reset
+ * layered ahead of app.css.
  *
  * Load ORDER is load-bearing and invisible to per-file reasoning: equal-specificity
  * rules resolve by document order, so this test pins the rendered order, not the files.
@@ -54,17 +57,32 @@ class LayoutStylesheetOrderTest {
     }
 
     @Test
-    fun `app css loads after bootstrap so its body rule can win`() {
-        val html = renderedHead()
-        val bootstrap = html.indexOf("bootstrap.min.css")
-        val appCss = html.indexOf("/css/app.css")
-        bootstrap shouldBeGreaterThan -1
-        appCss shouldBeGreaterThan -1
-        bootstrap shouldBeLessThan appCss
+    fun `no webjars bootstrap reference remains in the rendered layout`() {
+        renderedHead().contains("webjars/bootstrap") shouldBe false
     }
 
     @Test
-    fun `app css restores the token body canvas over the bootstrap reboot`() {
+    fun `the design system vendor sheets load before app css`() {
+        val html = renderedHead()
+        val tokens = html.indexOf("/vendor/design-system/tokens.css")
+        val base = html.indexOf("/vendor/design-system/base.css")
+        val motion = html.indexOf("/vendor/design-system/motion.css")
+        val primitives = html.indexOf("/vendor/design-system/primitives.css")
+        val appCss = html.indexOf("/css/app.css")
+        tokens shouldBeGreaterThan -1
+        base shouldBeGreaterThan -1
+        motion shouldBeGreaterThan -1
+        primitives shouldBeGreaterThan -1
+        appCss shouldBeGreaterThan -1
+        tokens shouldBeLessThan base
+        base shouldBeLessThan motion
+        motion shouldBeLessThan primitives
+        // app.css is LAST: its body-canvas and element-default rules win by order.
+        primitives shouldBeLessThan appCss
+    }
+
+    @Test
+    fun `app css asserts the token body canvas`() {
         val appCss =
             ClassPathResource("static/css/app.css").inputStream.readBytes().decodeToString()
         appCss shouldMatch

@@ -112,7 +112,6 @@ kotest = "6.2.3"
 # Konsist: latest stable on Maven Central (verified 2026-08-15; the project's
 # last release is 2024-12 but it remains the current stable line).
 konsist = "0.17.3"
-webjars-bootstrap = "5.3.8"
 # htmx: 4.0.0-beta6 is the newest artifact and is rejected as pre-release.
 htmx = "2.0.10"
 # MCP SDK — GATE G1 CLOSED, see [libraries] below.
@@ -224,7 +223,6 @@ mcp-core = { module = "io.modelcontextprotocol.sdk:mcp-core", version.ref = "mcp
 mcp-json-jackson2 = { module = "io.modelcontextprotocol.sdk:mcp-json-jackson2", version.ref = "mcp-sdk" }
 
 # --- UI assets (NOT BOM-managed) ---------------------------------------------
-webjars-bootstrap = { module = "org.webjars:bootstrap", version.ref = "webjars-bootstrap" }
 webjars-htmx = { module = "org.webjars.npm:htmx.org", version.ref = "htmx" }
 
 # --- Test (junit/testcontainers/rest-assured are BOM-managed) ----------------

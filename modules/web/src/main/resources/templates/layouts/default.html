@@ -13,12 +13,6 @@
   <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
 
-  <!-- Bootstrap AFTER the design system, BEFORE app.css (§3.4 load order): its reboot
-       must not be the last word — it paints <body> Bootstrap-white for every theme,
-       masking the theme's --surface-page canvas (app.css re-asserts the tokens). -->
-  <link rel="stylesheet"
-        th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}"
-        media="screen">
   <link th:href="@{/css/app.css}" rel="stylesheet">
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">

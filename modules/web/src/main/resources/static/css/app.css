@@ -26,11 +26,12 @@
   --node-aborted-accent: var(--accent-warning, #f59e0b);
 }
 
-/* The body canvas, re-asserted AFTER Bootstrap (this file loads last, §3.4): Bootstrap's
-   reboot declares body { background-color: var(--bs-body-bg); color: var(--bs-body-color) }
-   — concrete white — and had it been the final sheet the page would paint white under
-   every theme, dark included (024 T40 cause 2). base.css already paints <html> with these
-   tokens; this restores what the reboot covers. */
+/* The body canvas. base.css paints <html> with these tokens but leaves <body> to
+   inherit; this rule paints the body itself, so the canvas survives any reset
+   layered between the design system and this file (this file loads last, §3.4).
+   Bootstrap's reboot used to be that reset — it painted <body> concrete white
+   under every theme (024 T40 cause 2). Bootstrap is gone (076 §C); the rule
+   stays as the standing guard over whatever ships hereafter. */
 body {
   background-color: var(--surface-page);
   color: var(--text-primary);
@@ -308,4 +309,65 @@ body {
     animation: none;
     width: 100%;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   076 §C — element defaults Bootstrap's reboot used to provide.
+
+   Bootstrap 5.3.8 is removed from the app; base.css zeroes margins/padding
+   globally but styles no elements. A grounded sweep of everything rendering
+   inside .app-main (pages AND the partials htmx swaps into it) found these
+   bare elements had been leaning on the reboot:
+
+   - <code> — unclassed inline code on the promotion screen, pipelines list
+     and tree, workspaces, and the node inspector's pe-value cells. The reboot
+     made it small monospace on a tinted chip; without it the code rendered in
+     body sans. Restored below, mirroring the docs.css / .ds-mono idiom.
+   - <pre> — every <pre> rendered today carries a class (.pe-sql, .pe-error-*,
+     .te-preview-pane) or inline styles, so those win by specificity; the rule
+     below is the standing default for any future bare <pre>.
+   - <strong> / <small> — <strong> appears unclassed on the promotion screen;
+     <small> is not rendered anywhere yet. Without Bootstrap both fall back to
+     the UA stylesheet (bolder / smaller); the rules below pin them to tokens
+     instead of browser defaults.
+
+   Deliberately NOT restored — the sweep showed nothing relying on them:
+   - h1-h6 / p margins: every app-chrome heading and paragraph carries a ds-*
+     class, an inline margin, or a rule in pipeline-editor.css /
+     template-editor.css (.te-panel-head h2 and .pe-modal-header h2 already
+     set margin:0; the modal-body and expired-card <p>s sit inside padded
+     containers, so the reboot's bottom margin was invisible there).
+   - dl / blockquote / bare tables: only rendered markdown emits those, and
+     markdown lands in .doc-body, which docs.css styles in full.
+   --------------------------------------------------------------------------- */
+.app-main code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--gap-xs);
+}
+
+.app-main pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--surface-inset);
+  border-radius: var(--radius-md);
+  padding: var(--gap-md);
+  overflow-x: auto;
+  margin-bottom: var(--gap-md);
+}
+
+/* Inline-code chip must not double-paint inside a code block. */
+.app-main pre code {
+  background: none;
+  padding: 0;
+}
+
+.app-main strong {
+  font-weight: var(--weight-semibold);
+}
+
+.app-main small {
+  font-size: var(--text-xs);
 }

@@ -86,11 +86,10 @@ The active theme is resolved **per request**, not fixed at deployment: `${active
 <link rel="stylesheet" href="/vendor/design-system/base.css">
 <link rel="stylesheet" href="/vendor/design-system/motion.css">
 <link rel="stylesheet" href="/vendor/design-system/primitives.css">
-<link rel="stylesheet" href="/webjars/bootstrap/5.3.8/css/bootstrap.min.css">  <!-- grid/utilities/modal -->
 <link rel="stylesheet" href="/css/app.css">                <!-- app-specific, LAST -->
 ```
 
-Bootstrap sits BETWEEN the design system and `app.css`: its reboot declares `body { background-color: var(--bs-body-bg) }` — concrete white — and were it the final sheet it would paint `<body>` white under every theme (024 T40; `app.css` re-asserts `background-color: var(--surface-page); color: var(--text-primary)` over it). Every theme file, `dark.css` included, opens on `:root`: the swap loads exactly one file, so a theme takes effect by being loaded — no `data-theme` attribute is involved anywhere.
+`app.css` loads LAST so its rules win equal-specificity ties by document order: its `body` rule re-asserts `background-color: var(--surface-page); color: var(--text-primary)` (born as the guard against Bootstrap's reboot painting `<body>` white under every theme, 024 T40 — Bootstrap itself was removed in 076 §C, and the element defaults its reboot silently provided are now owned by base.css plus the "076 §C" section at the end of `app.css`). Every theme file, `dark.css` included, opens on `:root`: the swap loads exactly one file, so a theme takes effect by being loaded — no `data-theme` attribute is involved anywhere.
 
 Theme switching at runtime: swap the `href` of `#theme-link`. All tokens cascade instantly — no page reload.
 
