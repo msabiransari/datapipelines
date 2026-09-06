@@ -625,7 +625,7 @@ On startup, the app validates:
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **The boot line (§3.23):** `event=config.posture env=<env> posture=<posture> authoring=<on|off> demo=<families>` is logged once (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
-The validator's own test suite must assert that the documented dev setup (env vars from `.env.local`) passes the **production** rules — so a broken dev value gets fixed at the data, never by weakening the check.
+The validator's own test suite must assert that the documented laptop setup (`deploy/env/posture/development.env` + `deploy/env/laptop.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
 
 Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop startup with a clear log message listing every missing/invalid key.
 
