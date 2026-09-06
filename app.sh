@@ -5,10 +5,11 @@
 # via deploy/compose.yml + deploy/compose.local-build.yml — the same stack an
 # engineer evaluating the project runs.
 #
+#   ./app.sh --scaffold                   write deploy/secrets.env and stop
 #   ./app.sh --start [--env <label>] [--posture development|hardened]
 #            [--demo nyc,trade] [--no-build]
 #   ./app.sh --stop [--demo <families>]   stop the stack, demo services included
-#   ./app.sh --status [--demo <families>] show services + app health
+#   ./app.sh --status [--demo <families>] show services + app health + the login
 #   ./app.sh --logs                       follow the app container's logs
 #
 # THE TWO VARIABLES (docs/environments.md). --env is the ORG's label for this
@@ -18,12 +19,17 @@
 # script is a LOADER: everything it does is assemble env files that work just as
 # well under `java -jar`, systemd, Kubernetes, ECS and Nomad.
 #
-#   deploy/env/posture/<posture>.env   tracked, non-secret: the posture
-#   deploy/env/demo.env                tracked: sample-data versions and posture
-#   deploy/secrets.env                 GIT-IGNORED: every secret. Scaffolded here.
+#   deploy/env/defaults.env   TRACKED, non-secret: every variable the app reads, with
+#                             the value this deployment defaults to. One file (081).
+#   deploy/secrets.env        GIT-IGNORED: every secret, plus every override that
+#                             belongs to THIS deployment. Scaffolded here from
+#                             deploy/secrets.env.example.
 #
 # ...passed in that order, secrets LAST, so a value an operator sets in
-# deploy/secrets.env always wins. deploy/env/example.env is the full reference.
+# deploy/secrets.env always wins. Two files, in that order, under every loader.
+#
+# --posture and --env are EXPLICIT OVERRIDES: they are exported into this process, and
+# a shell variable beats both files. Leaving them off uses defaults.env's values.
 #
 # --demo is a FLAG, not an environment (`--demo nyc`, `--demo nyc,trade`): it sets
 # DATAPIPELINES_DEMO, from which this script derives the compose profiles that gate
@@ -40,8 +46,8 @@ set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 
 SECRETS_ENV="deploy/secrets.env"
-DEMO_ENV="deploy/env/demo.env"
-POSTURE_DIR="deploy/env/posture"
+SECRETS_TEMPLATE="deploy/secrets.env.example"
+DEFAULTS_ENV="deploy/env/defaults.env"
 
 die() { echo "app.sh: $*" >&2; exit 1; }
 
@@ -88,8 +94,8 @@ case "$DP_POSTURE" in
   development|hardened) ;;
   *) die "--posture $DP_POSTURE is not a posture: development or hardened (docs/environments.md)." ;;
 esac
-POSTURE_ENV="$POSTURE_DIR/$DP_POSTURE.env"
-[[ -f $POSTURE_ENV ]] || die "$POSTURE_ENV is missing — the posture files are tracked in this repo."
+[[ -f $DEFAULTS_ENV ]] || die "$DEFAULTS_ENV is missing — it is the tracked settings file every
+  loader reads first. Restore it from the repository (git checkout -- $DEFAULTS_ENV)."
 
 DEMO_FAMILIES=$(printf '%s' "$DP_DEMO" | tr -d '[:space:]')
 DEMO_NYC=0
@@ -149,8 +155,7 @@ GRADLE_CACHE="$PWD/.gradle-docker"
 assemble_compose() {
   COMPOSE=(docker compose -p "$COMPOSE_PROJECT"
     -f deploy/compose.yml -f deploy/compose.local-build.yml
-    --env-file "$POSTURE_ENV")
-  ((DEMO_NYC || DEMO_TRADE)) && COMPOSE+=(--env-file "$DEMO_ENV")
+    --env-file "$DEFAULTS_ENV")
   [[ -f $SECRETS_ENV ]] && COMPOSE+=(--env-file "$SECRETS_ENV")
   ((DEMO_NYC)) && COMPOSE+=(--profile demo-nyc)
   ((DEMO_TRADE)) && COMPOSE+=(--profile demo-trade)
@@ -186,9 +191,7 @@ env_get() { # file key
 effective() { # key
   local key="$1" value=""
   local f v
-  for f in "$POSTURE_ENV" "$DEMO_ENV" "$SECRETS_ENV"; do
-    # demo.env only participates when this invocation passes it to compose.
-    if [[ $f == "$DEMO_ENV" ]] && ((!DEMO_NYC && !DEMO_TRADE)); then continue; fi
+  for f in "$DEFAULTS_ENV" "$SECRETS_ENV"; do
     v=$(env_get "$f" "$key")
     [[ -n $v ]] && value="$v"
   done
@@ -196,48 +199,117 @@ effective() { # key
 }
 
 # ---------------------------------------------------------------- secrets
+# The scaffold is GENERATED FROM deploy/secrets.env.example, not written out here (081).
+# Two hand-maintained copies of "the secrets a deployment needs" is the drift this round
+# exists to remove: the 075 template omitted five keys the scaffold wrote, so a deployer
+# who followed the documented `cp` path got a file that could not run the demo. One
+# derivation now — the template is the list, this function only supplies VALUES:
+#
+#   * every key in the template's secrets section gets a generated value;
+#   * the two identity keys get this box's own answers;
+#   * the commented override list is copied through untouched, so the file an operator
+#     ends up with names every variable they may set.
+#
+# `scripts/app-sh-secrets-test.sh` diffs the two key sets on every build.
 scaffold_secrets_env() {
   [[ -f $SECRETS_ENV ]] && return 0
-  echo "==> $SECRETS_ENV missing — scaffolding it with generated secrets"
-  # §7 requires at least ONE authentication method, and an unset GOOGLE_* pair means
-  # the stock provider is ignored — so with no OIDC creds the app refuses to start.
-  # Scaffold local accounts, or `./app.sh --start` on a clean machine never becomes
-  # healthy (found by adversarial verification of 026, post-merge).
+  [[ -f $SECRETS_TEMPLATE ]] || die "$SECRETS_TEMPLATE is missing — the scaffold is generated
+  from it. Restore it from the repository (git checkout -- $SECRETS_TEMPLATE)."
+  echo "==> $SECRETS_ENV missing — generating it from $SECRETS_TEMPLATE"
+
+  # §7 requires at least ONE authentication method, and an unset GOOGLE_* pair means the
+  # stock provider is ignored — so with no OIDC creds the app refuses to start. The
+  # scaffold therefore turns local accounts ON and seeds the first admin, or
+  # `./app.sh --start` on a clean machine never becomes healthy (found by adversarial
+  # verification of 026, post-merge).
   #
   # The password is GENERATED, never a shipped constant: a fixed default in a tracked
   # file is a published admin credential on an app that binds all interfaces. It is
-  # written ONCE, HERE, and read back out of this file by everything that prints it.
-  local pw
-  pw=$(openssl rand -base64 18)
-  cat >"$SECRETS_ENV" <<EOF
-# Generated by app.sh $(date +%F). GIT-IGNORED — see deploy/env/secrets.env.example
-# for the field reference, and docs/environments.md for what belongs in this file.
-DATAPIPELINES_JWT_SECRET=$(openssl rand -base64 32)
-DATAPIPELINES_DB_ENCRYPTION_KEY=$(openssl rand -base64 32)
-SPRING_DATASOURCE_PASSWORD=$(openssl rand -base64 24)
-DATAPIPELINES_REDIS_PASSWORD=$(openssl rand -base64 24)
-DATAPIPELINES_AUTH_BASE_URL=${APP_URL}
-# Empty = the stock google provider is ignored (configuration.md §7): startup then
-# needs local accounts, enabled below.
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=
-# The zero-setup login (auth.md §5A). This one-time password is seeded onto the
-# bootstrap admin at FIRST BOOT ONLY and the app forces a change at first sign-in.
-# Want YOUR address to be the admin? Set it below BEFORE the first start — the seed
-# fires once, at row creation, and a later change does not re-seed it.
-DATAPIPELINES_AUTH_LOCAL_ENABLED=true
-DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=$pw
-DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=admin@local.test
-# The demo's SELECT-only sample logins. Hex, NOT base64: hex can never contain the
-# one string the loader refuses in a Postgres password — its dollar-quote tag (045
-# §A) — and stays shell/SQL-quiet everywhere.
-SAMPLE_PG_PASSWORD=$(openssl rand -hex 24)
-SAMPLE_MYSQL_PASSWORD=$(openssl rand -hex 24)
-SAMPLE_MYSQL_ROOT_PASSWORD=$(openssl rand -hex 24)
-EOF
+  # written ONCE, HERE, and read back out of this file by everything that prints it (T137).
+  DP_GEN_B64_32=$(openssl rand -base64 32) \
+  DP_GEN_B64_32B=$(openssl rand -base64 32) \
+  DP_GEN_B64_24=$(openssl rand -base64 24) \
+  DP_GEN_B64_24B=$(openssl rand -base64 24) \
+  DP_GEN_PW=$(openssl rand -base64 18) \
+  DP_GEN_HEX_A=$(openssl rand -hex 24) \
+  DP_GEN_HEX_B=$(openssl rand -hex 24) \
+  DP_GEN_HEX_C=$(openssl rand -hex 24) \
+  DP_APP_URL="$APP_URL" \
+  python3 - "$SECRETS_TEMPLATE" "$SECRETS_ENV" <<'PY'
+import os, re, sys
+
+template, out = sys.argv[1], sys.argv[2]
+
+# key -> the value this box gives it. Anything not listed keeps the template's value,
+# which for a secret is the empty string: an unused credential stays unset rather than
+# being invented (an empty promotion server key is how a deployment refuses promotion).
+FILL = {
+    "DATAPIPELINES_JWT_SECRET": os.environ["DP_GEN_B64_32"],
+    "DATAPIPELINES_DB_ENCRYPTION_KEY": os.environ["DP_GEN_B64_32B"],
+    "SPRING_DATASOURCE_PASSWORD": os.environ["DP_GEN_B64_24"],
+    "DATAPIPELINES_REDIS_PASSWORD": os.environ["DP_GEN_B64_24B"],
+    "DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD": os.environ["DP_GEN_PW"],
+    "SAMPLE_PG_PASSWORD": os.environ["DP_GEN_HEX_A"],
+    "SAMPLE_MYSQL_PASSWORD": os.environ["DP_GEN_HEX_B"],
+    "SAMPLE_MYSQL_ROOT_PASSWORD": os.environ["DP_GEN_HEX_C"],
+    "DATAPIPELINES_AUTH_BASE_URL": os.environ["DP_APP_URL"],
+    "DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL": "admin@local.test",
+}
+# Commented lines this box uncomments. Local password accounts are what make a clean
+# machine bootable with no OIDC client at all (auth.md §5A).
+UNCOMMENT = {"DATAPIPELINES_AUTH_LOCAL_ENABLED": "true"}
+
+lines = []
+for line in open(template):
+    m = re.match(r"^([A-Z][A-Z0-9_]*)=(.*)$", line)
+    if m and m.group(1) in FILL:
+        lines.append(f"{m.group(1)}={FILL[m.group(1)]}\n")
+        continue
+    c = re.match(r"^#\s*([A-Z][A-Z0-9_]*)=", line)
+    if c and c.group(1) in UNCOMMENT:
+        lines.append(f"{c.group(1)}={UNCOMMENT[c.group(1)]}\n")
+        continue
+    lines.append(line)
+
+header = [
+    "# GENERATED by ./app.sh --scaffold from deploy/secrets.env.example.\n",
+    "# GIT-IGNORED. Everything below is yours to edit; the comments are the template's.\n",
+    "#\n",
+    "# EDIT DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL BEFORE THE FIRST START if you want\n",
+    "# your own address to be the administrator: the seed fires once, at row creation,\n",
+    "# and changing it afterwards does not re-seed (auth.md §5A.2).\n",
+    "\n",
+]
+open(out, "w").writelines(header + lines)
+PY
   chmod 600 "$SECRETS_ENV"
-  echo "==> wrote $SECRETS_ENV — review it; set GOOGLE_* for OIDC login, or keep local accounts"
+  echo "==> wrote $SECRETS_ENV (mode 600) — every secret generated, every other variable"
+  echo "    named in it, commented, with the default $DEFAULTS_ENV gives it."
+}
+
+# `--scaffold` exists so the admin email and the OIDC client can be set BEFORE the
+# one-time seed runs. The seed fires at the first boot that finds no bootstrap row and
+# never again (auth.md §5A.2), so "start it, then fix the email" does not work — the
+# owner hit exactly that, and the recovery is a password reset from Admin -> Users.
+scaffold_only() {
+  if [[ -f $SECRETS_ENV ]]; then
+    echo "==> $SECRETS_ENV already exists — nothing written (it holds live credentials)."
+    echo "    Delete it yourself if you mean to start over; a stack running against the"
+    echo "    old values will stop being able to read its own encrypted datasources."
+    return 0
+  fi
+  scaffold_secrets_env
+  cat <<EOM
+==> Next:
+    1. \$EDITOR $SECRETS_ENV
+       - DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL: YOUR address. It is seeded ONCE, at
+         the first start, and cannot be changed by editing this file afterwards.
+       - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET: only if you want OIDC login; local
+         password accounts are already on.
+       - DATAPIPELINES_POSTURE / DATAPIPELINES_ENV: uncomment to deploy as anything but
+         a laptop.
+    2. ./app.sh --start [--demo nyc,trade]
+EOM
 }
 
 # ---------------------------------------------------------------- build
@@ -337,10 +409,67 @@ EOM
   fi
 }
 
+# ---------------------------------------------------------------- healthy, or a real failure
+# `compose up --wait` gives up on its own schedule (the image HEALTHCHECK's 40s start
+# period + 3 x 30s retries), and 075 shipped a script that treated that deadline as the
+# answer: the owner's first boot printed "still starting — check ./app.sh --status" after
+# about two minutes, and the stack was healthy a minute later. A first boot runs Flyway,
+# seeds the admin, and — under --demo — has already restored two sample databases, so two
+# minutes is simply not the length of the job.
+#
+# So `up --wait`'s verdict is not read at all. This loop is, and it ends on one of three
+# things, none of which is a fixed nap:
+#
+#   healthy        /health answers 2xx        -> return, and the login gets printed
+#   dead           the container is not running -> the hard failure, with logs
+#   out of patience  HEALTH_WAIT_SECONDS       -> the T75 message, exit 0, NOT a failure
+#
+# A container that is running is a STARTING app; anything else (exited, restarting,
+# absent) is a real failure and keeps the exit 1 it always had.
+HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-360}"
+wait_until_healthy() {
+  local waited=0 step=5
+  while ((waited < HEALTH_WAIT_SECONDS)); do
+    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+      # `if`, not `((…)) && echo`: under `set -e` an AND-list whose left side is false
+      # is a failed command and kills the script — here, on the fast path where the app
+      # was healthy on the first probe.
+      if ((waited > 0)); then echo "==> healthy after ${waited}s"; fi
+      return 0
+    fi
+    if ! app_container_running; then
+      echo "---- app container, last 40 log lines ----"
+      "${COMPOSE[@]}" logs --tail 40 datapipelines || true
+      die "the app container is not running — full logs: ./app.sh --logs"
+    fi
+    # A progress line every 15s: silence for six minutes is indistinguishable from a hang,
+    # and the owner had no way to tell which one he was watching.
+    if ((waited % 15 == 0)); then
+      printf '    ... still booting (%ds; migrations and seeding run once)\n' "$waited"
+    fi
+    sleep "$step"
+    waited=$((waited + step))
+  done
+  cat <<EOM
+==> stack is STILL starting after ${HEALTH_WAIT_SECONDS}s. Nothing has failed — the
+    container is running — but this box is slower than the bound. Watch it with
+    ./app.sh --logs, and ./app.sh --status flips to UP the moment Tomcat answers
+    (it prints the login too). Raise the bound with HEALTH_WAIT_SECONDS=900.
+EOM
+  exit 0
+}
+
 # ---------------------------------------------------------------- verbs
 start() {
   local do_build=1
   [[ ${1:-} == --no-build ]] && do_build=0
+  # Whether this start is also a first setup — asked BEFORE the scaffold runs, because
+  # the scaffold is what creates the file. A brand-new deploy/secrets.env carries a
+  # one-time admin password that the first boot seeds and no later boot will (auth.md
+  # §5A.2), and saying so at the moment it happens is the difference between "I can edit
+  # this later" and the reset-from-Admin-Users recovery the owner needed.
+  local seeds_now=false
+  [[ -f $SECRETS_ENV ]] || seeds_now=true
   scaffold_secrets_env
   assemble_compose # the file may have just been created; the list must carry it
   if ((do_build)); then
@@ -354,23 +483,14 @@ start() {
     fi
   fi
   echo "==> starting env=$DP_ENV posture=$DP_POSTURE demo=${DEMO_FAMILIES:-(none)} project=$COMPOSE_PROJECT port=$APP_HOST_PORT"
-  echo "==> (app healthcheck probes /ready; first boot runs migrations)"
-  if ! "${COMPOSE[@]}" up -d --wait; then
-    # T75: a wait that is always long enough does not exist. When the only failure is
-    # the health probe timing out on a still-booting JVM, say so and exit 0 — a new
-    # user on a slow laptop must not be told a working app failed. ./app.sh --status
-    # flips to UP when Tomcat answers. Only a container that is NOT running keeps the
-    # hard failure, with the logs to read.
-    if app_container_running; then
-      echo "==> stack is still starting (a cold first boot can take minutes) — check ./app.sh --status"
-      exit 0
-    fi
-    echo "---- app container, last 40 log lines ----"
-    "${COMPOSE[@]}" logs --tail 40 datapipelines || true
-    die "stack did not become healthy — full logs: ./app.sh --logs"
+  echo "==> (app healthcheck probes /ready; first boot runs migrations and seeds the admin)"
+  if $seeds_now; then
+    echo "==> FIRST START: the one-time admin credential just generated into $SECRETS_ENV"
+    echo "    is seeded at this boot and at no later one. To choose the administrator's"
+    echo "    address yourself, stop here and use ./app.sh --scaffold next time."
   fi
-  curl -sf "$HEALTH_URL" >/dev/null 2>&1 \
-    || die "stack is up but $HEALTH_URL is not answering"
+  "${COMPOSE[@]}" up -d --wait || true
+  wait_until_healthy
   echo "==> UP — ${APP_URL}"
   print_login
   if ((DEMO_NYC || DEMO_TRADE)); then
@@ -405,7 +525,7 @@ stop() {
   if [[ -n $running ]]; then
     docker compose -p "$COMPOSE_PROJECT" \
       -f deploy/compose.yml -f deploy/compose.local-build.yml \
-      --env-file "$POSTURE_ENV" --env-file "$DEMO_ENV" --env-file "$SECRETS_ENV" \
+      --env-file "$DEFAULTS_ENV" --env-file "$SECRETS_ENV" \
       --profile demo-nyc --profile demo-trade stop
     echo "==> demo services stopped too (a plain --stop covers the demo profiles)"
   fi
@@ -419,9 +539,14 @@ status() {
   else
     echo "health: NOT RESPONDING ($HEALTH_URL)"
   fi
+  # The owner asked where the password is, and only --start said. It is the same
+  # derivation: read the seeded row out of the database and print the login that EXISTS
+  # (T137), so --status answers the question at any time, not once at boot.
+  print_login
 }
 
 case ${1:-} in
+  --scaffold) scaffold_only ;;
   --start)
     shift
     start "$@"
