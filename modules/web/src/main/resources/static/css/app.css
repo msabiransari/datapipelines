@@ -26,6 +26,95 @@
   --node-aborted-accent: var(--accent-warning, #f59e0b);
 }
 
+/* ---------------------------------------------------------------------------
+   079 §G — VENDORED WEBFONTS (Inter, JetBrains Mono; both SIL OFL-1.1).
+
+   The design system NAMES both faces but ships neither: `saas`, `ocean`,
+   `professional`, `auto`, `forest` and `healthcare` set `--_font-sans` to
+   "Inter", and four of them set `--_font-mono` to "JetBrains Mono" — while
+   `light`, `dark` and `minimal` name NEITHER. So the app rendered in whatever
+   the machine happened to have, and the two themes the mode toggle switches
+   between (light/dark) were exactly the two with no brand face at all. That is
+   why the app never looked like the mocks anywhere but a designer's laptop.
+
+   Vendored from the projects' own GitHub release assets, hashes recorded in
+   vendor/design-system/vendor-manifest.json (one manifest for every vendored
+   asset — DEVELOPMENT.md §"design system"). NO Google Fonts, no CDN: a webfont
+   from a third-party host is a runtime dependency AND a per-visitor request to
+   someone else's log.  `VendoredFontsAuditTest` fails the build if a file goes
+   missing, a hash drifts, an OFL.txt disappears, or any stylesheet/template
+   starts referencing a font host over the network.
+
+   URLs are RELATIVE (`../vendor/...`), not absolute: this file is served at
+   /css/app.css, so a relative URL survives a non-root context path — the same
+   reason partials/theme-swap.html renders `@{...}` instead of a built string.
+
+   `font-display: swap` — text paints immediately in the fallback and reflows
+   once the face arrives; `unicode-range` is left at its default (the full
+   coverage of each file), per the round's brief.
+   --------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../vendor/fonts/inter/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../vendor/fonts/inter/InterVariable-Italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+/* app tokens (080) — this block is OWNED BY ROUND 080 (`static/css/app.css`,
+   the `--type-*` scale and the brand tints). 079 needs three of its values
+   before 080 merges, so it declares them here under the same label and with
+   the same names; the merge dedupes the block. Do not rename these.
+
+   Every value DERIVES from a design-system token, so a theme swap re-tints the
+   shell for free and no literal enters this file (the standing rule,
+   ui-screens.md §2.3 / pipeline-editor.md §3.4):
+
+   - `--brand`       the theme's own accent — the active nav item, links, focus.
+   - `--brand-soft`  `--surface-selected`, the token the design system's contrast
+                     audit sizes FOR a selected row (ui-screens §2.8: a tint
+                     alone cannot reach 3:1, so selection also carries a 3px
+                     `--border-focus` bar — see .app-nav-link[aria-current]).
+   - `--border-faint` `--border-subtle`, the 2:1 separator floor. The rail edge,
+                     card headers and table rules are separators, not component
+                     boundaries; `--border-default` (3:1) makes every rule heavy.
+   --------------------------------------------------------------------------- */
+:root {
+  --brand: var(--accent-primary);
+  --brand-soft: var(--surface-selected);
+  --border-faint: var(--border-subtle);
+
+  /* 079 §G: the vendored faces lead every stack, whatever the theme said. The
+     design system's own fallbacks follow, so a blocked/failed font download
+     degrades to exactly today's rendering. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
 /* The body canvas. base.css paints <html> with these tokens but leaves <body> to
    inherit; this rule paints the body itself, so the canvas survives any reset
    layered between the design system and this file (this file loads last, §3.4).

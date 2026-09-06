@@ -57,7 +57,7 @@
     "sha256": "ea4b3acc5c0ab4d4429707b62a7b3eb3ff99cf683f6212265962683b877d951e",
     "source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.js",
     "license": "MIT",
-    "note": "059 — HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
+    "note": "059 \u2014 HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
   },
   "lucide-sprite": {
     "package": "lucide-static",
@@ -67,10 +67,20 @@
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
-      "db", "table", "boxes", "workflow", "file", "check", "x", "minus",
-      "zoom-in", "zoom-out", "maximize", "rotate-ccw"
+      "db",
+      "table",
+      "boxes",
+      "workflow",
+      "file",
+      "check",
+      "x",
+      "minus",
+      "zoom-in",
+      "zoom-out",
+      "maximize",
+      "rotate-ccw"
     ],
-    "note": "059 — subset ONLY (12 glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks)."
+    "note": "059 \u2014 subset ONLY (12 glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks)."
   },
   "dagre": {
     "version": "0.8.5",
@@ -85,5 +95,40 @@
     "sha256": "358d9afbb1ab5befa2f48061a30776e5bcd7707f410a606ba985f98bc3b1c034",
     "source": "https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js",
     "license": "MIT"
+  },
+  "inter": {
+    "package": "rsms/inter",
+    "version": "4.1",
+    "files": [
+      "vendor/fonts/inter/InterVariable.woff2",
+      "vendor/fonts/inter/InterVariable-Italic.woff2",
+      "vendor/fonts/inter/OFL.txt"
+    ],
+    "sha256": {
+      "vendor/fonts/inter/InterVariable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+      "vendor/fonts/inter/InterVariable-Italic.woff2": "e564f652916db6c139570fefb9524a77c4d48f30c92928de9db19b6b5c7a262a",
+      "vendor/fonts/inter/OFL.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+    },
+    "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+    "license": "OFL-1.1",
+    "license_file_upstream": "LICENSE.txt",
+    "note": "079 \u00a7G \u2014 the two VARIABLE web faces from the release zip's web/ folder, vendored so every machine renders the design system's declared \"Inter\" instead of a system fallback. Upstream ships the OFL text as LICENSE.txt; it is vendored verbatim as OFL.txt so one audit rule covers both font directories. No Google Fonts, no CDN."
+  },
+  "jetbrains-mono": {
+    "package": "JetBrains/JetBrainsMono",
+    "version": "2.304",
+    "files": [
+      "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2",
+      "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2",
+      "vendor/fonts/jetbrains-mono/OFL.txt"
+    ],
+    "sha256": {
+      "vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2": "a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2",
+      "vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2": "086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353",
+      "vendor/fonts/jetbrains-mono/OFL.txt": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+    },
+    "source": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+    "license": "OFL-1.1",
+    "note": "079 \u00a7G \u2014 weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/."
   }
 }

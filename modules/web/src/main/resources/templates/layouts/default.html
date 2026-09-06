@@ -13,6 +13,18 @@
   <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
 
+  <!-- 079 §G: the two PRIMARY vendored faces (upright sans, regular mono) are
+       preloaded so the swap lands on the first paint rather than after the
+       stylesheet parses out the @font-face. The italic sans and the mono 500 are
+       deliberately NOT preloaded — the app renders almost no italic, and a
+       preload the page never uses costs a request and a console warning.
+       crossorigin is MANDATORY on a font preload even same-origin: fonts are
+       fetched in CORS mode, and a preload without it is fetched twice. -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        th:href="@{/vendor/fonts/inter/InterVariable.woff2}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
+
   <link th:href="@{/css/app.css}" rel="stylesheet">
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">

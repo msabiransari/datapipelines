@@ -107,6 +107,26 @@ Measured on the owner's ~3,000px window (2026-09-05): four content widths across
 
 One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next.
 
+**The faces (079 §G, normative).** The app sets in **Inter** (sans) and **JetBrains Mono** (mono), both
+vendored — `static/vendor/fonts/inter/` and `static/vendor/fonts/jetbrains-mono/`, from the projects' own
+GitHub release assets, hashes and versions recorded in `vendor/design-system/vendor-manifest.json` alongside
+every other vendored asset. Both are **SIL Open Font License 1.1**, which the owner confirmed compatible with
+this repository's AGPL-3.0 (2026-09-05); each directory carries its `OFL.txt` verbatim, as the licence requires
+of a redistribution. **No Google Fonts and no CDN** — a webfont from a third-party host is a runtime dependency
+on someone else's uptime and a per-visitor request to someone else's log.
+
+This closes a gap the design system could not: it *names* both faces in `--_font-sans`/`--_font-mono` but ships
+neither, and the two themes the mode toggle switches between — `light` and `dark` — name **neither** face at all
+(`minimal` likewise). So every machine without Inter installed rendered the app in its system UI font, which is
+why the running app never looked like the approved mocks. `app.css` therefore restates `--font-sans`/`--font-mono`
+at the app level with the vendored faces first and the design system's own stacks behind them, so a blocked or
+failed download degrades to exactly the previous rendering. Four `@font-face` blocks, all `font-display: swap`;
+the upright sans and the regular mono are `<link rel="preload" as="font" crossorigin>`ed in the layout, the italic
+sans and the mono 500 are not (the app renders almost no italic, and an unused preload is a wasted request).
+`VendoredFontsAuditTest` fails the build if a file goes missing, a hash drifts, an `OFL.txt` disappears, or any
+stylesheet or template starts naming a font host over the network. The marketing site (`site/**`) does not load
+`app.css` and keeps the system fallback this round.
+
 1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`.
 2. **Every table is `.ds-table` with `font-variant-numeric: tabular-nums`** (app.css). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
 3. **Mono is for identifiers only**: machine names, ids, template refs (`path @ vN`), SQL, keys/prefixes, `context_key → value`. Display names, usernames, badges and dates are prose. The per-table decision:
