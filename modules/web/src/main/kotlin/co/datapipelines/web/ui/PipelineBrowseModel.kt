@@ -51,6 +51,9 @@ class PipelineBrowseModel(
      * every level pages the same way and no level silently truncates. Its sub-folders are not
      * paged: they are a `GROUP BY` over one path segment, capped with an honest overflow flag
      * rather than a silent cut.
+     *
+     * **The ROOT level renders no leaves** (§4.1, 077) — see the comment on the call below for
+     * why that is a rendering rule here and a data guarantee on the templates side.
      */
     fun fillLevel(
         model: Model,
@@ -69,14 +72,25 @@ class PipelineBrowseModel(
         // browser settled that (`TemplateBrowseModel.fillLevel`), a level that cannot exist is
         // not a client fault worth a 400, and two sibling explorers answering the same input
         // differently would be the surprise.
-        if (!prefix.isNullOrEmpty() && !PipelineNameGrammar.matches(prefix)) {
+        if (!prefix.isNullOrEmpty() && !PipelineNameGrammar.matchesPrefix(prefix)) {
             return emptyLevel(model, prefix)
         }
         // "" and absent are the SAME level — the root — so they normalize to one repository
         // call rather than two shapes of the same query. The model keeps the caller's `""`,
         // because that is what the fragment renders its own prefix as.
         val level = repository.listFolder(workspaceId, prefix?.takeIf { it.isNotEmpty() }, offset = page, limit = PAGE_SIZE)
-        fillLevelAttributes(model, workspaceId, prefix, page, level)
+        // THE ROOT HOLDS FOLDERS ONLY (§4.1, 077). A pipeline name needs a folder, so the root
+        // level renders sub-folders and nothing else, and the fragment's "leaves at the root"
+        // branch is gone.
+        //
+        // Unlike templates there is no deploy gate here, deliberately (§14.2): a pipeline name
+        // is validated at SAVE only, so a pre-077 flat row still exists, still opens and still
+        // executes. Dropping it from the ROOT LEVEL is a rendering decision about a tree whose
+        // root is now a directory of folders — it is not a disappearance. That row is still
+        // returned by search (`q`, a flat list of full paths), by `pipelines_list`, and by its
+        // own UUID URL, which is how it is opened and run.
+        val rendered = if (prefix.isNullOrEmpty()) level.withoutLeaves() else level
+        fillLevelAttributes(model, workspaceId, prefix, page, rendered)
         return LEVEL_VIEW
     }
 

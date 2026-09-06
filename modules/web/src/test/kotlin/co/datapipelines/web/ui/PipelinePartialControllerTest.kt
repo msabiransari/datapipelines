@@ -10,6 +10,7 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -100,6 +101,48 @@ class PipelinePartialControllerTest {
     }
 
     @Test
+    fun `077 - the ROOT level carries no leaves, even when the repository still returns one`() {
+        // The repository is deliberately told to answer WITH a leaf — a pre-077 flat pipeline,
+        // which can still exist because a pipeline name is validated at save only (§14.2 gives
+        // it no migration gate). The model must drop it from the ROOT level: §4.1 makes the
+        // root a directory of folders, and the fragment has no "leaf at the root" branch left.
+        //
+        // Asserting through the repository rather than around it is the point: a test that
+        // stubbed an empty leaf list would pass with the production filter deleted.
+        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
+            level(
+                folders = listOf(PipelineFolder("nyc", "nyc", 6)),
+                pipelines = listOf(record("legacy_flat")),
+                total = 1,
+                hasMore = true,
+            )
+
+        controller.list(model, q = null, prefix = "", offset = 0) shouldBe "partials/pipeline-tree-level"
+
+        @Suppress("UNCHECKED_CAST")
+        (model["pipelines"] as List<PipelineRecord>).shouldBeEmpty()
+        // total and hasMore travel with the leaves, so the level and its pager cannot disagree.
+        model["total"] shouldBe 0
+        model["hasMore"] shouldBe false
+        @Suppress("UNCHECKED_CAST")
+        (model["folders"] as List<PipelineFolderView>).map { it.path } shouldBe listOf("nyc")
+    }
+
+    @Test
+    fun `077 - a NESTED level still carries its leaves`() {
+        // The other half: dropping leaves at the ROOT must not drop them anywhere else.
+        every { repository.listFolder(workspaceId, "nyc/mobility", 0, pageSize) } returns
+            level(pipelines = listOf(record("nyc/mobility/revenue_by_borough")), total = 1)
+        every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
+
+        controller.list(model, q = null, prefix = "nyc/mobility", offset = 0)
+
+        @Suppress("UNCHECKED_CAST")
+        (model["pipelines"] as List<PipelineRecord>).map { it.name } shouldBe listOf("nyc/mobility/revenue_by_borough")
+        model["total"] shouldBe 1
+    }
+
+    @Test
     fun `a prefix renders exactly ONE level - the level view, not the wrapper`() {
         every { repository.listFolder(workspaceId, "nyc/mobility", 0, pageSize) } returns
             level(pipelines = listOf(record("nyc/mobility/revenue_by_borough")))
@@ -176,12 +219,14 @@ class PipelinePartialControllerTest {
 
     @Test
     fun `the drafts map for the level's ids feeds the pending-release badge`() {
+        // A NESTED level: since 077 the root has no leaves, so the badge query it feeds is a
+        // nested-level question (§4.1).
         val ids = List(3) { UUID.randomUUID() }
-        every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
-            level(pipelines = ids.map { record("p", id = it) }, total = 3)
+        every { repository.listFolder(workspaceId, "nyc/mobility", 0, pageSize) } returns
+            level(pipelines = ids.map { record("nyc/mobility/p", id = it) }, total = 3)
         every { repository.findDrafts(workspaceId, ids) } returns emptyMap()
 
-        controller.list(model, q = null, prefix = null, offset = 0)
+        controller.list(model, q = null, prefix = "nyc/mobility", offset = 0)
 
         verify { repository.findDrafts(workspaceId, ids) }
         model["drafts"] shouldBe emptyMap<Any, Any>()
@@ -205,7 +250,7 @@ class PipelinePartialControllerTest {
             {"schema_version":1,"name":"nyc/mobility/revenue_by_borough","display_name":"Revenue","description":"d",
              "settings":{"tempdb":{"engine":"H2"}},
              "parameters":{"start_date":{"type":"DATE","required":false,"default":"2024-01-01"}},
-             "nodes":[{"id":"a","type":"DQL","source":"pg","template":{"id":"t.sql","version":1},"output":{"target":"caller"}}]}
+             "nodes":[{"id":"a","type":"DQL","source":"pg","template":{"id":"test/t.sql","version":1},"output":{"target":"caller"}}]}
             """.trimIndent()
         every { repository.findById(workspaceId, id) } returns record("nyc/mobility/revenue_by_borough", id = id)
         every { repository.findDraftDetail(workspaceId, id) } returns null

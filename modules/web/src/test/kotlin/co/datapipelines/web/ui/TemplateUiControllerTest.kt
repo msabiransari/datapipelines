@@ -93,10 +93,14 @@ class TemplateUiControllerTest {
     }
 
     @Test
-    fun `an empty search browses the TREE — folders, root leaves, and no flat listing`() {
+    fun `an empty search browses the TREE — folders only at the root, and no flat listing`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
-        stubRootLevel(leaves = listOf(template(), template("orders_v2.sql")), total = 42)
+        // 077: the repository is stubbed to answer WITH leaves, and the root level must still
+        // show none — §4.1 requires a folder, so nothing sits directly at the root and the
+        // model does not even issue the leaf query. Stubbing an empty leaf list instead would
+        // pass with the production change deleted.
+        stubRootLevel(leaves = listOf(template(), template("test/orders_v2.sql")), total = 42)
 
         val model = ExtendedModelMap()
         val viewName = controller.list(model, mockk(), null, null, null, null)
@@ -106,9 +110,30 @@ class TemplateUiControllerTest {
         model["searching"] shouldBe false
         model["levelId"] shouldBe TemplateBrowseModel.ROOT_LEVEL_ID
         (model["folders"] as List<*>) shouldHaveSize 1
-        (model["templates"] as List<*>) shouldHaveSize 2
-        // 034 E3: the pager's total is the level's truthful count, not an estimate.
-        model["total"] shouldBe 42
+        (model["templates"] as List<*>) shouldHaveSize 0
+        // The pager travels with the leaves: an empty root level reports a truthful zero, so
+        // the level and its pager cannot disagree (034 E3).
+        model["total"] shouldBe 0
+    }
+
+    @Test
+    fun `077 - the root level never queries the leaves, and a NESTED level still does`() {
+        authenticate()
+        stubRootLevel()
+
+        val root = ExtendedModelMap()
+        partialController.list(root, q = null, dialect = null, type = null, prefix = "", offset = 0)
+
+        (root["templates"] as List<*>) shouldHaveSize 0
+        verify(exactly = 0) { repository.listChildTemplates(any(), null, any(), any(), any(), any()) }
+        verify(exactly = 0) { repository.listChildTemplates(any(), "", any(), any(), any(), any()) }
+
+        // …and a nested level is untouched by the rule: it queries and it renders.
+        val nested = ExtendedModelMap()
+        partialController.list(nested, q = null, dialect = null, type = null, prefix = "acme", offset = 0)
+
+        (nested["templates"] as List<*>) shouldHaveSize 1
+        verify(exactly = 1) { repository.listChildTemplates(any(), "acme", any(), any(), any(), any()) }
     }
 
     @Test
@@ -157,7 +182,10 @@ class TemplateUiControllerTest {
         val viewName = partialController.list(model, null, null, null, null, null)
 
         viewName shouldBe TemplateBrowseModel.WRAPPER_VIEW
-        (model["templates"] as List<*>) shouldHaveSize 1
+        // The dispatcher is what is under test; the level it fills is the ROOT, which since
+        // 077 holds folders and nothing else (§4.1).
+        (model["folders"] as List<*>) shouldHaveSize 1
+        (model["templates"] as List<*>) shouldHaveSize 0
     }
 
     @Test
@@ -193,11 +221,13 @@ class TemplateUiControllerTest {
     @Test
     fun `a level pages its leaves — 26 probed, 25 shown, hasMore true`() {
         authenticate()
-        val many = (1..26).map { template("t$it.sql") }
+        // A NESTED level: since 077 the root has no leaves to page (§4.1), so paging is a
+        // question about a folder's level.
+        val many = (1..26).map { template("acme/t$it.sql") }
         stubRootLevel(folders = emptyList(), leaves = many, total = 100)
 
         val model = ExtendedModelMap()
-        partialController.list(model, null, null, null, null, 0)
+        partialController.list(model, null, null, null, "acme", 0)
 
         (model["templates"] as List<*>) shouldHaveSize 25
         model["hasMore"] shouldBe true

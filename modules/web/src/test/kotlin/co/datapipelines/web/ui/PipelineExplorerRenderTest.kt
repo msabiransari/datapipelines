@@ -81,15 +81,9 @@ class PipelineExplorerRenderTest {
     @Test
     fun `the root level is a tree and a nested level is a group under its folder`() {
         val root = render("partials/pipeline-tree-level") { fillLevel() }
-        val nested =
-            render("partials/pipeline-tree-level") {
-                fillLevel()
-                setVariable("prefix", "nyc/mobility")
-                setVariable("levelId", PipelineBrowseModel.levelId("nyc/mobility"))
-                // A nested level's leaves are BY CONSTRUCTION under its prefix (the query
-                // splits on the remainder), which is what lets the label be the last segment.
-                setVariable("pipelines", listOf(record(DEEP_PATH)))
-            }
+        // A nested level's leaves are BY CONSTRUCTION under its prefix (the query splits on the
+        // remainder), which is what lets the label be the last segment.
+        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
 
         root shouldContain "role=\"tree\""
         root shouldContain "aria-label=\"Pipelines\""
@@ -118,6 +112,24 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
+    fun `077 - the ROOT level renders folders only, never a leaf`() {
+        // §4.1 requires a folder, so nothing sits directly at the root and the fragment has no
+        // "leaf at the root" branch left to exercise. Asserted on the RENDERED level rather
+        // than on the model, because the branch that is gone lived in the markup: the label
+        // used to be `prefix.isEmpty() ? p.name : p.name.substring(...)`.
+        val root = render("partials/pipeline-tree-level") { fillLevel() }
+
+        root shouldNotContain "tpl-leaf"
+        root shouldNotContain "data-editor-url"
+        root shouldContain "tpl-folder"
+        // …and a NESTED level still renders its leaves, labelled by their last segment, so the
+        // assertion above is about the root and not about leaves having disappeared.
+        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
+        nested shouldContain "tpl-leaf"
+        nested shouldContain ">revenue_by_borough</span>"
+    }
+
+    @Test
     fun `the tree ships no folder CRUD and no empty-folder state`() {
         val html = render("partials/pipeline-tree-level") { fillLevel() }
 
@@ -133,7 +145,8 @@ class PipelineExplorerRenderTest {
 
     @Test
     fun `a leaf SELECTS - its detail swaps into the detail pane and nothing in the tree moves`() {
-        val html = render("partials/pipeline-tree-level") { fillLevel() }
+        // A NESTED level: since 077 a leaf can only sit under a folder (§4.1).
+        val html = render("partials/pipeline-tree-level") { fillNestedLevel() }
 
         html shouldContain "hx-target=\"#pipeline-detail\""
         html shouldContain "hx-swap=\"innerHTML\""
@@ -228,19 +241,36 @@ class PipelineExplorerRenderTest {
 
     // ------------------------------------------------------------------ fixtures
 
+    /**
+     * The ROOT level: folders and nothing else (077, §4.1).
+     *
+     * It used to carry `record("legacy_flat")` — a leaf sitting at the root, which the grammar
+     * now forbids and `PipelineBrowseModel` no longer puts in the model. Every assertion about
+     * a LEAF therefore moved onto [fillNestedLevel].
+     */
     private fun WebContext.fillLevel() {
         setVariable("searching", false)
         setVariable("prefix", "")
         setVariable("levelId", PipelineBrowseModel.ROOT_LEVEL_ID)
         setVariable("folders", listOf(PipelineFolderView("nyc", "nyc", 6, PipelineBrowseModel.levelId("nyc"))))
         setVariable("foldersTruncated", false)
-        setVariable("pipelines", listOf(record("legacy_flat")))
+        setVariable("pipelines", emptyList<PipelineRecord>())
         setVariable("drafts", emptyMap<UUID, Any>())
         setVariable("offset", 0)
         setVariable("hasMore", false)
-        setVariable("total", 1)
+        setVariable("total", 0)
         setVariable("q", "")
         setVariable("scopes", setOf("ADMIN"))
+    }
+
+    /** A NESTED level — the only kind that has leaves now. */
+    private fun WebContext.fillNestedLevel() {
+        fillLevel()
+        setVariable("prefix", "nyc/mobility")
+        setVariable("levelId", PipelineBrowseModel.levelId("nyc/mobility"))
+        setVariable("folders", emptyList<PipelineFolderView>())
+        setVariable("pipelines", listOf(record(DEEP_PATH)))
+        setVariable("total", 1)
     }
 
     private fun WebContext.fillSearch() {

@@ -78,9 +78,12 @@ class PipelineUiControllerTest {
     }
 
     @Test
-    fun `the page renders the tree's ROOT level, with its folders and its flat leaves`() {
+    fun `the page renders the tree's ROOT level, and since 077 that is folders only`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
+        // The repository is told to answer WITH a leaf — a pre-077 flat pipeline, which can
+        // still exist because §14.2 gives pipelines no migration gate. The ROOT level must
+        // drop it: §4.1 makes the root a directory of folders.
         every { repository.listFolder(workspaceId, null, 0, pageSize) } returns
             level(folders = listOf(PipelineFolder("nyc", "nyc", 6)), pipelines = listOf(pipeline("legacy_flat")))
         every { repository.findDrafts(any(), any()) } returns emptyMap()
@@ -95,8 +98,8 @@ class PipelineUiControllerTest {
         @Suppress("UNCHECKED_CAST")
         (model["folders"] as List<PipelineFolderView>).map { it.path } shouldBe listOf("nyc")
         @Suppress("UNCHECKED_CAST")
-        (model["pipelines"] as List<PipelineRecord>) shouldHaveSize 1
-        model["total"] shouldBe 1
+        (model["pipelines"] as List<PipelineRecord>) shouldHaveSize 0
+        model["total"] shouldBe 0
         model["hasMore"] shouldBe false
         model["offset"] shouldBe 0
     }
