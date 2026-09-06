@@ -59,7 +59,7 @@ param comtrade_reporters     156,124,484,392,276
 param fx_daily_package       60f32914ab61dfab590e0e470153e3ae
 param fx_monthly_package     c5d6e0edf324b2fb28d73bcacafaaa02
 param duckdb_version         v1.5.5
-param artifact_version       v3
+param artifact_version       v4
 # The design §8 go-live gate: set ONLY by the owner after checking every
 # source's CURRENT terms. Absent = manifest ships license_verified: null and
 # publishing blocks go-live.

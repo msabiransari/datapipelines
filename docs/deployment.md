@@ -642,8 +642,8 @@ from the active families, and the MySQL service is shared.
 ### One command
 
 The published artifacts live at
-`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v4/` and
-`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v3/` (us-east-1;
+`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v5/` and
+`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v4/` (us-east-1;
 app.sh defaults to these). For the raw compose path, fill in the `SAMPLE_*`
 block of [`deploy/.env.example`](../deploy/.env.example) — the base URLs, the
 versions, the `SAMPLE_*_ON` markers for the families you want, and the demo
@@ -825,6 +825,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-06 | v1.12 | mobility v5 + trade v4 (077 mandatory folders) | Both artifact sets republish with every template id under a folder (`nyc/mobility/…`, `nyc/reference/…`, `nyc/weather/…`, `trade/…`) — 13 of 25 demo templates were flat and are refused by 077's rule at seed time. Data files unchanged in content. Pins → `SAMPLE_VERSION=v5`, `SAMPLE_TRADE_VERSION=v4`; `check-published.sh v5` / `--family trade v4` byte-identical on publish. |
 | 2026-09-05 | v1.11 | mobility v4 + trade v3 (067 pipeline folders) | Both artifact sets republish with `examples.json` carrying the folder convention (`nyc/…`, `trade/…`); data files unchanged in content (every pinned table checksum re-derived identical; the DuckDB file's bytes differ as DuckDB files are not byte-deterministic). Pins move to `SAMPLE_VERSION=v4`, `SAMPLE_TRADE_VERSION=v3`. Until an operator moves the pin, a fresh demo seeds the old flat names — expected, version pins are operator config. |
 | 2026-09-04 | v1.10 | trade/v2 — Binance out, Federal Reserve H.10 in | The trade family republishes as **trade/v2**. The Binance market slice is **removed entirely** (its Vision terms are CC BY-NC-SA with an explicit no-hosting-of-derivative-feeds clause and a separate enterprise licence for commercial use — owner ruling 2026-09-04); the SQLite artifact is now `fx_rates.db`, built from the **Federal Reserve H.10** daily noon buying rates and their G.5 monthly averages for the five reconciled partners' currencies (a US Government work — no copyright), and the datasource is renamed `sample-market` → **`sample-fx`**. A third example pipeline, `imports_in_partner_currency`, restates US import value in the partner's own money across three engines (DuckDB facts → SQLite rates → H2 join). Two licence conditions that were never in the tree now ship with the data: the **verbatim Census notice** ("This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.") in the family README, the `sample-trade-us` datasource description and the manifest's Census provenance entry, and the **UN Comtrade citation** with the under-100,000-record note. `check-published.sh` learns `--family trade`; `SAMPLE_TRADE_VERSION` defaults to `v2` in `app.sh`, `deploy/.env.example` and the compose services. **An existing `deploy/.env.demo` pinning `SAMPLE_TRADE_VERSION=v1` is not rewritten by `app.sh` (version pins are operator config) — edit it, or the loader fetches a version whose market object no longer exists.** |
 | 2026-09-04 | v1.10 | mobility v3 (070 showcase pipelines) | **Mobility artifact v3 published** — v2's data files byte-identical, `examples.json` now 17 templates / 6 pipelines (the 070 showcase set, baselined by `check-baselines.sh`); `SAMPLE_VERSION` default → v3. Operators with an existing `.env.demo` set `SAMPLE_VERSION=v3` by hand — `app.sh` never overwrites present keys. |

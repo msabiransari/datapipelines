@@ -317,7 +317,7 @@ services:
     profiles: [demo-nyc]
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v4}", "--engines", "postgres,sqlite", "--family", "nyc"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v5}", "--engines", "postgres,sqlite", "--family", "nyc"]
     environment:
       # The metadata-DB superuser: the loader creates the dp_sample_trips
       # database and the SELECT-only demo role, so it needs more than the demo
@@ -344,7 +344,7 @@ services:
     profiles: [demo-nyc]
     image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v4}", "--engines", "mysql", "--family", "nyc"]
+    command: ["${SAMPLE_BASE_URL:-}", "${SAMPLE_VERSION:-v5}", "--engines", "mysql", "--family", "nyc"]
     environment:
       MYSQL_HOST: mysql
       MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}
@@ -362,7 +362,7 @@ services:
     restart: "no"
 
 
-  # The trade family (trade/v3): two one-shot services mirroring the nyc pair.
+  # The trade family (trade/v4): two one-shot services mirroring the nyc pair.
   # No Postgres artifact exists in this family, so the file stage needs no
   # engine client at all — it downloads, verifies and places us_trade.duckdb,
   # fx_rates.db and the family examples + bootstrap files. It still runs
@@ -373,7 +373,7 @@ services:
     profiles: [demo-trade]
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v3}", "--engines", "sqlite", "--family", "trade"]
+    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v4}", "--engines", "sqlite", "--family", "trade"]
     environment:
       SAMPLE_DIR: /srv/sample
     volumes:
@@ -387,7 +387,7 @@ services:
     profiles: [demo-trade]
     image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
     entrypoint: ["/bin/sh", "/opt/sample-data/load.sh"]
-    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v3}", "--engines", "mysql", "--family", "trade"]
+    command: ["${SAMPLE_TRADE_BASE_URL:-}", "${SAMPLE_TRADE_VERSION:-v4}", "--engines", "mysql", "--family", "trade"]
     environment:
       MYSQL_HOST: mysql
       MYSQL_ROOT_PASSWORD: ${SAMPLE_MYSQL_ROOT_PASSWORD}

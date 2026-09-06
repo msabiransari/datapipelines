@@ -210,9 +210,9 @@ ensure_demo_env() {
   set_key SAMPLE_NYC_ON "$([[ ${DEMO_NYC:-0} = 1 ]] && echo 1)"
   set_key SAMPLE_TRADE_ON "$([[ ${DEMO_TRADE:-0} = 1 ]] && echo 1)"
   add_key SAMPLE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/mobility"
-  add_key SAMPLE_VERSION "v4"
+  add_key SAMPLE_VERSION "v5"
   add_key SAMPLE_TRADE_BASE_URL "https://datapipelines-co.s3.amazonaws.com/sample-data/trade"
-  add_key SAMPLE_TRADE_VERSION "v3"
+  add_key SAMPLE_TRADE_VERSION "v4"
   add_key SAMPLE_DB_USER "dp_demo_ro"
   # hex, NOT base64: hex can never contain the one string the loader refuses
   # in a Postgres password — its dollar-quote tag (045 §A) — and stays
@@ -264,7 +264,7 @@ ensure_demo_env() {
   you produced yourself — the loader fetches \$BASE_URL/\$VERSION/manifest.json
   and the manifest declares v2, so serve the artifacts AS a v2 directory:
     (cd scripts/sample-data/work && ln -sfn artifacts v2 && python3 -m http.server 8099)
-    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=v4"
+    SAMPLE_BASE_URL=http://host.docker.internal:8099  SAMPLE_VERSION=v5"
   fi
 }
 

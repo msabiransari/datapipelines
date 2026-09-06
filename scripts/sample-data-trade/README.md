@@ -96,8 +96,8 @@ the param. Then:
 
 ```bash
 cd scripts/sample-data-trade/work/artifacts
-aws s3 cp . s3://datapipelines-co/sample-data/trade/v3/ --recursive --acl public-read
-aws s3 ls s3://datapipelines-co/sample-data/trade/v3/
+aws s3 cp . s3://datapipelines-co/sample-data/trade/v4/ --recursive --acl public-read
+aws s3 ls s3://datapipelines-co/sample-data/trade/v4/
 ```
 
 Verify from a clean directory (as a consumer), re-run `verify.sh` against it,
