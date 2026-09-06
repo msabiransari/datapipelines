@@ -41,15 +41,14 @@ body {
    design-system-starter (scripts/sync-design-system.sh) — do NOT edit vendor
    files; app-level chrome and component polish layer on top here.
    --------------------------------------------------------------------------- */
-:root {
-  /* Wide-app canvas: --container-xl (1200px) wastes half a desktop monitor. */
-  --app-content-max: 1600px;
-}
 
+/* 076 §A — one width policy (ui-screens.md §3.x "Shell and width policy").
+   EVERY app screen is full-bleed: the nav and <main> span the viewport minus
+   one gutter (the editor's 065 opt-in became the rule; --app-content-max and
+   .app-main-bleed are gone). Reading content — docs prose, settings cards,
+   empty states, forms — gets .app-reading instead of a different container. */
 .app-container {
   width: 100%;
-  max-width: var(--app-content-max);
-  margin-inline: auto;
   padding-inline: var(--gap-lg);
 }
 

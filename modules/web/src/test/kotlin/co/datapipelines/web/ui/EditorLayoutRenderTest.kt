@@ -12,29 +12,23 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
- * 065 §A — the full-bleed opt-out, pinned at the RENDER, not at the model.
+ * 076 §A — one width policy, pinned at the RENDER, not at the model.
  *
- * `layouts/default.html` wraps every page in `<main class="app-container app-main">`,
- * and `app.css` caps `.app-container` at `--app-content-max: 1600px`. That cap is
- * right for prose pages and wrong for the graph editor, which is the one surface
- * whose value scales with width: on the owner's ~2000px viewport the editor
- * occupied ~1450px between two dead margins.
+ * Before 076, `layouts/default.html` capped `.app-container` at
+ * `--app-content-max: 1600px` and the pipeline editor alone opted out via a
+ * `fullBleed` model attribute (065 §A). Measured on the owner's ~3000px window
+ * (2026-09-05): four content widths across eleven screens. The opt-in became
+ * the rule — EVERY screen's `<main>` is the same full-bleed shell now, reading
+ * content sits in `.app-reading` inside it, and `fullBleed`/`.app-main-bleed`/
+ * `--app-content-max` are gone.
  *
- * The opt-out is one model attribute (`fullBleed`) read by one `th:classappend`.
- * Both halves are easy to lose silently — a controller refactor drops the
- * attribute, or a layout edit drops the append — and neither shows up in a
- * controller test that only inspects the model. So this renders the real
- * templates through the real layout and reads the `<main>` tag that comes out.
- *
- * The negative case is the point of the pair: `th:classappend` on a null
- * condition must add NOTHING, so every other screen keeps the 1600px cap. A rule
- * that leaked onto the list pages would widen the whole app, which is precisely
- * what the owner did not ask for.
+ * So the pair below inverts 065's: the editor page and the pipelines list must
+ * render the SAME `<main>` — the invariant is that no page can opt into a
+ * different container any more. A layout edit that re-introduces a conditional
+ * class, or a controller that resurrects a per-page width flag, fails here.
  *
  * Harness: the standalone `SpringTemplateEngine` that `ListPartialsRenderTest`
- * uses. (The brief called for MockMvc; the tree's render-test harness beside that
- * class is this one, and it exercises the same two template files with no context
- * to boot.)
+ * uses.
  */
 class EditorLayoutRenderTest {
     private val engine =
@@ -49,14 +43,15 @@ class EditorLayoutRenderTest {
         }
 
     @Test
-    fun `the editor page's main element carries app-main-bleed`() {
+    fun `the editor page renders the same full-bleed main as every other page`() {
         val html = engine.process("pipelines/editor", webContext().apply { fillEditor() })
 
-        html shouldContain "app-container app-main app-main-bleed"
+        html shouldContain "class=\"app-container app-main\""
+        html shouldNotContain "app-main-bleed"
     }
 
     @Test
-    fun `the pipelines list page's main element does not`() {
+    fun `the pipelines list page renders the same full-bleed main`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
 
         html shouldContain "class=\"app-container app-main\""
@@ -73,12 +68,9 @@ class EditorLayoutRenderTest {
         setVariable("draftVersion", null)
         setVariable("draftHash", null)
         setVariable("releasedVersion", 1)
-        // The one attribute under test — PipelineEditorController sets it; no other
-        // controller does.
-        setVariable("fullBleed", true)
     }
 
-    /** PipelineUiController's model, with `fullBleed` deliberately ABSENT. */
+    /** PipelineUiController's model. */
     private fun WebContext.fillList() {
         fillLayoutChrome()
         setVariable("scopes", setOf("READ"))
