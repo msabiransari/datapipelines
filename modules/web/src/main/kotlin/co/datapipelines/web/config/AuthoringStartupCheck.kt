@@ -46,7 +46,11 @@ class AuthoringStartupCheck(
     fun check() {
         val authoringEnabled =
             environment.getProperty(AuthoringGuard.CONFIG_KEY, Boolean::class.java) ?: true
-        val env = DeploymentEnv.resolveEnv(environment.getProperty(DeploymentEnv.ENV_KEY), environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY))
+        val env =
+            DeploymentEnv.resolveEnv(
+                environment.getProperty(DeploymentEnv.ENV_KEY),
+                environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
+            )
         val posture = DeploymentEnv.resolvePosture(environment.getProperty(DeploymentEnv.POSTURE_KEY), env)
         val demo = DeploymentEnv.demoFamilies(environment.getProperty(DeploymentEnv.DEMO_KEY))
 

@@ -46,6 +46,16 @@ import java.util.Base64
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // INLINED, not @DynamicPropertySource: `spring.profiles.active` is resolved during
+    // config-data processing, before a DynamicPropertySource's property source joins the
+    // environment, so a posture supplied that way would never select its profile — and the
+    // §7 alignment rule would (correctly) refuse the boot. Inlined properties ARE visible to
+    // config-data processing, so this exercises the real derivation: one variable in, the
+    // right profile out. No profile is named here on purpose.
+    properties = [
+        "datapipelines.env=prod-us",
+        "datapipelines.posture=hardened",
+    ],
 )
 class ApplicationHardenedSmokeTest {
     @Autowired
@@ -143,12 +153,6 @@ class ApplicationHardenedSmokeTest {
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             registry.add("management.server.port") { "0" }
-
-            // The two variables an org sets. The posture selects application-hardened.yml
-            // through application.yml's own `spring.profiles.active` derivation — nothing
-            // here names a profile, which is the point.
-            registry.add("datapipelines.env") { ENV_NAME }
-            registry.add("datapipelines.posture") { "hardened" }
 
             val host = checkNotNull(siteLocalHost) { "assumption above guarantees this" }
             registry.add("spring.datasource.url") {

@@ -33,13 +33,16 @@ class ConfigValidatorCheckCountTest {
         declared.size shouldBe ConfigValidator.CHECK_COUNT
     }
 
+    /**
+     * BOTH rule files. 075 lifted the four posture rules into `PostureRules.kt` (the
+     * companion had outgrown the build's own size guard); counting only `ConfigValidator.kt`
+     * would then have let four checks leave the number the boot line quotes without a word.
+     */
     private fun checkFunctionNames(): List<String> =
-        CHECK_FUNCTION
-            .findAll(repoFile("modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt").readText())
-            .map { it.groupValues[1] }
+        RULE_FILES
+            .flatMap { CHECK_FUNCTION.findAll(repoFile(it).readText()).map { m -> m.groupValues[1] } }
             .distinct()
             .sorted()
-            .toList()
 
     /** The repo root is the nearest ancestor holding `settings.gradle.kts` (the house locator). */
     private fun repoFile(relative: String): File {
@@ -52,5 +55,11 @@ class ConfigValidatorCheckCountTest {
 
     private companion object {
         val CHECK_FUNCTION = Regex("""fun (check[A-Z][A-Za-z0-9]*)\(""")
+
+        val RULE_FILES =
+            listOf(
+                "modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt",
+                "modules/app/src/main/kotlin/co/datapipelines/config/PostureRules.kt",
+            )
     }
 }

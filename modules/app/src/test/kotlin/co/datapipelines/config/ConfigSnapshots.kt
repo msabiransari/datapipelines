@@ -65,6 +65,11 @@ internal object ConfigSnapshots {
      * credential, no demo — which is the point: `hardened` is not a different configuration,
      * it is the same one with the shortcuts refused. A posture test that had to change five
      * other fields to go green would be testing the fixture, not the rule.
+     *
+     * The `hardened` PROFILE is active here because that is what a real hardened boot looks
+     * like — `application.yml` derives `spring.profiles.active` from the posture, and §7
+     * refuses a hardened posture whose profile did not load (its DEFAULTS would silently be
+     * the other column's).
      */
-    fun hardened() = valid().copy(env = "prod", posture = "hardened")
+    fun hardened() = valid().copy(env = "prod", posture = "hardened", activeProfiles = setOf("hardened"))
 }

@@ -80,6 +80,22 @@ object DeploymentEnv {
     }
 
     /**
+     * True when BOTH keys are set to different labels — the one alias case that is a refusal
+     * rather than a warning. Named here rather than spelled inline in the validator: the
+     * resolver owns what "the alias disagrees" means, and a four-clause boolean at the call
+     * site is the shape a reader mis-reads.
+     */
+    fun aliasConflicts(
+        env: String?,
+        legacy: String?,
+    ): Boolean {
+        val declared = env?.trim().orEmpty()
+        val alias = legacy?.trim().orEmpty()
+        if (declared.isEmpty() || alias.isEmpty()) return false
+        return declared != DEFAULT_ENV && declared != alias
+    }
+
+    /**
      * The effective posture, or **null** when it cannot be decided — a named environment
      * that declared no posture. Null is a REFUSAL, never a default: explicit beats guessed,
      * and the one exception is `local`, where `development` is the honest reading.

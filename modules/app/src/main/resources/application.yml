@@ -44,12 +44,19 @@ spring:
   # this file), and ConfigValidator §7 REFUSES a value that disagrees with the posture
   # rather than letting the two drift apart silently.
   profiles:
-    # No default: an empty value means NO profile is active, and the base file's own
-    # defaults ARE the `development` column of the posture table — so `local` with no
-    # posture behaves exactly as `development`, which is what §7 resolves it to. A
-    # literal `development` default here would also give this variable TWO different
-    # shipped defaults in one file, which compose-env-audit reads as drift.
-    active: ${DATAPIPELINES_POSTURE:}
+    # The ENVIRONMENT VARIABLE first — that is the contract — and the bound property as the
+    # fallback, so a posture supplied any other way Spring accepts (`--datapipelines.posture=`,
+    # a mounted yml, SPRING_APPLICATION_JSON) also selects its profile. Without the second
+    # form the property and the profile silently disagree: §7 would judge `hardened` while
+    # `application-hardened.yml` never loaded and its defaults never applied. §7 refuses that
+    # state outright as a backstop — see PostureRules.checkPostureProfileAlignment.
+    #
+    # No literal default: empty means NO profile is active, and the base file's own defaults
+    # ARE the `development` column of the posture table, so `local` with no posture behaves
+    # exactly as `development` — which is what §7 resolves it to. A `development` default here
+    # would also give this variable TWO different shipped defaults in one file, which
+    # compose-env-audit reads as drift.
+    active: ${DATAPIPELINES_POSTURE:${datapipelines.posture:}}
 
 server:
   port: ${SERVER_PORT:8080}

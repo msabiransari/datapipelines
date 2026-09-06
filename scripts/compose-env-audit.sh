@@ -76,6 +76,13 @@ app_yml, compose, example_env = sys.argv[1], sys.argv[2], sys.argv[3]
 # with its shipped default ('' when the placeholder carries none or an empty one).
 bound = {}
 for name, default in re.findall(r"\$\{(DATAPIPELINES_[A-Z0-9_]+)(?::([^}]*))?\}", open(app_yml).read()):
+    # A NESTED fallback chain (`${VAR:${other.property:}}`) is not a declaration of VAR's
+    # default — it is one reader falling back to another property. 075's
+    # `spring.profiles.active` is the only such line: the variable's real default is declared
+    # where the app BINDS it (`datapipelines.posture`), further down this same file. Taking
+    # the chain's text as a default would report every compose line as diverged.
+    if default and default.startswith("${"):
+        continue
     bound.setdefault(name, default or "")
 
 # The compose `datapipelines` service environment.
