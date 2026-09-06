@@ -31,14 +31,16 @@ import java.util.Base64
  * container, no test-only substitute bean.
  *
  * Self-contained by design — it runs against the module's shared Postgres and
- * Redis containers rather than assuming `deploy/docker-compose.dev.yml` is up, so
+ * Redis containers rather than assuming `deploy/compose.laptop-infra.yml` is up, so
  * CI and a fresh checkout behave identically.
  *
- * Deliberately does NOT activate the `dev` profile. Two reasons: the dev profile
- * resolves its secrets from a developer's `.env.local` (configuration.md §6), and
- * a test that depended on dev values would be the back door through which literal
- * secrets returned to the repository after the 2026-08-07 HIGH-2 finding. The
- * secrets below are generated per-run and never written down.
+ * Deliberately sets no posture. That is the `local` deployment (configuration.md §3.23):
+ * `datapipelines.env` binds its shipped default `local`, §7 resolves it to `development`,
+ * and no posture profile is active — the base file's defaults ARE that column. It is also
+ * deliberately NOT a laptop profile: a test that depended on one developer's infrastructure
+ * values would be the back door through which literal secrets returned to the repository
+ * after the 2026-08-07 HIGH-2 finding. The secrets below are generated per-run and never
+ * written down. [ApplicationHardenedSmokeTest] is the other posture's boot.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],

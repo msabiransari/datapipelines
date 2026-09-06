@@ -18,22 +18,27 @@ class ConfigValidatorTest {
 
     private fun validSnapshot() = ConfigSnapshots.valid()
 
-    // §7 closing rule — the documented dev setup must pass the PRODUCTION rules, so a
-    // broken dev value is fixed at the data, never by weakening the check.
+    /** The §3.23 baseline under the OTHER posture — see [ConfigSnapshots.hardened]. */
+    private fun hardened() = ConfigSnapshots.hardened()
+
+    // §7 closing rule — the documented laptop setup must pass the PRODUCTION rules, so a
+    // broken local value is fixed at the data, never by weakening the check.
     @Test
-    fun `the documented dev setup passes every production rule`() {
-        // configuration.md §6 verbatim in shape: localhost metadata DB and Redis,
-        // passwordless loopback Redis, open theme default, secrets from .env.local
-        // (openssl rand -base64 32 → 32 decoded bytes each).
-        val dev =
+    fun `the documented laptop setup passes every production rule`() {
+        // configuration.md §6 verbatim in shape: the `local` env under the `development`
+        // posture, localhost metadata DB and Redis, passwordless loopback Redis, open theme
+        // default, secrets from deploy/secrets.env (openssl rand -base64 32 → 32 bytes each).
+        val laptop =
             validSnapshot().copy(
                 datasourceUrl = "jdbc:postgresql://localhost:5434/datapipelines",
                 redisHost = "localhost",
                 redisPassword = "",
-                activeProfiles = setOf("dev"),
+                env = "local",
+                posture = "development",
+                activeProfiles = setOf("development"),
             )
 
-        val report = ConfigValidator.validate(dev)
+        val report = ConfigValidator.validate(laptop)
 
         report.violations.shouldBeEmpty()
         report.warnings.shouldBeEmpty()
@@ -138,40 +143,178 @@ class ConfigValidatorTest {
         report.violations.single().shouldContain("ttl")
     }
 
-    @Test
-    fun `dev profile against non-localhost infrastructure refuses to start`() {
-        val remoteDb =
-            ConfigValidator.validate(
-                validSnapshot().copy(activeProfiles = setOf("dev")),
-            )
-        remoteDb.violations.shouldHaveSize(1)
-        remoteDb.violations.single().shouldContain("dev")
-        remoteDb.violations.single().shouldContain("db.internal")
+    // ---- §3.23 (075): the posture matrix ------------------------------------------------
+    //
+    // One test per ROW of the posture table in docs/environments.md: the `hardened` refusal
+    // fires AND the `development` allowance holds. A refusal test alone would pass against a
+    // validator that refused everything, which is why every row asserts both halves.
 
-        val remoteRedis =
-            ConfigValidator.validate(
-                validSnapshot().copy(
-                    datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
-                    activeProfiles = setOf("dev"),
-                ),
-            )
-        remoteRedis.violations.shouldHaveSize(1)
-        remoteRedis.violations.single().shouldContain("redis.internal")
+    @Test
+    fun `a named environment with no posture refuses to start, naming both variables`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(env = "qa", posture = null))
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.env")
+        report.violations.single().shouldContain("datapipelines.posture")
     }
 
     @Test
-    fun `dev and prod profiles together refuse to start even on localhost`() {
+    fun `only the environment named local gets a posture for free`() {
+        val local = ConfigValidator.validate(validSnapshot().copy(env = "local", posture = null))
+
+        local.violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a posture that is not one of the two values is refused, listing them`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(env = "qa", posture = "prod"))
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.posture")
+        report.violations.single().shouldContain("development")
+        report.violations.single().shouldContain("hardened")
+    }
+
+    @Test
+    fun `an env name outside the grammar is refused`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(env = "QA Prod!", posture = "hardened"))
+
+        report.violations.shouldContain(
+            report.violations.single { it.contains("is not a legal environment name") },
+        )
+    }
+
+    @Test
+    fun `an env name inside the grammar is accepted`() {
+        ConfigValidator.validate(hardened().copy(env = "sandbox-eu")).violations.shouldBeEmpty()
+        ConfigValidator.validate(hardened().copy(env = "perf_2")).violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `demo is allowed under development and refused under hardened`() {
+        ConfigValidator.validate(validSnapshot().copy(demo = "nyc,trade")).violations.shouldBeEmpty()
+
+        val report = ConfigValidator.validate(hardened().copy(demo = "nyc"))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.demo")
+        report.violations.single().shouldContain("hardened")
+    }
+
+    @Test
+    fun `a bootstrap password is allowed under development and refused under hardened`() {
+        val seeded =
+            validSnapshot().copy(
+                localEnabled = true,
+                localBootstrapPasswordSet = true,
+                bootstrapAdminEmail = "admin@example.com",
+            )
+        ConfigValidator.validate(seeded).violations.shouldBeEmpty()
+
+        val report = ConfigValidator.validate(seeded.copy(env = "prod", posture = "hardened"))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("bootstrap-password")
+        report.violations.single().shouldContain("hardened")
+    }
+
+    @Test
+    fun `the hash form of the seed is refused under hardened too`() {
         val report =
             ConfigValidator.validate(
-                validSnapshot().copy(
-                    datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
-                    redisHost = "localhost",
-                    activeProfiles = setOf("dev", "production"),
+                hardened().copy(
+                    localEnabled = true,
+                    localBootstrapPasswordHashSet = true,
+                    bootstrapAdminEmail = "admin@example.com",
                 ),
             )
 
         report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("production")
+        report.violations.single().shouldContain("bootstrap-password-hash")
+    }
+
+    @Test
+    fun `loopback infrastructure is allowed under development and refused under hardened`() {
+        val loopback =
+            validSnapshot().copy(
+                datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
+                redisHost = "127.0.0.1",
+                redisPassword = "",
+            )
+        ConfigValidator.validate(loopback).violations.shouldBeEmpty()
+
+        val report = ConfigValidator.validate(loopback.copy(env = "prod", posture = "hardened"))
+        report.violations.shouldHaveSize(2)
+        report.violations.first().shouldContain("spring.datasource.url")
+        report.violations.last().shouldContain("datapipelines.redis.host")
+    }
+
+    @Test
+    fun `hardened without OIDC is refused unless local-only is acknowledged`() {
+        val localOnly = hardened().copy(oidcProviders = emptyList(), localEnabled = true)
+
+        val refused = ConfigValidator.validate(localOnly)
+        refused.violations.shouldHaveSize(1)
+        refused.violations.single().shouldContain("DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY")
+
+        val acknowledged = ConfigValidator.validate(localOnly.copy(authAllowLocalOnly = true))
+        acknowledged.violations.shouldBeEmpty()
+        acknowledged.warnings.single().shouldContain("event=config.auth_local_only")
+    }
+
+    @Test
+    fun `development without OIDC is not a posture violation - local accounts are enough`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(oidcProviders = emptyList(), localEnabled = true))
+
+        report.violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a spring profile that disagrees with the posture refuses to start`() {
+        val report = ConfigValidator.validate(hardened().copy(activeProfiles = setOf("development")))
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("SPRING_PROFILES_ACTIVE")
+        report.violations.single().shouldContain("hardened")
+    }
+
+    @Test
+    fun `the profile the posture derives is not a mismatch`() {
+        ConfigValidator.validate(hardened().copy(activeProfiles = setOf("hardened"))).violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `the renamed dev profile is refused rather than silently ignored`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(activeProfiles = setOf("dev")))
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("development")
+    }
+
+    @Test
+    fun `the deprecated deployment-name alias names the deployment and WARNs`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(env = null, deploymentName = "qa", posture = "development"))
+
+        report.violations.shouldBeEmpty()
+        report.warnings.single().shouldContain("event=config.deployment_name_deprecated")
+        report.warnings.single().shouldContain("qa")
+    }
+
+    @Test
+    fun `the alias set alone still selects the posture rule - a named env needs a posture`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(env = null, deploymentName = "qa", posture = null))
+
+        report.violations.single().shouldContain("datapipelines.posture")
+    }
+
+    @Test
+    fun `the alias and the new key disagreeing refuses to start, naming both`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(env = "qa", posture = "development", deploymentName = "uat"),
+            )
+
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.env")
+        report.violations.single().shouldContain("datapipelines.deployment.name")
     }
 
     @Test

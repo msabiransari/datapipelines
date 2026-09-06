@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.DeploymentEnv
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.bind.Bindable
@@ -15,7 +16,8 @@ import java.util.Base64
  * A **violation** stops startup: `@PostConstruct` throws, the context fails to refresh,
  * and the log line names every offending key at once so the operator fixes one file,
  * not one key per restart. A **warning** is logged structured and startup continues —
- * §7 defines exactly one of those (passwordless Redis off loopback).
+ * passwordless Redis off loopback, the deprecated executor and deployment-name aliases,
+ * and a hardened deployment's explicit local-accounts-only acknowledgement (§3.23).
  *
  * The checks are pure functions of a [ConfigSnapshot] so the test suite can drive them
  * without a Spring context — including the §7 closing rule that the *documented dev
@@ -49,7 +51,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 19
+        internal const val CHECK_COUNT = 22
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -84,6 +86,9 @@ class ConfigValidator(
 
         private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]", "0:0:0:0:0:0:0:1")
 
+        /** 039's profile name, renamed `development` by 075 — named so a stale manifest is refused, not ignored. */
+        private const val LEGACY_DEV_PROFILE = "dev"
+
         /** The §7 rules, against a snapshot. Pure — every branch is unit-tested without Spring. */
         internal fun validate(snapshot: ConfigSnapshot): ValidationReport {
             val violations = mutableListOf<String>()
@@ -95,7 +100,10 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
-            checkDevProfileGuard(snapshot, violations)
+            checkEnvName(snapshot, violations, warnings)
+            checkPosture(snapshot, violations)
+            checkPostureProfileAlignment(snapshot, violations)
+            checkHardenedPosture(snapshot, violations, warnings)
             checkWorkspacesProvisioningMode(snapshot, violations)
             checkWorkspacesOpenJoinMode(snapshot, violations)
             checkExamplesSeederReachable(snapshot, violations)
@@ -405,27 +413,168 @@ class ConfigValidator(
             }
         }
 
-        /** §7 — the dev-profile guard: dev convenience must never touch production infra. */
-        private fun checkDevProfileGuard(
+        /**
+         * §7 / §3.23 (075) — the org's LABEL for this deployment.
+         *
+         * Two rules, and nothing else: the grammar (a label that is logged, written into a
+         * promotion's `source_env` and read by a human under pressure is lowercase, short and
+         * shell-quiet), and the deprecated alias. Nothing here — and nothing anywhere in
+         * production code — reads the label's VALUE to decide behaviour; that is
+         * `DeploymentNameBranchingGuardTest`'s pin, and the reason a posture exists at all.
+         */
+        private fun checkEnvName(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+            warnings: MutableList<String>,
+        ) {
+            val declared = snapshot.env?.trim().orEmpty()
+            val alias = snapshot.deploymentName?.trim().orEmpty()
+            if (declared.isNotEmpty() && alias.isNotEmpty() && declared != DeploymentEnv.DEFAULT_ENV && declared != alias) {
+                violations +=
+                    "${DeploymentEnv.ENV_KEY} ('$declared') and the deprecated " +
+                    "${DeploymentEnv.LEGACY_ENV_KEY} ('$alias') are both set and disagree (§3.23); " +
+                    "keep DATAPIPELINES_ENV and delete DATAPIPELINES_DEPLOYMENT_NAME."
+            } else if (DeploymentEnv.aliasInUse(snapshot.env, snapshot.deploymentName)) {
+                warnings +=
+                    "event=config.deployment_name_deprecated env=$alias " +
+                    "message=\"${DeploymentEnv.LEGACY_ENV_KEY} (DATAPIPELINES_DEPLOYMENT_NAME) was renamed " +
+                    "${DeploymentEnv.ENV_KEY} (DATAPIPELINES_ENV) in 075; the old name is honoured for one " +
+                    "release. Rename the variable (docs/environments.md).\""
+            }
+            val effective = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+            if (!DeploymentEnv.ENV_NAME.matches(effective)) {
+                violations +=
+                    "${DeploymentEnv.ENV_KEY} '$effective' is not a legal environment name (§3.23): " +
+                    "lowercase letters, digits, '_' and '-', starting with a letter or digit, at most 32 characters " +
+                    "(set DATAPIPELINES_ENV)."
+            }
+        }
+
+        /**
+         * §7 / §3.23 (075) — the POSTURE: `development` or `hardened`, and nothing else.
+         *
+         * **Explicit beats guessed.** A named environment with no posture does not start. The
+         * one exception is `local`, where `development` is the honest reading and demanding a
+         * second variable to run a laptop would be ceremony. Every other label — `dev`, `qa`,
+         * `sandbox-eu`, `prod` — must say which stance it wants, because the product cannot
+         * infer a stance from a name it is forbidden to branch on.
+         */
+        private fun checkPosture(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+        ) {
+            val declared = snapshot.posture?.trim()?.lowercase().orEmpty()
+            if (declared.isNotEmpty() && declared !in DeploymentEnv.POSTURES) {
+                violations +=
+                    "${DeploymentEnv.POSTURE_KEY} '$declared' is not a posture (§3.23): " +
+                    "DATAPIPELINES_POSTURE is ${DeploymentEnv.POSTURES.joinToString(" or ")}."
+                return
+            }
+            val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+            if (DeploymentEnv.resolvePosture(snapshot.posture, env) == null) {
+                violations +=
+                    "${DeploymentEnv.ENV_KEY} is '$env' but ${DeploymentEnv.POSTURE_KEY} is not set (§3.23): " +
+                    "set DATAPIPELINES_POSTURE to ${DeploymentEnv.POSTURES.joinToString(" or ")}. " +
+                    "Only the environment named '${DeploymentEnv.DEFAULT_ENV}' gets a posture for free."
+            }
+        }
+
+        /**
+         * §7 / §3.23 (075) — the posture and the Spring profile must be the same fact.
+         *
+         * `application.yml` derives `spring.profiles.active` from `DATAPIPELINES_POSTURE`, so
+         * the two agree by construction — until an operator sets `SPRING_PROFILES_ACTIVE`
+         * themselves (a manifest carried over from before 075, a habit, a copy-paste). An
+         * environment variable outranks the file, so the posture's DEFAULTS would then come
+         * from one profile while every posture RULE below judged the other. That is silent,
+         * and it is exactly the drift this validator exists to refuse.
+         *
+         * The old `dev` profile is named here too: it was renamed `development` by 075 and no
+         * longer exists, so a deployment still asking for it would load NO posture file at all
+         * and get the base defaults with no sign that anything was ignored.
+         */
+        private fun checkPostureProfileAlignment(
             snapshot: ConfigSnapshot,
             violations: MutableList<String>,
         ) {
             val profiles = snapshot.activeProfiles.map { it.lowercase() }.toSet()
-            if ("dev" !in profiles) return
-            val reasons = mutableListOf<String>()
-            if ("prod" in profiles || "production" in profiles) {
-                reasons += "profiles ${profiles.filter { it == "prod" || it == "production" }} are also active"
-            }
-            if (!isLoopback(jdbcHost(snapshot.datasourceUrl))) {
-                reasons += "spring.datasource.url points at non-localhost '${jdbcHost(snapshot.datasourceUrl)}'"
-            }
-            if (!isLoopback(snapshot.redisHost?.trim())) {
-                reasons += "datapipelines.redis.host is non-localhost '${snapshot.redisHost}'"
-            }
-            if (reasons.isNotEmpty()) {
+            if (LEGACY_DEV_PROFILE in profiles) {
                 violations +=
-                    "The 'dev' profile is active against production indicators (${reasons.joinToString("; ")}). " +
-                    "Dev convenience settings must never run against production infrastructure (§7)."
+                    "the Spring profile '$LEGACY_DEV_PROFILE' is active, and 075 renamed it " +
+                    "'${DeploymentEnv.DEVELOPMENT}' (§3.23). Set DATAPIPELINES_POSTURE instead of " +
+                    "SPRING_PROFILES_ACTIVE — the posture derives the profile."
+            }
+            val posturesActive = profiles.filter { it in DeploymentEnv.POSTURES }
+            if (posturesActive.isEmpty()) return
+            val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+            val effective = DeploymentEnv.resolvePosture(snapshot.posture, env) ?: return
+            if (posturesActive.size > 1 || posturesActive.single() != effective) {
+                violations +=
+                    "spring.profiles.active names ${posturesActive.sorted()} while " +
+                    "${DeploymentEnv.POSTURE_KEY} resolves to '$effective' (§3.23): the posture derives the " +
+                    "profile, so unset SPRING_PROFILES_ACTIVE or make it match DATAPIPELINES_POSTURE."
+            }
+        }
+
+        /**
+         * §7 / §3.23 (075) — the `hardened` posture's refusals, each naming the variable and
+         * the posture (the posture table in docs/environments.md is this function, in prose).
+         *
+         * Every rule here is a REFUSAL rather than a silent downgrade: a deployment that asked
+         * for the hardened stance and got a quietly-relaxed one is worse than a deployment that
+         * did not start. The loopback rule is 039's dev-profile guard, inverted and reused —
+         * "dev convenience must never touch production infrastructure" is the same fact as
+         * "a hardened deployment does not run against a laptop's database".
+         */
+        private fun checkHardenedPosture(
+            snapshot: ConfigSnapshot,
+            violations: MutableList<String>,
+            warnings: MutableList<String>,
+        ) {
+            val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+            if (DeploymentEnv.resolvePosture(snapshot.posture, env) != DeploymentEnv.HARDENED) return
+            val where = "under ${DeploymentEnv.POSTURE_KEY}=${DeploymentEnv.HARDENED} (env '$env', §3.23)"
+
+            if (DeploymentEnv.demoFamilies(snapshot.demo).isNotEmpty()) {
+                violations +=
+                    "${DeploymentEnv.DEMO_KEY} is set to '${snapshot.demo}' $where. Demo is a flag for " +
+                    "out-of-the-box evaluation in a development environment: it registers sample datasources " +
+                    "and seeds example content. Unset DATAPIPELINES_DEMO, or run this environment as " +
+                    "${DeploymentEnv.DEVELOPMENT}."
+            }
+            if (snapshot.localBootstrapPasswordSet || snapshot.localBootstrapPasswordHashSet) {
+                violations +=
+                    "a local bootstrap credential (datapipelines.auth.local.bootstrap-password" +
+                    "${if (snapshot.localBootstrapPasswordHashSet) "-hash" else ""}) is set $where. " +
+                    "A seeded credential has no place in a hardened deployment — local accounts themselves " +
+                    "stay allowed; create the first admin with an admin reset instead."
+            }
+            val dbHost = jdbcHost(snapshot.datasourceUrl)
+            if (isLoopback(dbHost) && !snapshot.datasourceUrl.isNullOrBlank()) {
+                violations +=
+                    "spring.datasource.url points at loopback ('$dbHost') $where. " +
+                    "A hardened deployment does not run its metadata database on the same loopback " +
+                    "interface as the process (SPRING_DATASOURCE_URL)."
+            }
+            val redisHost = snapshot.redisHost?.trim()
+            if (redisHost != null && isLoopback(redisHost)) {
+                violations +=
+                    "datapipelines.redis.host is loopback ('$redisHost') $where " +
+                    "(DATAPIPELINES_REDIS_HOST)."
+            }
+            val hasOidc = snapshot.oidcProviders.any { it.clientId.isNotBlank() && it.clientSecret.isNotBlank() && it.issuerUri.isNotBlank() }
+            if (!hasOidc) {
+                if (!snapshot.authAllowLocalOnly) {
+                    violations +=
+                        "no OIDC provider is fully configured $where. Configure one (auth.md §5.2), or set " +
+                        "DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true to acknowledge that this hardened deployment " +
+                        "authenticates with local password accounts only."
+                } else {
+                    warnings +=
+                        "event=config.auth_local_only env=$env posture=${DeploymentEnv.HARDENED} " +
+                        "message=\"DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true: this hardened deployment has no OIDC " +
+                        "provider and authenticates with local password accounts only (acknowledged explicitly).\""
+                }
             }
         }
 
@@ -762,6 +911,15 @@ class ConfigValidator(
                 orgTimezone = environment.getProperty("datapipelines.org.timezone"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
+                // §3.23 (075) — the org's label, the product's posture, the demo flag, and the
+                // one deprecated alias. Read through DeploymentEnv's constants so `app` and
+                // `web` cannot drift about which key is which.
+                env = environment.getProperty(DeploymentEnv.ENV_KEY),
+                posture = environment.getProperty(DeploymentEnv.POSTURE_KEY),
+                demo = environment.getProperty(DeploymentEnv.DEMO_KEY),
+                deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
+                authAllowLocalOnly =
+                    environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
             )
 
         /**
@@ -926,6 +1084,16 @@ internal data class ConfigSnapshot(
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
+    /** §3.23 (075) — the ORG's label for this deployment; nothing branches on it. */
+    val env: String? = null,
+    /** §3.23 (075) — the PRODUCT's stance: `development` | `hardened`. Blank = undeclared. */
+    val posture: String? = null,
+    /** §3.23 (075) — the sample-data families to load; blank = off. Refused under `hardened`. */
+    val demo: String? = null,
+    /** §3.19 → §3.23 — 039's deployment-name key ([DeploymentEnv.LEGACY_ENV_KEY]), deprecated by 075. */
+    val deploymentName: String? = null,
+    /** §3.4 (075) — the explicit acknowledgement that a hardened deployment has no OIDC. */
+    val authAllowLocalOnly: Boolean = false,
 ) {
     override fun toString() =
         "ConfigSnapshot(" +
@@ -962,7 +1130,12 @@ internal data class ConfigSnapshot(
             "orgWeekStart=$orgWeekStart, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +
-            "vendoredThemes=$vendoredThemes)"
+            "vendoredThemes=$vendoredThemes, " +
+            "env=$env, " +
+            "posture=$posture, " +
+            "demo=$demo, " +
+            "deploymentName=$deploymentName, " +
+            "authAllowLocalOnly=$authAllowLocalOnly)"
 }
 
 /** One `datapipelines.auth.oidc.providers[]` entry (auth.md §11.1), bound by relaxed binding. */

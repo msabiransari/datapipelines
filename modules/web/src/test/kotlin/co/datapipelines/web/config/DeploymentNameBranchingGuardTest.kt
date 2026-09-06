@@ -18,15 +18,22 @@ import java.io.File
  *
  * A grep cannot parse conditionals, so it over-approximates to something stronger and
  * trivially checkable: the key's literal spelling may appear in exactly ONE production
- * source file — [AuthoringStartupCheck], whose use is the startup posture LOG line. A file
- * that cannot NAME the key cannot branch on it; any new consumer (a UI banner, an /info
- * exposure) must either come through here or widen this allowlist deliberately, in review.
+ * source file — [DeploymentEnv], the resolver that owns the key and its deprecated alias.
+ * Every consumer (the startup posture line, promotion's `source_env`, `app`'s validator)
+ * goes through that object's constants, so none of them can NAME the key, and a file that
+ * cannot name it cannot branch on it. Any new consumer (a UI banner, an `/info` exposure)
+ * must either come through the resolver or widen this allowlist deliberately, in review.
+ *
+ * 075 renamed the key from `datapipelines.deployment.name` to `datapipelines.env` and split
+ * the label from the POSTURE, which is the closed two-valued thing the product may branch
+ * on. The old key is checked here too: it survives one release as an alias, and the alias
+ * must be resolved in the same one place, never re-read somewhere else.
  *
  * ## Falsification (039's exit gate 3)
  *
- * Adding `if (environment.getProperty("datapipelines.deployment.name") == "prod") …` to
- * any production file makes this red: the key literal appears in a second src/main source.
- * Verified red in a scratch copy before landing (see the round's handback).
+ * Adding `if (environment.getProperty("datapipelines.env") == "prod") …` to any production
+ * file makes this red: the key literal appears in a second src/main source. Verified red in a
+ * scratch copy before landing (see the round's handback).
  *
  * Same repo-root location discipline as [TestRepoFiles][co.datapipelines.web.TestRepoFiles],
  * replicated locally because that helper keeps its root private: walk up to
@@ -34,18 +41,24 @@ import java.io.File
  */
 class DeploymentNameBranchingGuardTest {
     @Test
-    fun `the deployment name key is named by exactly one production source - its log consumer`() {
-        val offenders = productionSources().filter { DEPLOYMENT_NAME_KEY in it.readText() }
+    fun `the env key is named by exactly one production source - its resolver`() {
+        val offenders = productionSources().filter { ENV_KEY in it.readText() }
 
-        offenders.map { it.relativeTo(root).path } shouldContainExactly
-            listOf("modules/web/src/main/kotlin/co/datapipelines/web/config/AuthoringStartupCheck.kt")
+        offenders.map { it.relativeTo(root).path } shouldContainExactly listOf(RESOLVER)
+    }
+
+    @Test
+    fun `the deprecated deployment-name alias is named by exactly one production source - the same resolver`() {
+        val offenders = productionSources().filter { LEGACY_ENV_KEY in it.readText() }
+
+        offenders.map { it.relativeTo(root).path } shouldContainExactly listOf(RESOLVER)
     }
 
     @Test
     fun `the scan sees the production tree - a guard over nothing guards nothing`() {
         // Non-vacuity (the BDT lesson): if the walk lost the source tree, the guard above
         // would pass on an empty scan. Name a file the walk must find, and floor the count.
-        File(root, "modules/web/src/main/kotlin/co/datapipelines/web/config/AuthoringStartupCheck.kt").isFile shouldBe true
+        File(root, RESOLVER).isFile shouldBe true
         productionSources().size shouldBeGreaterThan MODULE_FLOOR
     }
 
@@ -65,7 +78,13 @@ class DeploymentNameBranchingGuardTest {
             .toList()
 
     private companion object {
-        const val DEPLOYMENT_NAME_KEY = "datapipelines.deployment.name"
+        const val ENV_KEY = "datapipelines.env"
+
+        /** 039's spelling, deprecated by 075 — resolved in the same one place. */
+        const val LEGACY_ENV_KEY = "datapipelines.deployment.name"
+
+        /** The one production file allowed to name either key. */
+        const val RESOLVER = "modules/web/src/main/kotlin/co/datapipelines/web/config/DeploymentEnv.kt"
 
         /** build/ and .git/ never hold shipping sources; entering them only slows the walk. */
         val EXCLUDED_DIRS = setOf("build", ".git")

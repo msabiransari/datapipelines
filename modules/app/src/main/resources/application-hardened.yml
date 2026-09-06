@@ -1,0 +1,26 @@
+# The `hardened` POSTURE (configuration.md §3.23, docs/environments.md).
+#
+# Loaded when `DATAPIPELINES_POSTURE=hardened`. The posture is the PRODUCT's stance,
+# never the org's environment NAME: an org maps `qa`, `uat`, `prod` — any names, any
+# count — onto these two postures, and nothing in the product branches on a name.
+#
+# WHAT BELONGS HERE: the posture table's non-secret DEFAULTS, each a placeholder so an
+# operator can still set it either way. The RULES that refuse a boot (demo, a seeded
+# bootstrap password, loopback infrastructure, OIDC) are not defaults and cannot live
+# in a yml — they are ConfigValidator §7 checks, which name the variable and the
+# posture in every refusal.
+#
+# The `hardened` row of the posture table (environments.md):
+#   authoring-enabled   FALSE  — a hardened deployment is a promotion RECEIVER by
+#                                default; set the variable to true for a one-box
+#                                deployment that deliberately authors in place
+#   demo                REFUSED at boot
+#   bootstrap password  REFUSED at boot (local accounts themselves stay allowed)
+#   loopback DB/Redis   REFUSED at boot
+#   cookie Secure       ON
+#   OIDC                REQUIRED unless DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true
+datapipelines:
+  deployment:
+    authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:false}
+  auth:
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:true}

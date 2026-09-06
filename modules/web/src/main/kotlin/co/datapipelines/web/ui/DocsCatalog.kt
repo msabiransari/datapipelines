@@ -231,7 +231,20 @@ class DocsCatalog(
         private val GROUPING: Map<String, List<String>> =
             linkedMapOf(
                 "Operations manual" to
-                    listOf("deployment", "configuration", "auth", "datasources", "key-providers", "observability", "mcp-server"),
+                    listOf(
+                        "deployment",
+                        // 075: environments.md sits directly after deployment — it is the page an
+                        // org's DevOps engineer reads FIRST (what the two variables are, which
+                        // posture a named environment maps onto, how any loader supplies them),
+                        // and configuration.md is the key-by-key reference they reach for after it.
+                        "environments",
+                        "configuration",
+                        "auth",
+                        "datasources",
+                        "key-providers",
+                        "observability",
+                        "mcp-server",
+                    ),
                 "Contracts" to
                     listOf(
                         "pipeline-contract",

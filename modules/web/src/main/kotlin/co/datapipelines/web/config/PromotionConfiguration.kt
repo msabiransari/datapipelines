@@ -26,12 +26,14 @@ import org.springframework.transaction.support.TransactionTemplate
  * client, wired explicitly like every other module here (module-structure §8.4: no component
  * scanning anywhere).
  *
- * The deployment's own posture is read once, here, off the `Environment`, through the two
- * constants that own those keys ([AuthoringStartupCheck.DEPLOYMENT_NAME_KEY] and
- * [AuthoringGuard.CONFIG_KEY]) rather than as fresh string literals. That is not tidiness: the
- * name key has exactly ONE spelling in production sources and `DeploymentNameBranchingGuardTest`
- * pins it there. Promotion carries the name as DATA — the `source_env` a receiver records — and
- * never branches on it, which is the invariant that guard exists to protect.
+ * The deployment's own posture is read once, here, off the `Environment`, through the
+ * constants that own those keys ([DeploymentEnv] and [AuthoringGuard.CONFIG_KEY]) rather than
+ * as fresh string literals. That is not tidiness: the env key has exactly ONE spelling in
+ * production sources and `DeploymentNameBranchingGuardTest` pins it there. Promotion carries
+ * the env label as DATA — the `source_env` a receiver records — and never branches on it,
+ * which is the invariant that guard exists to protect. The 039 spelling
+ * ([DeploymentEnv.LEGACY_ENV_KEY]) is resolved as that object's one-release alias, so a
+ * deployment that has not yet renamed the variable keeps promoting under its own name.
  */
 @Configuration
 class PromotionConfiguration {
@@ -124,7 +126,10 @@ class PromotionConfiguration {
 
     /** The deployment LABEL, carried as data (never branched on) — see the class KDoc. */
     private fun deploymentName(environment: Environment): String =
-        environment.getProperty(AuthoringStartupCheck.DEPLOYMENT_NAME_KEY)?.trim().orEmpty()
+        DeploymentEnv.resolveEnv(
+            environment.getProperty(DeploymentEnv.ENV_KEY),
+            environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
+        )
 
     private fun authoringEnabled(environment: Environment): Boolean =
         environment.getProperty(AuthoringGuard.CONFIG_KEY, Boolean::class.java) ?: true

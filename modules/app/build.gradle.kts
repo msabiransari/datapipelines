@@ -36,7 +36,7 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.test)
     // The @SpringBootTest smoke test brings its own Postgres and Redis so it is
-    // self-contained — it must not depend on deploy/docker-compose.dev.yml being up.
+    // self-contained — it must not depend on deploy/compose.laptop-infra.yml being up.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)

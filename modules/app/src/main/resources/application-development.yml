@@ -1,0 +1,30 @@
+# The `development` POSTURE (configuration.md §3.23, docs/environments.md).
+#
+# This file is loaded when `DATAPIPELINES_POSTURE=development` — which is also the
+# shipped default, so it is the profile every deployment gets unless it asks for
+# `hardened`. It replaces the old `dev` profile (039's `application-dev.yml`), and the
+# difference is the whole of 075: the old file was a LAPTOP file (localhost:5434,
+# console logging, one developer's ports). Those values are not a posture — an org's
+# `dev` environment on Kubernetes is `development` posture and must not inherit one
+# laptop's host ports. They moved to `deploy/env/laptop.env`, which the laptop loads
+# like any other env file.
+#
+# WHAT BELONGS HERE: the posture table's non-secret DEFAULTS, each written as a
+# placeholder so an operator can still set it either way. Nothing else — no secrets
+# (this file ships inside every production jar; the 2026-08-07 security review's
+# HIGH-2 is why), no infrastructure, no org facts.
+#
+# The `development` row of the posture table (environments.md):
+#   authoring-enabled   true   — someone running one box authors there and runs there
+#   demo                allowed
+#   bootstrap password  allowed
+#   loopback DB/Redis   allowed
+#   cookie Secure       derived from base-url's scheme (an http:// base-url drops it)
+#   OIDC                optional
+datapipelines:
+  deployment:
+    authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
+  auth:
+    # Empty = the base file's derivation from `base-url`'s scheme. Spelled out rather
+    # than omitted so the two posture files read as one table with two columns.
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:}

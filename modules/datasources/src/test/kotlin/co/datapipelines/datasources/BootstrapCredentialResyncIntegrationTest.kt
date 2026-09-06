@@ -196,7 +196,7 @@ class BootstrapCredentialResyncIntegrationTest {
     /**
      * Neither credential authenticates: the row is left alone (there is nothing to resync TO)
      * and the ERROR line names the datasource AND the environment variable an operator would
-     * change — which on 2026-09-02 was `SAMPLE_PG_PASSWORD` in `deploy/.env.demo`.
+     * change — which on 2026-09-02 was `SAMPLE_PG_PASSWORD` in `deploy/secrets.env`.
      */
     @Test
     fun `when NEITHER credential authenticates the row is untouched and the ERROR names the env key`() {

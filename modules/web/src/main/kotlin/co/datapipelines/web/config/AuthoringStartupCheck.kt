@@ -12,10 +12,13 @@ import org.springframework.core.env.Environment
  *
  * Three things happen here, in order:
  *
- * - **The posture line.** `deployment.name` (a LABEL — nothing branches on it, pinned by
- *   [DeploymentNameBranchingGuardTest]) is logged once beside the authoring state, so a
- *   deployment's posture is visible in its own logs. That is the name's ONLY consumer this
- *   round; it is deliberately not on `/info`, which is permitAll.
+ * - **The posture line** (075). The org's ENV label (a LABEL — nothing branches on it,
+ *   pinned by [DeploymentNameBranchingGuardTest]), the product's POSTURE, the authoring
+ *   state and the demo families are logged once, so what a deployment IS is visible in its
+ *   own logs and in a pasted issue report. The env is deliberately not on `/info`, which is
+ *   permitAll. The values are resolved through [DeploymentEnv] — the same resolver `app`'s
+ *   `ConfigValidator` refuses on, so the line can never describe a posture the validator
+ *   judged differently.
  * - **WARN — the receiver that also authors** (C5, BOTH-SIDED since 055): a deployment with
  *   a promotion `server-key` configured — meaning it RECEIVES — AND authoring enabled is
  *   D7's violation stated in config. [promotionServerKeyPresent] is the seam; `DomainConfiguration`
@@ -43,14 +46,17 @@ class AuthoringStartupCheck(
     fun check() {
         val authoringEnabled =
             environment.getProperty(AuthoringGuard.CONFIG_KEY, Boolean::class.java) ?: true
-        val deploymentName = environment.getProperty(DEPLOYMENT_NAME_KEY)?.trim().orEmpty()
+        val env = DeploymentEnv.resolveEnv(environment.getProperty(DeploymentEnv.ENV_KEY), environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY))
+        val posture = DeploymentEnv.resolvePosture(environment.getProperty(DeploymentEnv.POSTURE_KEY), env)
+        val demo = DeploymentEnv.demoFamilies(environment.getProperty(DeploymentEnv.DEMO_KEY))
 
-        // C2: the label's one consumer — visible posture, never a branch.
+        // C2 / 075: the label's one consumer — visible posture, never a branch.
         log.info(
-            "event=config.deployment_posture deployment={} authoring_enabled={} " +
-                "message=\"deployment posture at boot; the name is a label only and nothing branches on it\"",
-            deploymentName.ifEmpty { "(unset)" },
-            authoringEnabled,
+            "event=config.posture env={} posture={} authoring={} demo={}",
+            env,
+            posture ?: "(unset)",
+            if (authoringEnabled) "on" else "off",
+            demo.joinToString(",").ifEmpty { "(none)" },
         )
 
         if (authoringEnabled && promotionServerKeyPresent()) {
@@ -87,9 +93,6 @@ class AuthoringStartupCheck(
     }
 
     companion object {
-        /** configuration.md §3.19 — the deployment LABEL. Its only consumer is the posture line above. */
-        const val DEPLOYMENT_NAME_KEY = "datapipelines.deployment.name"
-
         /** The refusal NAMES the offenders; past this many per kind it counts them. */
         const val MAX_NAMED = 20
     }

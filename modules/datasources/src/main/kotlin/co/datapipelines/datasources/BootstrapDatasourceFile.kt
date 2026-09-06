@@ -66,7 +66,7 @@ data class BootstrapDatasourcesFile(
  * The env key exists on this type because [BootstrapDatasourceFileReader] resolves `${VAR}`
  * placeholders away — by the time an entry is a [Datasource] the reference is gone, and §8A.3
  * rule 3's ERROR line has to name the key an operator would go and change. On 2026-09-02 the
- * answer was `SAMPLE_PG_PASSWORD` in `deploy/.env.demo`, and a log line saying "the stored
+ * answer was `SAMPLE_PG_PASSWORD` in `deploy/secrets.env`, and a log line saying "the stored
  * credential and the file's both fail" without naming it would have sent the operator hunting.
  *
  * Null when the entry's password is a literal rather than a placeholder — the SQLite sample
