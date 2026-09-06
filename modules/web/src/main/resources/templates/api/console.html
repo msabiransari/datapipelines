@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- 079 §C — the API section (ui-screens.md §4.18). Three cards, all READ-ONLY:
+       everything a program uses to talk to this workspace, in the one place the
+       owner went looking for it and found nothing. Publishing, binding and
+       revoking stay on REST/MCP this round; the actions here are links. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">API</h1>
+      <p class="app-page-sub">Everything a program uses to talk to this workspace: the endpoints you have
+        published, the keys that may call them, and the MCP server your agent connects to.</p>
+    </div>
+    <div class="app-page-actions" th:if="${canAuthor}">
+      <a class="ds-button ds-button-secondary" th:href="@{/settings/api-keys}">Manage API keys</a>
+    </div>
+  </div>
+
+  <div class="app-grid app-grid-wide-left">
+
+    <!-- ---------------------------------------------------------------- endpoints -->
+    <div class="ds-card app-card-table">
+      <div class="app-card-h">
+        <h2 class="ds-title">Published endpoints</h2>
+        <span class="app-card-note" th:text="${#lists.size(endpoints)} + ' live'">3 live</span>
+      </div>
+
+      <table class="ds-table" th:if="${not #lists.isEmpty(endpoints)}">
+        <thead>
+        <tr>
+          <th>Path</th>
+          <th>Pipeline</th>
+          <th class="num">Timeout</th>
+          <th>Keys</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="e : ${endpoints}">
+          <td>
+            <!-- Always GET: PublishedEndpointController refuses every other method with
+                 `Allow: GET`, so the tag is a fact about the surface, not a column that
+                 could vary. -->
+            <span class="app-method">GET</span>
+            <span class="ds-mono" th:text="${e.url}">/api/x/nyc/mobility/briefing</span>
+            <span class="app-chip app-chip-warn" th:unless="${e.enabled}"><i class="ds-status"></i>Disabled</span>
+          </td>
+          <td>
+            <span class="app-name" th:text="${e.pipelineDisplayName}">Mobility briefing</span>
+            <span class="app-path" th:if="${e.pipelinePath != null}" th:text="${e.pipelinePath}">nyc/mobility/briefing</span>
+            <!-- The RELEASED version, not `pipelines.current_version`: an endpoint pins a
+                 pipeline and serves its latest release, so a draft number here would be a
+                 statement about something no call will ever run. No release at all is a
+                 dash, and worth seeing. -->
+            <span class="app-path" th:text="${e.releasedVersion != null} ? 'v' + ${e.releasedVersion} : 'no released version'">v3</span>
+          </td>
+          <td class="num" th:text="${e.timeoutSeconds} + ' s'">30 s</td>
+          <td>
+            <span class="app-chip app-chip-ok" th:if="${e.boundKeys > 0}"><i class="ds-status"></i><span th:text="${e.boundKeys} + ' bound'">2 bound</span></span>
+            <span class="app-chip app-chip-warn" th:if="${e.boundKeys == 0}"><i class="ds-status"></i>none</span>
+          </td>
+        </tr>
+        </tbody>
+      </table>
+
+      <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
+        <div class="app-empty">
+          <b>No published endpoints</b>
+          A published endpoint turns one pipeline into a GET URL under <span class="ds-mono">/api/x</span>.
+          Publish one with the <span class="ds-mono">endpoints_create</span> MCP tool or
+          <span class="ds-mono">POST /api/v1/endpoints</span>.
+        </div>
+      </div>
+
+      <div class="app-card-b">
+        <!-- The mock has a per-endpoint 24-hour call column and this screen does NOT.
+             Nothing in the system counts endpoint serves — no counter column on
+             published_endpoints, no Micrometer counter, no query; the only trace is an
+             append-only `endpoint.served` audit row whose own reader is documented as
+             deliberately narrow. A column filled from a sample would be a plausible number
+             and a false one. (The mock's column label is deliberately not repeated here:
+             ApiConsoleRenderTest asserts its ABSENCE from the rendered page, and an HTML
+             comment renders.) -->
+        <p class="app-card-note app-flush">Call counts are not recorded anywhere in this system —
+          no counter column, no metric, no query — so this table shows none rather than a number
+          derived from a sample.</p>
+      </div>
+    </div>
+
+    <div class="app-grid-stack">
+
+      <!-- ------------------------------------------------------------- api keys -->
+      <div class="ds-card app-card-table">
+        <div class="app-card-h">
+          <h2 class="ds-title">API keys</h2>
+          <span class="app-card-note" th:text="${#lists.size(apiKeys)} + ' active'">4 active</span>
+        </div>
+
+        <table class="ds-table" th:if="${not #lists.isEmpty(apiKeys)}">
+          <thead>
+          <tr>
+            <th>Key</th>
+            <th>Reach</th>
+            <th>Expires</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="k : ${apiKeys}">
+            <td>
+              <span class="app-name" th:text="${k.name}">agent</span>
+              <span class="app-path" th:text="${k.prefix} + '…'">dpk_A7Qx…</span>
+            </td>
+            <td>
+              <!-- An `endpoint` key has NO scopes by design (auth §7.7) — its authority is
+                   the paths it is bound to. Showing an empty scope cell for it would read
+                   as "this key can do nothing", which is the opposite of true. -->
+              <span class="app-chip app-chip-mono" th:text="${k.kind}">user</span>
+              <span class="app-chips" th:if="${k.kind == 'user'}">
+                <span class="app-chip app-chip-mono" th:each="s : ${k.scopes}" th:text="${s}">read</span>
+              </span>
+              <span class="app-chips" th:if="${k.kind == 'endpoint'}">
+                <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}" th:text="${p}">/nyc/**</span>
+                <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">no bindings</span>
+              </span>
+            </td>
+            <td th:text="${k.expiresAt != null} ? ${#temporals.format(k.expiresAt, 'yyyy-MM-dd')} : 'never'">never</td>
+          </tr>
+          </tbody>
+        </table>
+
+        <div class="app-card-b" th:if="${#lists.isEmpty(apiKeys)}">
+          <div class="app-empty">
+            <b>No API keys</b>
+            A key is how an agent authenticates. Create one on the API keys screen.
+          </div>
+        </div>
+      </div>
+
+      <!-- ------------------------------------------------------------- mcp server -->
+      <div class="ds-card">
+        <div class="app-card-h app-card-h-flush">
+          <h2 class="ds-title">MCP server</h2>
+          <span class="app-chip app-chip-ok"><i class="ds-status"></i><span th:text="${mcpToolCount} + ' tools'">28 tools</span></span>
+        </div>
+        <div class="app-card-b app-card-b-flush">
+          <!-- The tool count is McpToolCatalog.NAMES.size at request time, never a literal —
+               the same expression the marketing site renders, for the same reason: a number
+               that can drift from `tools/list` is worse than no number. -->
+          <pre class="app-code" th:text="${mcpConfigJson}">{}</pre>
+          <div class="app-note">
+            <svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <span>Only <b>user</b> keys reach <span class="ds-mono">/mcp</span>; endpoint keys are confined
+              to the paths they are bound to.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</th:block>
+</html>
