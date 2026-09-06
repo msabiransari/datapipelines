@@ -649,7 +649,7 @@ an engineer spins up exactly the data they need:
 | Family | Flag / profile | What you get |
 |---|---|---|
 | **nyc** (mobility) | `--demo nyc` / profile `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
-| **trade** (trade/v3) | `--demo trade` / profile `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
+| **trade** (trade/v4) | `--demo trade` / profile `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
 
 Both together is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
