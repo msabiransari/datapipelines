@@ -271,13 +271,25 @@ class TemplateTreeRenderTest {
     }
 
     @Test
-    fun `the pipeline editor's inspector puts the same string on the link and on its title`() {
+    fun `the pipeline editor's Details tab puts the same string on every value and on its title`() {
         val html = render("pipelines/editor") { fillPipelineEditor() }
 
         // One value, rendered twice — the truncated text is never the only copy (§9.4).
-        html shouldContain "class=\"pe-link pe-path\""
-        html shouldContain "x-bind:title=\"templateRefText(selectedNode)\""
-        html shouldContain "x-text=\"templateRefText(selectedNode)\""
+        // 080: the rule moved from the inspector's template link to the Details tab's
+        // key/value grid, where every row's dd carries the same string in both places.
+        html shouldContain "x-bind:title=\"row[1]\""
+        html shouldContain "x-text=\"row[1]\""
+        // …and the SQL partial's own template link keeps its pe-path form.
+        val partial =
+            render("partials/pipeline-node-sql") {
+                setVariable("state", "rendered")
+                setVariable("dialect", "POSTGRES")
+                setVariable("templateId", DEEP_PATH)
+                setVariable("templateVersion", 3)
+                setVariable("sql", "SELECT 1")
+                setVariable("sampledParameters", emptyList<String>())
+            }
+        partial shouldContain "class=\"pe-link pe-path\""
     }
 
     // ------------------------------------------------------------------ fixtures

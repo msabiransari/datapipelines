@@ -2,29 +2,32 @@
   "use strict";
 
   /*
-   * 065 §B — the bottom dock's state machine: Results | Errors, three states,
-   * one transition table (pipeline-editor.md §10). PURE — no DOM, no Alpine, no
-   * fetch — so `node --test` drives every row of that table (dock.test.mjs), the
-   * same harness decision result.js's paging arithmetic gets.
+   * 080 §B — the bottom dock's state machine: Details | Results | Errors | Events,
+   * two states (open | collapsed), one transition table. PURE — no DOM, no Alpine,
+   * no fetch — so `node --test` drives every row of that table (dock.test.mjs),
+   * the same harness decision result.js's paging arithmetic gets.
    *
-   * What lives here: `state` (hidden | minimized | open), `tab` (results |
-   * errors), the per-run failure list, and the "these results are from an
-   * earlier run" flag. What does NOT live here: the result rows themselves
-   * (result.js owns the 027b-frozen cursor arithmetic and hands the dock
-   * nothing), the failure RENDERING (details.js's PEErrorDetails.build), and
-   * every focus/DOM effect (init.js).
+   * What changed from 065 §B: the inspector overlay is gone (owner ruling
+   * 2026-09-05 — "move that pane in the bottom along with Result and Errors,
+   * minimizable"), so Details is a TAB and the dock is always present — the old
+   * `hidden` state has no page left to live on. `minimized` is renamed `collapsed`
+   * (the mock's chevron), and there is still NO close: 065's standing complaint was
+   * that × lost the pane with no way back short of re-running.
    *
-   * There is no `close`. The owner's complaint was that the results panel's ×
-   * lost the pane with no way back short of re-running; `minimized` is the
-   * whole of what × used to do, and it keeps its header strip, its tabs and its
-   * badge on the screen.
+   * What lives here: `state`, `tab`, the per-run failure list, the "these results
+   * are from an earlier run" flag, the Results row count for the tab badge, and the
+   * node the Details tab is showing. What does NOT live here: the result rows
+   * (result.js), the events list (events.js), the failure RENDERING
+   * (details.js's PEErrorDetails.build), and every focus/DOM effect (init.js).
    */
 
-  var HIDDEN = "hidden";
-  var MINIMIZED = "minimized";
   var OPEN = "open";
+  var COLLAPSED = "collapsed";
+  var DETAILS = "details";
   var RESULTS = "results";
   var ERRORS = "errors";
+  var EVENTS = "events";
+  var TABS = [DETAILS, RESULTS, ERRORS, EVENTS];
 
   /** Two failure records are the same event when node, code and message agree. */
   function failureKey(nodeId, record) {
@@ -34,19 +37,41 @@
 
   function createDock() {
     return {
-      state: HIDDEN,
-      tab: RESULTS,
-      /* [{ nodeId, record }] — newest LAST, one per failed node of this run. */
+      state: OPEN,
+      tab: DETAILS,
+      /* [{ key, nodeId, record }] — newest LAST, one per failed node of this run. */
       errors: [],
       /* True while the Results tab is showing a page from an EARLIER run. */
       resultsStale: false,
       /* Set once a run has delivered data_ready; drives resultsStale on re-execute. */
       hasResults: false,
+      /* The Results tab badge: the caller result's row count on success. */
+      resultsRows: null,
+      /* The node the Details tab is showing (null → the pane's empty state). */
+      detailsNodeId: null,
 
-      /* --- transitions (the §10 table, and nothing else) --------------------
-       * The template reads `state`, `tab` and `errors.length` DIRECTLY — no
-       * derived getters here, so an Alpine proxy has nothing to preserve and the
-       * node tests assert the same three fields the browser renders. */
+      /* --- transitions (the table, and nothing else) ----------------------------
+       * The template reads `state`, `tab`, `errors.length` and `resultsRows`
+       * DIRECTLY — no derived getters here, so an Alpine proxy has nothing to
+       * preserve and the node tests assert the same fields the browser renders. */
+
+      /**
+       * A node was selected (card tap, list row, the card's expand button, Enter):
+       * the Details tab fills with it and surfaces — the mock's select() calls
+       * showPane('details'), which also un-collapses the dock.
+       */
+      selectNode: function (nodeId) {
+        this.detailsNodeId = nodeId;
+        this.tab = DETAILS;
+        this.state = OPEN;
+        return this.state;
+      },
+
+      /** Tapping the canvas background clears the selection, not the tab. */
+      clearSelection: function () {
+        this.detailsNodeId = null;
+        return this.state;
+      },
 
       /** execute started: the run's failures are cleared; the state does not move. */
       executeStarted: function () {
@@ -55,25 +80,23 @@
         return this.state;
       },
 
-      /** data_ready: hidden opens on Results; an already-visible dock stays put. */
-      dataReady: function () {
+      /**
+       * data_ready: the Results badge takes the row count and the tab follows the
+       * data — unless a failure the user has not read yet owns the tab. A collapsed
+       * dock stays collapsed (065: the STATE is the user's).
+       */
+      dataReady: function (rowCount) {
         this.hasResults = true;
         this.resultsStale = false;
-        if (this.state === HIDDEN) {
-          this.state = OPEN;
-          this.tab = RESULTS;
-          return this.state;
-        }
-        // minimized / open: the STATE is the user's; the tab follows the data
-        // only while nothing failed — a failure the user has not read yet wins.
+        this.resultsRows = rowCount === undefined ? null : rowCount;
         if (this.errors.length === 0) this.tab = RESULTS;
         return this.state;
       },
 
       /**
        * node_failed. The FIRST failure of a run raises the dock onto Errors from
-       * hidden or minimized; every later one appends and moves the badge, leaving
-       * the state and the tab exactly where the user put them.
+       * collapsed and takes the tab; every later one appends and moves the badge,
+       * leaving the state and the tab exactly where the user put them (065, kept).
        */
       nodeFailed: function (nodeId, record) {
         var first = this.errors.length === 0;
@@ -92,39 +115,32 @@
             record: record || null,
           });
         }
-        if (first && (this.state === HIDDEN || this.state === MINIMIZED)) {
+        if (first) {
           this.state = OPEN;
           this.tab = ERRORS;
         }
         return this.state;
       },
 
-      /** The minimise button. Only an OPEN dock has anything to minimise. */
-      minimise: function () {
-        if (this.state === OPEN) this.state = MINIMIZED;
+      /** The chevron. One control, two directions — 065's minimise/restore pair. */
+      toggleCollapse: function () {
+        this.state = this.state === OPEN ? COLLAPSED : OPEN;
         return this.state;
       },
 
-      /** The restore button — the same control, flipped, on a minimised dock. */
-      restore: function () {
-        if (this.state === MINIMIZED) this.state = OPEN;
-        return this.state;
-      },
-
-      /** A tab click. From minimized it also restores; from hidden it is inert. */
+      /** A tab click. From collapsed it also restores; an unknown tab is inert. */
       selectTab: function (tab) {
-        if (tab !== RESULTS && tab !== ERRORS) return this.state;
-        if (this.state === HIDDEN) return this.state;
-        if (this.state === MINIMIZED) this.state = OPEN;
+        if (TABS.indexOf(tab) === -1) return this.state;
+        this.state = OPEN;
         this.tab = tab;
         return this.state;
       },
 
       /**
-       * Escape. Deliberately a NO-OP: Esc belongs to the node inspector (§C), and
-       * a dock that vanished on the key that closes the panel above it is the
-       * "where did my results go" defect in a second costume. Returns false so the
-       * a11y handler knows the key was not consumed here.
+       * Escape. Deliberately a NO-OP: with the inspector overlay gone there is no
+       * surface below the modal for Esc to own, and a dock that vanished on Esc is
+       * the "where did my results go" defect in a second costume (065, kept).
+       * Returns false so the a11y handler knows the key was not consumed here.
        */
       handleEscape: function () {
         return false;
@@ -132,7 +148,15 @@
     };
   }
 
-  var api = { createDock: createDock, HIDDEN: HIDDEN, MINIMIZED: MINIMIZED, OPEN: OPEN, RESULTS: RESULTS, ERRORS: ERRORS };
+  var api = {
+    createDock: createDock,
+    OPEN: OPEN,
+    COLLAPSED: COLLAPSED,
+    DETAILS: DETAILS,
+    RESULTS: RESULTS,
+    ERRORS: ERRORS,
+    EVENTS: EVENTS,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof window !== "undefined") window.PEDock = api;
 })();

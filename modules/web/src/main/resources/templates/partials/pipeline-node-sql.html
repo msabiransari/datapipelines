@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<!-- The node details panel's SQL section (pipeline-editor.md §8). Loaded by htmx.ajax
+<!-- The dock's Details tab SQL section (pipeline-editor.md §8). Loaded by htmx.ajax
      from init.js on selection change; one block per state the controller reports.
      Escaping is Thymeleaf's (th:text / th:attr) — never hand-rolled. -->
 <th:block th:switch="${state}">
@@ -9,7 +9,7 @@
     <div class="pe-sql-meta">
       <span class="ds-badge ds-badge-default" th:text="${dialect}">POSTGRES</span>
       <!-- §9.4: the reference is a PATH now (`acme/finance/monthly_revenue @ v3`). It stays
-           on ONE line in the narrow inspector and the full reference rides on `title`, so
+           on ONE line in the dock's Details pane and the full reference rides on `title`, so
            the truncated text is never the only copy of it. -->
       <a class="pe-link pe-path" th:href="@{/templates/editor(name=${templateId})}"
          th:title="${templateId} + ' @ v' + ${templateVersion}"
