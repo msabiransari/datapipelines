@@ -40,7 +40,12 @@
               th:text="'draft v' + ${draftVersion} + ' pending release'"
               title="A draft exists; release it from the editor to publish."></span>
         <span class="htmx-indicator ds-spinner" id="pipeline-detail-spinner" aria-hidden="true"></span>
-        <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open"
+        <!-- The editor is a full document load, never a boosted swap: its Alpine root
+             (x-data="pipelineEditor()") is initialised by alpine.min.js the moment the
+             swapped markup lands, racing the editor scripts that define it — every
+             binding then throws "pipelineEditor is not defined" and the page has no
+             Execute, no dock, no inspector (found live 2026-09-05, first walk after 076). -->
+        <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open" hx-boost="false"
            th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open in editor</a>
       </div>
     </header>
@@ -107,7 +112,7 @@
           </td>
           <td th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
           <td>
-            <a class="ds-button ds-button-ghost ds-button-sm"
+            <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false"
                th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>
           </td>
         </tr>

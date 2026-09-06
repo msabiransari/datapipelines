@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.StagingEngine
 import co.datapipelines.pipeline.TempdbSettings
 import co.datapipelines.typesystem.LogicalType
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -158,6 +159,19 @@ class PipelineExplorerRenderTest {
         html shouldContain "No pipelines yet"
         html shouldContain "MCP server"
         html shouldNotContain "Create Pipeline"
+    }
+
+    @Test
+    fun `every link into the pipeline editor is a full document load, never a boosted swap`() {
+        // The editor's Alpine root is initialised by alpine.min.js as soon as swapped markup
+        // lands, before the editor scripts that define pipelineEditor() have run: boosted
+        // entry renders a graph with no Execute, no dock and no inspector, and every binding
+        // throws. Found live on 2026-09-05, the first walk after 076 turned boost on.
+        val html = render("partials/pipeline-detail") { fillDetail() }
+
+        val editorLinks = Regex("""<a [^>]*href="/pipelines/[^"]+/editor"[^>]*>""").findAll(html).map { it.value }.toList()
+        editorLinks.size shouldBeGreaterThan 0
+        editorLinks.forEach { it shouldContain "hx-boost=\"false\"" }
     }
 
     @Test
