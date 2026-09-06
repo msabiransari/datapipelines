@@ -129,7 +129,8 @@ class VersionBackfillMigrationTest {
         // find one already present when it runs (JUnit order is not fixed).
         val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/third_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(Fixtures.pipeline(name = "test/third_legacy")), detail.bodyHash, owner)
+        val body = serializer.write(Fixtures.pipeline(name = "test/third_legacy"))
+        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner)
 
         val thrown =
             shouldThrow<org.springframework.dao.DuplicateKeyException> {

@@ -1245,7 +1245,9 @@ class PipelineRepositoryIntegrationTest {
         repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 2) shouldBe emptyList()
         // …and the any-version scan agrees: a soft-deleted pipeline can no longer be edited or
         // executed, so its stored pins are inert and excluded there too (the documented choice).
-        repository.findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql").map { it.pipelineName } shouldContainExactly listOf("p1", "p1", "p2")
+        repository
+            .findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql")
+            .map { it.pipelineName } shouldContainExactly listOf("p1", "p1", "p2")
     }
 
     /** The datasource reverse-scan's own join shape (current_version only), so the tests prove the miss mechanically. */

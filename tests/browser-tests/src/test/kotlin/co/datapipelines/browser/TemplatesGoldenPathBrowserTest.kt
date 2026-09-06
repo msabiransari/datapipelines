@@ -83,7 +83,13 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
 
         // Expanding the folder issues ONE request for ONE level (§9.1) — and THAT level has
         // the leaf, labelled by its last segment with the full path on `title` (§9.4).
-        page.waitForResponse("**/partials/templates?prefix=test**") { folder.click() }
+        // A PREDICATE, not a glob: Playwright treats `?` as a wildcard in a URL glob, so
+        // "**/partials/templates?prefix=test**" does not reliably match the query string the
+        // fragment renders (`?prefix=test&dialect=&type=`).
+        page.waitForResponse(
+            { response -> response.url().contains("/partials/templates") && response.url().contains("prefix=test") },
+            { folder.click() },
+        )
         val leafButton =
             page.locator(
                 "button.tpl-leaf",
@@ -95,7 +101,10 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
         leafButton.locator("span.tpl-label").getAttribute("title") shouldBe name
 
         // Selection swaps the versions pane into #template-detail — the two-pane contract.
-        page.waitForResponse("**/partials/templates/versions**") { leafButton.click() }
+        page.waitForResponse(
+            { response -> response.url().contains("/partials/templates/versions") },
+            { leafButton.click() },
+        )
         page.waitForSelector("#template-detail")
         page.locator("#template-detail").innerText() shouldContain leaf
     }
