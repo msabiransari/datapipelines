@@ -406,7 +406,11 @@
         evt.preventDefault();
         evt.stopPropagation();
         var id = btn.getAttribute("data-node-open");
-        if (self.editor && self.editor.openNodeDetails) self.editor.openNodeDetails(id, btn);
+        // Resolve the LIVE component, not the graph instance that wired this: a
+        // history-restored container keeps this listener (the flag above) while
+        // the component it closed over was destroyed and re-bound (080 §B).
+        var ed = (typeof window !== "undefined" && window.__peInstance) || self.editor;
+        if (ed && ed.openNodeDetails) ed.openNodeDetails(id, btn);
       });
     }
 

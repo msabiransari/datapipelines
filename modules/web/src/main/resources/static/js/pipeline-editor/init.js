@@ -826,8 +826,11 @@
     if (!pane || pane.__peEventsScrollWired) return;
     pane.__peEventsScrollWired = true;
     pane.addEventListener("scroll", function () {
+      // Read the LIVE component — a history-restored pane keeps this listener
+      // while the component that wired it was destroyed and re-bound (080 §B).
+      var ed = (typeof window !== "undefined" && window.__peInstance) || editor;
       var atBottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 20;
-      if (editor.eventsLog && editor.eventsLog.setPinned) editor.eventsLog.setPinned(!atBottom);
+      if (ed && ed.eventsLog && ed.eventsLog.setPinned) ed.eventsLog.setPinned(!atBottom);
     });
   }
 
