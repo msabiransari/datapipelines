@@ -63,7 +63,43 @@ class TypeScaleAuditTest {
         violations shouldBe emptyList()
     }
 
+    @Test
+    fun `every top-level screen wears the one page header`() {
+        // 079 §E: "one page header" is a claim about EVERY screen, and prose cannot enforce it.
+        // Before this, six screens each had their own header markup — one of them ran a
+        // subtitle the full width of a 2560px window, which is the readability problem
+        // `.app-page-sub`'s 70ch cap exists for (seen in this round's own screenshots).
+        //
+        // Scope: the screens a reader NAVIGATES to. Partials, the editors (065/080 own their
+        // own chrome), the auth and error pages (centred single cards, no page header by
+        // design) and the docs VIEWER (one document's own h1) are excluded, and the exclusion
+        // is spelled out rather than pattern-matched.
+        val screens =
+            templates.filterKeys { name ->
+                name in
+                    setOf(
+                        "dashboard.html",
+                        "pipelines/list.html",
+                        "templates/list.html",
+                        "datasources/list.html",
+                        "executions/list.html",
+                        "api/console.html",
+                        "promotion/index.html",
+                        "workspaces/index.html",
+                        "settings/index.html",
+                        "docs/index.html",
+                        "admin/users.html",
+                    )
+            }
+        // Non-vacuity: all eleven must be on the classpath, or the filter is auditing nothing.
+        screens.keys.size shouldBe EXPECTED_SCREENS
+
+        val missing = screens.filterValues { !it.contains("app-page-h") }.keys.sorted()
+        missing shouldBe emptyList()
+    }
+
     private companion object {
         val H1_TAG = Regex("""<h1\b[^>]*>""")
+        const val EXPECTED_SCREENS = 11
     }
 }

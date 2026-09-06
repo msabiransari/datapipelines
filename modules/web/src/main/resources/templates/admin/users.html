@@ -2,7 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <h1 class="ds-headline u-m0 u-mb-lg">User Management</h1>
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline u-m0">Users</h1>
+      <p class="app-page-sub">Every user across every workspace. Admin-ness is not a scope — it is this list.</p>
+    </div>
+  </div>
 
   <!-- Out-of-band target for one-time password notices (create / reset). -->
   <div id="admin-notice"></div>

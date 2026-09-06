@@ -2,11 +2,15 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div class="u-row u-between u-mb-lg">
-    <h1 class="ds-headline">Datasources</h1>
-    <th:block th:if="${canRegister}">
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Datasources</h1>
+      <p class="app-page-sub">The databases this workspace can query. Credentials are stored encrypted and are
+        never rendered back.</p>
+    </div>
+    <div class="app-page-actions" th:if="${canRegister}">
       <button class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
-    </th:block>
+    </div>
   </div>
 
   <div class="u-row-md u-mb-md">

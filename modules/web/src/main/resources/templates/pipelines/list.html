@@ -19,19 +19,21 @@
          exactly three rows — so the heading and the authoring note travel together; a fourth
          top-level child pushes the panes into an implicit row and hands the 1fr track to the
          search box, which renders as ~80px of dead space above the tree (measured at 1440). -->
-    <div>
+    <div class="app-page-h">
+      <div>
       <h1 class="ds-headline">Pipelines</h1>
 
       <!-- T108: the disabled "Create Pipeline" button and its "Phase 2 other worktree" tooltip
            are gone. It promised an affordance the server does not have, and a tooltip naming a
            worktree is an internal note leaking into the product. This says what is true today
            and where authoring actually happens. -->
-      <p class="tplx-authoring-note u-secondary u-text-sm u-m0 u-mt-xs">
+      <p class="tplx-authoring-note app-page-sub">
         Pipelines are authored through agents over the
         <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it
         a folder path like <code>nyc/mobility/revenue_by_borough</code>. Creating and editing
         pipelines in the browser is on the roadmap; this screen browses and opens them.
       </p>
+      </div>
     </div>
 
     <!-- SPA search control (ui-screens.md §4.3, the 028 §4.5 contract): it re-fetches ONLY the

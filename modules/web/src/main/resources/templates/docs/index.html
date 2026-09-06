@@ -3,10 +3,12 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div class="app-reading">
-  <div class="u-mb-lg">
-    <h1 class="ds-headline u-mb-xs">Documentation</h1>
-    <!-- 033: the docs ship in the jar — this index always matches the running version. -->
-    <p class="u-secondary u-text-sm">The operations manual and specifications for the version you are running.</p>
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Documentation</h1>
+      <!-- 033: the docs ship in the jar — this index always matches the running version. -->
+      <p class="app-page-sub">The operations manual and specifications for the version you are running.</p>
+    </div>
   </div>
 
   <section th:each="group : ${groups}" class="u-mb-lg">

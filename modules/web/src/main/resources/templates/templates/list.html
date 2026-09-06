@@ -16,11 +16,15 @@
        rendered INTO. -->
   <div class="tplx-page">
 
-    <div class="u-row u-between">
-      <h1 class="ds-headline">Templates</h1>
-      <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
+    <div class="app-page-h">
+      <div>
+        <h1 class="ds-headline">Templates</h1>
+        <p class="app-page-sub">Reusable SQL that pipelines pin by version. A template's folder is the first
+          segment of its name.</p>
+      </div>
+      <div class="app-page-actions" th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
         <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
-      </th:block>
+      </div>
     </div>
 
     <!-- Search, dialect and type address each other by ID (hx-include): a name-based include

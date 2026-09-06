@@ -2,8 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div class="u-flex u-items-center u-between u-mb-lg">
-    <h1 class="ds-headline">Workspaces</h1>
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Workspaces</h1>
+      <p class="app-page-sub">Every workspace you belong to. Pipelines, templates and datasources live in
+        exactly one.</p>
+    </div>
   </div>
 
   <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack
