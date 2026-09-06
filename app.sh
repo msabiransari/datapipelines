@@ -139,15 +139,24 @@ export IMAGE_TAG
 BUILDER_IMAGE="eclipse-temurin:21-jdk"
 GRADLE_CACHE="$PWD/.gradle-docker"
 
-# The env-file list, in precedence order (compose: later files win). Every verb uses
-# the same list so `--status` and `--stop` see exactly the stack `--start` created.
-COMPOSE=(docker compose -p "$COMPOSE_PROJECT"
-  -f deploy/compose.yml -f deploy/compose.local-build.yml
-  --env-file "$POSTURE_ENV")
-((DEMO_NYC || DEMO_TRADE)) && COMPOSE+=(--env-file "$DEMO_ENV")
-COMPOSE+=(--env-file "$SECRETS_ENV")
-((DEMO_NYC)) && COMPOSE+=(--profile demo-nyc)
-((DEMO_TRADE)) && COMPOSE+=(--profile demo-trade)
+# The env-file list, in precedence order (compose: later files win). Every verb uses the
+# same list so `--status` and `--stop` see exactly the stack `--start` created.
+#
+# A FUNCTION, not a one-shot assignment: deploy/secrets.env may not exist yet, and compose
+# errors outright on an `--env-file` that is missing. `--stop`/`--status` on a machine that
+# has never started anything must still work (they did before, via a `touch` of the demo
+# file), and `--start` must pick the file up AFTER scaffolding it — so start() re-assembles.
+assemble_compose() {
+  COMPOSE=(docker compose -p "$COMPOSE_PROJECT"
+    -f deploy/compose.yml -f deploy/compose.local-build.yml
+    --env-file "$POSTURE_ENV")
+  ((DEMO_NYC || DEMO_TRADE)) && COMPOSE+=(--env-file "$DEMO_ENV")
+  [[ -f $SECRETS_ENV ]] && COMPOSE+=(--env-file "$SECRETS_ENV")
+  ((DEMO_NYC)) && COMPOSE+=(--profile demo-nyc)
+  ((DEMO_TRADE)) && COMPOSE+=(--profile demo-trade)
+  return 0
+}
+assemble_compose
 
 # The variables the compose file interpolates that are NOT in any env file: the two
 # that ARE the invocation, and the ON markers the bootstrap lists are built from.
@@ -333,6 +342,7 @@ start() {
   local do_build=1
   [[ ${1:-} == --no-build ]] && do_build=0
   scaffold_secrets_env
+  assemble_compose # the file may have just been created; the list must carry it
   if ((do_build)); then
     build
   else
