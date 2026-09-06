@@ -1,12 +1,12 @@
 // Graph stylesheet and element-building coverage for
-// static/js/pipeline-editor/graph.js (031: graph design).
+// static/js/pipeline-editor/graph.js (031: graph design; 080 §A: the v2 canvas).
 //
 // Runs on Node's BUILT-IN runner (`node --test`), wired into Gradle by
 // modules/web's `editorJsTest` task — same harness as toast.test.mjs. graph.js
 // is an IIFE that exports {PipelineGraph, buildStylesheet, buildElements,
-// readDesignTokens, layoutOptions, pulseEnabled} via module.exports when
-// `window` is absent; these tests drive the PURE functions with sentinel
-// tokens, never the constructor (which calls getComputedStyle).
+// readDesignTokens, layoutOptions, pulseEnabled, clampFitZoom, ...} via
+// module.exports when `window` is absent; these tests drive the PURE functions
+// with sentinel tokens, never the constructor (which calls getComputedStyle).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,39 +31,33 @@ function styleFor(sheet, selector) {
 }
 
 // Distinct sentinel values per key: a token the stylesheet forgets to read then
-// asserts as undefined === undefined and the test passes vacuously. Task 2 adds
-// selection/state keys here — keep every value unique.
+// asserts as undefined === undefined and the test passes vacuously. The keys are
+// the 080 canvas token set (readDesignTokens); keep every value unique.
 const TOKENS = {
-  nodeSurface: "#f01", nodeBorder: "#f02", nodeLabelText: "#f03",
-  nodeSelectedRing: "#f04", nodeSelectedHalo: "#f05",
-  nodeRunningAccent: "#f06", nodeSuccessAccent: "#f07",
-  nodeFailedAccent: "#f08", nodeAbortedAccent: "#f09",
-  edgeIdleStroke: "#f0a", edgeActiveStroke: "#f0b",
+  brand: "#f01", brandSoft: "#f02",
+  edgeIdle: "#f03", edgeActive: "#f04", edgeDone: "#f05",
+  nodeSurface: "#f06", nodeBorder: "#f07",
+  nodeSuccess: "#f08", nodeFailed: "#f09", nodeAborted: "#f0a",
+  edgeLabelText: "#f0b", edgeLabelBg: "#f0c",
+  cardW: 236, cardH: 148, cardRadius: "12px",
 };
 
-test("the node is a CARD sized for five lines of facts — the text is the HTML overlay, not canvas text", () => {
+test("the node is the mock's CARD — 236px, chrome only, the text is the HTML overlay", () => {
   const sheet = loadGraph().buildStylesheet(TOKENS);
   const style = styleFor(sheet, "node");
-  // 059 (2026-09-02) reverses the 2026-08-31 label-below contract: the facts render
-  // INSIDE the box as an HTML card (cytoscape-node-html-label), because Cytoscape
-  // text cannot carry icons, per-line styling or the run line. The canvas box carries
-  // the chrome only — so it must NOT emit a canvas label to fight the overlay.
+  // The canvas box carries the chrome only — it must NOT emit a canvas label to
+  // fight the HTML overlay (059's contract, kept).
   assert.equal(style["label"], undefined, "no canvas label — the HTML overlay owns the text");
-  assert.equal(style["text-valign"], undefined);
-  assert.ok(style.width >= 240, "a card wide enough for the longest line at body size");
-  assert.ok(style.height >= 140, "a card tall enough for five lines without shrinking type");
-  // The 80x40 box the 031 redesign replaced, and the 120x44 label-below box after it.
-  assert.notEqual(style.width, 80);
-  assert.notEqual(style.height, 40);
-  assert.notEqual(style.width, 120);
-  assert.notEqual(style.height, 44);
+  assert.equal(style.width, 236, "the mock's card width");
+  assert.equal(style.height, 148);
+  assert.equal(style["corner-radius"], "12px", "the mock's --r-lg maps to the design system's --radius-lg");
+  assert.equal(style["border-color"], TOKENS.nodeBorder);
 });
 
 test("a long display name survives buildElements un-truncated", () => {
   const name = "a_very_long_node_display_name_beyond_twenty";
   const els = loadGraph().buildElements([{ id: "n1", display_name: name, type: "DQL" }]);
-  assert.equal(els[0].data.label, name);      // truncation is now a stylesheet concern
-  assert.ok(!els[0].data.label.includes("..."));
+  assert.equal(els[0].data.id, "n1"); // the card renders the id; truncation is a stylesheet concern
 });
 
 test("buildElements emits a type class per node type", () => {
@@ -105,6 +99,10 @@ test("a PIPELINE node with an explicit caller output is marked (contract §4.9) 
   assert.ok(!/\bcaller\b/.test(els[2].classes));
   assert.ok(!/\bcaller\b/.test(els[3].classes));
   assert.match(els[4].classes, /\bcaller\b/);
+  // 080 §A: the class stays (the dock and tests read it) but the canvas's
+  // double-border caller style is retired — the mock's caller card carries no marker.
+  const sheet = loadGraph().buildStylesheet(TOKENS);
+  assert.equal(sheet.find((e) => e.selector === "node.caller"), undefined, "no caller chrome on the v2 canvas");
 });
 
 test("edges are still built from depends_on", () => {
@@ -116,36 +114,69 @@ test("edges are still built from depends_on", () => {
   assert.deepEqual([edges[0].data.source, edges[0].data.target], ["a", "b"]);
 });
 
-test("a selected node is unmistakable — ring plus halo", () => {
+test("selection is the mock's ring: brand border over a brand-soft underlay", () => {
   const style = styleFor(loadGraph().buildStylesheet(TOKENS), "node:selected");
-  assert.ok(style["border-width"] >= 3);
-  assert.equal(style["border-color"], TOKENS.nodeSelectedRing);
-  // underlay, not overlay: an overlay paints over the node and dims its label.
-  assert.ok(style["underlay-opacity"] > 0);
-  assert.ok(style["underlay-padding"] > 0);
+  assert.equal(style["border-color"], TOKENS.brand);
+  // underlay, not overlay: an overlay paints over the node and dims its label. The
+  // underlay at full opacity and 3px padding is the `0 0 0 3px var(--brand-soft)` ring.
+  assert.equal(style["underlay-color"], TOKENS.brandSoft);
+  assert.equal(style["underlay-opacity"], 1);
+  assert.equal(style["underlay-padding"], 3);
 });
 
 test("states are accents, not full fills", () => {
   const sheet = loadGraph().buildStylesheet(TOKENS);
   const accent = {
-    running: TOKENS.nodeRunningAccent, success: TOKENS.nodeSuccessAccent,
-    failed: TOKENS.nodeFailedAccent, aborted: TOKENS.nodeAbortedAccent,
+    running: TOKENS.brand, success: TOKENS.nodeSuccess,
+    failed: TOKENS.nodeFailed, aborted: TOKENS.nodeAborted,
   };
   Object.keys(accent).forEach((s) => {
     const style = styleFor(sheet, "node." + s);
     assert.equal(style["background-color"], undefined,
       `state ${s} must not repaint the card background`);
-    // Assert the VALUE, not merely presence: a border-color left on the old
-    // --node-*-bg token would satisfy a truthiness check and change nothing.
+    // Assert the VALUE, not merely presence.
     assert.equal(style["border-color"], accent[s]);
   });
   assert.equal(styleFor(sheet, "node.aborted").opacity, 0.5);   // §6.2 already required this
 });
 
-test("the pulse is gated on the reduced-motion preference", () => {
+test("the edge's three states are the mock's: --edge at rest, --edge-active dashed while the target runs, --edge-done after", () => {
+  const sheet = loadGraph().buildStylesheet(TOKENS);
+  const idle = styleFor(sheet, "edge");
+  assert.equal(idle["line-color"], TOKENS.edgeIdle);
+  assert.equal(idle.width, 2, "the mock's 2px stroke");
+
+  const active = styleFor(sheet, "edge.active");
+  assert.equal(active["line-color"], TOKENS.edgeActive);
+  assert.equal(active["line-style"], "dashed");
+  assert.deepEqual(active["line-dash-pattern"], [6, 8], "the mock's dash — the flow animation steps the offset");
+
+  const done = styleFor(sheet, "edge.done");
+  assert.equal(done["line-color"], TOKENS.edgeDone);
+  assert.equal(done["target-arrow-color"], TOKENS.edgeDone);
+});
+
+test("row counts ride the edge behind the `rows` class — small mono on a page-coloured backing", () => {
+  const style = styleFor(loadGraph().buildStylesheet(TOKENS), "edge.rows");
+  assert.equal(style.label, "data(rowLabel)");
+  assert.equal(style["font-size"], 11, "the mock's small mono label");
+  assert.equal(style.color, TOKENS.edgeLabelText);
+  assert.equal(style["text-background-color"], TOKENS.edgeLabelBg, "the line must not show through the digits");
+});
+
+test("the pulse/flow gate honours the reduced-motion preference", () => {
   const graph = loadGraph();
   assert.equal(graph.pulseEnabled({ matches: true }), false);   // reduce → still
   assert.equal(graph.pulseEnabled({ matches: false }), true);
+});
+
+test("fit never zooms below the 0.75 floor and never IN past the 1.0 ceiling", () => {
+  const g = loadGraph();
+  assert.equal(g.FIT_MIN_ZOOM, 0.75, "the 059 floor keeps three nodes filling the pane");
+  assert.equal(g.FIT_MAX_ZOOM, 1.0, "the 080 ceiling — a one-node pipeline used to fit to 3x");
+  assert.equal(g.clampFitZoom(0.3), 0.75, "below the floor clamps UP");
+  assert.equal(g.clampFitZoom(2.4), 1.0, "above the ceiling clamps DOWN — fit never zooms in");
+  assert.equal(g.clampFitZoom(0.85), 0.85, "between floor and ceiling, fit is untouched");
 });
 
 test("the layout gives the graph room, and counts labels as part of a node", () => {

@@ -1,3 +1,36 @@
+/* app tokens (080): node-type accents
+ * The editor-v2 canvas (mock 2026-09-05-editor-canvas-v2.html) runs on these. The mock
+ * declares light AND dark literals; the app themes by swapping the design-system
+ * stylesheet, which has no per-theme hook an app stylesheet could key on — so every
+ * token the mock itself derived from the design system BRIDGES to it (and matches the
+ * mock's hex exactly in both themes: accent-info/-bg = dql, accent-warning/-bg = dml,
+ * accent-success/-bg = pipeline, text-link = brand, accent-success = edge-done), and
+ * the rest are color-mix bridges off theme tokens, which puts every one of the nine
+ * themes within a few percent of the mock instead of light/dark alone. The two hues
+ * with no design-system counterpart (ddl slate, calc violet) are category colours and
+ * stay constant: the icon and its tile travel as a pair whose internal contrast
+ * (7.0:1 and 5.9:1) holds on every theme's card surface. 079 (shell v2) is told this
+ * block exists and must not redeclare it. */
+:root {
+  --type-dql: var(--accent-info);
+  --type-dql-bg: var(--accent-info-bg);
+  --type-dml: var(--accent-warning);
+  --type-dml-bg: var(--accent-warning-bg);
+  --type-ddl: #475569;
+  --type-ddl-bg: #e2e8f0;
+  --type-pipeline: var(--accent-success);
+  --type-pipeline-bg: var(--accent-success-bg);
+  --type-calc: #7c3aed;
+  --type-calc-bg: #ede9fe;
+  --brand: var(--text-link);
+  --brand-soft: color-mix(in srgb, var(--brand) 16%, var(--surface-default));
+  --border-faint: color-mix(in srgb, var(--border-subtle) 40%, var(--surface-default));
+  --grid-dot: color-mix(in srgb, var(--text-muted) 22%, var(--surface-page));
+  --edge: color-mix(in srgb, var(--text-muted) 65%, var(--surface-page));
+  --edge-active: var(--brand);
+  --edge-done: var(--accent-success);
+}
+
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
 :root {
   --app-sidebar-width: 280px;
