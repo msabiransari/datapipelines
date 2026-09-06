@@ -3,7 +3,7 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div style="margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);">Dashboard</h1>
+    <h1 class="ds-headline" style="margin-bottom: var(--gap-xs);">Dashboard</h1>
     <p style="color: var(--text-secondary); font-size: var(--text-sm);">Overview of your data pipelines</p>
   </div>
 
@@ -20,7 +20,7 @@
   </div>
 
   <div style="margin-top: var(--gap-lg);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Recent Executions</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Recent Executions</h2>
     <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
       <div class="ds-skeleton ds-skeleton-table-row"></div>
       <div class="ds-skeleton ds-skeleton-table-row"></div>

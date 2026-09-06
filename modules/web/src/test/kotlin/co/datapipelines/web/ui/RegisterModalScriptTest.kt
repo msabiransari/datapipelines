@@ -30,6 +30,15 @@ class RegisterModalScriptTest {
     }
 
     @Test
+    fun `the modal script arms immediately after a boosted swap`() {
+        // 076 §D: a DOMContentLoaded-only wrapper never fires when the screen arrives in
+        // a boosted htmx swap (the event has long fired) — the readyState guard is what
+        // keeps the refusal listener alive on the boosted path.
+        template shouldContain "document.readyState === 'loading'"
+        template shouldContain "initRegisterModal()"
+    }
+
+    @Test
     fun `the register form does not rely on the unloaded response-targets extension`() {
         template shouldNotContain "hx-target-error="
     }

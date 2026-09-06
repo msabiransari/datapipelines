@@ -26,11 +26,12 @@
   --node-aborted-accent: var(--accent-warning, #f59e0b);
 }
 
-/* The body canvas, re-asserted AFTER Bootstrap (this file loads last, §3.4): Bootstrap's
-   reboot declares body { background-color: var(--bs-body-bg); color: var(--bs-body-color) }
-   — concrete white — and had it been the final sheet the page would paint white under
-   every theme, dark included (024 T40 cause 2). base.css already paints <html> with these
-   tokens; this restores what the reboot covers. */
+/* The body canvas. base.css paints <html> with these tokens but leaves <body> to
+   inherit; this rule paints the body itself, so the canvas survives any reset
+   layered between the design system and this file (this file loads last, §3.4).
+   Bootstrap's reboot used to be that reset — it painted <body> concrete white
+   under every theme (024 T40 cause 2). Bootstrap is gone (076 §C); the rule
+   stays as the standing guard over whatever ships hereafter. */
 body {
   background-color: var(--surface-page);
   color: var(--text-primary);
@@ -41,15 +42,14 @@ body {
    design-system-starter (scripts/sync-design-system.sh) — do NOT edit vendor
    files; app-level chrome and component polish layer on top here.
    --------------------------------------------------------------------------- */
-:root {
-  /* Wide-app canvas: --container-xl (1200px) wastes half a desktop monitor. */
-  --app-content-max: 1600px;
-}
 
+/* 076 §A — one width policy (ui-screens.md §3.x "Shell and width policy").
+   EVERY app screen is full-bleed: the nav and <main> span the viewport minus
+   one gutter (the editor's 065 opt-in became the rule; --app-content-max and
+   .app-main-bleed are gone). Reading content — docs prose, settings cards,
+   empty states, forms — gets .app-reading instead of a different container. */
 .app-container {
   width: 100%;
-  max-width: var(--app-content-max);
-  margin-inline: auto;
   padding-inline: var(--gap-lg);
 }
 
@@ -57,15 +57,77 @@ body {
   padding-block: var(--gap-lg);
 }
 
-/* 065 §A — full-bleed pages. The graph editor is the one surface whose value
-   scales with width; on a 2000px viewport the 1600px cap left it ~1450px and two
-   dead margins. Opt-in per page (`fullBleed` model attribute → th:classappend in
-   layouts/default.html), so lists, settings and docs keep the cap that suits
-   prose. The nav bar keeps its own .app-container cap — a nav wider than its
-   content reads as broken. */
-.app-main-bleed {
-  max-width: none;
-  padding-inline: var(--gap-md);
+/* The reading column: prose and cards sit in a 90ch measure, LEFT-aligned
+   inside the full-bleed main — never centred, never a second container.
+   Tables and trees never use it. */
+.app-reading {
+  max-width: 90ch;
+}
+
+/* Stacked page sections (settings pages' former inline grid). */
+.app-stack {
+  display: grid;
+  gap: var(--gap-lg);
+}
+
+/* Dashboard stat cards (the former inline grid-template-columns). */
+.app-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--gap-md);
+}
+
+/* Centred single-card pages (login, error pages). */
+.app-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+}
+
+.app-card-auth {
+  max-width: 26rem;
+  width: 100%;
+}
+
+/* Hand-rolled modals (register datasource, create template, create API key):
+   the width the inline max-width used to carry, on tokens. */
+.app-modal {
+  position: relative;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  padding: var(--gap-lg);
+}
+
+.app-modal-sm {
+  max-width: 30rem;
+}
+
+.app-modal-md {
+  max-width: 32rem;
+}
+
+.app-modal-lg {
+  max-width: 35rem;
+}
+
+/* List-page search boxes (pipelines, templates, datasources). */
+.app-search-input {
+  flex: 1 1 15rem;
+  min-width: 11rem;
+  max-width: 22rem;
+}
+
+/* Inline-width form inputs (admin user forms). */
+.app-input-inline {
+  flex: 1;
+  max-width: 17.5rem;
+}
+
+.app-input-inline-lg {
+  flex: 1;
+  max-width: 20rem;
 }
 
 /* Sticky top nav — one bordered bar, not a floating ds-surface card. */
@@ -175,6 +237,10 @@ body {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-default);
+  /* 076 §D: every table aligns figures — dates and counts share a column's rhythm.
+     `.num` cells keep their mono face on top of this; dates render proportional
+     but tabular, so a column of timestamps still scans. */
+  font-variant-numeric: tabular-nums;
 }
 
 .ds-table thead th {
@@ -198,4 +264,114 @@ body {
 
 .ds-table tbody tr:last-child td:last-child {
   border-bottom-right-radius: calc(var(--radius-md) - 1px);
+}
+
+/* ---------------------------------------------------------------------------
+   076 §B — boosted-navigation progress bar (layouts/default.html #app-progress,
+   shell.js toggles .active off htmx:beforeRequest/htmx:afterSettle). The bar is
+   the swap's "loading" signal: boosted swaps must not flash the document, so
+   this does the talking instead — 2px under the sticky nav, tokens only.
+   --------------------------------------------------------------------------- */
+.app-progress {
+  position: fixed;
+  top: calc(var(--header-height) + var(--space-px));
+  left: 0;
+  right: 0;
+  height: calc(var(--space-px) * 2);
+  z-index: var(--z-fixed);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.app-progress.active {
+  opacity: 1;
+}
+
+.app-progress::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 33%;
+  background: var(--accent-primary);
+  animation: app-progress-slide var(--duration-slower) var(--ease-linear) infinite;
+}
+
+@keyframes app-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/* Reduced motion: the show/hide stays (it is information, not decoration);
+   the slide goes. */
+@media (prefers-reduced-motion: reduce) {
+  .app-progress::before {
+    animation: none;
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   076 §C — element defaults Bootstrap's reboot used to provide.
+
+   Bootstrap 5.3.8 is removed from the app; base.css zeroes margins/padding
+   globally but styles no elements. A grounded sweep of everything rendering
+   inside .app-main (pages AND the partials htmx swaps into it) found these
+   bare elements had been leaning on the reboot:
+
+   - <code> — unclassed inline code on the promotion screen, pipelines list
+     and tree, workspaces, and the node inspector's pe-value cells. The reboot
+     made it small monospace on a tinted chip; without it the code rendered in
+     body sans. Restored below, mirroring the docs.css / .ds-mono idiom.
+   - <pre> — every <pre> rendered today carries a class (.pe-sql, .pe-error-*,
+     .te-preview-pane) or inline styles, so those win by specificity; the rule
+     below is the standing default for any future bare <pre>.
+   - <strong> / <small> — <strong> appears unclassed on the promotion screen;
+     <small> is not rendered anywhere yet. Without Bootstrap both fall back to
+     the UA stylesheet (bolder / smaller); the rules below pin them to tokens
+     instead of browser defaults.
+
+   Deliberately NOT restored — the sweep showed nothing relying on them:
+   - h1-h6 / p margins: every app-chrome heading and paragraph carries a ds-*
+     class, an inline margin, or a rule in pipeline-editor.css /
+     template-editor.css (.te-panel-head h2 and .pe-modal-header h2 already
+     set margin:0; the modal-body and expired-card <p>s sit inside padded
+     containers, so the reboot's bottom margin was invisible there).
+   - dl / blockquote / bare tables: only rendered markdown emits those, and
+     markdown lands in .doc-body, which docs.css styles in full.
+   --------------------------------------------------------------------------- */
+.app-main code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--gap-xs);
+}
+
+.app-main pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--surface-inset);
+  border-radius: var(--radius-md);
+  padding: var(--gap-md);
+  overflow-x: auto;
+  margin-bottom: var(--gap-md);
+}
+
+/* Inline-code chip must not double-paint inside a code block. */
+.app-main pre code {
+  background: none;
+  padding: 0;
+}
+
+.app-main strong {
+  font-weight: var(--weight-semibold);
+}
+
+.app-main small {
+  font-size: var(--text-xs);
 }

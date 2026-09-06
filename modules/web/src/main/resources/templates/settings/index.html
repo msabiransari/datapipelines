@@ -2,12 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0 0 var(--gap-lg) 0">Settings</h1>
+  <h1 class="ds-headline" style="margin:0 0 var(--gap-lg) 0">Settings</h1>
 
-  <div style="display:grid;grid-template-columns:1fr;gap:var(--gap-lg);max-width:640px">
+  <div class="app-reading app-stack">
 
     <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Profile</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Profile</h2>
       <div style="display:flex;align-items:center;gap:var(--gap-md);margin-bottom:var(--gap-md)">
         <th:block th:if="${user?.profilePictureUrl != null}">
           <img th:src="${user.profilePictureUrl}" alt="Avatar" style="width:48px;height:48px;border-radius:50%;object-fit:cover">
@@ -27,7 +27,7 @@
     </div>
 
     <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Appearance</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Appearance</h2>
       <div style="display:flex;align-items:center;gap:var(--gap-sm)">
         <label for="themeSelect" style="color:var(--text-secondary);font-size:var(--text-sm);white-space:nowrap">Theme</label>
         <!-- Shape B (§5.1): no content target — the response is only the OOB stylesheet
@@ -43,7 +43,7 @@
     </div>
 
     <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Session</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Session</h2>
       <div style="font-size:var(--text-sm)">
         <div style="display:flex;justify-content:space-between;padding:var(--gap-xs) 0;border-bottom:1px solid var(--border-default)">
           <span style="color:var(--text-secondary)">Scopes</span>
@@ -61,13 +61,13 @@
     </div>
 
     <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Password</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Password</h2>
       <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Change your local password, or see which sign-in method your account uses.</p>
       <a th:href="@{/settings/password}" class="ds-button ds-button-secondary">Change password</a>
     </div>
 
     <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">API Keys</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">API Keys</h2>
       <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Keys authenticate agents against the MCP endpoint and REST API. Each key is pinned to one workspace and carries its own scopes (read, execute, author).</p>
       <a th:href="@{/settings/api-keys}" class="ds-button ds-button-secondary">Manage API keys</a>
     </div>

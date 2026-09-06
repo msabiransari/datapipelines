@@ -17,7 +17,7 @@
   <div class="te-page">
   <div style="display:flex;align-items:center;justify-content:space-between">
     <div>
-      <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
+      <h1 class="ds-headline" style="margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
       <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0"
          th:text="'ID: ' + ${template?.id ?: '—'}" th:title="${template?.id}">Template ID</p>
       <!-- §9.3: `type` is a create-time input and IMMUTABLE afterwards (§5.3), so it renders

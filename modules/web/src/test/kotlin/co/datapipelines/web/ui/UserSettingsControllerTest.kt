@@ -178,6 +178,8 @@ class UserSettingsControllerTest {
         // but htmx never swaps 4xx, so the screen owns its error path explicitly.
         template shouldContain "htmx:responseError"
         template shouldContain "password-change-result"
+        // 076 §D: armed via the readyState guard so the listener survives a boosted swap.
+        template shouldContain "document.readyState === 'loading'"
     }
 
     @Test

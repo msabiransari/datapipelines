@@ -14,6 +14,10 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.web.TestRepoFiles
+import co.datapipelines.web.ui.site.SitePages
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -56,6 +60,72 @@ class WebsiteFactsGuardTest {
             { beanCount shouldBe specCount },
         )
     }
+
+    /**
+     * 076 — the demo pipeline names the site QUOTES are derived, never transcribed: every
+     * name mentioned by the homepage, the federated-query page and the engine pages' `demo`
+     * facts must be one of the pipelines the shipped demo content seeds
+     * (`scripts/sample-data/content/examples.json` and
+     * `scripts/sample-data-trade/content/examples.json` — what `./app.sh --start --demo-nyc`
+     * and `--demo-trade` load). The 067 folder-named rename left the site quoting the old
+     * flat names; this guard is what makes that the last time.
+     *
+     * Extraction, same regex-over-source style as [renderedSiteCount]:
+     * - Demo names: the `"name"` of each `"pipelines"` entry in both JSON files, anchored on
+     *   the preceding `"schema_version"` so nothing else named "name" is collected.
+     * - Site mentions: every lowercase-underscore token in the two template SOURCES (read
+     *   from disk via [TestRepoFiles], never the build output) whose LAST `/`-separated
+     *   segment equals a demo leaf name. A full path (`nyc/mobility/revenue_by_borough`)
+     *   matches on its leaf; a flat regression (`revenue_by_borough`) matches too — and then
+     *   fails the membership assertion, which is the point. The corollary: site prose must
+     *   quote demo pipelines by their full path, because a bare leaf segment is treated as a
+     *   pipeline mention.
+     * - Engine facts: [SitePages.ENGINES]' non-null `demo` fields, read off the registry
+     *   itself rather than re-parsed from source.
+     */
+    @Test
+    fun `every demo pipeline name the site quotes is a pipeline the demo content ships`() {
+        val demoNames = demoPipelineNames()
+        val leafNames = demoNames.map { it.substringAfterLast('/') }.toSet()
+
+        val indexMentions = quotedPipelineMentions(SITE_INDEX, leafNames)
+        val federatedMentions = quotedPipelineMentions(SITE_FEDERATED_QUERY, leafNames)
+        val engineDemos = SitePages.ENGINES.mapNotNull { it.demo }
+
+        assertAll(
+            // Non-vacuity first: an extractor that silently found nothing must not "agree".
+            { demoNames.size shouldBeGreaterThan 3 },
+            { indexMentions.shouldNotBeEmpty() },
+            { federatedMentions.shouldNotBeEmpty() },
+            { engineDemos.shouldNotBeEmpty() },
+            {
+                (indexMentions + federatedMentions + engineDemos).forEach { name ->
+                    demoNames shouldContain name
+                }
+            },
+        )
+    }
+
+    /** The pipeline names of both demo families, parsed from the content files themselves. */
+    private fun demoPipelineNames(): Set<String> =
+        listOf(DEMO_NYC, DEMO_TRADE)
+            .flatMap { path ->
+                PIPELINE_NAME
+                    .findAll(TestRepoFiles.read(path))
+                    .map { it.groupValues[1] }
+                    .toList()
+            }.toSet()
+
+    /** Tokens in [relativePath] whose last segment is a demo leaf — the page's pipeline mentions. */
+    private fun quotedPipelineMentions(
+        relativePath: String,
+        leafNames: Set<String>,
+    ): Set<String> =
+        NAME_TOKEN
+            .findAll(TestRepoFiles.read(relativePath))
+            .map { it.value }
+            .filter { it.substringAfterLast('/') in leafNames }
+            .toSet()
 
     /** The count a visitor reads off `/`, extracted from the rendered page. */
     private fun renderedSiteCount(): Int {
@@ -132,5 +202,16 @@ class WebsiteFactsGuardTest {
 
     private companion object {
         val SITE_COUNT = Regex("""<span>(\d+)</span> tools cover the full lifecycle""")
+
+        const val SITE_INDEX = "modules/web/src/main/resources/templates/site/index.html"
+        const val SITE_FEDERATED_QUERY = "modules/web/src/main/resources/templates/site/federated-query.html"
+        const val DEMO_NYC = "scripts/sample-data/content/examples.json"
+        const val DEMO_TRADE = "scripts/sample-data-trade/content/examples.json"
+
+        /** A `"pipelines"` entry's name — anchored on the schema version that precedes it. */
+        val PIPELINE_NAME = Regex(""""schema_version":\s*\d+,\s*"name":\s*"([^"]+)"""")
+
+        /** Lowercase-underscore words, `/`-joined or bare — the shape every pipeline name has. */
+        val NAME_TOKEN = Regex("""[a-z0-9_]+(?:/[a-z0-9_]+)*""")
     }
 }

@@ -48,7 +48,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.slf4j.api)
 
-    runtimeOnly(libs.webjars.bootstrap)
     runtimeOnly(libs.webjars.htmx)
 
     // --- Tests -------------------------------------------------------------------

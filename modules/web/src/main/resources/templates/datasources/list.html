@@ -3,7 +3,7 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Datasources</h1>
+    <h1 class="ds-headline">Datasources</h1>
     <th:block th:if="${canRegister}">
       <button class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
     </th:block>
@@ -21,7 +21,8 @@
            hx-trigger="input changed delay:300ms, search"
            hx-include="#ds-filter-dialect"
            hx-indicator="#ds-filter-spinner"
-           style="flex: 1; padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); max-width: 360px;">
+           class="app-search-input"
+           style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm);">
     <select id="ds-filter-dialect" name="dialect"
             th:attr="hx-get=@{/partials/datasources}, hx-target='#datasource-list-wrapper', hx-swap='outerHTML'"
             hx-trigger="change"
@@ -44,9 +45,9 @@
   <div th:replace="~{partials/datasources :: fragment}"></div>
 
   <div id="register-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
-    <div class="ds-card" style="max-width:520px;width:100%;padding:var(--gap-lg);position:relative;max-height:90vh;overflow:auto;">
+    <div class="ds-card app-modal app-modal-md">
       <button class="ds-button ds-button-ghost ds-button-sm" onclick="hideRegisterModal()" style="position:absolute;top:var(--gap-sm);right:var(--gap-sm);font-size:var(--text-xl)">&times;</button>
-      <h2 style="font-size:var(--text-lg);font-weight:var(--weight-semibold);margin:0 0 var(--gap-md) 0">Register Datasource</h2>
+      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Register Datasource</h2>
       <form th:attr="hx-post=@{/partials/datasources}"
             hx-target="#register-result"
             hx-swap="innerHTML">
@@ -107,7 +108,9 @@
     function hideRegisterModal() {
       document.getElementById('register-modal').style.display = 'none';
     }
-    document.addEventListener('DOMContentLoaded', function() {
+    // 076 §D: arm immediately when this fragment arrives in a boosted swap
+    // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
+    var initRegisterModal = function() {
       var result = document.getElementById('register-result');
 
       // Refusals arrive as 4xx and htmx does not swap those. The layout now carries
@@ -140,7 +143,12 @@
         }
       });
       if (result) observer.observe(result, {childList: true, subtree: true});
-    });
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initRegisterModal);
+    } else {
+      initRegisterModal();
+    }
   </script>
 </th:block>
 </html>

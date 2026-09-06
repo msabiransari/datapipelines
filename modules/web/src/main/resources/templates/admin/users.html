@@ -2,7 +2,7 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin:0 0 var(--gap-lg) 0">User Management</h1>
+  <h1 class="ds-headline" style="margin:0 0 var(--gap-lg) 0">User Management</h1>
 
   <!-- Out-of-band target for one-time password notices (create / reset). -->
   <div id="admin-notice"></div>
@@ -12,20 +12,20 @@
         hx-target="#user-table-body"
         hx-swap="afterbegin"
         style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
-    <input type="email" name="email" class="ds-input" placeholder="new-user@example.com" required style="flex:1;max-width:280px">
-    <input type="text" name="displayName" class="ds-input" placeholder="Display name (optional)" style="flex:1;max-width:220px">
+    <input type="email" name="email" class="ds-input app-input-inline" placeholder="new-user@example.com" required>
+    <input type="text" name="displayName" class="ds-input app-input-inline" placeholder="Display name (optional)">
     <button type="submit" class="ds-button ds-button-primary ds-button-sm">Create local user</button>
     <span style="color:var(--text-secondary);font-size:var(--text-xs)">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
   </form>
 
   <div style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
-    <input type="text" id="userSearch" class="ds-input" placeholder="Search by email or name" style="flex:1;max-width:320px"
+    <input type="text" id="userSearch" class="ds-input app-input-inline-lg" placeholder="Search by email or name"
            hx-get="/partials/admin/users"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#user-table-body"
            hx-swap="innerHTML"
            name="q">
-    <span class="htmx-indicator" style="color:var(--text-secondary);font-size:var(--text-sm)">Searching...</span>
+    <span class="htmx-indicator ds-spinner" aria-hidden="true"></span>
   </div>
 
   <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
@@ -42,16 +42,26 @@
       </tr>
     </thead>
     <tbody id="user-table-body">
-      <tr><td colspan="7" style="padding:var(--gap-md);text-align:center;color:var(--text-secondary);font-size:var(--text-sm)">
-        <span class="htmx-indicator">Loading users...</span>
-      </td></tr>
+      <!-- The load placeholder is what the dashboard skeletons made the house idiom
+           (025 B2): real shimmer rows, not a "Loading..." caption. Replaced whole by the
+           htmx.ajax load below. -->
+      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
     </tbody>
   </table>
 
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    // 076 §B: run immediately when this fragment arrives in a boosted swap
+    // (DOMContentLoaded has long fired); arm the listener only on a cold parse.
+    var loadUsers = function() {
       htmx.ajax('GET', '/partials/admin/users?offset=0&limit=20', {target: '#user-table-body', swap: 'innerHTML'});
-    });
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadUsers);
+    } else {
+      loadUsers();
+    }
   </script>
 </th:block>
 </html>

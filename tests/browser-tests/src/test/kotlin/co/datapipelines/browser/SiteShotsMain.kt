@@ -12,6 +12,7 @@ import com.microsoft.playwright.options.WaitForSelectorState
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 
 /**
  * `./gradlew siteShots` — the marketing site's screenshots, produced by a SCRIPT (070 §C).
@@ -50,19 +51,62 @@ import java.nio.file.Paths
  * ("2 minutes ago") re-renders differently on every run and would make each re-run a diff.
  * Run it twice and the PNGs are byte-identical; that property is the point, and the round
  * that added this task proved it rather than asserting it.
+ *
+ * ## The `app` set (076 §E)
+ *
+ * `-PshotsSet=app` skips the marketing list and instead photographs every top-level screen
+ * (/dashboard through /admin/users) at BOTH 1440x900 and 2560x1440, in light AND dark — the
+ * dark pass driven through the settings theme select (the control a user has), never an
+ * emulation, and the account put back on light afterwards so a later `site` run's assertion
+ * still holds. One Playwright video of a full boosted-navigation click-through is recorded
+ * alongside (app/boost-navigation.webm), from its own context so the still-shot contexts
+ * stay clean. Everything lands in an `app/` subfolder of the same output directory.
  */
 object SiteShotsMain {
     private const val VIEWPORT_W = 1440
     private const val VIEWPORT_H = 900
 
     /** The pipeline photographed for the graph, inspector and failure shots. */
-    private const val SHOWCASE = "weather_sensitivity_by_borough"
+    private const val SHOWCASE = "nyc/mobility/weather_sensitivity_by_borough"
 
     /** A library template lives here; this one is PINNED by four pipelines, which is what used-by shows. */
     private const val SHARED_TEMPLATE = "sample_zones.sql"
 
     /** Created by the driver if absent, so the switcher shot has something to switch between. */
     private const val SECOND_WORKSPACE = "analytics-team"
+
+    /** The two shot sets `-PshotsSet` selects between; `site` is the default. */
+    private const val SET_SITE = "site"
+    private const val SET_APP = "app"
+
+    /** The subfolder of the output dir the `app` set lands in. */
+    private const val APP_DIR = "app"
+
+    /** Which partial URL an explorer expansion fetches — the two trees differ only in this. */
+    private const val TEMPLATES_PARTIAL = "/partials/templates"
+    private const val PIPELINES_PARTIAL = "/partials/pipelines"
+
+    /** Every top-level screen, in nav order — the `app` set's pages and the video's click path. */
+    private val APP_PAGES =
+        listOf(
+            "/dashboard",
+            "/pipelines",
+            "/datasources",
+            "/templates",
+            "/executions",
+            "/workspaces",
+            "/promotion",
+            "/settings",
+            "/docs",
+            "/admin/users",
+        )
+
+    /** The two review widths the `app` set captures every screen at. */
+    private val APP_VIEWPORTS = listOf(1440 to 900, 2560 to 1440)
+
+    /** The recorded click-through's frame size. */
+    private const val VIDEO_W = 1920
+    private const val VIDEO_H = 1080
 
     private lateinit var baseUrl: String
     private lateinit var outDir: Path
@@ -78,27 +122,49 @@ object SiteShotsMain {
         }
         Files.createDirectories(outDir)
 
-        val taken = withSignedInPage(email, password) { page -> Shots(page).captureAll() }
-        println("siteShots: wrote ${taken.size} PNGs to ${outDir.toAbsolutePath()}")
+        val taken =
+            when (prop("shots.set", SET_SITE)) {
+                SET_APP -> {
+                    val stills = withSignedInPage(email, password) { page -> Shots(page).captureApp() }
+                    stills + recordBoostNavigation(email, password)
+                }
+
+                else -> {
+                    withSignedInPage(email, password) { page ->
+                        assertLightTheme(page)
+                        Shots(page).captureAll()
+                    }
+                }
+            }
+        println("siteShots: wrote ${taken.size} artefacts to ${outDir.toAbsolutePath()}")
         taken.forEach { println("  $it") }
     }
 
     /**
      * Owns the whole browser session — Playwright, the browser, the context — so [main] reads as
      * the six steps it is and each resource still closes in reverse order on any exit path.
+     * The theme assertion is the CALLER's business: the `site` list specifies light and asserts
+     * it; the `app` list drives both themes on purpose.
      */
     private fun <T> withSignedInPage(
         email: String,
         password: String,
         block: (Page) -> T,
     ): T =
+        withBrowser(contextOptions()) { page ->
+            signIn(page, email, password)
+            block(page)
+        }
+
+    /** Playwright + browser + context over [options], every resource closed in reverse order. */
+    private fun <T> withBrowser(
+        options: Browser.NewContextOptions,
+        block: (Page) -> T,
+    ): T =
         Playwright.create().use { playwright ->
             playwright.chromium().launch(BrowserType.LaunchOptions().setHeadless(true)).use { browser ->
-                browser.newContext(contextOptions()).use { context ->
-                    val page = context.newPage()
-                    signIn(page, email, password)
-                    assertLightTheme(page)
-                    block(page)
+                browser.newContext(options).use { context ->
+                    block(context.newPage())
                 }
             }
         }
@@ -146,6 +212,44 @@ object SiteShotsMain {
         check(!dark) { "the account's theme resolves to $href — the shot list specifies light" }
     }
 
+    /**
+     * One boosted-navigation pass, recorded (076 §E): the point of the video is that the nav
+     * NEVER re-renders across the click-through — hx-boost swaps only #app-main, so per click
+     * the waits are the URL change and network idle, never a fixed sleep. Its own context, so
+     * the recording options stay off the still-shot contexts. Playwright finalises the .webm
+     * on context.close(); it is then renamed to the stable path the evidence pack expects.
+     */
+    private fun recordBoostNavigation(
+        email: String,
+        password: String,
+    ): List<String> {
+        val videoDir = outDir.resolve(APP_DIR).resolve("video")
+        Files.createDirectories(videoDir)
+        val options =
+            contextOptions()
+                .setViewportSize(VIDEO_W, VIDEO_H)
+                .setRecordVideoDir(videoDir)
+                .setRecordVideoSize(VIDEO_W, VIDEO_H)
+        // Playwright finalises the .webm on context.close(); it is renamed below.
+        withBrowser(options) { page ->
+            signIn(page, email, password)
+            APP_PAGES.forEach { route ->
+                page.locator("nav.app-nav a[href='$route']").first().click()
+                page.waitForURL({ url -> url.endsWith(route) })
+                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            }
+        }
+        val produced =
+            Files.list(videoDir).use { stream ->
+                stream.filter { it.fileName.toString().endsWith(".webm") }.findFirst()
+            }
+        check(produced.isPresent) { "the video context closed but $videoDir holds no .webm" }
+        val target = outDir.resolve(APP_DIR).resolve("boost-navigation.webm")
+        Files.move(produced.get(), target, StandardCopyOption.REPLACE_EXISTING)
+        Files.delete(videoDir)
+        return listOf("$APP_DIR/boost-navigation.webm")
+    }
+
     /** Every capture goes through here, so no shot can skip the determinism steps. */
     internal class Shots(
         private val page: Page,
@@ -165,6 +269,50 @@ object SiteShotsMain {
             promotion()
             sitePageReview()
             return written
+        }
+
+        /**
+         * The `app` set (076 §E): every top-level screen at BOTH review widths in BOTH
+         * themes. The theme is the account's preference, driven through the settings UI —
+         * the control a user has, never a stylesheet hack — and put back on light at the
+         * end so a later `site` run's light-theme assertion still holds.
+         */
+        fun captureApp(): List<String> {
+            Files.createDirectories(outDir.resolve(APP_DIR))
+            setTheme("light")
+            captureAppPasses("light")
+            setTheme("dark")
+            captureAppPasses("dark")
+            setTheme("light")
+            return written
+        }
+
+        private fun captureAppPasses(theme: String) {
+            APP_VIEWPORTS.forEach { (width, height) ->
+                page.setViewportSize(width, height)
+                APP_PAGES.forEach { route ->
+                    page.navigate("$baseUrl$route")
+                    page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+                    shoot("$APP_DIR/${route.substring(1).replace('/', '-')}-${width}x$height-$theme.png")
+                }
+            }
+        }
+
+        /**
+         * The same select#themeSelect a user drives (settings/index.html): the PATCH answers
+         * with an out-of-band swap of #theme-link, so the href CHANGING is the completion
+         * signal — anything else (or a sleep) photographs a half-swapped page.
+         */
+        private fun setTheme(theme: String) {
+            page.navigate("$baseUrl/settings")
+            waitFor("#themeSelect")
+            val current = page.locator("#theme-link").getAttribute("href") ?: ""
+            if (current.contains("/themes/$theme.css")) return
+            page.selectOption("#themeSelect", theme)
+            page.waitForFunction(
+                "(expected) => document.querySelector('#theme-link').getAttribute('href').includes(expected)",
+                "/themes/$theme.css",
+            )
         }
 
         // ---------------------------------------------------------------- shots
@@ -396,11 +544,22 @@ object SiteShotsMain {
 
         private fun openEditor(name: String) {
             page.navigate("$baseUrl/pipelines")
-            waitFor(".ds-table")
-            // Rows navigate on click (no anchor). Match the NAME CELL exactly: several rows
-            // mention another pipeline's name inside their description column.
-            page.locator("tr:has(td span:text-is('$name'))").first().click()
-            page.waitForURL("**/editor")
+            waitFor("#pipeline-list-wrapper")
+            // 067: the explorer is a folder tree, not a table — expand the name's prefix one
+            // segment at a time (each expansion fetches ONE more level), then read the editor
+            // URL off the LEAF itself: data-editor-url is the same URL the detail pane's Open
+            // button uses, and reading it depends on no detail-pane markup.
+            name
+                .split('/')
+                .dropLast(1)
+                .runningReduce { prefix, segment -> "$prefix/$segment" }
+                .forEach { prefix -> expandFolder(prefix, PIPELINES_PARTIAL) }
+            val leaf = page.locator("button.tpl-leaf:has(.tpl-label[title='$name'])").first()
+            leaf.waitFor()
+            val editorUrl =
+                leaf.getAttribute("data-editor-url")
+                    ?: error("pipeline leaf '$name' carries no data-editor-url")
+            page.navigate("$baseUrl$editorUrl")
             waitFor("#cy-container")
             // The graph is drawn by Cytoscape after the body loads. The node CARDS are the
             // DOM signal that it finished — `#pe-node-list` is visually clipped for screen
@@ -469,11 +628,18 @@ object SiteShotsMain {
          * every surface showing a template name follows (template-hierarchy-design §9.4), and
          * the only attribute here that is unambiguous: the visible text is the last segment
          * only, so two `mobility` folders under different parents would both match it.
+         *
+         * The pipeline explorer (067) renders the SAME markup by design — its partial states
+         * the selectors transfer unchanged — so [partial] is the only explorer-specific bit:
+         * which partial URL the expansion's one-level fetch goes to.
          */
-        private fun expandFolder(prefix: String) {
+        private fun expandFolder(
+            prefix: String,
+            partial: String = TEMPLATES_PARTIAL,
+        ) {
             val summary = page.locator("summary.tpl-summary:has(.tpl-label[title='$prefix'])").first()
             summary.waitFor()
-            page.waitForResponse({ it.url().contains("/partials/templates") }) { summary.click() }
+            page.waitForResponse({ it.url().contains(partial) }) { summary.click() }
         }
 
         private fun selectLeaf(name: String) {
@@ -511,11 +677,14 @@ object SiteShotsMain {
         private fun shoot(file: String) {
             settle()
             val target = outDir.resolve(file)
+            // Clip to the CURRENT viewport, not a constant: the `app` set resizes the page
+            // between passes, and a hard-coded 1440x900 clip would crop the 2560x1440 pass.
+            val viewport = page.viewportSize()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
                     .setPath(target)
-                    .setClip(0.0, 0.0, VIEWPORT_W.toDouble(), VIEWPORT_H.toDouble())
+                    .setClip(0.0, 0.0, viewport.width.toDouble(), viewport.height.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
                     .setScale(com.microsoft.playwright.options.ScreenshotScale.CSS),
             )

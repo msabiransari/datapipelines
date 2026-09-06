@@ -181,7 +181,7 @@ object SitePages {
                 bundled = true,
                 otherwise = "",
                 jdbcUrlExample = "jdbc:postgresql://db.internal:5432/analytics",
-                demo = "revenue_by_borough",
+                demo = "nyc/mobility/revenue_by_borough",
                 demoHref = "/federated-query",
             ),
             EngineFacts(
@@ -205,7 +205,7 @@ object SitePages {
                 bundled = false,
                 otherwise = "Rebuild with ./gradlew -Pmysql bootJar, or drop mysql-connector-j.jar into lib/",
                 jdbcUrlExample = "jdbc:mysql://db.internal:3306/analytics",
-                demo = "rainy_vs_dry_ridership",
+                demo = "nyc/mobility/rainy_vs_dry_ridership",
                 demoHref = "/#demo",
             ),
             EngineFacts(
@@ -229,7 +229,7 @@ object SitePages {
                 bundled = true,
                 otherwise = "",
                 jdbcUrlExample = "jdbc:sqlite:/data/reference.db",
-                demo = "revenue_by_borough",
+                demo = "nyc/mobility/revenue_by_borough",
                 demoHref = "/federated-query",
             ),
             EngineFacts(

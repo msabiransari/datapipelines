@@ -3,7 +3,7 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Promotion</h1>
+    <h1 class="ds-headline">Promotion</h1>
     <span th:if="${hasTarget}" class="ds-badge" th:text="${targetBaseUrl}">https://uat.example.com</span>
   </div>
 
@@ -38,7 +38,7 @@
   </div>
 
   <!-- State 1: this deployment promotes nowhere. A config change, not a promotion. -->
-  <div th:unless="${hasTarget}" class="ds-empty">
+  <div th:unless="${hasTarget}" class="ds-empty app-reading">
     <p class="ds-empty-title">No promotion target configured</p>
     <p class="ds-empty-description">
       This deployment has no higher environment to promote to. Set
@@ -51,7 +51,7 @@
   <th:block th:if="${hasTarget}">
     <!-- State 3: the target refused or could not be reached. The CODE is shown, because the
          operator's next step depends on which refusal it was. -->
-    <div th:if="${planError}" class="ds-empty">
+    <div th:if="${planError}" class="ds-empty app-reading">
       <p class="ds-empty-title">Could not read the target</p>
       <p class="ds-empty-description">
         <code th:text="${planError}">pipeline.promotion.target_unreachable</code>
@@ -60,7 +60,7 @@
     </div>
 
     <th:block th:if="${plan != null}">
-      <p style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-lg);">
+      <p class="app-reading" style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-lg);">
         Promoting workspace <code th:text="${plan.workspace}">acme</code>
         to <strong th:text="${plan.targetDeployment}">uat</strong>
         at <code th:text="${plan.targetBaseUrl}">https://uat.example.com</code>.
@@ -69,7 +69,7 @@
 
       <!-- versioning D7: dev is where drafts live. A target that authors is a misconfiguration
            the operator must fix on the TARGET, so say so instead of offering a doomed button. -->
-      <div th:if="${plan.targetAuthoringEnabled}" class="ds-empty" style="margin-bottom: var(--gap-lg);">
+      <div th:if="${plan.targetAuthoringEnabled}" class="ds-empty app-reading" style="margin-bottom: var(--gap-lg);">
         <p class="ds-empty-title">That target has authoring enabled</p>
         <p class="ds-empty-description">
           A promotion receiver never authors. Set
@@ -79,7 +79,7 @@
       </div>
 
       <!-- State 2: reachable, nothing to promote. Says "in sync", not "broken". -->
-      <div th:if="${#lists.isEmpty(plan.promotable)}" class="ds-empty">
+      <div th:if="${#lists.isEmpty(plan.promotable)}" class="ds-empty app-reading">
         <p class="ds-empty-title">Nothing to promote</p>
         <p class="ds-empty-description">
           All <span th:text="${plan.examined}">0</span> pipelines in this workspace are already at

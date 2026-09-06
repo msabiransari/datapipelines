@@ -81,6 +81,24 @@ class SiteAssetAuditTest {
         resolver.getResource("classpath:static/site/vendor/design-system/tokens.css").exists() shouldBe false
     }
 
+    @Test
+    fun `no template anywhere references the removed bootstrap webjar`() {
+        // 076 §C: Bootstrap 5.3.8 was removed from the app (dependency, layout <link>,
+        // lockfiles). This sweeps the WHOLE templates tree — not just the public pages
+        // above — so a webjars/bootstrap reference can never creep back in anywhere.
+        val all = resolver.getResources("classpath*:templates/**/*.html").toList()
+        all.shouldNotBeEmpty()
+        val offenders =
+            all
+                .filter {
+                    it.inputStream
+                        .readBytes()
+                        .decodeToString()
+                        .contains("webjars/bootstrap")
+                }.mapNotNull { it.filename }
+        offenders shouldBe emptyList()
+    }
+
     /** Asset-tag references only: href/src of link/script/img, thymeleaf or plain, in source form. */
     private fun assetRefs(source: String): List<String> =
         ASSET_TAG

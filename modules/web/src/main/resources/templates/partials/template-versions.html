@@ -20,7 +20,7 @@
         <th class="num">Version</th>
         <th>Status</th>
         <th class="num">In use</th>
-        <th class="num">Created</th>
+        <th>Created</th>
         <th></th>
       </tr>
     </thead>
@@ -38,7 +38,7 @@
                 th:text="${inUse[v.version] + (inUse[v.version] == 1 ? ' pipeline' : ' pipelines')}">2 pipelines</span>
           <span th:unless="${inUse != null and inUse[v.version] != null}">—</span>
         </td>
-        <td class="num" th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
+        <td th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
         <td>
           <a class="ds-button ds-button-ghost ds-button-sm"
              th:href="@{/templates/editor(name=${templateId})}" th:title="${templateId}">Open</a>

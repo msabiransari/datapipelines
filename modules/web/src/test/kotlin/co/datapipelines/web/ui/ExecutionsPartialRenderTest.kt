@@ -60,6 +60,56 @@ class ExecutionsPartialRenderTest {
         html shouldContain "&quot;offset&quot;: 50"
     }
 
+    @Test
+    fun `the pipeline cell shows the display name and carries the machine name on title`() {
+        // T114: the join happens web-side (one batch query per page); the partial renders
+        // the DISPLAY name as prose and the machine folder-path name on `title`.
+        val record = executionRecord()
+        val html =
+            engine.process(
+                "partials/executions",
+                webContext().apply {
+                    setVariable("executions", listOf(record))
+                    setVariable(
+                        "pipelineNames",
+                        mapOf(
+                            record.pipelineId to
+                                PipelineName(name = "nyc/mobility/revenue_by_borough", displayName = "Revenue by borough"),
+                        ),
+                    )
+                    setVariable("offset", 0)
+                    setVariable("pageSize", 25)
+                    setVariable("nextOffset", null)
+                    setVariable("hasMore", false)
+                },
+            )
+
+        html shouldContain "Revenue by borough"
+        html shouldContain "title=\"nyc/mobility/revenue_by_borough\""
+        html shouldNotContain record.pipelineId.toString().substring(0, 8)
+    }
+
+    @Test
+    fun `a missing pipeline falls back to the truncated id`() {
+        // A deleted pipeline leaves its executions behind; the lookup returns no row and
+        // the cell degrades to the old truncated-id rendering instead of crashing.
+        val record = executionRecord()
+        val html =
+            engine.process(
+                "partials/executions",
+                webContext().apply {
+                    setVariable("executions", listOf(record))
+                    setVariable("pipelineNames", emptyMap<UUID, PipelineName>())
+                    setVariable("offset", 0)
+                    setVariable("pageSize", 25)
+                    setVariable("nextOffset", null)
+                    setVariable("hasMore", false)
+                },
+            )
+
+        html shouldContain record.pipelineId.toString().substring(0, 8) + "..."
+    }
+
     private fun executionRecord() =
         ExecutionRecord(
             executionId = UUID.randomUUID(),

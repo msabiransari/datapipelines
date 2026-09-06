@@ -283,3 +283,30 @@ test("an unknown variant falls back to info rather than emitting a dead class", 
   assert.ok(stack.children[0].classList.value.includes("ds-toast-info"));
   delete globalThis.document;
 });
+
+test("076 §B — adoptFlashToasts moves server-rendered flashes from the hidden bin into the stack", () => {
+  const toast = loadToast();
+  // A bin double with DOM parent semantics: each appendChild elsewhere detaches
+  // the node, advancing firstElementChild until the bin is empty.
+  const domBin = {
+    children: [fakeEl(), fakeEl()],
+    get firstElementChild() { return this.children[0] || null; },
+  };
+  const domStack = fakeStack();
+  const adoptStack = {
+    appendChild(child) {
+      domBin.children = domBin.children.filter((c) => c !== child);
+      domStack.children.push(child);
+      child.parentNode = domStack;
+    },
+  };
+  const domDoc = { getElementById: (id) => (id === "toast-flash" ? domBin : null) };
+  toast.adoptFlashToasts(adoptStack, domDoc);
+
+  assert.equal(domBin.children.length, 0, "the bin is empty after adoption");
+  assert.equal(domStack.children.length, 2, "both flashes moved into the persistent stack");
+  assert.doesNotThrow(() => toast.adoptFlashToasts(adoptStack, { getElementById: () => null }),
+    "a page without the bin is a no-op");
+  assert.doesNotThrow(() => toast.adoptFlashToasts(null, domDoc),
+    "a page without the stack is a no-op");
+});

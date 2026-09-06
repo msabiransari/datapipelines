@@ -17,8 +17,15 @@
    * any .pe-copy with a data-copy attribute. One copy channel for the editor,
    * not two to keep in step.
    */
+  /* The delegated copy listener and the SQL-highlight swap listener are module-
+     level so teardown() can remove them (076 §B): init() runs on every visit to
+     the editor, and anonymous handlers would stack one per visit. */
+  var sqlCopyHandler = null;
+  var sqlHighlightHandler = null;
+
   function wireSqlCopy(editor) {
-    document.addEventListener("click", function (evt) {
+    if (sqlCopyHandler) document.removeEventListener("click", sqlCopyHandler);
+    sqlCopyHandler = function (evt) {
       var target = evt.target;
       var btn = target && target.closest ? target.closest(".pe-sql-copy") : null;
       if (btn) {
@@ -27,7 +34,8 @@
       }
       var generic = target && target.closest ? target.closest(".pe-copy") : null;
       if (generic) copyFrom(generic, generic.getAttribute("data-copy") || "");
-    });
+    };
+    document.addEventListener("click", sqlCopyHandler);
   }
 
   function sqlOf(btn) {
@@ -169,12 +177,16 @@
           // Highlight the SQL only after the partial has swapped in — never before:
           // the tokenizer reads the code element's textContent and replaces its
           // innerHTML with escaped, span-wrapped tokens (sql-highlight.js).
-          document.body.addEventListener("htmx:afterSwap", function (evt) {
+          if (sqlHighlightHandler) {
+            document.body.removeEventListener("htmx:afterSwap", sqlHighlightHandler);
+          }
+          sqlHighlightHandler = function (evt) {
             var target = evt.detail && evt.detail.target;
             if (target && target.id === "pe-node-sql" && window.DpSqlHighlight) {
               window.DpSqlHighlight.apply(target);
             }
-          });
+          };
+          document.body.addEventListener("htmx:afterSwap", sqlHighlightHandler);
 
           // 065 §C: a tap SELECTS and nothing else — the inspector opens from the
           // card's own button (or Enter/Space on the selected node). Sliding a
@@ -191,8 +203,49 @@
               self.selectedNode = null;
             }
           });
+
+          // 076 §B: the boosted-swap teardown reaches the live component through
+          // this handle (wireBoostLifecycle below).
+          window.__peInstance = self;
         } catch (e) {
           console.error("Pipeline Editor init failed:", e);
+        }
+      },
+
+      /*
+       * 076 §B — teardown before a swap replaces #app-main. The one real bug
+       * boost can introduce is an execution stream living past the section
+       * change, so the stream's reader is ABORTED here — never cancel(): the
+       * run continues server-side (it is on /executions); only our view of it
+       * goes away. Cytoscape is destroyed (its container is leaving the DOM),
+       * timers are cleared, and the two document-level listeners init()
+       * installed come off so a later visit starts clean.
+       */
+      teardown: function () {
+        var self = this;
+        if (self.sseHandler && self.sseHandler.abortController) {
+          self.sseHandler.abortController.abort();
+        }
+        if (self.sqlReloadTimer) {
+          clearTimeout(self.sqlReloadTimer);
+          self.sqlReloadTimer = null;
+        }
+        if (self.resultPanel && self.resultPanel.ttlInterval) {
+          clearInterval(self.resultPanel.ttlInterval);
+          self.resultPanel.ttlInterval = null;
+        }
+        if (self.cy) {
+          self.cy.destroy();
+          self.cy = null;
+        }
+        self.graph = null;
+        if (sqlCopyHandler) {
+          document.removeEventListener("click", sqlCopyHandler);
+          sqlCopyHandler = null;
+        }
+        if (sqlHighlightHandler) {
+          document.body.removeEventListener("htmx:afterSwap", sqlHighlightHandler);
+          sqlHighlightHandler = null;
         }
       },
 
@@ -553,5 +606,55 @@
     };
   }
 
+  /*
+   * 076 §B — the editor's boost lifecycle, one document-level pair installed ONCE
+   * per session (this script re-executes on every boosted visit to the editor;
+   * the flag keeps the wiring singular).
+   *
+   * htmx:beforeSwap — the outgoing swap replaces the editor's host region:
+   * teardown the live component. Boosted swaps qualify outright (shell.js
+   * retargets them at #app-main); so does any swap whose target IS #app-main or
+   * an ancestor of it, because htmx history restores swap the cached fragment
+   * WITHOUT a boosted flag. Partial swaps inside the editor (node SQL, result
+   * pages) target inner nodes and never match.
+   *
+   * htmx:afterSettle — the rescue half: a history restore brings the editor's
+   * DOM back WITHOUT re-executing its scripts, so no component is bound.
+   * Re-bind through Alpine; a fresh boosted visit bound one already (its
+   * scripts re-executed) and __peInstance is set, making this a no-op there.
+   */
+  function wireBoostLifecycle() {
+    if (window.__peBoostWired) return;
+    if (typeof document === "undefined" || !document.addEventListener) return; // node --test
+    window.__peBoostWired = true;
+
+    document.addEventListener("htmx:beforeSwap", function (evt) {
+      var inst = window.__peInstance;
+      if (!inst) return;
+      var detail = evt.detail || {};
+      var target = detail.target;
+      var main = document.getElementById("app-main");
+      var replacesMain =
+        detail.boosted ||
+        target === main ||
+        target === document.body ||
+        (target && target.contains && main && target.contains(main));
+      if (!replacesMain) return;
+      inst.teardown();
+      window.__peInstance = null;
+      window.PEDraft = null;
+    });
+
+    document.addEventListener("htmx:afterSettle", function () {
+      var main = document.getElementById("app-main");
+      var root = main && main.querySelector ? main.querySelector(".pe-root") : null;
+      if (root && !window.__peInstance && window.Alpine && window.Alpine.initTree) {
+        window.Alpine.initTree(root);
+      }
+    });
+  }
+
   window.pipelineEditor = pipelineEditor;
+  window.pipelineEditorBoost = { wireBoostLifecycle: wireBoostLifecycle };
+  wireBoostLifecycle();
 })();

@@ -52,9 +52,10 @@ class ExecutionControllerTest {
     private val resultUrls = mockk<ResultUrlFactory>()
     private val cursor = mockk<ResultCursor>()
     private val cancellation = mockk<ExecutionCancellationService>()
+    private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
 
     private val pageController = ExecutionHistoryController(pipelines)
-    private val partialController = ExecutionHistoryPartialController(executions)
+    private val partialController = ExecutionHistoryPartialController(executions, pipelineNames)
     private val detailController = ExecutionDetailController(executions, pipelines, resultStore, resultUrls)
     private val detailPartialController = ExecutionDetailPartialController(executions, resultStore, cursor, cancellation)
 

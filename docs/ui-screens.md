@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.22
+**Status:** v1.23
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-05
@@ -17,7 +17,7 @@ These are standard CRUD + list/detail screens. They don't need pipeline-editor-l
 
 ## 2. Design Principles
 
-1. **Server-rendered by default.** Thymeleaf renders full HTML pages. htmx handles partial updates (search, filter, pagination, form submission) without full page reload.
+1. **Server-rendered by default.** Thymeleaf renders full HTML pages. htmx handles partial updates (search, filter, pagination, form submission) without full page reload. Navigation is boosted (§3.2): a section click fetches the SAME full page and swaps only the main region — the MPA is the design, the document-per-click feel is not required by it.
 2. **htmx for these screens, fetch for the pipeline editor.** htmx is the right tool for "server renders partial HTML, swap it in" patterns. The pipeline editor is the exception (graph + SSE requires vanilla JS).
 3. **Design system everywhere.** Every screen uses `@acme/design-tokens` tokens and `.ds-*` primitives. No exceptions, no hardcoded colors. Where a class named below has no counterpart in the vendored `primitives.css` (`.ds-spinner`, `.ds-toast*`, `.ds-empty-state` and `.ds-avatar` are the candidates — the roster is ~80 classes and is not enumerated in these docs), the app defines it in `app.css` **derived from design tokens**, never from literal values ([Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens)). Confirm against the vendored file at implementation time before adding an app-level class.
 4. **Consistent layout shell.** Every page (except login) shares a common nav bar + sidebar layout, defined in a Thymeleaf layout fragment.
@@ -66,10 +66,10 @@ Thymeleaf layout: `layouts/default.html` — includes navbar, design system CSS,
 The layout also wires three things once, for every page:
 
 - **Theme resolution.** The active design-system theme is `users.theme_preference` when set, otherwise the deployment default `datapipelines.ui.theme` ([Configuration §3.10](configuration.md#310-ui)). `UiWorkspaceAdvice` resolves it per request into `${activeTheme}` for EVERY screen (a controller that forgets it renders a `themes/null.css` URL that 404s, leaving every design token unresolved — no borders, no surfaces); individual controllers may still set it explicitly, which simply overrides the advice's value with the same one. Emitted as the `href` of the `#theme-link` stylesheet element ([Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens)) — see §4.11. The deployment setting is the default, not a ceiling: a user preference overrides it for that user only, and an unset preference is indistinguishable from today's config-only behaviour.
-- **Nav chrome (027 UI pass).** The navbar is a sticky, full-width bar whose links and Logout render only for authenticated requests (`UiWorkspaceAdvice.authenticated` — anonymous screens like Login see the brand only). The active section is highlighted from `UiWorkspaceAdvice.currentPath`. Nav and content share the `.app-container` shell (app.css), capped at `--app-content-max` (1600px) rather than the design system's `--container-xl`. App-level chrome and table polish live in `static/css/app.css` — the vendored design system files are synced from design-system-starter and are never edited in this repo.
+- **Nav chrome (027 UI pass).** The navbar is a sticky, full-width bar whose links and Logout render only for authenticated requests (`UiWorkspaceAdvice.authenticated` — anonymous screens like Login see the brand only). The active section is highlighted from `UiWorkspaceAdvice.currentPath` on first paint, and mirrored client-side by `shell.js` after boosted swaps (§3.2). Nav and content share the `.app-container` shell (app.css) — full-bleed with one gutter since 076 (§3.1). App-level chrome and table polish live in `static/css/app.css` — the vendored design system files are synced from design-system-starter and are never edited in this repo.
 - **CSRF for htmx.** `hx-headers` on `<body>` carries the `dp_csrf` cookie value as `DP-CSRF-Token`; because `hx-headers` is inherited, every descendant htmx request is covered ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)).
 - **Workspace switcher + context (workspaces design §9).** The navbar carries a `<select>` of the principal's memberships (`UiWorkspaceAdvice` fills it for every screen); choosing one POSTs `/workspace/switch`, which re-stamps the session JWT's `active_workspace` claim and re-issues `dp_session`, so full-page navigations follow the switch. The layout's `hx-headers` ALSO carries `DP-Workspace: <active>` for every htmx partial call — both mechanisms agree because the switcher drives both. A principal with zero memberships sees no switcher and empty states, never an error page (workspaces design §7).
-- **Toast region.** An empty `<div id="toast" aria-live="polite"></div>` and `static/js/toast.js`, which together implement §5.1 Notifications — including `bridgeErrors`, the small `htmx:beforeSwap` listener that admits a 4xx/5xx to the swap only when the server retargeted it at `#toast` by header. No htmx extension is loaded; this replaces the `response-targets` prescription this spec once carried.
+- **Toast region.** A persistent `<div id="toast" aria-live="polite"></div>` OUTSIDE the swapped region, plus `static/js/toast.js`, which together implement §5.1 Notifications — including `bridgeErrors`, the small `htmx:beforeSwap` listener that admits a 4xx/5xx to the swap only when the server retargeted it at `#toast` by header. No htmx extension is loaded; this replaces the `response-targets` prescription this spec once carried. Server-rendered redirect flashes (`?ok=`/`?error=`) render into a hidden `#toast-flash` bin INSIDE `#app-main` so a boosted response carries them; `toast.js` adopts them into the persistent stack on init and after every settle.
 
 ```html
 <head>
@@ -84,6 +84,43 @@ The layout also wires three things once, for every page:
 ```
 
 htmx is **vendored** (webjar) like the rest of the frontend stack — no CDN references, and no htmx extensions ([Pipeline Editor §4.2](pipeline-editor.md)).
+
+### 3.1 Shell and width policy (076, normative)
+
+Measured on the owner's ~3,000px window (2026-09-05): four content widths across eleven screens — a 1600px cap on most, bespoke narrower columns on Settings, full-bleed on Templates and the editor. The policy that replaces them:
+
+1. **Every app screen is full-bleed.** `<main>` spans the viewport minus one gutter (`var(--gap-lg)`), exactly as the editor always has. `--app-content-max`, `.app-main-bleed` and the editor's `fullBleed` opt-in are deleted — the opt-in became the rule. The nav spans the viewport with the same gutter. `EditorLayoutRenderTest` pins the editor and a list page rendering the SAME `<main>`.
+2. **Reading content gets a reading column, not a different container.** Docs prose, Settings cards, empty states and forms sit in `.app-reading` (`max-width: 90ch`, LEFT-aligned inside the full-bleed main — never centred). Tables and trees never use it.
+3. **Width lives in classes, never inline.** No app template carries an inline `max-width` or `grid-template-columns` — modals, search inputs, auth cards and the stats grid use the `app.css` classes (`app-modal*`, `app-search-input`, `app-card-auth`, `app-stats-grid`, …). `InlineWidthAuditTest` scans the templates and fails the build on a regression.
+
+### 3.2 Boosted navigation (the app shell, 076)
+
+`hx-boost="true"` on the `<nav>` and on `<main id="app-main">`. A section click — or any in-content navigation — fetches the SAME full page (there is no second template variant) and swaps only the main region; the nav, the workspace switcher and the toast stack persist, the URL pushes, back/forward ride htmx history.
+
+- **The swap policy lives in `static/js/shell.js`, not in attributes.** `hx-target`/`hx-select`/`hx-swap` are deliberately NOT set on `<main>`: htmx inherits them into every child request, which would retarget the screens' partial swaps (search results, tree levels, dashboard stats) at `#app-main`. Instead `shell.js` listens for `htmx:beforeSwap` and, only for requests htmx flags as boosted, retargets at `#app-main` with `select="#app-main"` and `outerHTML show:window:top`.
+- **Full navigations remain** — marked `hx-boost="false"` and pinned by `ShellRenderTest`: `/login`, `/logout`, the OIDC redirects, the forced-change gate (`/settings/password` under `mustChange`) and file downloads (external links too — htmx 2 rejects cross-origin requests).
+- **The progress signal.** A document load used to say "loading" with a white flash; a swap must not flash, so one 2px bar under the nav (`#app-progress`, tokens only, reduced-motion respected) shows between `htmx:beforeRequest` and `htmx:afterSettle` for boosted requests only.
+- **Active-section state.** Server-computed from `currentPath` for the first paint; after swaps `shell.js` mirrors the same rule (Dashboard exact, others prefix) off `data-nav-section` + `window.location.pathname`.
+- **Scripts re-arm per swap.** Page scripts whose tags ride inside `#app-main` re-execute on arrival; anything document-level installs ONCE per session. The pipeline editor tears down on host-replacing swaps — the execution stream's reader is ABORTED (never `cancel()`: the run continues server-side, visible on `/executions`), the Cytoscape instance is destroyed, timers and document listeners come off — and re-binds through Alpine on `htmx:afterSettle` when a history restore brings its DOM back without re-executing scripts. `toast.js` and `template-explorer.js` follow the same idempotent-init contract; `editorJsTest` pins all three.
+
+### 3.3 Type and density scale (076, normative)
+
+One scale, decided once — measured against the drift the owner saw: page titles at three sizes, dates monospace in one table and proportional in the next.
+
+1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`.
+2. **Every table is `.ds-table` with `font-variant-numeric: tabular-nums`** (app.css). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
+3. **Mono is for identifiers only**: machine names, ids, template refs (`path @ vN`), SQL, keys/prefixes, `context_key → value`. Display names, usernames, badges and dates are prose. The per-table decision:
+
+| Screen | Mono columns | Prose columns |
+|---|---|---|
+| Dashboard recent executions / §4.8 history | (pipeline machine path on `title` only) | display name, status, triggered_by/via, started_at, duration (`.num`) |
+| §4.9 node stats | node id, Context `key → value` | rows in/out, duration (`.num`) |
+| §4.10 API keys | key prefix | name, scopes, created/last_used/expires, status |
+| §4.12 admin users | — | email, display name, provider, created, scopes, actions (`.num`) |
+| §4.13 workspaces | workspace name | role, members, created, actions |
+| §4.17 promotion | pipeline/template path, target URL | versions (`.num`), status |
+| §4.5 datasources | JDBC URL, username | name, dialect, workspace, last test |
+| §4.3/§4.6 detail versions | template ref / path | released_by, created, versions (`.num`) |
 
 ---
 
@@ -118,7 +155,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | htmx | Yes — refresh sections independently (`hx-get="/partials/recent-executions"`) |
 
 Content:
-- **Recent executions** (last 10): pipeline name, status badge, duration, timestamp. Clickable → execution detail.
+- **Recent executions** (last 10): pipeline **display name** (the machine folder-path name on hover; T114 — the truncated pipeline UUID is gone everywhere), status badge, duration, timestamp. Clickable → execution detail.
 - **My pipelines** (top 5 by updated_at): name, description, version. Clickable → pipeline editor.
 - **Quick stats**: total pipelines, total executions today, success rate.
 
@@ -244,7 +281,7 @@ Content:
 | JS | None |
 | htmx | Yes — filters (pipeline, status, date range), pagination (`hx-get="/partials/executions"` into `#execution-table`, `innerHTML`, with `hx-include="#execution-filters"` re-sending the filter form by id; the pager offsets are server-rendered into `hx-vals` via `th:attr` literal substitution) |
 
-Content: table of executions (pipeline name, version, status badge, triggered_by, triggered_via badge, started_at, duration). Clickable → execution detail. This screen deliberately keeps its own `#execution-table` / `innerHTML` / `hx-include="#execution-filters"` contract rather than adopting the §5 outerHTML one — it satisfies every §5.1 guarantee (stable target, controls outside the fragment, spinner, toasts), and the pager's `hx-vals` offsets are server-rendered via `th:attr="hx-vals=|{...}|"` (a plain-attribute `[[...]]` inlining reaches the browser unprocessed — Thymeleaf processes inlining in text nodes, not attribute values).
+Content: table of executions (pipeline **display name** — machine path on hover, T114 —, version, status badge, triggered_by, triggered_via badge, started_at, duration). Clickable → execution detail. This screen deliberately keeps its own `#execution-table` / `innerHTML` / `hx-include="#execution-filters"` contract rather than adopting the §5 outerHTML one — it satisfies every §5.1 guarantee (stable target, controls outside the fragment, spinner, toasts), and the pager's `hx-vals` offsets are server-rendered via `th:attr="hx-vals=|{...}|"` (a plain-attribute `[[...]]` inlining reaches the browser unprocessed — Thymeleaf processes inlining in text nodes, not attribute values).
 
 ### 4.9 Execution Detail
 
@@ -259,7 +296,7 @@ Content: table of executions (pipeline name, version, status badge, triggered_by
 
 Content:
 - **Header**: pipeline name + version, status badge, timing, triggered_by + via.
-- **Node stats table**: per-node status, duration, rows_out, error.
+- **Node stats table**: per-node status, duration, rows_out, error — and, for a CALCULATOR node, a **Context** column showing `context_key → computed value` (mono; `node_stats_json` has carried the pair since 072 — the run detail page now actually reads it, which `pipeline-contract.md` and `dag-executor.md` always claimed).
 - **Error details** (if failed): the structured failure record (057) — code badge, message, user_message, correlation id, node line, details JSON, doc_url link, the rendered SQL (`:name` form), and the exception chain collapsed root-cause-first with frames in monospace (`partials/execution-error`, shared with the result partial's failure branch). Not a raw JSON dump.
 - **Cancel button** (only while the execution is `RUNNING`; `execute` scope + ownership): backed by `DELETE /api/v1/executions/{id}`, moving the execution to `ABORTED` ([REST §10.4](rest-api.md#104-cancel-execution)).
 - **Result panel** — see below.
@@ -607,3 +644,4 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | 2026-08-31 | v1.14 | execute page redesign (032) | §4.4 Pipeline Editor expanded from the bare pointer into the rows that touch this document's shared contracts: the new `READ_RESOURCES` node-SQL read partial (`GET /partials/pipelines/{id}/nodes/{nodeId}/sql`, spec §8.3) with the deliberately-NOT-a-toast copy confirmation (live region + 1.5s label swap); the result grid moved onto the shared `.ds-table` (bespoke `.pe-result-table` styles deleted; paging stays the client-side cursor contract, restyled to the shared pager's look); and the SSE terminal events land on §5.1's Shape D — `pipeline_completed`/`execution_aborted` toast via `DpToast.show` (stream-borne, no HTTP response), `pipeline_failed` keeps the error modal — with all three announcing on the live region. No §5.1 amendment was needed: Shape D already existed (v1.13) and the copy button does not use it. |
 | 2026-09-03 | v1.20 | datasource credentials (061/T84) | §4.5 gains the **Last test** column: an `ok`/`failed`/`never tested` badge with the timestamp and the driver's message on hover, from the datasource row's stored outcome ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). It exists because listing never connects — on 2026-09-02 this screen showed a datasource as fine while every execution failed at CONNECT. The §5.1 Search rule follows the new column (`ok` / `failed` / `never tested` all match). No polling is added. §4.5's delete note now points at the any-version in-use guard (T79). |
 | 2026-09-05 | v1.22 | pipeline folders (067) | §4.3 becomes the **Pipelines Explorer**: pipeline names are folder paths, so the flat table is a tree LEFT + selected pipeline RIGHT — the §4.6 shape, reusing `template-tree.css` and `template-explorer.js` (which now finds its pane by a `data-explorer-pane` marker rather than a hard-coded id, so one file serves both screens). One level per request; a non-empty `q` is a flat list of full paths; the detail pane is read-only and carries settings, parameters, versions and Open in editor. **T108:** the permanently-`disabled` "Create Pipeline" button and its "Phase 2 other worktree" tooltip are deleted — an affordance the server does not have, advertised with an internal note — replaced by a sentence naming MCP as the authoring path and the roadmap as the plan. |
+| 2026-09-05 | v1.23 | app shell + coherence (076) | One width policy (new **§3.1**, normative): every screen full-bleed with one gutter — `--app-content-max`, `.app-main-bleed` and the editor's `fullBleed` opt-in deleted (the opt-in became the rule); reading content in `.app-reading` (90ch, left); inline `max-width`/`grid-template-columns` out of every app template (`InlineWidthAuditTest`). **Boosted navigation** (new **§3.2**): `hx-boost` on nav + `<main id="app-main">` with the swap policy in `shell.js` (NOT inherited attributes — that would hijack partial swaps), `#app-progress` as the loading signal, client-mirrored active-section state, the five full-navigation routes marked `hx-boost="false"` (`ShellRenderTest`), editor teardown/re-bind semantics, and server redirect flashes rendered into a hidden `#toast-flash` bin inside the swapped region (`WorkspacesUiControllerTest` re-pinned). **Bootstrap out**: the 5.3.8 webjar, its layout `<link>` and every lockfile/verification reference deleted — no app screen used a Bootstrap class; what its reboot silently provided (`<code>`, `<pre>`, `<small>`, `<strong>`) is restated on tokens in app.css (`LayoutStylesheetOrderTest` rewritten, `SiteAssetAuditTest` sweeps for the reference). One type/density scale (new **§3.3**): `.ds-headline` titles everywhere (`TypeScaleAuditTest`), tabular tables, dates always proportional, mono for identifiers only with the per-column decision table. **T114**: execution lists show the pipeline display name (machine path on hover) via ONE web-side batch query per page — no dag/pipeline-contract change, no request per row. §4.9's node-stats table gains the Context column (`context_key → value` for CALCULATOR nodes — the claim `pipeline-contract.md`/`dag-executor.md` always made, now true). |

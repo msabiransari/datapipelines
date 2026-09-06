@@ -153,8 +153,8 @@
           </div>
         </div>
         <figure class="hero-shot ds-animate-fade-in">
-          <!-- screenshot: execution detail of a real SUCCESS run of the seeded rainy_vs_dry_ridership pipeline, triggered over REST with an API key (untouched capture) -->
-          <img th:src="@{/site/img/execution-result.png}" width="1440" height="1000" alt="Execution detail for the seeded rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
+          <!-- screenshot: execution detail of a real SUCCESS run of the seeded nyc/mobility/rainy_vs_dry_ridership pipeline, triggered over REST with an API key (untouched capture) -->
+          <img th:src="@{/site/img/execution-result.png}" width="1440" height="1000" alt="Execution detail for the seeded nyc/mobility/rainy_vs_dry_ridership pipeline: a SUCCESS badge with start time, 448ms duration and correlation ID, a node-stats table with per-node row counts, and the full six-row result table comparing rainy and dry ridership and revenue. Triggered via REST — the actual agent flow." loading="eager" fetchpriority="high">
           <figcaption>A real SUCCESS execution, triggered over REST with an API key — exactly the agent flow. Rows included, so the agent can check its own work.</figcaption>
         </figure>
       </div>
@@ -460,9 +460,9 @@
           <figure class="shot">
             <!-- screenshot: the editor on the largest showcase pipeline after a successful run, dock open on Results — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/graph-cards.png}" width="1440" height="900" alt="The pipeline editor for weather_sensitivity_by_borough after a successful run. Node cards carry a green tick, the node name, a DQL badge, the datasource and dialect (sample-trips POSTGRES, sample-weather MYSQL, tempdb H2), the pinned template and version, and a run line reading 5.7 s and 13368 rows. Curved edges join the staging nodes to the answer node. The results dock is open below, showing borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="lazy">
+              <img th:src="@{/site/img/graph-cards.png}" width="1440" height="900" alt="The pipeline editor for nyc/mobility/weather_sensitivity_by_borough after a successful run. Node cards carry a green tick, the node name, a DQL badge, the datasource and dialect (sample-trips POSTGRES, sample-weather MYSQL, tempdb H2), the pinned template and version, and a run line reading 5.7 s and 13368 rows. Curved edges join the staging nodes to the answer node. The results dock is open below, showing borough, weather, day type, days, trip count, trips per day and revenue per trip." loading="lazy">
             </div>
-            <figcaption>The editor after running <code>weather_sensitivity_by_borough</code> — five nodes across Postgres, MySQL and SQLite, staged into one tempdb. Each card carries its own engine, pinned template, elapsed time and row count. The fifth card sits below the results dock at this window size.</figcaption>
+            <figcaption>The editor after running <code>nyc/mobility/weather_sensitivity_by_borough</code> — five nodes across Postgres, MySQL and SQLite, staged into one tempdb. Each card carries its own engine, pinned template, elapsed time and row count. The fifth card sits below the results dock at this window size.</figcaption>
           </figure>
           <figure class="shot">
             <!-- screenshot: a node's details panel showing the resolved SQL — untouched capture from `./gradlew siteShots` (070 §C) -->
@@ -710,7 +710,7 @@
 
               <rect class="dg-box" x="30" y="216" width="300" height="52" rx="8"/>
               <text class="dg-label" x="180" y="238" font-size="13" text-anchor="middle">Joined result</text>
-              <text class="dg-sub" x="180" y="255" font-size="10" text-anchor="middle">weather_sensitivity_by_borough · mobility_briefing</text>
+              <text class="dg-sub" x="180" y="250" font-size="10" text-anchor="middle">nyc/mobility/weather_sensitivity_by_borough<tspan x="180" dy="11">nyc/mobility/mobility_briefing</tspan></text>
             </svg>
           </figure>
         </div>

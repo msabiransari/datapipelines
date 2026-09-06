@@ -26,7 +26,8 @@ import java.util.UUID
 class DashboardControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val pipelines = mockk<PipelineRepository>()
-    private val controller = DashboardPartialController(executions, pipelines)
+    private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
+    private val controller = DashboardPartialController(executions, pipelines, pipelineNames)
 
     private val userId = UUID.randomUUID()
     private val adminId = UUID.randomUUID()

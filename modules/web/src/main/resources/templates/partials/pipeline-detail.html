@@ -93,7 +93,7 @@
         <tr>
           <th class="num">Version</th>
           <th>Status</th>
-          <th class="num">Created</th>
+          <th>Created</th>
           <th></th>
         </tr>
       </thead>
@@ -105,7 +105,7 @@
                   th:classappend="${v.status.name() == 'RELEASED'} ? 'ds-badge-success' : 'ds-badge-warning'"
                   th:text="${v.status}">RELEASED</span>
           </td>
-          <td class="num" th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
+          <td th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</td>
           <td>
             <a class="ds-button ds-button-ghost ds-button-sm"
                th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open</a>

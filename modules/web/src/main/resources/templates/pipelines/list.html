@@ -20,7 +20,7 @@
          top-level child pushes the panes into an implicit row and hands the 1fr track to the
          search box, which renders as ~80px of dead space above the tree (measured at 1440). -->
     <div>
-      <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Pipelines</h1>
+      <h1 class="ds-headline">Pipelines</h1>
 
       <!-- T108: the disabled "Create Pipeline" button and its "Phase 2 other worktree" tooltip
            are gone. It promised an affordance the server does not have, and a tooltip naming a
@@ -44,7 +44,7 @@
              th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'"
              hx-trigger="input changed delay:300ms, search"
              hx-indicator="#pipeline-filter-spinner"
-             class="ds-input" style="flex: 1 1 240px; min-width: 180px; max-width: 360px;">
+             class="ds-input app-search-input">
       <span id="pipeline-filter-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
     </div>
 
