@@ -15,6 +15,13 @@
  * bridgeErrors} for `node --test` (modules/web/src/test/js/toast.test.mjs shims
  * the DOM); in the browser it additionally publishes window.DpToast, auto-attaches
  * to #toast on DOMContentLoaded, and installs the error bridge on document.body.
+ *
+ * 076 §B (hx-boost): full-page redirect flashes (?ok=/?error=) are rendered
+ * server-side into a hidden #toast-flash bin INSIDE #app-main, so they survive
+ * the boosted #app-main-only swap; init() and every htmx:afterSettle adopt them
+ * into the persistent #toast stack, whose observer arms them like any other
+ * toast. #toast itself lives outside the swapped region and is never detached,
+ * so its MutationObserver and the body-level error bridge are installed once.
  */
 (function () {
   "use strict";
@@ -130,20 +137,50 @@
     });
   }
 
+  /*
+   * 076 §B: move server-rendered flash toasts from the hidden #toast-flash bin
+   * (inside #app-main, so they arrive in boosted swaps) into the persistent
+   * #toast stack. Appending re-parents the nodes, so the stack's own observer
+   * arms them — one stack, one observer, one arming path.
+   */
+  function adoptFlashToasts(stack, doc) {
+    if (!stack) return;
+    var flash = (doc || document).getElementById("toast-flash");
+    if (!flash) return;
+    while (flash.firstElementChild) {
+      stack.appendChild(flash.firstElementChild);
+    }
+  }
+
+  function init() {
+    var stack = document.getElementById("toast");
+    attach(stack);
+    bridgeErrors(document.body);
+    adoptFlashToasts(stack, document);
+    if (window.__dpToastSettleWired) return;
+    window.__dpToastSettleWired = true;
+    document.body.addEventListener("htmx:afterSettle", function () {
+      adoptFlashToasts(document.getElementById("toast"), document);
+    });
+  }
+
   var api = {
     attach: attach,
     arm: arm,
     dismiss: dismiss,
     show: show,
     bridgeErrors: bridgeErrors,
+    adoptFlashToasts: adoptFlashToasts,
+    init: init,
     DISMISS_AFTER_MS: DISMISS_AFTER_MS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {
     window.DpToast = api;
-    document.addEventListener("DOMContentLoaded", function () {
-      attach(document.getElementById("toast"));
-      bridgeErrors(document.body);
-    });
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
   }
 })();

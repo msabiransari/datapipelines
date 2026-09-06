@@ -120,6 +120,9 @@
     if (loadTimer) clearTimeout(loadTimer);
     loadTimer = setTimeout(function () {
       loadTimer = null;
+      // A debounced load that fires after a boosted swap detached the row is a
+      // ghost request for a pane that no longer exists (076 §B).
+      if (item.isConnected === false) return;
       item.click();
     }, 150);
   }
@@ -221,35 +224,50 @@
     return !!details && details.open;
   }
 
+  // <details> toggle does not bubble; the capture phase still sees it, so one listener
+  // keeps every folder summary's aria-expanded truthful without per-node handlers.
+  // Closing a folder whose CHILD was selected moves the selection to the folder: the
+  // child is now invisible (closed levels do not render), and a hidden selection is
+  // both unreadable and unannounceable.
+  function onToggle(event) {
+    var t = event.target;
+    if (t.tagName === "DETAILS" && t.classList.contains("tpl-folder")) {
+      var s = t.querySelector(":scope > summary");
+      if (s) s.setAttribute("aria-expanded", t.open ? "true" : "false");
+      if (!t.open && s && t.querySelector('[aria-selected="true"]')) select(s, false);
+    }
+  }
+
+  // Rows that arrive in an htmx swap (a level, a search, a filter refresh) join the
+  // same tabindex contract. Detail-pane swaps land outside the pane and are ignored.
+  function onAfterSwap(event) {
+    var p2 = pane();
+    if (p2 && event.target && p2.contains(event.target)) maintainTabindex();
+  }
+
+  /* 076 §B: under hx-boost this script re-executes on every swap INTO an explorer
+     screen (its tag rides inside #app-main). The pane is a fresh element each time
+     and wants its own listeners; the two DOCUMENT-level listeners must be installed
+     exactly once per session, or every revisit would stack another pair. */
+  var docWired = false;
+
   function init() {
     var p = pane();
-    if (!p) return;
-    p.addEventListener("keydown", onKeydown);
-    p.addEventListener("click", function (event) {
-      if (!event.target.closest) return;
-      var item = event.target.closest('[role="treeitem"], [role="option"]');
-      if (item && p.contains(item)) select(item, false);
-    });
-    // <details> toggle does not bubble; the capture phase still sees it, so one listener
-    // keeps every folder summary's aria-expanded truthful without per-node handlers.
-    // Closing a folder whose CHILD was selected moves the selection to the folder: the
-    // child is now invisible (closed levels do not render), and a hidden selection is
-    // both unreadable and unannounceable.
-    document.addEventListener("toggle", function (event) {
-      var t = event.target;
-      if (t.tagName === "DETAILS" && t.classList.contains("tpl-folder")) {
-        var s = t.querySelector(":scope > summary");
-        if (s) s.setAttribute("aria-expanded", t.open ? "true" : "false");
-        if (!t.open && s && t.querySelector('[aria-selected="true"]')) select(s, false);
-      }
-    }, true);
-    // Rows that arrive in an htmx swap (a level, a search, a filter refresh) join the
-    // same tabindex contract. Detail-pane swaps land outside the pane and are ignored.
-    document.addEventListener("htmx:afterSwap", function (event) {
-      var p2 = pane();
-      if (p2 && event.target && p2.contains(event.target)) maintainTabindex();
-    });
-    maintainTabindex();
+    if (p && !p.__tplxWired) {
+      p.__tplxWired = true;
+      p.addEventListener("keydown", onKeydown);
+      p.addEventListener("click", function (event) {
+        if (!event.target.closest) return;
+        var item = event.target.closest('[role="treeitem"], [role="option"]');
+        if (item && p.contains(item)) select(item, false);
+      });
+    }
+    if (!docWired) {
+      docWired = true;
+      document.addEventListener("toggle", onToggle, true);
+      document.addEventListener("htmx:afterSwap", onAfterSwap);
+    }
+    if (p) maintainTabindex();
   }
 
   if (document.readyState === "loading") {
@@ -258,11 +276,13 @@
     init();
   }
 
-  // Exposed for editorJsTest (the init.js pattern): the navigation policy, DOM-free.
+  // Exposed for editorJsTest (the init.js pattern): the navigation policy, DOM-free,
+  // plus init itself so a re-init test can drive it (076 §B).
   window.templateExplorer = {
     nextIndex: nextIndex,
     arrowRightOpens: arrowRightOpens,
     arrowLeftCloses: arrowLeftCloses,
     loadsDetail: loadsDetail,
+    init: init,
   };
 })();

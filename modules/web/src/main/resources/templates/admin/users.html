@@ -12,14 +12,14 @@
         hx-target="#user-table-body"
         hx-swap="afterbegin"
         style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
-    <input type="email" name="email" class="ds-input" placeholder="new-user@example.com" required style="flex:1;max-width:280px">
-    <input type="text" name="displayName" class="ds-input" placeholder="Display name (optional)" style="flex:1;max-width:220px">
+    <input type="email" name="email" class="ds-input app-input-inline" placeholder="new-user@example.com" required>
+    <input type="text" name="displayName" class="ds-input app-input-inline" placeholder="Display name (optional)">
     <button type="submit" class="ds-button ds-button-primary ds-button-sm">Create local user</button>
     <span style="color:var(--text-secondary);font-size:var(--text-xs)">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
   </form>
 
   <div style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
-    <input type="text" id="userSearch" class="ds-input" placeholder="Search by email or name" style="flex:1;max-width:320px"
+    <input type="text" id="userSearch" class="ds-input app-input-inline-lg" placeholder="Search by email or name"
            hx-get="/partials/admin/users"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#user-table-body"
@@ -49,9 +49,16 @@
   </table>
 
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    // 076 §B: run immediately when this fragment arrives in a boosted swap
+    // (DOMContentLoaded has long fired); arm the listener only on a cold parse.
+    var loadUsers = function() {
       htmx.ajax('GET', '/partials/admin/users?offset=0&limit=20', {target: '#user-table-body', swap: 'innerHTML'});
-    });
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadUsers);
+    } else {
+      loadUsers();
+    }
   </script>
 </th:block>
 </html>

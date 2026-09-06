@@ -56,15 +56,77 @@ body {
   padding-block: var(--gap-lg);
 }
 
-/* 065 §A — full-bleed pages. The graph editor is the one surface whose value
-   scales with width; on a 2000px viewport the 1600px cap left it ~1450px and two
-   dead margins. Opt-in per page (`fullBleed` model attribute → th:classappend in
-   layouts/default.html), so lists, settings and docs keep the cap that suits
-   prose. The nav bar keeps its own .app-container cap — a nav wider than its
-   content reads as broken. */
-.app-main-bleed {
-  max-width: none;
-  padding-inline: var(--gap-md);
+/* The reading column: prose and cards sit in a 90ch measure, LEFT-aligned
+   inside the full-bleed main — never centred, never a second container.
+   Tables and trees never use it. */
+.app-reading {
+  max-width: 90ch;
+}
+
+/* Stacked page sections (settings pages' former inline grid). */
+.app-stack {
+  display: grid;
+  gap: var(--gap-lg);
+}
+
+/* Dashboard stat cards (the former inline grid-template-columns). */
+.app-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--gap-md);
+}
+
+/* Centred single-card pages (login, error pages). */
+.app-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+}
+
+.app-card-auth {
+  max-width: 26rem;
+  width: 100%;
+}
+
+/* Hand-rolled modals (register datasource, create template, create API key):
+   the width the inline max-width used to carry, on tokens. */
+.app-modal {
+  position: relative;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  padding: var(--gap-lg);
+}
+
+.app-modal-sm {
+  max-width: 30rem;
+}
+
+.app-modal-md {
+  max-width: 32rem;
+}
+
+.app-modal-lg {
+  max-width: 35rem;
+}
+
+/* List-page search boxes (pipelines, templates, datasources). */
+.app-search-input {
+  flex: 1 1 15rem;
+  min-width: 11rem;
+  max-width: 22rem;
+}
+
+/* Inline-width form inputs (admin user forms). */
+.app-input-inline {
+  flex: 1;
+  max-width: 17.5rem;
+}
+
+.app-input-inline-lg {
+  flex: 1;
+  max-width: 20rem;
 }
 
 /* Sticky top nav — one bordered bar, not a floating ds-surface card. */
@@ -197,4 +259,53 @@ body {
 
 .ds-table tbody tr:last-child td:last-child {
   border-bottom-right-radius: calc(var(--radius-md) - 1px);
+}
+
+/* ---------------------------------------------------------------------------
+   076 §B — boosted-navigation progress bar (layouts/default.html #app-progress,
+   shell.js toggles .active off htmx:beforeRequest/htmx:afterSettle). The bar is
+   the swap's "loading" signal: boosted swaps must not flash the document, so
+   this does the talking instead — 2px under the sticky nav, tokens only.
+   --------------------------------------------------------------------------- */
+.app-progress {
+  position: fixed;
+  top: calc(var(--header-height) + var(--space-px));
+  left: 0;
+  right: 0;
+  height: calc(var(--space-px) * 2);
+  z-index: var(--z-fixed);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.app-progress.active {
+  opacity: 1;
+}
+
+.app-progress::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 33%;
+  background: var(--accent-primary);
+  animation: app-progress-slide var(--duration-slower) var(--ease-linear) infinite;
+}
+
+@keyframes app-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/* Reduced motion: the show/hide stays (it is information, not decoration);
+   the slide goes. */
+@media (prefers-reduced-motion: reduce) {
+  .app-progress::before {
+    animation: none;
+    width: 100%;
+  }
 }

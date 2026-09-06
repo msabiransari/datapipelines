@@ -29,7 +29,14 @@
   <!-- No hx-target-error here: the response-targets extension is NOT loaded, so the
        attribute was dead config. Refusals that should toast use Shape C (§5.1) —
        HX-Retarget/HX-Reswap response headers admitted by toast.js's bridgeErrors. -->
-  <nav class="app-nav">
+  <!-- 076 §B: hx-boost turns every nav click (and every in-main navigation) into
+       a fetch of the SAME full page; shell.js retargets boosted swaps at
+       #app-main (hx-target/hx-select are NOT inherited onto the nav/main — that
+       would hijack the screens' partial swaps). The nav, workspace switcher and
+       toast stack persist; only the main region is replaced. Full navigations
+       remain for the routes marked hx-boost="false" (logout below; /login, OIDC
+       and the forced-change gate in their templates; downloads in the editor). -->
+  <nav class="app-nav" hx-boost="true">
     <div class="app-container app-nav-inner">
       <div class="app-nav-left">
         <a class="app-brand" th:href="@{/dashboard}"><svg viewBox="0 0 64 64" aria-hidden="true" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default, #ffffff)"/></svg>datapipelines</a>
@@ -46,73 +53,91 @@
           <noscript><button type="submit" class="ds-button ds-button-ghost ds-button-sm">Go</button></noscript>
         </form>
       </div>
+      <!-- data-nav-section is the client-side half of the active-section state
+           (076 §B): shell.js mirrors the server-side currentPath rule after a
+           boosted swap, when the nav is NOT re-rendered. -->
       <div class="app-nav-links" th:if="${authenticated}">
-        <a th:href="@{/dashboard}" class="app-nav-link"
+        <a th:href="@{/dashboard}" class="app-nav-link" data-nav-section="/dashboard"
            th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null">Dashboard</a>
-        <a th:href="@{/pipelines}" class="app-nav-link"
+        <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null">Pipelines</a>
-        <a th:href="@{/datasources}" class="app-nav-link"
+        <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null">Datasources</a>
-        <a th:href="@{/templates}" class="app-nav-link"
+        <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null">Templates</a>
-        <a th:href="@{/executions}" class="app-nav-link"
+        <a th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null">Executions</a>
-        <a th:href="@{/workspaces}" class="app-nav-link"
+        <a th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null">Workspaces</a>
         <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
              reach it — there is no MCP tool and no schedule. -->
-        <a th:href="@{/promotion}" class="app-nav-link"
+        <a th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null">Promotion</a>
-        <a th:href="@{/settings}" class="app-nav-link"
+        <a th:href="@{/settings}" class="app-nav-link" data-nav-section="/settings"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/settings')} ? 'active' : null">Settings</a>
-        <a th:href="@{/docs}" class="app-nav-link"
+        <a th:href="@{/docs}" class="app-nav-link" data-nav-section="/docs"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null">Docs</a>
-        <a th:href="@{/admin/users}" class="app-nav-link"
+        <a th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null">Admin</a>
-        <form th:action="@{/logout}" method="post" class="app-logout-form">
+        <form th:action="@{/logout}" method="post" class="app-logout-form" hx-boost="false">
           <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Logout</button>
         </form>
       </div>
     </div>
   </nav>
 
+  <!-- 076 §B: the boosted-navigation progress signal — the white flash used to
+       say "loading"; a swap must not flash, so this 2px bar does (shell.js
+       drives it off htmx:beforeRequest/htmx:afterSettle for boosted requests). -->
+  <div id="app-progress" class="app-progress" aria-hidden="true"></div>
+
   <!-- The notification stack (ui-screens.md §5.1): htmx appends server-rendered
-       partials/toast fragments here (hx-swap="beforeend"); toast.js arms each. -->
+       partials/toast fragments here (hx-swap="beforeend"); toast.js arms each.
+       The stack lives OUTSIDE #app-main so it persists across boosted swaps
+       (076 §B) — server-rendered redirect flashes arrive in #toast-flash inside
+       the swapped region and toast.js adopts them into this stack. -->
   <div id="toast" class="ds-toast-stack" aria-live="polite" style="top: var(--header-height); right: var(--gap-md);">
-    <!-- Full-page redirect flashes, rendered server-side into the stack (§4.13): the
-         workspaces mutations keep their redirect contract — only how the result is
-         DISPLAYED changed (banner → toast). toast.js arms these at DOMContentLoaded
-         like any swapped-in toast. Error copy is the reviewed 022/F8 wording, verbatim. -->
+  </div>
+
+  <!-- 076 §A: one width policy — EVERY screen's <main> is full-bleed with the
+       same gutter (065's editor opt-in became the rule). Reading content sits
+       in .app-reading inside it; nothing sets a container per page any more.
+       076 §B: id="app-main" is the boosted-navigation swap target (shell.js);
+       hx-boost makes in-main links and plain forms navigate through the swap. -->
+  <main id="app-main" class="app-container app-main" hx-boost="true">
+    <!-- Full-page redirect flashes, rendered server-side (§4.13): the workspaces
+         mutations keep their redirect contract — only how the result is DISPLAYED
+         changed (banner → toast). They render into this HIDDEN bin inside the
+         swapped region so a boosted response carries them; toast.js moves them
+         into the persistent #toast stack on init and after every settle. Error
+         copy is the reviewed 022/F8 wording, verbatim. -->
     <!-- th:if CANNOT share an element with th:replace: fragment inclusion has the
          higher precedence and DISCARDS the host before the condition is evaluated —
          so the condition wraps a th:block and the replace lives on the inner div. -->
-    <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
-      <th:block th:if="${code == 'duplicate_name'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace with that name already exists.')}"></div></th:block>
-      <th:block th:if="${code == 'name_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.')}"></div></th:block>
-      <th:block th:if="${code == 'creation_forbidden'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Creating workspaces is not permitted on this server.')}"></div></th:block>
-      <th:block th:if="${code == 'in_use'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'This workspace still owns content (pipelines, templates or datasources), or still needs its owner.')}"></div></th:block>
-      <th:block th:if="${code == 'membership_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is not available to you.')}"></div></th:block>
-      <th:block th:if="${code == 'session_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.')}"></div></th:block>
-      <th:block th:if="${code == 'switch_refused'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Switching workspaces was refused — you are not a member of that workspace.')}"></div></th:block>
-      <th:block th:if="${code == 'user_not_found' or code == 'not_found'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'No user or workspace with that identity exists.')}"></div></th:block>
-    </th:block>
-    <th:block th:if="${param.ok}" th:with="code=${param.ok[0]}">
-      <th:block th:if="${code == 'created'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was created.')}"></div></th:block>
-      <th:block th:if="${code == 'joined'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'You joined the workspace.')}"></div></th:block>
-      <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
-      <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
-      <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>
-    </th:block>
-  </div>
-
-  <!-- 065 §A: the 1600px .app-container cap is right for prose pages — lists,
-       settings, docs — and wrong for the ONE surface that scales with width. A page
-       opts out by setting `fullBleed`; only the pipeline editor does. -->
-  <main class="app-container app-main" th:classappend="${fullBleed} ? 'app-main-bleed' : null">
+    <div id="toast-flash" hidden>
+      <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
+        <th:block th:if="${code == 'duplicate_name'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace with that name already exists.')}"></div></th:block>
+        <th:block th:if="${code == 'name_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.')}"></div></th:block>
+        <th:block th:if="${code == 'creation_forbidden'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Creating workspaces is not permitted on this server.')}"></div></th:block>
+        <th:block th:if="${code == 'in_use'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'This workspace still owns content (pipelines, templates or datasources), or still needs its owner.')}"></div></th:block>
+        <th:block th:if="${code == 'membership_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is not available to you.')}"></div></th:block>
+        <th:block th:if="${code == 'session_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace actions from these screens need a signed-in session. Use the workspace REST API with an API key, or sign in.')}"></div></th:block>
+        <th:block th:if="${code == 'switch_refused'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Switching workspaces was refused — you are not a member of that workspace.')}"></div></th:block>
+        <th:block th:if="${code == 'user_not_found' or code == 'not_found'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'No user or workspace with that identity exists.')}"></div></th:block>
+      </th:block>
+      <th:block th:if="${param.ok}" th:with="code=${param.ok[0]}">
+        <th:block th:if="${code == 'created'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was created.')}"></div></th:block>
+        <th:block th:if="${code == 'joined'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'You joined the workspace.')}"></div></th:block>
+        <th:block th:if="${code == 'member_added'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was added.')}"></div></th:block>
+        <th:block th:if="${code == 'member_removed'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The member was removed.')}"></div></th:block>
+        <th:block th:if="${code == 'deleted'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was deleted.')}"></div></th:block>
+      </th:block>
+    </div>
     <th:block th:replace="${content}"/>
   </main>
 
   <script th:src="@{/webjars/htmx.org/2.0.10/dist/htmx.min.js}"></script>
+  <script th:src="@{/js/shell.js}"></script>
   <script th:src="@{/js/toast.js}"></script>
 </body>
 </html>

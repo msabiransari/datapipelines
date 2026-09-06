@@ -442,10 +442,12 @@
             <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
             <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
             <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+            <!-- 076 §B: downloads are full navigations, never boosted — a boosted
+                 fetch would try to swap a file response into #app-main. -->
             <div class="pe-result-downloads">
-              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
-              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
-              <a class="ds-button ds-button-ghost ds-button-sm" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
             </div>
           </div>
         </div>

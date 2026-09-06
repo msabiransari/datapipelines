@@ -63,3 +63,36 @@ test("only leaves and search results load the detail pane — folders have no de
   assert.equal(explorer.loadsDetail("folder"), false);
   assert.equal(explorer.loadsDetail(null), false);
 });
+
+test("076 §B — re-init after a boosted swap wires the pane once and never doubles document listeners", () => {
+  // The script's tag rides inside #app-main, so it RE-EXECUTES on every boosted
+  // visit to an explorer screen. init() must be idempotent: pane listeners go on
+  // the (fresh) pane element, the two document-level listeners go on exactly once.
+  const docListeners = [];
+  const paneListeners = [];
+  const pane = {
+    addEventListener: (t) => paneListeners.push(t),
+    querySelectorAll: () => [],
+  };
+  const prevDoc = globalThis.document;
+  globalThis.document = {
+    readyState: "complete",
+    addEventListener: (t) => docListeners.push(t),
+    querySelector: (sel) => (sel === "[data-explorer-pane]" ? pane : null),
+    getElementById: () => null,
+  };
+  const freshPath = path.resolve(here, "../../main/resources/static/js/template-explorer.js");
+  delete require.cache[require.resolve(freshPath)];
+  require(freshPath); // init() at load, as a fresh full page would
+
+  const fresh = globalThis.window.templateExplorer;
+  fresh.init(); // the boosted re-visit
+  fresh.init(); // and a redundant one (belt)
+
+  assert.deepEqual(docListeners.slice().sort(), ["htmx:afterSwap", "toggle"],
+    "document listeners installed exactly once across repeated init");
+  assert.deepEqual(paneListeners.slice().sort(), ["click", "keydown"],
+    "pane listeners installed exactly once on the same pane");
+
+  globalThis.document = prevDoc;
+});
