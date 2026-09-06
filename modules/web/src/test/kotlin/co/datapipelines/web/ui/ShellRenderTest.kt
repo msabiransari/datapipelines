@@ -1,6 +1,9 @@
 package co.datapipelines.web.ui
 
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -41,12 +44,151 @@ class ShellRenderTest {
     fun `every app page renders the boost shell on nav and main`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
 
-        html shouldContain "<nav class=\"app-nav\" hx-boost=\"true\">"
+        // 079 §A moved the nav into the rail; the BOOST CONTRACT is unchanged, which is
+        // what this pins — same element class, same hx-boost, same swap target, same
+        // progress bar and flash bin.
+        html shouldContain "<nav class=\"app-nav\" hx-boost=\"true\""
         html shouldContain "<main id=\"app-main\" class=\"app-container app-main\" hx-boost=\"true\">"
         html shouldContain "id=\"app-progress\""
-        html shouldContain "id=\"toast-flash\" hidden"
+        // 079 §F: the bin gained [data-toast-flash] — toast.js now drains EVERY marked bin,
+        // so a screen with its own refusal vocabulary (promotion) can render its own.
+        html shouldContain "id=\"toast-flash\" data-toast-flash hidden"
         html shouldContain "data-nav-section=\"/pipelines\""
         html shouldContain "/js/shell.js"
+    }
+
+    @Test
+    fun `the rail renders the three groups, the collapse control and the counts`() {
+        val html =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("navCounts", NavCounts.Counts(9, 27))
+                },
+            )
+
+        html shouldContain "class=\"app-shell\""
+        html shouldContain "app-nav-section app-rail-label\">Build<"
+        html shouldContain "app-nav-section app-rail-label\">Operate<"
+        html shouldContain "app-nav-section app-rail-label\">Organisation<"
+        html shouldContain "id=\"rail-collapse\""
+        // Counts render as badges only when the cache produced a number (§A).
+        html shouldContain "app-nav-badge app-rail-label\">9<"
+        html shouldContain "app-nav-badge app-rail-label\">27<"
+    }
+
+    @Test
+    fun `a workspace with unreadable counts renders no badges rather than a zero`() {
+        val html =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("navCounts", NavCounts.Counts(null, null))
+                },
+            )
+
+        html shouldContain "data-nav-label=\"Pipelines\""
+        html shouldNotContain "app-nav-badge"
+    }
+
+    @Test
+    fun `the top bar renders the search placeholder, the mode toggle and the avatar menu`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+
+        html shouldContain "class=\"app-topbar\""
+        html shouldContain "app-crumb-page"
+        // §B: the search box is a div, NEVER an input — nobody types into a field that
+        // is wired to nothing this round.
+        html shouldContain "class=\"app-search\" aria-hidden=\"true\""
+        html shouldNotContain "class=\"app-search\"><input"
+        html shouldContain "id=\"mode-toggle\""
+        html shouldContain "hx-patch=\"/partials/profile/theme\""
+        html shouldContain "id=\"app-avatar\""
+        html shouldContain "aria-haspopup=\"menu\""
+        html shouldContain "aria-expanded=\"false\""
+        html shouldContain "id=\"app-user-menu\""
+        html shouldContain "role=\"menu\""
+    }
+
+    @Test
+    fun `the avatar renders the OIDC picture when the users row carries one`() {
+        val withPicture =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable(
+                        "currentUser",
+                        mapOf(
+                            "displayName" to "Muhammad Sabir",
+                            "email" to "m@example.com",
+                            "profilePictureUrl" to "https://pic.example/x.png",
+                        ),
+                    )
+                },
+            )
+        // `users.profile_picture_url` IS stored (OidcSuccessHandler writes the `picture`
+        // claim through UserRepository on every login) — so the avatar is the real image
+        // when there is one, and initials otherwise. No gap to record.
+        withPicture shouldContain "class=\"app-avatar-img\""
+        withPicture shouldContain "https://pic.example/x.png"
+
+        val withoutPicture =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable(
+                        "currentUser",
+                        mapOf("displayName" to "Muhammad Sabir", "email" to "m@example.com", "profilePictureUrl" to null),
+                    )
+                },
+            )
+        withoutPicture shouldContain "class=\"app-avatar-initials\""
+        withoutPicture shouldContain ">MU<"
+    }
+
+    @Test
+    fun `the appearance segment and the palette swatches write the one theme preference`() {
+        val html =
+            engine.process(
+                "pipelines/list",
+                webContext().apply {
+                    fillList()
+                    setVariable("themePalettes", listOf("forest", "ocean", "saas"))
+                },
+            )
+
+        // Nine vendored themes, ONE users.theme_preference: three of them are modes and
+        // the rest are palettes, and both controls PATCH the same endpoint (§B).
+        html shouldContain "data-mode=\"light\""
+        html shouldContain "data-mode=\"dark\""
+        html shouldContain "data-mode=\"auto\""
+        html shouldContain "data-swatch=\"forest\""
+        html shouldContain "data-swatch=\"ocean\""
+        html shouldContain "data-swatch=\"saas\""
+        html shouldNotContain "data-swatch=\"light\""
+    }
+
+    @Test
+    fun `every rail link agrees with the breadcrumb table`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+
+        // The drift guard between the rail's MARKUP (here) and AppNav's TABLE (Kotlin):
+        // the top bar's breadcrumb is derived from the table, the highlight from the
+        // markup, and a link added to one without the other would make them disagree
+        // silently. Non-vacuous by construction — the count is asserted too.
+        val links = Regex("""data-nav-section="([^"]+)" *\n? *data-nav-group="([^"]*)" data-nav-label="([^"]+)"""").findAll(html).toList()
+        links.size shouldBe AppNav.ITEMS.size
+        links.forEach { match ->
+            val (section, group, label) = match.destructured
+            val item = AppNav.bySection(section)
+            item.shouldNotBeNull()
+            item.label shouldBe label
+            (item.group ?: "") shouldBe group
+        }
     }
 
     @Test
@@ -60,7 +202,11 @@ class ShellRenderTest {
     fun `login and the OIDC redirect are full navigations`() {
         val html = engine.process("login", webContext().apply { fillLogin() })
 
-        html shouldContain "action=\"/login\" style=\"text-align: left;\" hx-boost=\"false\""
+        // 079 §D stripped the inline `style="text-align: left;"` this used to name; the
+        // ASSERTION's subject was always the hx-boost="false", so it is pinned on the form
+        // itself rather than on an attribute string that a styling change can move.
+        html shouldContain "action=\"/login\""
+        Regex("""<form[^>]*action="/login"[^>]*hx-boost="false"""").containsMatchIn(html) shouldBe true
         html shouldContain "href=\"/oauth2/authorization/sso\""
         html shouldContain "hx-boost=\"false\""
     }

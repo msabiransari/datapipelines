@@ -95,7 +95,16 @@ class DocsPublicSeoTest {
                     "class=\"site-header\"" !in html -> "$slug: no public header"
 
                     // The app chrome's own markers. Either would mean the wrong layout was chosen.
-                    "app-nav" in html -> "$slug: rendered the signed-in application navigation"
+                    //
+                    // 079: matched on the ELEMENT, not on the bare class name. The packaged spec
+                    // set now DOCUMENTS the shell — ui-screens.md §3.4 names `nav.app-nav` and
+                    // `.app-nav-link` in prose — and a substring test flagged that documentation
+                    // as if the page had rendered the signed-in nav. The precise form is the one
+                    // `ShellRenderTest` and `NavigationGoldenPathBrowserTest` assert; prose about
+                    // a class is not the chrome.
+                    "<nav class=\"app-nav\"" in html -> "$slug: rendered the signed-in application navigation"
+
+                    "class=\"app-rail\"" in html -> "$slug: rendered the signed-in application rail"
 
                     "href=\"/dashboard\"" in html -> "$slug: links into the authenticated app"
 

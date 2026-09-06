@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:attr="data-theme=${activeTheme}"
       th:fragment="page(content)">
 <head>
   <meta charset="utf-8">
@@ -26,6 +27,24 @@
         th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
 
   <link th:href="@{/css/app.css}" rel="stylesheet">
+  <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
+
+       This is the ONE inline script in the layout, and the round's only
+       deliberate exception to "no inline scripts" (ui-screens.md §3.2 keeps the
+       rule for everything else). The reason it cannot move into shell.js: a
+       deferred external script runs after the document has painted, so the rail
+       would render at 232px and snap to 60px in front of the user on every
+       navigation — a flash of the wrong layout, which is the exact class of
+       thing the boosted-navigation work exists to remove. The class goes on
+       <html> rather than the shell element because <body> does not exist yet at
+       this point in the parse; shell.js toggles the same class on the same
+       element, so there is one source of truth for it.
+
+       Wrapped in try/catch: localStorage throws outright in some privacy modes,
+       and a shell that cannot render because a preference could not be read is
+       a worse failure than a rail that opens. -->
+  <script>try{if(localStorage.getItem("dp-rail")==="1")document.documentElement.classList.add("rail-collapsed")}catch(e){}</script>
+
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
   <link rel="apple-touch-icon" sizes="180x180" th:href="@{/site/brand/apple-touch-icon-180.png}">
@@ -42,56 +61,19 @@
        toast stack persist; only the main region is replaced. Full navigations
        remain for the routes marked hx-boost="false" (logout below; /login, OIDC
        and the forced-change gate in their templates; downloads in the editor). -->
-  <nav class="app-nav" hx-boost="true">
-    <div class="app-container app-nav-inner">
-      <div class="app-nav-left">
-        <a class="app-brand" th:href="@{/dashboard}"><svg viewBox="0 0 64 64" aria-hidden="true" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default, #ffffff)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default, #ffffff)"/></svg>datapipelines</a>
-        <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
-              class="app-workspace-form">
-          <label for="workspace-switcher" class="app-workspace-label">workspace</label>
-          <select id="workspace-switcher" name="name" onchange="this.form.submit()"
-                  class="app-workspace-select">
-            <option th:each="membership : ${workspaceOptions}"
-                    th:value="${membership.workspaceName}"
-                    th:text="${membership.workspaceName}"
-                    th:selected="${membership.workspaceName == activeWorkspace}">workspace</option>
-          </select>
-          <noscript><button type="submit" class="ds-button ds-button-ghost ds-button-sm">Go</button></noscript>
-        </form>
-      </div>
-      <!-- data-nav-section is the client-side half of the active-section state
-           (076 §B): shell.js mirrors the server-side currentPath rule after a
-           boosted swap, when the nav is NOT re-rendered. -->
-      <div class="app-nav-links" th:if="${authenticated}">
-        <a th:href="@{/dashboard}" class="app-nav-link" data-nav-section="/dashboard"
-           th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null">Dashboard</a>
-        <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null">Pipelines</a>
-        <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null">Datasources</a>
-        <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null">Templates</a>
-        <a th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null">Executions</a>
-        <a th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null">Workspaces</a>
-        <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
-             reach it — there is no MCP tool and no schedule. -->
-        <a th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null">Promotion</a>
-        <a th:href="@{/settings}" class="app-nav-link" data-nav-section="/settings"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/settings')} ? 'active' : null">Settings</a>
-        <a th:href="@{/docs}" class="app-nav-link" data-nav-section="/docs"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null">Docs</a>
-        <a th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
-           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null">Admin</a>
-        <form th:action="@{/logout}" method="post" class="app-logout-form" hx-boost="false">
-          <button type="submit" class="ds-button ds-button-ghost ds-button-sm">Logout</button>
-        </form>
-      </div>
-    </div>
-  </nav>
+  <!-- 079 §A/§B — the shell. Two columns: a collapsible rail spanning both rows,
+       and a content column of top bar + main. The rail and the top bar exist only
+       for an authenticated principal; the login page, the public docs and the
+       error pages render `.app-shell-anon`, a single full-width column, which is
+       also what keeps `nav.app-nav` at zero occurrences signed out
+       (NavigationGoldenPathBrowserTest).
 
+       The <nav> keeps its `app-nav` class and its `hx-boost="true"`: the boosted
+       -navigation contract (076 §B) is unchanged by this round — only where the
+       links sit changed. `data-nav-section` is still the client-side mirror's
+       hook; `shell.js` now also carries the aria-current and the breadcrumb
+       across a boosted swap, since neither the rail nor the top bar is
+       re-rendered by one. -->
   <!-- 076 §B: the boosted-navigation progress signal — the white flash used to
        say "loading"; a swap must not flash, so this 2px bar does (shell.js
        drives it off htmx:beforeRequest/htmx:afterSettle for boosted requests). -->
@@ -101,9 +83,223 @@
        partials/toast fragments here (hx-swap="beforeend"); toast.js arms each.
        The stack lives OUTSIDE #app-main so it persists across boosted swaps
        (076 §B) — server-rendered redirect flashes arrive in #toast-flash inside
-       the swapped region and toast.js adopts them into this stack. -->
-  <div id="toast" class="ds-toast-stack" aria-live="polite" style="top: var(--header-height); right: var(--gap-md);">
-  </div>
+       the swapped region and toast.js adopts them into this stack. 079: both
+       elements are position:fixed and now sit OUTSIDE .app-shell — a fixed child
+       is out of grid flow either way, but keeping the grid to exactly its three
+       real areas is what makes the layout readable. The stack's offset moved from
+       an inline style to .app-toast-stack (§D: no inline style= in app chrome). -->
+  <div id="toast" class="ds-toast-stack app-toast-stack" aria-live="polite"></div>
+
+  <div class="app-shell" th:classappend="${authenticated} ? null : 'app-shell-anon'">
+
+    <aside class="app-rail" th:if="${authenticated}">
+      <a class="app-brand" th:href="@{/dashboard}" hx-boost="true">
+        <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span><span class="app-rail-label">datapipelines</span>
+      </a>
+
+      <!-- The workspace switcher keeps its POST form and its <select> verbatim
+           (workspaces design §9) — only the chrome around it became a card. The
+           select is the control; the card is a <label> so the whole tile is the
+           hit target, and the caret is decoration. -->
+      <form th:if="${activeWorkspace} != null" th:action="@{/workspace/switch}" method="post"
+            class="app-workspace-form">
+        <label class="app-ws" for="workspace-switcher">
+          <span class="app-ws-avatar" aria-hidden="true"
+                th:text="${#strings.toUpperCase(#strings.substring(activeWorkspace, 0, activeWorkspace.length() >= 2 ? 2 : 1))}">TS</span>
+          <span class="app-ws-text app-rail-label">
+            <small class="app-workspace-label">workspace</small>
+            <b th:text="${activeWorkspace}">workspace</b>
+          </span>
+          <svg class="app-ws-caret app-rail-label ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
+        </label>
+        <select id="workspace-switcher" name="name" onchange="this.form.submit()"
+                class="app-workspace-select" aria-label="Switch workspace">
+          <option th:each="membership : ${workspaceOptions}"
+                  th:value="${membership.workspaceName}"
+                  th:text="${membership.workspaceName}"
+                  th:selected="${membership.workspaceName == activeWorkspace}">workspace</option>
+        </select>
+        <noscript><button type="submit" class="ds-button ds-button-ghost ds-button-sm">Go</button></noscript>
+      </form>
+
+      <!-- data-nav-section is the client-side half of the active-section state
+           (076 §B): shell.js mirrors the server-side currentPath rule after a
+           boosted swap, when the rail is NOT re-rendered. data-nav-group and
+           data-nav-label let it re-derive the breadcrumb from the same element,
+           and AppNav.crumbFor must agree with both (ShellRenderTest).
+
+           Icons: the vendored icon set (lucide-static, 12 glyphs) covers four of
+           these ten rows, so mixing it in would leave one nav column drawn from
+           two sources at two stroke weights. They are inline instead, sized by
+           the design system's own .ds-icon utilities. -->
+      <nav class="app-nav" hx-boost="true" aria-label="Sections">
+        <a th:href="@{/dashboard}" class="app-nav-link" data-nav-section="/dashboard"
+           data-nav-group="" data-nav-label="Dashboard"
+           th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="10" width="8" height="11" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/></svg><span class="app-rail-label">Dashboard</span></a>
+
+        <div class="app-nav-section app-rail-label">Build</div>
+        <a th:href="@{/pipelines}" class="app-nav-link" data-nav-section="/pipelines"
+           data-nav-group="Build" data-nav-label="Pipelines"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/pipelines')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="6" height="6" rx="1.5"/><rect x="15" y="14" width="6" height="6" rx="1.5"/><path d="M9 7h4a3 3 0 0 1 3 3v4"/></svg><span class="app-rail-label">Pipelines</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.pipelines != null}" th:text="${navCounts.pipelines}">0</span></a>
+        <a th:href="@{/templates}" class="app-nav-link" data-nav-section="/templates"
+           data-nav-group="Build" data-nav-label="Templates"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/templates')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 4l-5 8 5 8M16 4l5 8-5 8"/></svg><span class="app-rail-label">Templates</span><span class="app-nav-badge app-rail-label" th:if="${navCounts?.templates != null}" th:text="${navCounts.templates}">0</span></a>
+        <a th:href="@{/datasources}" class="app-nav-link" data-nav-section="/datasources"
+           data-nav-group="Build" data-nav-label="Datasources"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="app-rail-label">Datasources</span></a>
+
+        <div class="app-nav-section app-rail-label">Operate</div>
+        <a th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
+           data-nav-group="Operate" data-nav-label="Executions"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="app-rail-label">Executions</span></a>
+        <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
+             was literally true — published endpoints, keys and the MCP connection
+             had no screen at all. /api-console, not /api/**: that prefix is the
+             REST surface (/api/v1 and the published /api/x). -->
+        <a th:href="@{/api-console}" class="app-nav-link" data-nav-section="/api-console"
+           data-nav-group="Operate" data-nav-label="API"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12h4l2-6 4 12 2-6h4"/></svg><span class="app-rail-label">API</span></a>
+        <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
+             reach it — there is no MCP tool and no schedule. -->
+        <a th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
+           data-nav-group="Operate" data-nav-label="Promotion"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 17l6-6 4 4 6-6M14 9h6v6"/></svg><span class="app-rail-label">Promotion</span></a>
+
+        <div class="app-nav-section app-rail-label">Organisation</div>
+        <a th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
+           data-nav-group="Organisation" data-nav-label="Workspaces"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg><span class="app-rail-label">Workspaces</span></a>
+        <a th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
+           data-nav-group="Organisation" data-nav-label="Admin"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/></svg><span class="app-rail-label">Admin</span></a>
+        <a th:href="@{/docs}" class="app-nav-link" data-nav-section="/docs"
+           data-nav-group="Organisation" data-nav-label="Docs"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 7h8M8 11h8M8 15h5"/></svg><span class="app-rail-label">Docs</span></a>
+      </nav>
+
+      <div class="app-rail-foot">
+        <button type="button" id="rail-collapse" class="app-rail-collapse"
+                aria-expanded="true" aria-controls="app-rail-nav">
+          <svg class="ds-icon ds-icon-sm app-rail-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg><span class="app-rail-label">Collapse</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Signed out, the bar carries the brand and nothing else: the breadcrumb,
+         the search field, the mode toggle and the avatar are all statements about
+         a session. Keeping the bar (rather than dropping it with the rail) is what
+         preserves the login page's identity — 076's nav showed the brand to
+         anonymous requests and UiLayoutChromeAdviceTest pins that it still does. -->
+    <header class="app-topbar app-topbar-anon" th:unless="${authenticated}">
+      <a class="app-brand" th:href="@{/}">
+        <span class="app-brand-tile" aria-hidden="true"><svg viewBox="0 0 64 64" class="app-brand-mark" focusable="false"><path d="M18 14 C 28 14, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 32 C 28 32, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M18 50 C 28 50, 28 32, 34 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="13" cy="13" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="13" cy="51" r="5" fill="none" stroke="currentColor" stroke-width="4"/><rect x="36" y="18" width="26" height="28" rx="5" fill="currentColor"/><rect x="41" y="34" width="4" height="7" rx="1" fill="var(--surface-default)"/><rect x="47" y="28" width="4" height="13" rx="1" fill="var(--surface-default)"/><rect x="53" y="23" width="4" height="18" rx="1" fill="var(--surface-default)"/></svg></span><span>datapipelines</span>
+      </a>
+    </header>
+
+    <header class="app-topbar" th:if="${authenticated}">
+      <!-- The breadcrumb is server-rendered from AppNav.crumbFor(currentPath) and
+           re-derived client-side by shell.js after a boosted swap (the top bar is
+           outside #app-main, so the swap never re-renders it). -->
+      <div class="app-crumbs" id="app-crumbs">
+        <span class="app-crumb-group" th:if="${crumbGroup != null}" th:text="${crumbGroup}">Build</span>
+        <span class="app-crumb-sep" th:if="${crumbGroup != null}" aria-hidden="true">/</span>
+        <b class="app-crumb-page" th:text="${crumbPage} ?: 'datapipelines'">Pipelines</b>
+      </div>
+
+      <!-- 079 §B: the search field is a PLACEHOLDER this round — visual only,
+           wired to nothing. It is a <div>, not an <input>, precisely so nobody
+           types into a box that cannot answer; ui-screens.md §3.4 says so too. -->
+      <div class="app-search" aria-hidden="true">
+        <svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <span class="app-search-text">Search pipelines, templates, executions…</span>
+        <kbd class="app-kbd">&#8984;K</kbd>
+      </div>
+
+      <!-- The mode toggle and the appearance/theme controls in the menu below all
+           write ONE value — users.theme_preference — through the existing
+           PATCH /partials/profile/theme, which answers with an OOB swap of
+           #theme-link plus a toast. There is no second "mode" field: the design
+           system ships one stylesheet per look, so light / dark / auto and the six
+           palettes are nine values of the same preference (ui-screens.md §4.11). -->
+      <button type="button" id="mode-toggle" class="app-icon-button"
+              hx-patch="/partials/profile/theme" hx-swap="none"
+              th:attr="hx-vals=|{&quot;theme&quot;:&quot;${activeTheme == 'dark' ? 'light' : 'dark'}&quot;}|"
+              th:title="${activeTheme == 'dark'} ? 'Switch to light' : 'Switch to dark'"
+              th:aria-label="${activeTheme == 'dark'} ? 'Switch to light' : 'Switch to dark'">
+        <!-- BOTH icons are in the DOM, one hidden: shell.js flips them after the
+             theme PATCH settles, and a `th:if` would have left it nothing to flip. -->
+        <svg class="ds-icon ds-icon-md" data-mode-icon="light" th:attr="hidden=${activeTheme == 'dark'} ? 'hidden' : null" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ds-icon ds-icon-md" data-mode-icon="dark" th:attr="hidden=${activeTheme == 'dark'} ? null : 'hidden'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+
+      <div class="app-user">
+        <button type="button" id="app-avatar" class="app-avatar"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="app-user-menu"
+                th:title="${currentUser?.displayName} ?: 'Account'">
+          <img th:if="${currentUser?.profilePictureUrl != null}" class="app-avatar-img"
+               th:src="${currentUser.profilePictureUrl}" alt="" referrerpolicy="no-referrer">
+          <span th:if="${currentUser?.profilePictureUrl == null}" class="app-avatar-initials"
+                th:text="${currentUser != null} ? ${#strings.toUpperCase(#strings.substring(currentUser.displayName, 0, currentUser.displayName.length() >= 2 ? 2 : 1))} : '?'">MS</span>
+        </button>
+
+        <div class="app-menu" id="app-user-menu" role="menu" hidden>
+          <div class="app-menu-who">
+            <b th:text="${currentUser?.displayName} ?: 'Signed in'">Name</b>
+            <span th:text="${currentUser?.email}">email</span>
+          </div>
+
+          <div class="app-menu-row">
+            <span>Appearance</span>
+            <span class="app-seg" id="app-appearance">
+              <button type="button" role="menuitemradio" data-mode="light"
+                      hx-patch="/partials/profile/theme" hx-vals='{"theme":"light"}' hx-swap="none"
+                      th:attr="aria-checked=${activeTheme == 'light'} ? 'true' : 'false',aria-pressed=${activeTheme == 'light'} ? 'true' : 'false'">Light</button>
+              <button type="button" role="menuitemradio" data-mode="dark"
+                      hx-patch="/partials/profile/theme" hx-vals='{"theme":"dark"}' hx-swap="none"
+                      th:attr="aria-checked=${activeTheme == 'dark'} ? 'true' : 'false',aria-pressed=${activeTheme == 'dark'} ? 'true' : 'false'">Dark</button>
+              <button type="button" role="menuitemradio" data-mode="auto"
+                      hx-patch="/partials/profile/theme" hx-vals='{"theme":"auto"}' hx-swap="none"
+                      th:attr="aria-checked=${activeTheme == 'auto'} ? 'true' : 'false',aria-pressed=${activeTheme == 'auto'} ? 'true' : 'false'">System</button>
+            </span>
+          </div>
+
+          <div class="app-menu-row">
+            <span>Theme</span>
+            <span class="app-menu-value" id="app-theme-name" th:text="${activeTheme}">saas</span>
+          </div>
+          <!-- The palettes: every vendored theme that is not one of the three modes
+               above. Swatches take their fill from the design system's own accent
+               token as loaded by that theme — but a swatch must show a theme the
+               page is NOT currently wearing, so the colour cannot come from a var.
+               It comes from data-swatch + a CSS rule per palette in app.css, which
+               is the one place those six values are written down. -->
+          <div class="app-swatches" role="group" aria-label="Theme">
+            <button type="button" class="app-swatch" th:each="palette : ${themePalettes}"
+                    th:attr="data-swatch=${palette},aria-pressed=${palette == activeTheme} ? 'true' : 'false',title=${palette},aria-label='Theme: ' + ${palette},hx-vals=|{&quot;theme&quot;:&quot;${palette}&quot;}|"
+                    hx-patch="/partials/profile/theme" hx-swap="none"></button>
+          </div>
+
+          <div class="app-menu-sep"></div>
+          <a th:href="@{/settings}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
+          <a th:href="@{/api-console}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20l7-7M15 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg>API keys</a>
+
+          <div class="app-menu-sep"></div>
+          <form th:action="@{/logout}" method="post" class="app-logout-form" hx-boost="false">
+            <button type="submit" role="menuitem"><svg class="ds-icon ds-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M21 3v18"/></svg>Log out</button>
+          </form>
+        </div>
+      </div>
+    </header>
 
   <!-- 076 §A: one width policy — EVERY screen's <main> is full-bleed with the
        same gutter (065's editor opt-in became the rule). Reading content sits
@@ -120,7 +316,7 @@
     <!-- th:if CANNOT share an element with th:replace: fragment inclusion has the
          higher precedence and DISCARDS the host before the condition is evaluated —
          so the condition wraps a th:block and the replace lives on the inner div. -->
-    <div id="toast-flash" hidden>
+    <div id="toast-flash" data-toast-flash hidden>
       <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
         <th:block th:if="${code == 'duplicate_name'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace with that name already exists.')}"></div></th:block>
         <th:block th:if="${code == 'name_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'Workspace names use lowercase letters, digits, dashes and underscores — 1 to 63 characters.')}"></div></th:block>
@@ -141,6 +337,8 @@
     </div>
     <th:block th:replace="${content}"/>
   </main>
+
+  </div><!-- /.app-shell -->
 
   <script th:src="@{/webjars/htmx.org/2.0.10/dist/htmx.min.js}"></script>
   <script th:src="@{/js/shell.js}"></script>

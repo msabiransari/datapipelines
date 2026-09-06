@@ -219,98 +219,11 @@ body {
   max-width: 20rem;
 }
 
-/* Sticky top nav — one bordered bar, not a floating ds-surface card. */
-.app-nav {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
-  background: var(--surface-default);
-  border-bottom: 1px solid var(--border-default);
-}
-
-.app-nav-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-md);
-  min-height: var(--header-height);
-}
-
-.app-nav-left {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-md);
-}
-
-.app-brand {
-  font-weight: var(--weight-bold);
-  font-size: var(--text-xl);
-  color: var(--text-primary);
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-sm);
-}
-
-/* The mark ("the join", 2026-09-04): strokes and tile take the text colour; the
-   bars are cut out in the surface colour so the glyph reads on either theme. */
-.app-brand-mark {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-  color: var(--accent-info, var(--text-primary));
-  flex: none;
-}
-
-.app-workspace-form {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  margin-left: var(--gap-md);
-}
-
-.app-workspace-label {
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.app-workspace-select {
-  padding: var(--gap-xs) var(--gap-sm);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-base);
-  background: var(--surface-raised);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-}
-
-.app-nav-links {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-}
-
-.app-nav-link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: var(--text-sm);
-  padding: var(--gap-xs) var(--gap-sm);
-  border-radius: var(--radius-base);
-}
-
-.app-nav-link:hover {
-  color: var(--text-primary);
-  background: var(--surface-inset);
-}
-
-.app-nav-link.active {
-  color: var(--accent-primary);
-  background: var(--surface-inset);
-  font-weight: var(--weight-medium);
-}
-
-.app-logout-form {
-  display: inline;
-  margin-left: var(--gap-xs);
-}
+/* The 076 horizontal nav (.app-nav-inner / .app-nav-left / .app-nav-links and
+   their brand, switcher and logout rules) was DELETED here in 079 §A — the nav
+   moved into the left rail and its rules live in the shell section at the foot of
+   this file. `.app-logout-form` survives there as the avatar menu's last row; it
+   is still the `hx-boost="false"` full navigation `ShellRenderTest` pins. */
 
 /* ---------------------------------------------------------------------------
    Data tables — boxed, header fill, closed rounded corners. Layered over the
@@ -463,4 +376,1340 @@ body {
 
 .app-main small {
   font-size: var(--text-xs);
+}
+/* ---------------------------------------------------------------------------
+   079 §A/§B — THE SHELL: a collapsible left rail and a top bar, replacing the
+   076 horizontal nav (design-records/mocks/2026-09-05-app-shell-v2.html, owner
+   approved 2026-09-05).
+
+   Layout is ONE grid on <div class="app-shell">: the rail spans both rows, the
+   top bar is row 1 of the content column, <main> is row 2. The document keeps
+   scrolling — the rail is `position: sticky; height: 100vh` rather than the
+   mock's `height:100vh` flex shell — because four stylesheets size their panes
+   with `calc(100dvh - var(--header-height) - …)` (pipeline-editor.css,
+   template-editor.css, template-tree.css) and that arithmetic is only correct
+   while <main> starts at the bottom of the bar and scrolls with the page. A
+   fixed-height shell with its own scroll container would have made every one
+   of those panes a viewport too tall, silently.
+
+   --app-rail-width is a GEOMETRY value, not a colour: the same kind of literal
+   --app-sidebar-width has carried since 076. Every colour, radius, shadow and
+   type size below resolves through a design-system token.
+   --------------------------------------------------------------------------- */
+:root {
+  --app-rail-width: 232px;
+  --app-rail-collapsed: 60px;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--app-rail-width) 1fr;
+  grid-template-rows: var(--header-height) 1fr;
+  min-height: 100vh;
+}
+
+/* Signed out (login, the public docs, error pages): no rail, no top bar, one
+   column. This is also what keeps `nav.app-nav` at zero occurrences for an
+   anonymous request — NavigationGoldenPathBrowserTest asserts exactly that. */
+.app-shell-anon {
+  grid-template-columns: 1fr;
+}
+
+/* Signed out: the bar keeps the brand and drops everything that describes a
+   session. Its border is the only chrome an anonymous screen has. */
+.app-topbar-anon .app-brand {
+  border-bottom: 0;
+  padding-inline: 0;
+}
+
+/* The collapsed state is a class on <html>, set by the layout's one inline
+   script BEFORE the first paint and toggled by shell.js afterwards, so the rail
+   never renders at one width and snaps to the other in front of the reader. */
+:root.rail-collapsed .app-shell {
+  --app-rail-width: var(--app-rail-collapsed);
+}
+
+.app-rail {
+  grid-row: 1 / 3;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-default);
+  border-right: 1px solid var(--border-faint);
+}
+
+/* Everything that is TEXT in the rail disappears when it collapses; the icons,
+   the brand tile and the workspace avatar stay. One class does it, so a row
+   added later collapses correctly by carrying `.app-rail-label` on its label. */
+:root.rail-collapsed .app-rail-label {
+  display: none;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  height: var(--header-height);
+  padding-inline: var(--gap-md);
+  border-bottom: 1px solid var(--border-faint);
+  white-space: nowrap;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  text-decoration: none;
+  flex: none;
+}
+
+:root.rail-collapsed .app-brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* The mark ("the join", 2026-09-04) sits on a brand tile now: the strokes are
+   the inverted text colour, the tile is the accent, so the glyph reads on
+   either theme without the mark itself knowing which one is active. */
+.app-brand-tile {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: var(--accent-primary-text);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.app-brand-mark {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: inherit;
+  flex: none;
+}
+
+/* ---- workspace switcher (the card under the brand) ---- */
+.app-workspace-form {
+  position: relative;
+  margin: var(--gap-sm) var(--gap-sm) var(--gap-xs);
+  flex: none;
+}
+
+.app-ws {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.app-ws:hover {
+  border-color: var(--border-hover);
+}
+
+:root.rail-collapsed .app-ws {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.app-ws-avatar {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--radius-base);
+  background: var(--brand-soft);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  flex: none;
+}
+
+.app-ws-text {
+  min-width: 0;
+}
+
+.app-ws-text b {
+  display: block;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-ws-caret {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.app-workspace-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+/* The real control sits invisibly over its card: a <select> that is present to
+   the accessibility tree and to Playwright, styled away so the card shows. It
+   is NOT `display:none` — a hidden select cannot be operated by keyboard, and
+   `WorkspaceSwitcherBrowserTest` drives this exact element. */
+.app-workspace-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+}
+
+/* ---- nav ---- */
+.app-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--gap-xs) var(--gap-sm);
+  display: grid;
+  gap: var(--space-0-5);
+  align-content: start;
+}
+
+.app-nav-section {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: var(--weight-semibold);
+  padding: var(--gap-sm) var(--gap-sm) var(--space-1);
+  white-space: nowrap;
+}
+
+.app-nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--space-1-5) var(--gap-sm);
+  border-radius: var(--radius-base);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  /* The selected item's 3px accent bar (below) is drawn as a border so the row
+     never shifts when it becomes active. */
+  border-left: var(--focus-ring-offset, 3px) solid transparent;
+}
+
+.app-nav-link svg {
+  color: var(--text-muted);
+}
+
+.app-nav-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The active item. ui-screens.md §2.8 is normative here: `surface-selected` is
+   the token the design system's contrast audit sizes FOR a selected row, and it
+   reaches only 1.5:1 — "a tint alone cannot reach 3:1 without turning grey" —
+   so selection also carries a 3px `border-focus` bar. The mock paints the tint
+   and the brand text only; the bar is the accessible half of the same signal
+   and is the one deliberate addition to it. */
+.app-nav-link.active,
+.app-nav-link[aria-current="page"] {
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-left-color: var(--border-focus);
+}
+
+.app-nav-link.active svg,
+.app-nav-link[aria-current="page"] svg {
+  color: var(--brand);
+}
+
+.app-nav-badge {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+:root.rail-collapsed .app-nav-link {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.app-rail-foot {
+  flex: none;
+  padding: var(--gap-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.app-rail-collapse {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  padding: var(--space-1-5) var(--gap-sm);
+  border: 0;
+  border-radius: var(--radius-base);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.app-rail-collapse:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+:root.rail-collapsed .app-rail-collapse {
+  justify-content: center;
+}
+
+:root.rail-collapsed .app-rail-chevron {
+  transform: rotate(180deg);
+}
+
+/* ---- top bar ---- */
+.app-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding-inline: var(--gap-lg);
+  background: var(--surface-default);
+  border-bottom: 1px solid var(--border-faint);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+}
+
+.app-crumbs {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.app-crumb-page {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-lg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Visual only this round — a <div>, never an <input>, so nobody types into a
+   box that cannot answer (ui-screens.md §3.4). */
+.app-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  width: 17.5rem;
+  user-select: none;
+}
+
+.app-search-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--gap-xs);
+  background: var(--surface-inset);
+}
+
+@media (max-width: 900px) {
+  .app-search {
+    display: none;
+  }
+
+  .app-crumbs {
+    margin-right: auto;
+  }
+}
+
+.app-icon-button {
+  width: var(--field-height-sm);
+  height: var(--field-height-sm);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-secondary);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.app-icon-button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* ---- avatar + menu ---- */
+.app-user {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.app-avatar {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  border-radius: var(--radius-full);
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid var(--border-subtle);
+  display: grid;
+  place-items: center;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+}
+
+.app-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.app-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--gap-xs));
+  min-width: 14rem;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--gap-xs);
+  z-index: var(--z-popover);
+  text-align: left;
+}
+
+.app-menu[hidden] {
+  display: none;
+}
+
+.app-menu-who {
+  padding: var(--gap-sm);
+  border-bottom: 1px solid var(--border-faint);
+  margin-bottom: var(--gap-xs);
+}
+
+.app-menu-who b {
+  display: block;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+}
+
+.app-menu-who span {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.app-menu a,
+.app-menu > form > button {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  padding: var(--space-1-5) var(--gap-sm);
+  border: 0;
+  border-radius: var(--radius-base);
+  background: none;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.app-menu a:hover,
+.app-menu > form > button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.app-menu-sep {
+  border-top: 1px solid var(--border-faint);
+  margin-block: var(--gap-xs);
+}
+
+.app-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  padding: var(--space-1-5) var(--gap-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.app-menu-value {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The segmented control (Appearance, and Settings' Mode/Density rows). */
+.app-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: var(--space-0-5);
+  background: var(--surface-inset);
+}
+
+.app-seg button {
+  padding: var(--space-0-5) var(--gap-sm);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.app-seg button[aria-pressed="true"] {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.app-swatches {
+  display: flex;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+  padding: var(--space-1) var(--gap-sm) var(--gap-sm);
+}
+
+.app-swatch {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  background: var(--surface-inset);
+}
+
+.app-swatch[aria-pressed="true"] {
+  border-color: var(--brand);
+}
+
+/* A swatch has to show a theme the page is NOT wearing, so its colour cannot
+   come from a live token — a `var(--accent-primary)` swatch would paint all six
+   the same. These six values are each theme's own `--_accent-primary`, read out
+   of the vendored stylesheet it belongs to, and they are the ONLY literals in
+   this file. They are a PICTURE OF a theme rather than a use of one; a sync
+   that changes a palette leaves a stale dot, which VendoredThemeScopingTest's
+   sibling guard (AppThemeSwatchAuditTest) fails the build on. */
+.app-swatch[data-swatch="saas"] { background: #4f46e5; }
+.app-swatch[data-swatch="ocean"] { background: #0369a1; }
+.app-swatch[data-swatch="forest"] { background: #2d4a22; }
+.app-swatch[data-swatch="healthcare"] { background: #1a6b4a; }
+.app-swatch[data-swatch="minimal"] { background: #000000; }
+.app-swatch[data-swatch="professional"] { background: #0f1d40; }
+
+/* The toast stack's offset, moved off an inline style attribute (§D). */
+.app-toast-stack {
+  top: var(--header-height);
+  right: var(--gap-md);
+}
+
+/* ---------------------------------------------------------------------------
+   079 §E — THE PAGE FRAME: one page header, one card, one table, one chip.
+
+   These are app-level rules over the VENDORED primitives (this file loads last,
+   §3.4), never a second set of classes: a screen still writes `.ds-card` and
+   `.ds-table` and gets the shell's density for free. The two exceptions are
+   `.app-page-h` (a layout the design system has no primitive for) and
+   `.app-chip` (a status pill with a dot — `.ds-badge` has no dot, and the dot
+   is what makes status readable without relying on colour alone, WCAG 1.4.1).
+   --------------------------------------------------------------------------- */
+
+/* The page title's ONE size, restated for the denser shell (ui-screens.md §3.3
+   is amended to this value). It stays a property of `.ds-headline`, so no
+   screen picks its own and TypeScaleAuditTest's ban on inline font-size keeps
+   holding. Scoped to .app-main so the marketing site, which never loads this
+   file, is untouched either way. */
+.app-main .ds-headline {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+}
+
+.app-main .ds-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.app-page-h {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  margin-bottom: var(--gap-lg);
+}
+
+.app-page-h h1 {
+  margin: 0;
+}
+
+/* The subtitle: one line of prose telling a reader what the screen is for. The
+   70ch measure is the same reasoning as `.app-reading` — a sentence that runs
+   the width of a 2560px window is not read, it is skipped. */
+.app-page-sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  max-width: 70ch;
+}
+
+.app-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex: none;
+}
+
+/* Cards: the mock's larger radius, on the design system's own token. */
+.app-main .ds-card {
+  border-radius: var(--radius-lg);
+  border-color: var(--border-subtle);
+}
+
+/* A card whose body is a full-bleed table: the header keeps the padding, the
+   table runs to the card's edges and its own cell padding does the rest. */
+.app-card-table {
+  padding: 0;
+  overflow: hidden;
+}
+
+.app-card-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  padding: var(--gap-md) var(--gap-md) 0;
+}
+
+.app-card-h h2 {
+  margin: 0;
+}
+
+.app-card-b {
+  padding: var(--gap-md);
+}
+
+.app-card-note {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-grid {
+  display: grid;
+  gap: var(--gap-md);
+}
+
+.app-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* The API console's two columns: the endpoints table earns the wider one. */
+.app-grid-wide-left {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+}
+
+.app-grid-stack {
+  display: grid;
+  gap: var(--gap-md);
+  align-content: start;
+}
+
+/* §D's ruling (option a): the settings cards use the width. One column below
+   1100px, which is also where the design system's own layouts fold. */
+@media (max-width: 1100px) {
+  .app-grid-2,
+  .app-grid-3,
+  .app-grid-wide-left {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Tables inside a card have already got the card's border and radius; the
+   076 boxed-table treatment would draw a second one inside the first. */
+.app-card-table .ds-table {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.app-main .ds-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+/* The machine path under a display name: mono, muted, one size down — the
+   §3.3 "mono is for identifiers only" rule, given a place to live. */
+.app-path {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.app-name {
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+}
+
+/* Numerics right and tabular; dates stay proportional (§3.3.2) and never take
+   this class. */
+.app-main .ds-table td.num,
+.app-main .ds-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-main .ds-table td.num {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* The status chip. The DOT is not decoration: colour alone cannot carry state
+   (WCAG 1.4.1), and a 6px dot plus a word reads at a glance and in greyscale.
+   `.ds-status` is the design system's own dot; this positions it. */
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: var(--space-0-5) var(--gap-sm);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.app-chip .ds-status {
+  background: currentColor;
+}
+
+.app-chip-ok {
+  background: var(--accent-success-bg);
+  color: var(--accent-success);
+}
+
+.app-chip-bad {
+  background: var(--accent-danger-bg);
+  color: var(--accent-danger);
+}
+
+.app-chip-run {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.app-chip-warn {
+  background: var(--accent-warning-bg);
+  color: var(--accent-warning);
+}
+
+.app-chip-mono {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-normal);
+}
+
+/* Scope/permission chips (§D: the Session card's four spans became chips). */
+.app-chips {
+  display: flex;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+}
+
+/* The HTTP method tag on a published endpoint's path. Always GET this round —
+   PublishedEndpointController refuses anything else with `Allow: GET`. */
+.app-method {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-sm);
+  background: var(--accent-info-bg);
+  color: var(--accent-info);
+}
+
+/* A path segment that is a {variable}, so the shape of a route reads without
+   the reader parsing braces. */
+.app-var {
+  color: var(--accent-info);
+}
+
+/* The connection JSON: a read-only code block, never an input. */
+.app-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-base);
+  padding: var(--gap-sm);
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* An informational aside inside a card — a fact about the system, not a toast. */
+.app-note {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-start;
+  padding: var(--gap-sm);
+  border-radius: var(--radius-md);
+  background: var(--accent-info-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  margin-top: var(--gap-sm);
+}
+
+.app-note svg {
+  color: var(--accent-info);
+  flex: none;
+}
+
+/* Empty state: a bordered, dashed box that says what would be here. */
+.app-empty {
+  padding: var(--gap-xl);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.app-empty b {
+  display: block;
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-1);
+}
+
+/* A definition list of settings rows (the detail pane's key/value pairs). */
+.app-rows {
+  font-size: var(--text-sm);
+}
+
+.app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.app-row:last-child {
+  border-bottom: 0;
+}
+
+.app-row-k {
+  color: var(--text-muted);
+}
+
+.app-row-v {
+  font-weight: var(--weight-medium);
+  text-align: right;
+}
+
+/* A card that IS its content (the MCP card): its header and body sit flush with
+   the card's own padding instead of adding a second inset. */
+.app-card-h-flush {
+  padding: 0;
+}
+
+.app-card-b-flush {
+  padding: var(--gap-sm) 0 0;
+}
+
+.app-flush {
+  margin: 0;
+}
+
+/* §D — the Settings identity block (avatar + name + email). */
+.app-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-sm);
+}
+
+.app-identity-avatar {
+  width: var(--space-10);
+  height: var(--space-10);
+  border-radius: var(--radius-full);
+  object-fit: cover;
+  flex: none;
+}
+
+.app-identity-initials {
+  background: var(--brand-soft);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  font-weight: var(--weight-bold);
+}
+
+.app-identity-text b {
+  display: block;
+  font-weight: var(--weight-semibold);
+}
+
+.app-identity-text span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+/* A select sitting in a settings row: sized by its content, not by the row. */
+.app-select-inline {
+  max-width: 14rem;
+}
+
+.app-note-block {
+  margin: var(--gap-sm) 0 0;
+}
+
+.app-note-flush {
+  margin: 0 0 var(--gap-sm);
+}
+
+/* The datasources filter row's search box and dialect select. These predate
+   `.ds-input` on that screen and carry its look at the `--gap-*` scale rather
+   than the `--space-*` one; kept as a class so the row renders exactly as it
+   did before 079 §D lifted the inline copies off it. Converging them onto
+   `.ds-input` (as pipelines/ and templates/ already are) is a visual change and
+   belongs to a round that owns the look, not to this one. */
+.app-filter-control {
+  padding: var(--gap-sm) var(--gap-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-base);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+/* A `.ds-input` select in a filter row. `.ds-input` is `width: 100%`, so a bare
+   select grows without bound and starves the search box beside it (the note in
+   templates/list.html); these are sized by their own content instead. (Named
+   `-auto`, not `-filter-select`: the executions filter bar already owns that
+   name for a MIN-width, and two rules under one name is how a class quietly
+   changes meaning between screens.) */
+.app-select-auto {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+/* The hand-rolled modals' close button, pinned to the card's top-right corner.
+   `.app-modal` is `position: relative`, which is what this anchors to. */
+.app-modal-close {
+  position: absolute;
+  top: var(--gap-sm);
+  right: var(--gap-sm);
+}
+
+/* The create-template modal's body field: a mono editing surface tall enough to
+   show a short statement without scrolling. 8.75rem is the 140px the inline
+   style carried — a control's initial height is geometry, and the spacing scale
+   has no token for it. Width and size come from `.ds-input`. */
+.app-template-body-input {
+  min-height: 8.75rem;
+  font-family: var(--font-mono);
+}
+
+/* The template editor's render-context tabs (Key/Value | JSON). The 2px rule IS
+   the tab indicator — a geometry constant with no border-width token behind it.
+   switchTab() rewrites `borderBottom` and `fontWeight` inline as the selection
+   moves, and an inline declaration beats these, which is what makes the pair
+   safe to state as classes. */
+.app-tab-active {
+  border-bottom: 2px solid var(--accent-primary);
+}
+
+.app-tab-idle {
+  border-bottom: 2px solid transparent;
+}
+
+/* The template preview pane's failure card: a `.ds-card` wearing the danger edge.
+   Built by the editor's fetch `catch` and by TemplateEditorController's
+   server-side twin, which must keep looking the same. */
+.app-error-card {
+  border-color: var(--accent-danger);
+}
+
+/* ---------------------------------------------------------------------------
+   079 §D — THE UTILITY LAYER, and why it exists.
+
+   076 banned inline `max-width` / `grid-template-columns` on app templates,
+   because four screens had each picked their own pixel count and the single
+   width policy was gone. This round widens that ban to EVERY inline `style=`
+   with an allowlist that must stay empty (`InlineWidthAuditTest`). The reason
+   is the same one, one level up: an inline declaration is a decision made in a
+   template, invisible to every other template, and thirty of them is how a
+   design system quietly becomes thirty designs. It also makes a Content
+   Security Policy with no `style-src 'unsafe-inline'` reachable later, which an
+   inline-style-carrying app can never adopt.
+
+   The 330 attributes that had accumulated were overwhelmingly the SAME dozen
+   declarations, all already on tokens. So the replacement is a small, closed
+   utility vocabulary rather than a semantic class per site: naming
+   `.app-datasource-list-header-spacing` thirty times would be ceremony, not
+   design. Utilities are `u-` prefixed so they are never mistaken for the
+   semantic `app-*` and `ds-*` layers, and every value here resolves through a
+   design-system token — a utility that hard-coded a pixel would reintroduce
+   exactly what the ban exists to stop.
+
+   ADD to this list rather than reaching for `style=`. If a rule is genuinely
+   one screen's own, it gets an `app-*` class in the section above instead.
+   --------------------------------------------------------------------------- */
+
+/* type */
+.u-text-xs { font-size: var(--text-xs); }
+.u-text-sm { font-size: var(--text-sm); }
+.u-text-base { font-size: var(--text-base); }
+.u-text-lg { font-size: var(--text-lg); }
+.u-text-xl { font-size: var(--text-xl); }
+.u-text-2xl { font-size: var(--text-2xl); }
+.u-mono { font-family: var(--font-mono); }
+.u-medium { font-weight: var(--weight-medium); }
+.u-semibold { font-weight: var(--weight-semibold); }
+.u-bold { font-weight: var(--weight-bold); }
+.u-nowrap { white-space: nowrap; }
+.u-break { word-break: break-all; }
+.u-center { text-align: center; }
+.u-right { text-align: right; }
+.u-no-underline { text-decoration: none; }
+
+/* colour — semantic roles only, never a literal */
+.u-secondary { color: var(--text-secondary); }
+.u-muted { color: var(--text-muted); }
+.u-primary { color: var(--text-primary); }
+.u-danger { color: var(--accent-danger); }
+.u-success { color: var(--accent-success); }
+
+/* layout */
+.u-row { display: flex; align-items: center; gap: var(--gap-sm); }
+.u-row-md { display: flex; align-items: center; gap: var(--gap-md); }
+.u-row-top { display: flex; align-items: flex-start; gap: var(--gap-sm); }
+.u-between { justify-content: space-between; }
+.u-center-x { justify-content: center; }
+.u-wrap { flex-wrap: wrap; }
+.u-col { display: flex; flex-direction: column; gap: var(--gap-sm); }
+.u-grow { flex: 1; min-width: 0; }
+.u-none { flex: none; }
+.u-block { display: block; }
+.u-inline-block { display: inline-block; }
+.u-hidden { display: none; }
+.u-full { width: 100%; }
+.u-scroll-x { overflow-x: auto; }
+.u-flex { display: flex; }
+
+/* Gap overrides for the row/col utilities above. Declared AFTER them so the
+   override wins on the cascade rather than on `!important`; `.u-flex` pairs with
+   one of these where a row wants a gap but not `align-items: center`. */
+.u-gap-xs { gap: var(--gap-xs); }
+.u-gap-md { gap: var(--gap-md); }
+.u-gap-lg { gap: var(--gap-lg); }
+
+/* spacing — the gap scale, never a raw length */
+.u-m0 { margin: 0; }
+.u-mb-xs { margin-bottom: var(--gap-xs); }
+.u-mb-sm { margin-bottom: var(--gap-sm); }
+.u-mb-md { margin-bottom: var(--gap-md); }
+.u-mb-lg { margin-bottom: var(--gap-lg); }
+.u-mb-xl { margin-bottom: var(--gap-xl); }
+.u-mt-xs { margin-top: var(--gap-xs); }
+.u-mt-sm { margin-top: var(--gap-sm); }
+.u-mt-md { margin-top: var(--gap-md); }
+.u-mt-lg { margin-top: var(--gap-lg); }
+.u-p-sm { padding: var(--gap-sm); }
+.u-p-md { padding: var(--gap-md); }
+.u-p-lg { padding: var(--gap-lg); }
+.u-p0 { padding: 0; }
+
+/* surfaces */
+.u-inset { background: var(--surface-inset); border-radius: var(--radius-base); }
+.u-raised { background: var(--surface-raised); }
+.u-bordered { border: 1px solid var(--border-default); border-radius: var(--radius-base); }
+.u-rounded { border-radius: var(--radius-base); }
+
+/* The hand-rolled modal backdrop. It carried `rgba(0,0,0,0.5)` inline on three
+   screens — the only literal COLOUR left in an app template, and one that reads
+   as a black wash over a dark theme's already-black page. `--z-modal-backdrop`
+   and `color-mix` over the design system's own inverted text colour keep it a
+   scrim in both themes. */
+.u-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--text-primary) 55%, transparent);
+}
+
+/* The hand-rolled modals start CLOSED and are opened by their screen's script
+   setting an inline `display: flex`, which beats any class — so the closed state
+   is safe to hold here. Declared after `.u-backdrop` because it overrides that
+   rule's own `display: flex`, and without `!important` so the inline set wins. */
+.u-backdrop-hidden { display: none; }
+
+.u-modal-tall { min-height: 60vh; }
+
+/* 079 §E/§D — classes for the declarations the utility layer could not express:
+   each one is genuinely a decision about ONE thing, not a reusable primitive. */
+
+/* A clickable table row (the execution lists' whole-row navigation). */
+.app-row-clickable {
+  cursor: pointer;
+}
+
+/* Dashboard stat cards. The mock puts a 7-day sparkline under each figure; there is
+   no 7-day series in this system to draw one from (see partials/dashboard-stats.html),
+   so the card is label / figure / one line of breakdown. */
+.app-stat .app-stat-v {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  margin-top: var(--gap-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-stat-unit {
+  font-size: var(--text-base);
+  color: var(--text-muted);
+}
+
+.app-stat-d {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-0-5);
+}
+
+/* The execution list's filter bar: a row of controls that wraps and bottom-aligns
+   so labels above inputs still line up on the baseline of the controls. */
+.app-filters {
+  display: flex;
+  gap: var(--gap-md);
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.app-filter-select {
+  min-width: 12.5rem;
+}
+
+.app-filter-date {
+  min-width: 10rem;
+}
+
+/* A checkbox column: wide enough for the box and its focus ring, no wider. */
+.app-col-check {
+  width: 3rem;
+}
+
+/* A card whose border states failure (the execution detail's error card). */
+.app-card-danger {
+  border-color: var(--accent-danger);
+}
+
+.app-gap-md {
+  gap: var(--gap-md);
+}
+
+.app-row-baseline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+.app-pad-tight {
+  padding: var(--gap-xs) var(--gap-sm);
+}
+
+.app-break-word {
+  word-break: break-word;
+}
+
+/* A <summary> in the execution error's disclosure. */
+.app-summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+
+/* The three error blocks on the execution detail. They differ ONLY in how much of a
+   long error they show before scrolling, which is a per-block decision about how much
+   room that particular text deserves — hence three height modifiers rather than one
+   size for all of them. */
+.app-errblock {
+  background: var(--surface-inset);
+  border-radius: var(--radius-base);
+  padding: var(--gap-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre;
+  overflow: auto;
+  margin: 0;
+}
+
+.app-errblock-tight {
+  padding: var(--gap-xs);
+  line-height: var(--leading-normal);
+  margin-top: var(--gap-xs);
+}
+
+.app-errblock-wrap {
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: var(--gap-xs);
+}
+
+.app-errblock-12 { max-height: 12vh; }
+.app-errblock-20 { max-height: 20vh; }
+.app-errblock-30 { max-height: 30vh; }
+
+/* ---------------------------------------------------------------------------
+   079 §D — batch 2 additions (login, workspaces, admin/users, api-keys, docs,
+   the error pages, settings/password and the one-time-key partial).
+
+   Every declaration below is a verbatim lift of an inline `style=` those files
+   carried, so the conversion is a rename and not a restyle. Grouped as the
+   layer above is: utilities first, then the handful of `app-*` rules for
+   decisions that belong to one component.
+   --------------------------------------------------------------------------- */
+
+/* layout — `.u-row*` bundle `align-items: center` WITH a gap; several sites had
+   one without the other, so the two halves are also available separately. */
+.u-items-center { align-items: center; }
+.u-inline { display: inline; }
+.u-gap-sm { gap: var(--gap-sm); }
+
+/* type/spacing gaps in the layer */
+.u-left { text-align: left; }
+.u-my-md { margin: var(--gap-md) 0; }
+.u-py-sm { padding: var(--gap-sm) 0; }
+.u-list-plain { list-style: none; }
+
+/* Hairline separators. The two differ in token because the sites do: a divider
+   BETWEEN two controls is a component boundary (`--border-default`, 3:1), a rule
+   between list rows is a separator (`--border-subtle`, the 2:1 floor) — the same
+   distinction the `--border-faint` note above draws for table rules. */
+.u-divider-top { border-top: 1px solid var(--border-default); }
+.u-divider-bottom { border-bottom: 1px solid var(--border-subtle); }
+
+/* `.ds-table td` (0,1,1) outranks a bare utility (0,1,0), so `.u-p0` alone could
+   not clear the cell padding a full-bleed skeleton row needs. Declared at table
+   scope rather than with `!important`. */
+.ds-table td.u-p0 { padding: 0; }
+
+/* The login/forced-password notice boxes. One base, three role fills — the fill
+   is the whole signal, so the roles never share a border or an icon. The
+   success variant is the api-keys one-time-secret panel, which is roomier and
+   outlined rather than filled, so it carries its own box. */
+.app-alert {
+  padding: var(--gap-sm);
+  border-radius: var(--radius-base);
+  font-size: var(--text-sm);
+}
+
+.app-alert-warning {
+  background: var(--accent-warning-bg);
+  color: var(--accent-warning);
+}
+
+.app-alert-danger {
+  background: var(--accent-danger);
+  color: var(--accent-danger-text);
+}
+
+.app-alert-success {
+  background: var(--accent-success-bg);
+  border: 1px solid var(--accent-success);
+  padding: var(--gap-md);
+  border-radius: var(--radius-base);
+}
+
+/* workspaces/index.html's inline form controls. `.ds-input` already supplies the
+   border, radius, colour and type size those styles restated; what actually
+   differed was a roomier gutter over a raised fill, and a fixed track width per
+   field. The widths are rem, the house form for a width (`.app-input-inline`,
+   `.app-search-input`, `.app-card-auth`) — the token scale covers gaps and type,
+   not track widths. */
+.app-input-raised {
+  padding: var(--gap-sm) var(--gap-md);
+  background: var(--surface-raised);
+}
+
+.app-input-fixed-sm { width: 13.75rem; }
+.app-input-fixed-md { width: 16.25rem; }
+.app-input-fixed-lg { width: 17.5rem; }
+
+/* The one-time API key field (partials/api-key-created.html): a read-only input
+   outlined in the success accent so the secret reads as the thing to copy. The
+   fill is `transparent` so the panel's own `--accent-success-bg` shows through —
+   the inline style asked for `var(--surface-secondary)`, a custom property this
+   design system has never defined, which resolves to exactly that. Naming a real
+   surface token here would DARKEN the field; that is a design decision, not part
+   of an inline-style migration. */
+.app-secret-field {
+  flex: 1;
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 1px solid var(--accent-success);
+  border-radius: var(--radius-base);
+  background: transparent;
 }
