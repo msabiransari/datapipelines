@@ -615,11 +615,12 @@ object SiteShotsMain {
             val card = page.locator(".pe-card").nth(index)
             card.waitFor()
             val box = laidOutBox(card, index)
-            // 065: a click on the card only SELECTS it; the inspector opens from the card's own
-            // button (or Enter). The button sits in the card's top-right corner.
+            // 080: a click on the card SELECTS and fills the dock's Details tab; the
+            // card's own expand button is the explicit route in (it sits in the
+            // card's top-right corner).
             page.mouse().click(box.x + box.width / 2, box.y + box.height / 2)
             card.locator(".pe-card-open").first().click()
-            page.locator(".pe-details-panel").waitFor()
+            page.locator("#pe-pane-details .pe-details").waitFor()
             page.evaluate("() => document.activeElement && document.activeElement.blur()")
         }
 

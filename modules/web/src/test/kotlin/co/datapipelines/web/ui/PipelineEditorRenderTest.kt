@@ -12,10 +12,10 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
- * The details panel's SQL section (pipeline-editor.md §8): the swap target the
- * htmx.ajax loader in init.js fills, its indicator, and the highlighter script the
- * section depends on — plus, since 065, the panel's own open/close contract and the
- * bottom dock that replaced the losable result panel.
+ * 080 — the v2 editor: the mock's top bar, the canvas chrome (hint, legend, minimap,
+ * controls), and the four-tab dock (Details | Results | Errors | Events) that the 065
+ * inspector overlay moved into. The Details tab's SQL section keeps the swap target the
+ * htmx.ajax loader in init.js fills and the highlighter it depends on.
  */
 class PipelineEditorRenderTest {
     private val engine =
@@ -30,67 +30,88 @@ class PipelineEditorRenderTest {
         }
 
     /**
-     * 065 §C DELIBERATELY REMOVES the "Select a node" empty state this test used to
-     * demand. It existed because the drawer was always in the DOM and had to say
-     * something before the first selection; the panel is now gated on
-     * `inspector.open`, so it does not exist until a node has been chosen and has
-     * nothing to be empty about. What replaces the assertion is the gate itself plus
-     * the close control — the two halves of "opened from the card, closable" that a
-     * template edit could silently drop.
+     * The floor's render assertion: the editor markup carries the four tabs and NO
+     * overlay root. The inspector's scrim/panel/script are gone for good — a template
+     * edit that reintroduces them trips here.
      */
     @Test
-    fun `the inspector carries the SQL swap target, its spinner, the open gate and a close control`() {
-        val html = render()
-
-        html shouldContain "id=\"pe-node-sql\""
-        html shouldContain "id=\"pe-node-sql-spinner\""
-        html shouldContain "ds-spinner"
-        // The panel exists only while the inspector is open — no always-present drawer,
-        // hence no empty state to render before the first selection.
-        html shouldContain "x-show=\"inspector.open\""
-        html shouldNotContain "Select a node"
-        // Close: the × the owner asked for, top-right of the panel header, and the id
-        // init.js focuses on open.
-        html shouldContain "id=\"pe-details-close\""
-        html shouldContain "aria-label=\"Close details\""
-        html shouldContain "closeNodeDetails()"
-        // The SQL section is the one that grows (§8.3's 40% floor keys on this class).
-        html shouldContain "pe-details-section-sql"
-    }
-
-    /**
-     * 065 §B — the dock. Two tabs, a minimise/restore pair, and NO close: the reported
-     * defect was that the result panel's × set `resultPanel.visible = false` and left no
-     * way back short of re-running the pipeline. The absence of that binding is the
-     * assertion worth keeping; a template edit that reintroduced a close button would be
-     * the regression, and it would look perfectly reasonable in a diff.
-     */
-    @Test
-    fun `the dock renders two tabs and a minimise-restore pair, and no close`() {
+    fun `the dock renders four tabs - Details, Results, Errors, Events - and there is no overlay root`() {
         val html = render()
 
         html shouldContain "class=\"pe-dock\""
         html shouldContain "role=\"tablist\""
+        html shouldContain "dock.selectTab('details')"
         html shouldContain "dock.selectTab('results')"
         html shouldContain "dock.selectTab('errors')"
-        html shouldContain "aria-label=\"Minimise results\""
-        html shouldContain "aria-label=\"Restore results\""
-        html shouldContain "dock.minimise()"
-        html shouldContain "dock.restore()"
-        // There is no close, and nothing may hide the pane by fiat.
-        html shouldNotContain "aria-label=\"Close results\""
-        html shouldNotContain "resultPanel.visible = false"
-        html shouldNotContain "dock.state = 'hidden'"
-        // The state machines the page binds to are actually loaded.
+        html shouldContain "dock.selectTab('events')"
+        html shouldContain "id=\"pe-pane-details\""
+        html shouldContain "id=\"pe-pane-results\""
+        html shouldContain "id=\"pe-pane-errors\""
+        html shouldContain "id=\"pe-pane-events\""
+
+        // The 065 inspector overlay is deleted, not hidden: no scrim, no panel, no script.
+        html shouldNotContain "pe-inspector-scrim"
+        html shouldNotContain "pe-details-panel"
+        html shouldNotContain "inspector.open"
+        html shouldNotContain "/js/pipeline-editor/inspector.js"
+        // The state machines the page binds to are the ones that load.
         html shouldContain "/js/pipeline-editor/dock.js"
-        html shouldContain "/js/pipeline-editor/inspector.js"
+        html shouldContain "/js/pipeline-editor/events.js"
     }
 
     /**
-     * 065 §B — the 057 failure record moved OUT of the results body and into the Errors
-     * tab. Both halves are pinned: the Results tab no longer references
-     * `resultPanel.failure` at all, and the Errors tab renders the record through the
-     * same `failureView` view-model the inspector uses.
+     * 065's rule, kept: a chevron collapse/restore pair and NO close. The reported
+     * defect was that the result panel's × lost the pane with no way back short of
+     * re-running; a dock whose only contraction is the collapse cannot reproduce it.
+     */
+    @Test
+    fun `the dock keeps the collapse chevron and has no close`() {
+        val html = render()
+
+        html shouldContain "aria-label=\"Collapse dock\""
+        html shouldContain "aria-label=\"Restore dock\""
+        html shouldContain "dock.toggleCollapse()"
+        html shouldNotContain "aria-label=\"Close results\""
+        html shouldNotContain "resultPanel.visible = false"
+    }
+
+    /**
+     * Details (080 §B — the 065 inspector as a tab): the empty state, the per-type
+     * meta rows, the SQL swap target and its client-side fallback for the node types
+     * that have no SQL, and the Open-template link.
+     */
+    @Test
+    fun `the Details tab carries the meta grid, the SQL swap target and the non-SQL definition pane`() {
+        val html = render()
+
+        html shouldContain "Select a node to see its source, template, output and last run."
+        html shouldContain "detailsMeta(selectedNode)"
+        html shouldContain "class=\"pe-kv\""
+        html shouldContain "id=\"pe-node-sql\""
+        html shouldContain "id=\"pe-node-def\""
+        html shouldContain "isSqlNode(selectedNode)"
+        html shouldContain "definitionHtml(selectedNode)"
+        // §8.2/§9.6: the template link goes to the route that exists, /templates/editor?name=.
+        html shouldContain "/templates/editor?name='"
+    }
+
+    /**
+     * The badges the tabs carry: Results shows the row count on success, Errors turns
+     * danger above zero, Events counts the stream live.
+     */
+    @Test
+    fun `the tab badges are wired - results rows, errors danger count, events live count`() {
+        val html = render()
+
+        html shouldContain "dock.resultsRows"
+        html shouldContain "dock.errors.length > 0 ? 'pe-dock-count-err'"
+        html shouldContain "eventsLog.count()"
+        html shouldContain "dock.resultsStale"
+    }
+
+    /**
+     * The 057 failure record lives in the Errors tab — one entry per failed node,
+     * newest last, through the same failureView view-model.
      */
     @Test
     fun `the failure record renders in the Errors tab, not inside the results body`() {
@@ -100,8 +121,6 @@ class PipelineEditorRenderTest {
         html shouldContain "failureView(entry.record)"
         html shouldContain "entry in dock.errors"
         html shouldContain "No failures in this run."
-        // The per-NODE view stays where it was — same record, two homes.
-        html shouldContain "failureView(nodeErrors[selectedNode.id])"
     }
 
     @Test
@@ -110,18 +129,12 @@ class PipelineEditorRenderTest {
     }
 
     /**
-     * 059 §reference/§B: the card overlay's vendored script, the icon sprite the cards
-     * and controls draw from, and the keyboard-reachable view controls. If any of these
-     * disappears from the template the graph degrades to the empty-box look the owner
-     * rejected — this pins the wiring, not the visual.
-     *
-     * 059b: icons.css joins the wiring pins. The card/toolbar svgs always carried the
-     * .ds-icon size classes, but the page never loaded the stylesheet that gives them
-     * meaning — every svg rendered at the 300×150 replaced-element default ("the icons
-     * are the size of the canvas"). The link is load-bearing, not decorative.
+     * The canvas chrome (080 §A): the card overlay's vendored script, the icon system,
+     * the keyboard hint, the legend, the minimap and the view controls — fit included,
+     * with its F shortcut advertised.
      */
     @Test
-    fun `the card overlay script, the icon sprite and the view controls are wired`() {
+    fun `the canvas chrome is wired - overlay script, icons, hint, legend, minimap, controls`() {
         val html = render()
 
         html shouldContain "/vendor/cytoscape/cytoscape-node-html-label.js"
@@ -130,9 +143,11 @@ class PipelineEditorRenderTest {
         html shouldContain "aria-label=\"Graph view controls\""
         html shouldContain "graph.fitToView()"
         html shouldContain "graph.resetView()"
-        // 059b: the icon system's stylesheet, and the toolbar row at md (20px).
         html shouldContain "/vendor/design-system/icons.css"
         html shouldContain "ds-icon ds-icon-md"
+        html shouldContain "class=\"pe-hint\""
+        html shouldContain "class=\"pe-legend\""
+        html shouldContain "id=\"pe-minimap\""
     }
 
     @Test
@@ -148,53 +163,38 @@ class PipelineEditorRenderTest {
         html shouldContain "resultPanel.hasNext"
     }
 
+    /**
+     * 080 §D — the top bar: back to Pipelines, the crumb (folder muted + name bold),
+     * the version chip, the run status and the primary Execute.
+     */
     @Test
-    fun `the panel is grouped into headed sections and the template is a link`() {
+    fun `the top bar is the mock's - back link, crumb, version chip, status, execute`() {
         val html = render()
 
-        html shouldContain "Identity"
-        html shouldContain "Configuration"
-        html shouldContain "Runtime"
-        html shouldContain "Failure"
-        // §8.2/§9.6: the template field links to the route that exists, /templates/editor?name=.
-        html shouldContain "/templates/editor?name='"
-        html shouldNotContain "JSON.stringify(selectedNode.output)"
+        html shouldContain "class=\"pe-topbar\""
+        html shouldContain "&larr; Pipelines"
+        html shouldContain "crumbPath()"
+        html shouldContain "crumbName()"
+        html shouldContain "pe-vchip"
+        html shouldContain "statusClass()"
+        html shouldContain "runStatus.text"
+        html shouldContain "executePipeline()"
     }
 
+    /**
+     * 080 §C — every link INTO a pipeline editor is a full document load. This page
+     * itself renders none (its links all leave the editor), so the assertion is the
+     * non-vacuous twin of PipelineExplorerRenderTest's: any such href that ever
+     * appears here must carry hx-boost="false".
+     */
     @Test
-    fun `a CALCULATOR node gets its own read-only section, and the SQL and Template fields step aside`() {
+    fun `any link into a pipeline editor on this page is a full document load`() {
         val html = render()
-
-        // 072 §0.6: read-only means read-only. The section shows the four things an author
-        // cannot get anywhere else on this screen — the kind, the context key, each input
-        // beside what the last run resolved it to, and the computed value — and there is no
-        // picker, no form control and no save path anywhere in it (R10 stands).
-        html shouldContain "selectedNode.type === 'CALCULATOR'"
-        html shouldContain "Context Key"
-        html shouldContain "Computed Value"
-        html shouldContain "calculatorInputs(selectedNode)"
-        html shouldContain "calculatorValue(selectedNode)"
-        html shouldContain "pe-calc-input-resolved"
-
-        // The fields that would be empty or false for a calculator are gated OFF, not left
-        // to render "—": a Template row on a node that pins no template invites the reader
-        // to go looking for one, and the SQL section would sit there loading forever.
-        html shouldContain "x-show=\"selectedNode.type !== 'CALCULATOR'\""
-        html shouldContain "selectedNode.type !== 'PIPELINE' && selectedNode.type !== 'CALCULATOR'"
-    }
-
-    @Test
-    fun `the calculator section carries no editing affordance`() {
-        // The negative half of R10, asserted rather than assumed. A future edit that adds an
-        // input or a select to this section trips here first.
-        val section =
-            render()
-                .substringAfter("<template x-if=\"selectedNode.type === 'CALCULATOR'\">")
-                .substringBefore("</template>")
-
-        listOf("<input", "<select", "<textarea", "x-model", "@click").forEach {
-            section shouldNotContain it
-        }
+        val editorLinks = Regex("""<a [^>]*href="/pipelines/[^"]+/editor"[^>]*>""").findAll(html).map { it.value }.toList()
+        editorLinks.forEach { it shouldContain "hx-boost=\"false\"" }
+        // The leaving-the-editor links that must never be boosted either: the downloads
+        // (a file response cannot swap into #app-main) and the template editor.
+        html shouldContain "hx-boost=\"false\""
     }
 
     private fun render(): String =
@@ -208,6 +208,10 @@ class PipelineEditorRenderTest {
                 setVariable("activeTheme", "saas")
                 setVariable("authenticated", true)
                 setVariable("currentPath", "/pipelines")
+                setVariable("hasDraft", false)
+                setVariable("draftVersion", null)
+                setVariable("draftHash", null)
+                setVariable("releasedVersion", 1)
                 setVariable(
                     "pipelineJson",
                     """{"id":"00000000-0000-0000-0000-000000000001","name":"p",""" +
