@@ -115,6 +115,17 @@
     // afterSettle also covers history restores (back/forward), which do not push.
     doc.body.addEventListener("htmx:afterSettle", resync);
 
+    // htmx 2's selfRequestsOnly rejects a boosted CROSS-ORIGIN request — but only
+    // after the boost handler already preventDefaulted the click, so without this
+    // bridge an external link inside #app-main (the rendered docs carry canonical
+    // GitHub URLs) would silently die. Falling back to a plain navigation keeps
+    // the link a link.
+    doc.body.addEventListener("htmx:invalidPath", function (evt) {
+      var elt = evt.detail && evt.detail.elt;
+      var href = elt && elt.getAttribute && elt.getAttribute("href");
+      if (href && /^https?:\/\//.test(href)) window.location.assign(href);
+    });
+
     syncNavActive(doc, window.location.pathname);
   }
 

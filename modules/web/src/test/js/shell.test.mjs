@@ -125,3 +125,32 @@ test("init wires the shell once — repeated loads never stack listeners", () =>
   delete globalThis.window;
   delete globalThis.document;
 });
+
+test("a boosted cross-origin click falls back to plain navigation (selfRequestsOnly bridge)", () => {
+  const listeners = {};
+  const assigned = [];
+  globalThis.window = {
+    location: {
+      pathname: "/docs",
+      assign: (href) => assigned.push(href),
+    },
+  };
+  globalThis.document = {
+    readyState: "complete",
+    body: { addEventListener: (t, fn) => { listeners[t] = fn; } },
+    getElementById: () => null,
+    querySelectorAll: () => [],
+  };
+  const shell = loadShell(); // init() runs at load
+
+  const external = { getAttribute: (k) => (k === "href" ? "https://github.com/acme/docs" : null) };
+  listeners["htmx:invalidPath"]({ detail: { elt: external } });
+  assert.deepEqual(assigned, ["https://github.com/acme/docs"]);
+
+  // A same-origin invalid path (misconfiguration, not a link) is NOT navigated.
+  const internal = { getAttribute: (k) => (k === "href" ? "/pipelines" : null) };
+  listeners["htmx:invalidPath"]({ detail: { elt: internal } });
+  assert.equal(assigned.length, 1);
+  delete globalThis.window;
+  delete globalThis.document;
+});
