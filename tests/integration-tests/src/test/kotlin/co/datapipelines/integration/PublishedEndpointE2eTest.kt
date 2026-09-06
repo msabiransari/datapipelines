@@ -451,14 +451,14 @@ class PublishedEndpointE2eTest {
 
     private fun createTemplates() {
         template(
-            "revenue_by_borough.sql",
+            "test/revenue_by_borough.sql",
             "SELECT borough, revenue FROM boroughs WHERE borough = :borough AND as_of >= :start_date ORDER BY revenue DESC",
         )
-        template("trade_summary.sql", "SELECT borough, revenue FROM boroughs ORDER BY revenue DESC")
-        template("insert_row.sql", "INSERT INTO boroughs (borough, revenue, as_of) VALUES ('X', 1, DATE '2024-01-01')")
+        template("test/trade_summary.sql", "SELECT borough, revenue FROM boroughs ORDER BY revenue DESC")
+        template("test/insert_row.sql", "INSERT INTO boroughs (borough, revenue, as_of) VALUES ('X', 1, DATE '2024-01-01')")
         // The multi-instance harness's pg_sleep idea, shortened: long enough to outlive a
         // 1-second endpoint timeout, short enough that the cursor serves within this test.
-        template("slow.sql", "SELECT pg_sleep(3) AS slept, 1 AS marker")
+        template("test/slow.sql", "SELECT pg_sleep(3) AS slept, 1 AS marker")
     }
 
     private fun template(
@@ -488,7 +488,7 @@ class PublishedEndpointE2eTest {
              "parameters": {"borough": {"type": "STRING", "required": true},
                             "start_date": {"type": "DATE", "required": false, "default": "2024-01-01"}},
              "nodes": [{"id": "revenue", "description": "Revenue for one borough", "type": "DQL",
-                        "source": "ep-source", "template": {"id": "revenue_by_borough.sql", "version": 1},
+                        "source": "ep-source", "template": {"id": "test/revenue_by_borough.sql", "version": 1},
                         "depends_on": []}]}
             """.trimIndent(),
         )
@@ -497,7 +497,7 @@ class PublishedEndpointE2eTest {
             {"schema_version": 1, "name": "trade_summary", "display_name": "Trade summary",
              "description": "074 E2E — a second published subtree.", "parameters": {},
              "nodes": [{"id": "summary", "description": "All rows", "type": "DQL",
-                        "source": "ep-source", "template": {"id": "trade_summary.sql", "version": 1},
+                        "source": "ep-source", "template": {"id": "test/trade_summary.sql", "version": 1},
                         "depends_on": []}]}
             """.trimIndent(),
         )
@@ -506,7 +506,7 @@ class PublishedEndpointE2eTest {
             {"schema_version": 1, "name": "slow_sleep", "display_name": "Slow sleep",
              "description": "074 E2E — outlives a 1s endpoint timeout.", "parameters": {},
              "nodes": [{"id": "sleep", "description": "pg_sleep(3)", "type": "DQL",
-                        "source": "ep-source", "template": {"id": "slow.sql", "version": 1},
+                        "source": "ep-source", "template": {"id": "test/slow.sql", "version": 1},
                         "depends_on": []}]}
             """.trimIndent(),
         )
@@ -515,7 +515,7 @@ class PublishedEndpointE2eTest {
             {"schema_version": 1, "name": "writes_things", "display_name": "Writes things",
              "description": "074 E2E — the read-only rule's negative fixture.", "parameters": {},
              "nodes": [{"id": "insert_row", "description": "A write", "type": "DML",
-                        "source": "ep-source", "template": {"id": "insert_row.sql", "version": 1},
+                        "source": "ep-source", "template": {"id": "test/insert_row.sql", "version": 1},
                         "depends_on": []}]}
             """.trimIndent(),
         )

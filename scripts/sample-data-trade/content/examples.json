@@ -2,7 +2,7 @@
   "templates": [
     {
       "schema_version": 1,
-      "id": "trade_monthly_window.sql",
+      "id": "trade/trade_monthly_window.sql",
       "engine": "freemarker",
       "dialect": "DUCKDB",
       "display_name": "US trade facts, windowed to month grain",
@@ -13,7 +13,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_trade_balance.sql",
+      "id": "trade/sample_trade_balance.sql",
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Trade balance by partner (tempdb)",
@@ -24,7 +24,7 @@
     },
     {
       "schema_version": 1,
-      "id": "comtrade_reported.sql",
+      "id": "trade/comtrade_reported.sql",
       "engine": "freemarker",
       "dialect": "MYSQL",
       "display_name": "Partner-reported trade with the USA (Comtrade mirror)",
@@ -35,7 +35,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_trade_reconciliation.sql",
+      "id": "trade/sample_trade_reconciliation.sql",
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Mirror-statistics reconciliation (tempdb)",
@@ -46,7 +46,7 @@
     },
     {
       "schema_version": 1,
-      "id": "trade_reference_lookups.sql",
+      "id": "trade/trade_reference_lookups.sql",
       "engine": "freemarker",
       "dialect": "DUCKDB",
       "display_name": "Census-to-ISO partner crosswalk",
@@ -79,7 +79,7 @@
     },
     {
       "schema_version": 1,
-      "id": "trade_hhi.sql",
+      "id": "trade/trade_hhi.sql",
       "engine": "freemarker",
       "dialect": "DUCKDB",
       "display_name": "HS-chapter concentration (HHI) per partner",
@@ -106,7 +106,7 @@
           "description": "Stage the windowed per-partner monthly trade facts from the DuckDB artifact.",
           "type": "DQL",
           "source": "sample-trade-us",
-          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "template": { "id": "trade/trade_monthly_window.sql", "version": 1 },
           "output": { "target": "tempdb", "table": "stg_trade_monthly" },
           "depends_on": []
         },
@@ -115,7 +115,7 @@
           "description": "Roll up exports vs imports per partner in tempdb.",
           "type": "DQL",
           "source": "tempdb",
-          "template": { "id": "sample_trade_balance.sql", "version": 1 },
+          "template": { "id": "trade/sample_trade_balance.sql", "version": 1 },
           "output": { "target": "caller" },
           "depends_on": ["stage_trade_monthly"]
         }
@@ -137,7 +137,7 @@
           "description": "Stage US-reported annual per-partner trade from the DuckDB artifact.",
           "type": "DQL",
           "source": "sample-trade-us",
-          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "template": { "id": "trade/trade_monthly_window.sql", "version": 1 },
           "output": { "target": "tempdb", "table": "stg_us_reported" },
           "depends_on": []
         },
@@ -146,7 +146,7 @@
           "description": "Stage partner-reported annual trade with the USA from the MySQL mirror artifact.",
           "type": "DQL",
           "source": "sample-trade-world",
-          "template": { "id": "comtrade_reported.sql", "version": 1 },
+          "template": { "id": "trade/comtrade_reported.sql", "version": 1 },
           "output": { "target": "tempdb", "table": "stg_partner_reported" },
           "depends_on": []
         },
@@ -155,7 +155,7 @@
           "description": "Stage the partner and crosswalk lookups from the DuckDB artifact.",
           "type": "DQL",
           "source": "sample-trade-us",
-          "template": { "id": "trade_reference_lookups.sql", "version": 1 },
+          "template": { "id": "trade/trade_reference_lookups.sql", "version": 1 },
           "output": { "target": "tempdb", "table": "stg_iso" },
           "depends_on": []
         },
@@ -164,7 +164,7 @@
           "description": "Join both sides on the ISO code in tempdb and compute the reporting gap.",
           "type": "DQL",
           "source": "tempdb",
-          "template": { "id": "sample_trade_reconciliation.sql", "version": 1 },
+          "template": { "id": "trade/sample_trade_reconciliation.sql", "version": 1 },
           "output": { "target": "caller" },
           "depends_on": ["stage_us_reported", "stage_partner_reported", "stage_reference"]
         }
@@ -187,7 +187,7 @@
           "description": "Stage the windowed per-partner monthly trade facts from the DuckDB artifact.",
           "type": "DQL",
           "source": "sample-trade-us",
-          "template": { "id": "trade_monthly_window.sql", "version": 1 },
+          "template": { "id": "trade/trade_monthly_window.sql", "version": 1 },
           "output": { "target": "tempdb", "table": "stg_trade_monthly" },
           "depends_on": []
         },

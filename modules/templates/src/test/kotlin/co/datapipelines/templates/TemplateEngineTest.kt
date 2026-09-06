@@ -44,56 +44,56 @@ class TemplateEngineTest {
 
     @Test
     fun `renders a plain interpolation`() {
-        val e = engine(TemplateFixtures.version("t.sql", body = "SELECT * FROM o WHERE id = \${order_id}"))
-        render(e, TemplateRef("t.sql", 1), mapOf("order_id" to 42)) shouldBe "SELECT * FROM o WHERE id = 42"
+        val e = engine(TemplateFixtures.version("test/t.sql", body = "SELECT * FROM o WHERE id = \${order_id}"))
+        render(e, TemplateRef("test/t.sql", 1), mapOf("order_id" to 42)) shouldBe "SELECT * FROM o WHERE id = 42"
     }
 
     @Test
     fun `synthesizes an import prologue and calls a library macro`() {
         val lib =
             TemplateFixtures.version(
-                "lib_date.sql",
+                "test/lib_date.sql",
                 isLibrary = true,
                 body = "<#macro date_range column start end>\${column} BETWEEN '\${start}' AND '\${end}'</#macro>",
             )
         val main =
             TemplateFixtures.version(
-                "orders.sql",
-                imports = listOf(TemplateImport("lib_date.sql", 1, "dates")),
+                "test/orders.sql",
+                imports = listOf(TemplateImport("test/lib_date.sql", 1, "dates")),
                 body = "WHERE <@dates.date_range column=\"order_date\" start=start end=end/>",
             )
-        val out = render(engine(lib, main), TemplateRef("orders.sql", 1), mapOf("start" to "2026-01-01", "end" to "2026-12-31"))
+        val out = render(engine(lib, main), TemplateRef("test/orders.sql", 1), mapOf("start" to "2026-01-01", "end" to "2026-12-31"))
         out shouldBe "WHERE order_date BETWEEN '2026-01-01' AND '2026-12-31'"
     }
 
     @Test
     fun `resolves transitive imports through the loader`() {
-        val libB = TemplateFixtures.version("libb.sql", isLibrary = true, body = "<#macro inner v>[\${v}]</#macro>")
+        val libB = TemplateFixtures.version("test/libb.sql", isLibrary = true, body = "<#macro inner v>[\${v}]</#macro>")
         val libA =
             TemplateFixtures.version(
-                "liba.sql",
+                "test/liba.sql",
                 isLibrary = true,
-                imports = listOf(TemplateImport("libb.sql", 1, "b")),
+                imports = listOf(TemplateImport("test/libb.sql", 1, "b")),
                 body = "<#macro outer v><@b.inner v=v/></#macro>",
             )
         val main =
             TemplateFixtures.version(
-                "main.sql",
-                imports = listOf(TemplateImport("liba.sql", 1, "a")),
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/liba.sql", 1, "a")),
                 body = "<@a.outer v=\"hi\"/>",
             )
-        render(engine(libB, libA, main), TemplateRef("main.sql", 1), emptyMap()) shouldBe "[hi]"
+        render(engine(libB, libA, main), TemplateRef("test/main.sql", 1), emptyMap()) shouldBe "[hi]"
     }
 
     @Test
     fun `interpolates each canonical type per §4-4`() {
         val body =
             "i=\${i} d=\${d} b=\${flag} day=\${day} ts=\${ts} tm=\${tm} bin=\${bin}"
-        val e = engine(TemplateFixtures.version("types.sql", body = body))
+        val e = engine(TemplateFixtures.version("test/types.sql", body = body))
         val out =
             render(
                 e,
-                TemplateRef("types.sql", 1),
+                TemplateRef("test/types.sql", 1),
                 mapOf(
                     "i" to 42,
                     "d" to BigDecimal("12345.67"),
@@ -112,24 +112,24 @@ class TemplateEngineTest {
         // §4.4: DECIMAL/BIGDECIMAL render "with declared scale", approximate decimals render plain.
         // Both are trailing-zero / notation cases no built-in Freemarker number format produces —
         // see PlainNumberFormat. The 12345.67 case above passes under either, so it cannot guard this.
-        val e = engine(TemplateFixtures.version("n.sql", body = "\${money} \${big} \${whole}"))
+        val e = engine(TemplateFixtures.version("test/n.sql", body = "\${money} \${big} \${whole}"))
         render(
             e,
-            TemplateRef("n.sql", 1),
+            TemplateRef("test/n.sql", 1),
             mapOf("money" to BigDecimal("1000.00"), "big" to 1.0e10, "whole" to BigDecimal("42.000")),
         ) shouldBe "1000.00 10000000000 42.000"
     }
 
     @Test
     fun `an undefined variable is classified, not thrown, by execute`() {
-        val e = engine(TemplateFixtures.version("t.sql", body = "SELECT \${missing}"))
-        e.execute(TemplateRef("t.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.UndefinedVariable>()
+        val e = engine(TemplateFixtures.version("test/t.sql", body = "SELECT \${missing}"))
+        e.execute(TemplateRef("test/t.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.UndefinedVariable>()
     }
 
     @Test
     fun `render() throws a run-time render exception on failure`() {
-        val e = engine(TemplateFixtures.version("t.sql", body = "SELECT \${missing}"))
-        val thrown = shouldThrow<DatapipelinesException> { render(e, TemplateRef("t.sql", 1), emptyMap()) }
+        val e = engine(TemplateFixtures.version("test/t.sql", body = "SELECT \${missing}"))
+        val thrown = shouldThrow<DatapipelinesException> { render(e, TemplateRef("test/t.sql", 1), emptyMap()) }
         thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED
     }
 
@@ -138,17 +138,17 @@ class TemplateEngineTest {
         // templates.md §8.2 splits these two: "Template {id, version} not found →
         // pipeline.node.template_not_found", everything else → template_render_failed. A single
         // catch-all code would tell an operator the template is broken when it is simply absent.
-        val e = engine(TemplateFixtures.version("present.sql"))
+        val e = engine(TemplateFixtures.version("test/present.sql"))
 
-        val thrown = shouldThrow<DatapipelinesException> { render(e, TemplateRef("absent.sql", 1), emptyMap()) }
+        val thrown = shouldThrow<DatapipelinesException> { render(e, TemplateRef("test/absent.sql", 1), emptyMap()) }
 
         thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND
     }
 
     @Test
     fun `a runaway loop trips the render timeout`() {
-        val e = engine(TemplateFixtures.version("t.sql", body = "<#list 1..2000000000 as i></#list>"), timeoutMs = 150)
-        val outcome = e.execute(TemplateRef("t.sql", 1), emptyMap())
+        val e = engine(TemplateFixtures.version("test/t.sql", body = "<#list 1..2000000000 as i></#list>"), timeoutMs = 150)
+        val outcome = e.execute(TemplateRef("test/t.sql", 1), emptyMap())
         outcome.shouldBeInstanceOf<RenderOutcome.Failed>().detail shouldContain "timeout"
     }
 
@@ -156,10 +156,10 @@ class TemplateEngineTest {
     fun `oversized output trips the size cap`() {
         val e =
             engine(
-                TemplateFixtures.version("t.sql", body = "<#list 1..100000 as i>xxxxxxxxxx</#list>"),
+                TemplateFixtures.version("test/t.sql", body = "<#list 1..100000 as i>xxxxxxxxxx</#list>"),
                 maxOutputChars = 100,
             )
-        val outcome = e.execute(TemplateRef("t.sql", 1), emptyMap())
+        val outcome = e.execute(TemplateRef("test/t.sql", 1), emptyMap())
         outcome.shouldBeInstanceOf<RenderOutcome.Failed>().detail shouldContain "cap"
     }
 
@@ -172,9 +172,9 @@ class TemplateEngineTest {
         // *caller* returns either way; only the worker's death proves the guard works.
         //
         // The body writes nothing, so neither the output cap nor the writer can stop it.
-        val e = engine(TemplateFixtures.version("t.sql", body = RUNAWAY_SILENT_BODY), timeoutMs = 150)
+        val e = engine(TemplateFixtures.version("test/t.sql", body = RUNAWAY_SILENT_BODY), timeoutMs = 150)
 
-        e.execute(TemplateRef("t.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.Failed>()
+        e.execute(TemplateRef("test/t.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.Failed>()
 
         withClue("the render worker must unwind after the timeout, not run on burning a core") {
             awaitActiveRendersToDrain(e).shouldBeTrue()
@@ -187,7 +187,7 @@ class TemplateEngineTest {
         // `poolThreads <= MAX_CONCURRENT_RENDERS` — i.e. `min(8, MAX) <= MAX`, true by
         // construction. Reverting to `newCachedThreadPool`, the exact TPL-SEC-4 regression, left it
         // green. The pool's CONFIGURATION is what the fix consists of, so that is what is asserted.
-        val executor = engine(TemplateFixtures.version("t.sql")).renderExecutor
+        val executor = engine(TemplateFixtures.version("test/t.sql")).renderExecutor
 
         withClue("a fixed-size pool: core == max, or the pool grows a thread per concurrent render") {
             executor.corePoolSize shouldBe TemplateEngine.MAX_CONCURRENT_RENDERS
@@ -207,7 +207,7 @@ class TemplateEngineTest {
         // registry blocks inside `lookup`, which the loader calls on the worker thread, so exactly
         // MAX_CONCURRENT_RENDERS renders park there and the queue fills deterministically.
         val gate = CountDownLatch(1)
-        val registry = BlockingRegistry(gate, TemplateFixtures.version("t.sql", body = "SELECT 1"))
+        val registry = BlockingRegistry(gate, TemplateFixtures.version("test/t.sql", body = "SELECT 1"))
         val e = TemplateEngine(registry, cacheSize = 10, renderTimeoutMs = 30_000, maxOutputChars = 1_000)
         engines += e
 
@@ -215,7 +215,7 @@ class TemplateEngineTest {
         val outcomes = ConcurrentLinkedQueue<RenderOutcome>()
         val callers =
             (1..overCapacity).map {
-                Thread { outcomes += e.execute(TemplateRef("t.sql", 1), emptyMap()) }
+                Thread { outcomes += e.execute(TemplateRef("test/t.sql", 1), emptyMap()) }
                     .apply {
                         isDaemon = true
                         start()
@@ -252,19 +252,19 @@ class TemplateEngineTest {
         // budget at construction — it must be settable per render. Both directions are asserted,
         // so a signature that silently ignored the argument would fail here.
         val body = "<#list 1..100 as i>0123456789</#list>"
-        val e = engine(TemplateFixtures.version("t.sql", body = body), maxOutputChars = 1_000_000)
+        val e = engine(TemplateFixtures.version("test/t.sql", body = body), maxOutputChars = 1_000_000)
 
         e
-            .execute(TemplateRef("t.sql", 1), emptyMap())
+            .execute(TemplateRef("test/t.sql", 1), emptyMap())
             .shouldBeInstanceOf<RenderOutcome.Success>()
             .sql.length shouldBe 1_000
 
         e
-            .execute(TemplateRef("t.sql", 1), emptyMap(), maxOutputChars = 100)
+            .execute(TemplateRef("test/t.sql", 1), emptyMap(), maxOutputChars = 100)
             .shouldBeInstanceOf<RenderOutcome.Failed>()
             .detail shouldContain "100-character cap"
 
-        shouldThrow<DatapipelinesException> { e.render(TemplateRef("t.sql", 1), emptyMap(), maxOutputChars = 100) }
+        shouldThrow<DatapipelinesException> { e.render(TemplateRef("test/t.sql", 1), emptyMap(), maxOutputChars = 100) }
     }
 
     @Test
@@ -281,12 +281,12 @@ class TemplateEngineTest {
                 "<#switch mode><#case \"a\">A<#break><#default>D</#switch>" +
                 " \${missing?default(\"fallback\")} \${label} \${amount?string(\"0.##\")}" +
                 "<#if items?has_content> HAS</#if>"
-        val e = engine(TemplateFixtures.version("ok.sql", body = body))
+        val e = engine(TemplateFixtures.version("test/ok.sql", body = body))
 
         val out =
             render(
                 e,
-                TemplateRef("ok.sql", 1),
+                TemplateRef("test/ok.sql", 1),
                 mapOf(
                     "total" to 5,
                     "name" to "Ab",
@@ -308,7 +308,7 @@ class TemplateEngineTest {
         // usable — the §6.2 reading LibraryBodyCheck pins.
         val lib =
             TemplateFixtures.version(
-                "lib_calc.sql",
+                "test/lib_calc.sql",
                 isLibrary = true,
                 body =
                     "<#function to_cents amount><#return amount * 100></#function>" +
@@ -316,12 +316,12 @@ class TemplateEngineTest {
             )
         val main =
             TemplateFixtures.version(
-                "calc.sql",
-                imports = listOf(TemplateImport("lib_calc.sql", 1, "c")),
+                "test/calc.sql",
+                imports = listOf(TemplateImport("test/lib_calc.sql", 1, "c")),
                 body = "WHERE <@c.above column=\"amount\" value=c.to_cents(3)/>",
             )
 
-        render(engine(lib, main), TemplateRef("calc.sql", 1), emptyMap()) shouldBe "WHERE amount > 300"
+        render(engine(lib, main), TemplateRef("test/calc.sql", 1), emptyMap()) shouldBe "WHERE amount > 300"
     }
 
     @Test
@@ -332,19 +332,19 @@ class TemplateEngineTest {
         // loaded by Freemarker itself at render time, not by this engine's own getTemplate call.
         val lib =
             TemplateFixtures.version(
-                "lib_burn.sql",
+                "test/lib_burn.sql",
                 isLibrary = true,
                 body = "<#macro burn>$RUNAWAY_SILENT_BODY</#macro>",
             )
         val main =
             TemplateFixtures.version(
-                "main.sql",
-                imports = listOf(TemplateImport("lib_burn.sql", 1, "b")),
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/lib_burn.sql", 1, "b")),
                 body = "<@b.burn/>",
             )
         val e = engine(lib, main, timeoutMs = 200)
 
-        e.execute(TemplateRef("main.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.Failed>()
+        e.execute(TemplateRef("test/main.sql", 1), emptyMap()).shouldBeInstanceOf<RenderOutcome.Failed>()
 
         withClue("the worker running the LIBRARY's loop must unwind, not just the main template's") {
             awaitActiveRendersToDrain(e).shouldBeTrue()
@@ -357,7 +357,7 @@ class TemplateEngineTest {
         // must keep working (correctness) — eviction is safe precisely because an evicted key is
         // re-parsed into a fresh, unshared tree.
         val cacheSize = 4
-        val versions = (1..(cacheSize * 3)).map { TemplateFixtures.version("t$it.sql", body = "SELECT $it") }
+        val versions = (1..(cacheSize * 3)).map { TemplateFixtures.version("test/t$it.sql", body = "SELECT $it") }
         val e = TemplateEngine(InMemoryTemplateRegistry(versions), cacheSize, 5_000, 1_000_000).also { engines += it }
 
         repeat(2) {

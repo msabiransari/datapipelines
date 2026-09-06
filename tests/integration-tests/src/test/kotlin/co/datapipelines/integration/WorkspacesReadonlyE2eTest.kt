@@ -67,15 +67,15 @@ class WorkspacesReadonlyE2eTest {
     fun `all three write shapes against a readonly datasource are refused at save - DQL saves clean`() {
         seedAuthRows()
         registerDatasource(SAVE_DS, SAVE_H2_URL)
-        createTemplate("ro_e2e_ins1.sql", "INSERT INTO ro_t (n) VALUES (1)")
-        createTemplate("ro_e2e_ddl1.sql", "CREATE TABLE ro_made (n INT)")
-        createTemplate("ro_e2e_sel1.sql", "SELECT 1 AS n")
+        createTemplate("test/ro_e2e_ins1.sql", "INSERT INTO ro_t (n) VALUES (1)")
+        createTemplate("test/ro_e2e_ddl1.sql", "CREATE TABLE ro_made (n INT)")
+        createTemplate("test/ro_e2e_sel1.sql", "SELECT 1 AS n")
         flipReadonly(SAVE_DS, readonly = true)
 
         // Shape 1: DML node sourcing the readonly datasource.
-        postRefused("ro_save_dml", listOf(dmlNode("insert_rows", SAVE_DS, "ro_e2e_ins1.sql")))
+        postRefused("ro_save_dml", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql")))
         // Shape 2: DDL node sourcing it.
-        postRefused("ro_save_ddl", listOf(ddlNode("make_table", SAVE_DS, "ro_e2e_ddl1.sql")))
+        postRefused("ro_save_ddl", listOf(ddlNode("make_table", SAVE_DS, "test/ro_e2e_ddl1.sql")))
         // Shape 3: output.target "datasource" naming it — the write-back half, on a DQL node.
         postRefused(
             "ro_save_output",
@@ -85,7 +85,7 @@ class WorkspacesReadonlyE2eTest {
                     "description" to "DQL read from tempdb, written back to a readonly target",
                     "type" to "DQL",
                     "source" to "tempdb",
-                    "template" to mapOf("id" to "ro_e2e_sel1.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/ro_e2e_sel1.sql", "version" to 1),
                     "output" to
                         mapOf(
                             "target" to "datasource",
@@ -103,14 +103,14 @@ class WorkspacesReadonlyE2eTest {
 
         // The negative: DQL reads from the SAME readonly datasource save clean.
         createPipeline(
-            "ro_save_dql_ok",
+            "test/ro_save_dql_ok",
             listOf(
                 mapOf(
                     "id" to "read_only_read",
                     "description" to "DQL read from the readonly datasource — legal",
                     "type" to "DQL",
                     "source" to SAVE_DS,
-                    "template" to mapOf("id" to "ro_e2e_sel1.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/ro_e2e_sel1.sql", "version" to 1),
                     "output" to mapOf("target" to "caller"),
                     "depends_on" to emptyList<String>(),
                 ),
@@ -138,7 +138,7 @@ class WorkspacesReadonlyE2eTest {
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .body(
                     mapper.writeValueAsString(
-                        pipelineBody("ro_save_dml_details", listOf(dmlNode("insert_rows", SAVE_DS, "ro_e2e_ins1.sql"))),
+                        pipelineBody("ro_save_dml_details", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql"))),
                     ),
                 ).`when`()
                 .post("/api/v1/pipelines")
@@ -165,7 +165,7 @@ class WorkspacesReadonlyE2eTest {
         // Saved clean: the datasource is writable at save time.
         val pipelineId =
             createPipeline(
-                "ro_flip_dml",
+                "test/ro_flip_dml",
                 listOf(dmlNode("flip_insert", FLIP_DS, RO_H2_INSERT_TEMPLATE)),
             )
 
@@ -206,19 +206,19 @@ class WorkspacesReadonlyE2eTest {
 
         // The child (saved clean against a writable datasource) carries the DML write shape.
         createPipeline(
-            "ro_child_pipeline",
+            "test/ro_child_pipeline",
             listOf(dmlNode("child_insert", CHILD_DS, RO_CHILD_INSERT_TEMPLATE)),
         )
         // The parent runs it through a PIPELINE node.
         val parentId =
             createPipeline(
-                "ro_parent_pipeline",
+                "test/ro_parent_pipeline",
                 listOf(
                     mapOf(
                         "id" to "run_child",
                         "description" to "Runs the child whose node carries the write shape",
                         "type" to "PIPELINE",
-                        "pipeline" to mapOf("name" to "ro_child_pipeline", "version" to 1),
+                        "pipeline" to mapOf("name" to "test/ro_child_pipeline", "version" to 1),
                         "depends_on" to emptyList<String>(),
                     ),
                 ),
@@ -475,8 +475,8 @@ class WorkspacesReadonlyE2eTest {
         private const val H2_USER = "sa"
         private const val H2_PASSWORD = "sa"
 
-        private const val RO_H2_INSERT_TEMPLATE = "ro_e2e_insert.sql"
-        private const val RO_CHILD_INSERT_TEMPLATE = "ro_e2e_child_insert.sql"
+        private const val RO_H2_INSERT_TEMPLATE = "test/ro_e2e_insert.sql"
+        private const val RO_CHILD_INSERT_TEMPLATE = "test/ro_e2e_child_insert.sql"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 

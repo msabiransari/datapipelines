@@ -207,7 +207,7 @@ class NodeRunnerTest {
         runBlocking<Unit> {
             val engine = mockk<TemplateEngine>()
             every { engine.render(any(), any(), any()) } throws
-                TemplateRenderException("undefined variable: x", TemplateRef("t", 1))
+                TemplateRenderException("undefined variable: x", TemplateRef("test/t", 1))
             val runner = runnerWith(engine)
 
             failureOf(runner, Fixtures.node("render")).code shouldBe PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED

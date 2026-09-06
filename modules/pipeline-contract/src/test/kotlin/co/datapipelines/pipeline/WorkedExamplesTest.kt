@@ -135,17 +135,17 @@ class WorkedExamplesTest {
          */
         val TEMPLATE_DIALECTS: Map<String, TemplateLookup> =
             mapOf(
-                "fetch_orders.sql" to TemplateLookup.Found(Dialect.POSTGRES),
-                "active_users.sql" to TemplateLookup.Found(Dialect.POSTGRES),
-                "record_execution.sql" to TemplateLookup.Found(Dialect.POSTGRES),
-                "fetch_customers.sql" to TemplateLookup.Found(Dialect.MYSQL),
-                "join_revenue.sql" to TemplateLookup.Found(Dialect.H2),
-                "select_revenue.sql" to TemplateLookup.Found(Dialect.H2),
-                "final_report.sql" to TemplateLookup.Found(Dialect.H2),
-                "report.sql" to TemplateLookup.Found(Dialect.H2),
-                "create_idx_revenue.sql" to TemplateLookup.Found(Dialect.H2),
-                "transform.sql" to TemplateLookup.Found(Dialect.H2),
-                "select_orders.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/fetch_orders.sql" to TemplateLookup.Found(Dialect.POSTGRES),
+                "acme/reporting/active_users.sql" to TemplateLookup.Found(Dialect.POSTGRES),
+                "acme/finance/record_execution.sql" to TemplateLookup.Found(Dialect.POSTGRES),
+                "acme/finance/fetch_customers.sql" to TemplateLookup.Found(Dialect.MYSQL),
+                "acme/finance/join_revenue.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/select_revenue.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/final_report.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/report.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/create_idx_revenue.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/transform.sql" to TemplateLookup.Found(Dialect.H2),
+                "acme/finance/select_orders.sql" to TemplateLookup.Found(Dialect.H2),
             )
     }
 }

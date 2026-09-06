@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "pure_etl",
+  "name": "acme/finance/pure_etl",
   "display_name": "Pure ETL",
   "description": "No node resolves to caller — §9.4. Returns execution stats only.",
   "parameters": {},
@@ -10,7 +10,7 @@
       "description": "Pull orders from PG.",
       "type": "DQL",
       "source": "pg-prod",
-      "template": {"id": "fetch_orders.sql", "version": 1},
+      "template": {"id": "acme/finance/fetch_orders.sql", "version": 1},
       "output": {"target": "tempdb", "table": "stg_orders"},
       "depends_on": []
     },
@@ -19,7 +19,7 @@
       "description": "Transform in tempdb.",
       "type": "DQL",
       "source": "tempdb",
-      "template": {"id": "transform.sql", "version": 1},
+      "template": {"id": "acme/finance/transform.sql", "version": 1},
       "output": {"target": "tempdb", "table": "int_orders"},
       "depends_on": ["fetch_orders"]
     },
@@ -28,7 +28,7 @@
       "description": "Append to the warehouse.",
       "type": "DQL",
       "source": "tempdb",
-      "template": {"id": "select_orders.sql", "version": 1},
+      "template": {"id": "acme/finance/select_orders.sql", "version": 1},
       "output": {
         "target": "datasource",
         "datasource": "pg-warehouse",

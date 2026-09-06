@@ -156,6 +156,6 @@ class PipelineImportContextKeysTest {
         {"schema_version":1,"name":"regional","display_name":"Regional","description":"d",
          "parameters":{},"settings":{"tempdb":{"engine":"H2"}},
          "nodes":[{"id":"report","description":"report","type":"DQL","source":"warehouse",
-                   "template":{"id":"report.sql","version":1},"depends_on":[]}]}
+                   "template":{"id":"test/report.sql","version":1},"depends_on":[]}]}
         """.trimIndent()
 }

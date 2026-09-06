@@ -59,7 +59,7 @@ object SiteShotsMain {
     private const val SHOWCASE = "weather_sensitivity_by_borough"
 
     /** A library template lives here; this one is PINNED by four pipelines, which is what used-by shows. */
-    private const val SHARED_TEMPLATE = "sample_zones.sql"
+    private const val SHARED_TEMPLATE = "nyc/reference/sample_zones.sql"
 
     /** Created by the driver if absent, so the switcher shot has something to switch between. */
     private const val SECOND_WORKSPACE = "analytics-team"

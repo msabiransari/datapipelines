@@ -63,7 +63,7 @@ class PipelineNodeSqlPartialControllerTest {
               "id": "trips_by_day",
               "type": "DQL",
               "source": "sample-trips",
-              "template": {"id": "trips_by_day.sql", "version": 1},
+              "template": {"id": "test/trips_by_day.sql", "version": 1},
               "output": {"target": "tempdb", "table": "day_counts"},
               "depends_on": []
             },
@@ -71,7 +71,7 @@ class PipelineNodeSqlPartialControllerTest {
               "id": "top_days",
               "type": "DQL",
               "source": "tempdb",
-              "template": {"id": "top_days.sql", "version": 2},
+              "template": {"id": "test/top_days.sql", "version": 2},
               "depends_on": ["trips_by_day"]
             },
             {
@@ -103,8 +103,8 @@ class PipelineNodeSqlPartialControllerTest {
         every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns versionDetail(1)
         every { pipelines.findVersionBody(any(), pipelineId, 1) } returns bodyJson
         every { templateEngines.engineFor(workspaceId) } returns engine
-        every { templates.lookupVersion(workspaceId, "trips_by_day.sql", 1) } returns version("trips_by_day.sql", 1)
-        every { templates.lookupVersion(workspaceId, "top_days.sql", 2) } returns version("top_days.sql", 2)
+        every { templates.lookupVersion(workspaceId, "test/trips_by_day.sql", 1) } returns version("test/trips_by_day.sql", 1)
+        every { templates.lookupVersion(workspaceId, "test/top_days.sql", 2) } returns version("test/top_days.sql", 2)
     }
 
     @AfterEach
@@ -112,7 +112,7 @@ class PipelineNodeSqlPartialControllerTest {
 
     @Test
     fun `a fully supplied context renders bound, with no sampled parameters`() {
-        every { engine.render(TemplateRef("trips_by_day.sql", 1), any(), any()) } returns "SELECT 1"
+        every { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) } returns "SELECT 1"
         val model = ExtendedModelMap()
 
         controller.nodeSql(pipelineId, "trips_by_day", """{"start_date":"2023-01-01"}""", model)
@@ -120,7 +120,7 @@ class PipelineNodeSqlPartialControllerTest {
         model.getAttribute("state") shouldBe "rendered"
         model.getAttribute("sql") shouldBe "SELECT 1"
         model.getAttribute("dialect") shouldBe "POSTGRES"
-        model.getAttribute("templateId") shouldBe "trips_by_day.sql"
+        model.getAttribute("templateId") shouldBe "test/trips_by_day.sql"
         model.getAttribute("templateVersion") shouldBe 1
         model.getAttribute("sampledParameters") shouldBe emptyList<String>()
     }
@@ -128,14 +128,14 @@ class PipelineNodeSqlPartialControllerTest {
     @Test
     fun `the pinned version is rendered, never the latest`() {
         // The node pins trips_by_day.sql@1 while the registry also holds @2.
-        every { engine.render(TemplateRef("trips_by_day.sql", 1), any(), any()) } returns "SELECT v1"
-        every { templates.lookupVersion(workspaceId, "trips_by_day.sql", 2) } returns version("trips_by_day.sql", 2)
+        every { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) } returns "SELECT v1"
+        every { templates.lookupVersion(workspaceId, "test/trips_by_day.sql", 2) } returns version("test/trips_by_day.sql", 2)
         val model = ExtendedModelMap()
 
         controller.nodeSql(pipelineId, "trips_by_day", null, model)
 
-        verify { engine.render(TemplateRef("trips_by_day.sql", 1), any(), any()) }
-        verify(exactly = 0) { engine.render(TemplateRef("trips_by_day.sql", 2), any(), any()) }
+        verify { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) }
+        verify(exactly = 0) { engine.render(TemplateRef("test/trips_by_day.sql", 2), any(), any()) }
     }
 
     @Test
@@ -163,7 +163,7 @@ class PipelineNodeSqlPartialControllerTest {
     @Test
     fun `an unsupplied REQUIRED parameter falls back to sample values and says so`() {
         // ParameterBinder.bind rejects; sampleContext() is the documented dry-render context.
-        every { engine.render(TemplateRef("trips_by_day.sql", 1), any(), any()) } returns "SELECT sampled"
+        every { engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any()) } returns "SELECT sampled"
         val model = ExtendedModelMap()
 
         controller.nodeSql(pipelineId, "trips_by_day", null, model)
@@ -187,13 +187,13 @@ class PipelineNodeSqlPartialControllerTest {
 
     @Test
     fun `a pinned template absent from the registry renders the template-missing state`() {
-        every { templates.lookupVersion(workspaceId, "trips_by_day.sql", 1) } returns null
+        every { templates.lookupVersion(workspaceId, "test/trips_by_day.sql", 1) } returns null
         val model = ExtendedModelMap()
 
         controller.nodeSql(pipelineId, "trips_by_day", null, model)
 
         model.getAttribute("state") shouldBe "template-missing"
-        model.getAttribute("templateId") shouldBe "trips_by_day.sql"
+        model.getAttribute("templateId") shouldBe "test/trips_by_day.sql"
         model.getAttribute("templateVersion") shouldBe 1
         verify(exactly = 0) { engine.render(any(), any(), any()) }
     }
@@ -201,8 +201,8 @@ class PipelineNodeSqlPartialControllerTest {
     @Test
     fun `a render failure renders the render-failed state with the engine's message`() {
         every {
-            engine.render(TemplateRef("trips_by_day.sql", 1), any(), any())
-        } throws TemplateRenderException("undefined variable: nope", TemplateRef("trips_by_day.sql", 1))
+            engine.render(TemplateRef("test/trips_by_day.sql", 1), any(), any())
+        } throws TemplateRenderException("undefined variable: nope", TemplateRef("test/trips_by_day.sql", 1))
         val model = ExtendedModelMap()
 
         controller.nodeSql(pipelineId, "trips_by_day", null, model)

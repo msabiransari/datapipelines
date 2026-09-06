@@ -52,7 +52,7 @@ class ReferenceRulesTest {
 
     @Test
     fun `a missing template id is rejected`() {
-        val templates = StubTemplates(lookups = mapOf("fetch_orders.sql" to TemplateLookup.TemplateNotFound))
+        val templates = StubTemplates(lookups = mapOf("test/fetch_orders.sql" to TemplateLookup.TemplateNotFound))
 
         validate(Fixtures.pipeline(), templates = templates).codes shouldContainExactly
             listOf(Validation.TEMPLATE_NOT_FOUND)
@@ -60,7 +60,7 @@ class ReferenceRulesTest {
 
     @Test
     fun `a missing template version is rejected`() {
-        val templates = StubTemplates(lookups = mapOf("fetch_orders.sql" to TemplateLookup.VersionNotFound))
+        val templates = StubTemplates(lookups = mapOf("test/fetch_orders.sql" to TemplateLookup.VersionNotFound))
 
         validate(Fixtures.pipeline(), templates = templates).codes shouldContainExactly
             listOf(Validation.TEMPLATE_VERSION_NOT_FOUND)
@@ -223,7 +223,7 @@ class ReferenceRulesTest {
                             id = "write_temp",
                             type = NodeType.DML,
                             source = "tempdb",
-                            template = TemplateRef("h2_write.sql", 1),
+                            template = TemplateRef("test/h2_write.sql", 1),
                             dependsOn = listOf("read"),
                         ),
                     ),
@@ -236,8 +236,8 @@ class ReferenceRulesTest {
                 StubTemplates(
                     lookups =
                         mapOf(
-                            "fetch_orders.sql" to TemplateLookup.Found(Dialect.POSTGRES),
-                            "h2_write.sql" to TemplateLookup.Found(Dialect.H2),
+                            "test/fetch_orders.sql" to TemplateLookup.Found(Dialect.POSTGRES),
+                            "test/h2_write.sql" to TemplateLookup.Found(Dialect.H2),
                         ),
                 ),
         ).failures shouldBe emptyList()
@@ -249,7 +249,7 @@ class ReferenceRulesTest {
             StubTemplates(
                 renders =
                     mapOf(
-                        "fetch_orders.sql" to
+                        "test/fetch_orders.sql" to
                             DryRenderOutcome.UndeclaredVariable("region", "The following has evaluated to null: region"),
                     ),
             )
@@ -273,7 +273,7 @@ class ReferenceRulesTest {
             StubTemplates(
                 renders =
                     mapOf(
-                        "fetch_orders.sql" to
+                        "test/fetch_orders.sql" to
                             DryRenderOutcome.RenderFailed("?upper_case is not available for a date value"),
                     ),
             )
@@ -320,7 +320,7 @@ class ReferenceRulesTest {
 
         validate(pipeline, templates = templates)
 
-        val context = templates.renderedContexts.getValue("fetch_orders.sql")
+        val context = templates.renderedContexts.getValue("test/fetch_orders.sql")
         context.keys shouldContain "start_date"
         // The declared default wins over the sample value, and arrives coerced.
         context["min_total"].toString() shouldBe "12.50"
@@ -333,7 +333,7 @@ class ReferenceRulesTest {
                 nodes = listOf(Fixtures.node()),
                 parameters = mapOf("customer_id" to Parameter(type = LogicalType.STRING)),
             )
-        val templates = StubTemplates(interpolated = mapOf("fetch_orders.sql" to setOf("customer_id")))
+        val templates = StubTemplates(interpolated = mapOf("test/fetch_orders.sql" to setOf("customer_id")))
 
         val failure =
             validate(pipeline, templates = templates)
@@ -363,7 +363,7 @@ class ReferenceRulesTest {
     fun `an interpolated name that is not declared is not reported by the bind rule`() {
         // The dry-render's own undeclared-variable rule owns that case; the bind rule only
         // refuses DECLARED parameters, so a stub reporting an undeclared name is ignored.
-        val templates = StubTemplates(interpolated = mapOf("fetch_orders.sql" to setOf("undeclared")))
+        val templates = StubTemplates(interpolated = mapOf("test/fetch_orders.sql" to setOf("undeclared")))
 
         validate(Fixtures.pipeline(), templates = templates).codes shouldNotContain
             PipelineErrorCodes.Template.PARAMETER_INTERPOLATED

@@ -269,7 +269,7 @@ class WorkspaceIsolationIntegrationTest {
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"report","display_name":"Report","description":"",""" +
-                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"t","version":1}}]}"""
+                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"test/t","version":1}}]}"""
 
         private val random = SecureRandom()
 

@@ -30,7 +30,7 @@ class TypedTemplateRenderTest {
         val html =
             engine(
                 TemplateFixtures.version(
-                    "report.html",
+                    "test/report.html",
                     type = TemplateType.HTML,
                     dialect = null,
                     body = "<p title=\${title}>\${user_value}</p>",
@@ -39,17 +39,17 @@ class TypedTemplateRenderTest {
         val sql =
             engine(
                 TemplateFixtures.version(
-                    "report.sql",
+                    "test/report.sql",
                     body = "SELECT '<script>' AS marker WHERE title = \${title}",
                 ),
             )
 
         assertSoftly {
-            html.render(TemplateRef("report.html", 1), mapOf("user_value" to "<script>", "title" to "a&b")) shouldBe
+            html.render(TemplateRef("test/report.html", 1), mapOf("user_value" to "<script>", "title" to "a&b")) shouldBe
                 "<p title=a&amp;b>&lt;script&gt;</p>"
 
             sql.render(
-                TemplateRef("report.sql", 1),
+                TemplateRef("test/report.sql", 1),
                 mapOf("title" to "a&b"),
             ) shouldBe "SELECT '<script>' AS marker WHERE title = a&b"
         }
@@ -60,13 +60,13 @@ class TypedTemplateRenderTest {
         val e =
             engine(
                 TemplateFixtures.version(
-                    "row.html",
+                    "test/row.html",
                     type = TemplateType.HTML,
                     dialect = null,
                     body = "<td>\${cell}</td><td>\${cell?no_esc}</td>",
                 ),
             )
-        e.render(TemplateRef("row.html", 1), mapOf("cell" to "<b>bold</b>")) shouldBe
+        e.render(TemplateRef("test/row.html", 1), mapOf("cell" to "<b>bold</b>")) shouldBe
             "<td>&lt;b&gt;bold&lt;/b&gt;</td><td><b>bold</b></td>"
     }
 
@@ -77,12 +77,12 @@ class TypedTemplateRenderTest {
         // against an html body ever reaching the escaping-free configuration by omission.
         val both =
             engine(
-                TemplateFixtures.version("plain.sql", body = "\${value}"),
-                TemplateFixtures.version("plain.html", type = TemplateType.HTML, dialect = null, body = "\${value}"),
+                TemplateFixtures.version("test/plain.sql", body = "\${value}"),
+                TemplateFixtures.version("test/plain.html", type = TemplateType.HTML, dialect = null, body = "\${value}"),
             )
         assertSoftly {
-            both.render(TemplateRef("plain.sql", 1), mapOf("value" to "<i>x</i>")) shouldBe "<i>x</i>"
-            both.render(TemplateRef("plain.html", 1), mapOf("value" to "<i>x</i>")) shouldBe "&lt;i&gt;x&lt;/i&gt;"
+            both.render(TemplateRef("test/plain.sql", 1), mapOf("value" to "<i>x</i>")) shouldBe "<i>x</i>"
+            both.render(TemplateRef("test/plain.html", 1), mapOf("value" to "<i>x</i>")) shouldBe "&lt;i&gt;x&lt;/i&gt;"
         }
     }
 
@@ -92,19 +92,19 @@ class TypedTemplateRenderTest {
         // differs. An html template may import any library it is authorised to see.
         val lib =
             TemplateFixtures.version(
-                "lib_fmt.sql",
+                "test/lib_fmt.sql",
                 isLibrary = true,
                 body = "<#macro badge text><span>\${text}</span></#macro>",
             )
         val page =
             TemplateFixtures.version(
-                "page.html",
+                "test/page.html",
                 type = TemplateType.HTML,
                 dialect = null,
-                imports = listOf(TemplateImport("lib_fmt.sql", 1, "fmt")),
+                imports = listOf(TemplateImport("test/lib_fmt.sql", 1, "fmt")),
                 body = "<@fmt.badge text=user_label/>",
             )
-        engine(lib, page).render(TemplateRef("page.html", 1), mapOf("user_label" to "<script>")) shouldBe
+        engine(lib, page).render(TemplateRef("test/page.html", 1), mapOf("user_label" to "<script>")) shouldBe
             "<span>&lt;script&gt;</span>"
     }
 }

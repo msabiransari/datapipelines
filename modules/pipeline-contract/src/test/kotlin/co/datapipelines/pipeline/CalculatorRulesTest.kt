@@ -29,7 +29,7 @@ class CalculatorRulesTest {
          * case is what caught it — the argument for pairing every refusal with a case that must
          * NOT fire.
          */
-        const val SQL_TEMPLATE = "fetch_orders.sql"
+        const val SQL_TEMPLATE = "test/fetch_orders.sql"
     }
 
     private fun validate(
@@ -86,7 +86,7 @@ class CalculatorRulesTest {
         val node =
             Fixtures.calculatorNode().copy(
                 source = "warehouse",
-                template = TemplateRef("q", 1),
+                template = TemplateRef("test/q", 1),
                 output = NodeOutput.Caller,
             )
         val result = validate(Fixtures.pipeline(nodes = listOf(node)))

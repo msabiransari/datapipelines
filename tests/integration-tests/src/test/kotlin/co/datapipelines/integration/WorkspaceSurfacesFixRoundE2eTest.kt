@@ -118,7 +118,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, bobKey)
             .body(
-                """{"id": "globex_tpl", "dialect": "H2", "display_name": "Globex",
+                """{"id": "test/globex_tpl", "dialect": "H2", "display_name": "Globex",
                    "description": "F5", "imports": [], "body": "SELECT 1"}""",
             ).`when`()
             .post("/api/v1/templates")
@@ -131,7 +131,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .header(API_KEY_HEADER, bobKey)
                 .body(
                     """{"schema_version":1,"name":"globex_report","display_name":"G","description":"",""" +
-                        """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"globex_tpl","version":1}}]}""",
+                        """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"test/globex_tpl","version":1}}]}""",
                 ).`when`()
                 .post("/api/v1/pipelines")
                 .then()
@@ -162,7 +162,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .port(port)
                 .header(API_KEY_HEADER, bobKey)
                 .`when`()
-                .queryParam("name", "globex_tpl")
+                .queryParam("name", "test/globex_tpl")
                 .delete("/api/v1/templates")
                 .then()
                 .statusCode(204)

@@ -45,7 +45,7 @@ class SstiMatrixTest {
     fun tearDown() = engines.forEach { it.close() }
 
     private fun engineFor(body: String): TemplateEngine {
-        val registry = InMemoryTemplateRegistry(listOf(TemplateFixtures.version("evil.sql", body = body)))
+        val registry = InMemoryTemplateRegistry(listOf(TemplateFixtures.version("test/evil.sql", body = body)))
         return TemplateEngine(registry, cacheSize = 10, renderTimeoutMs = 5_000, maxOutputChars = 1_000_000)
             .also { engines += it }
     }
@@ -78,7 +78,7 @@ class SstiMatrixTest {
 
     @Test
     fun `the same live payload is blocked by the hardened configuration`() {
-        val outcome = engineFor(CLASS_INSTANTIATION_VECTOR).execute(TemplateRef("evil.sql", 1), emptyMap())
+        val outcome = engineFor(CLASS_INSTANTIATION_VECTOR).execute(TemplateRef("test/evil.sql", 1), emptyMap())
 
         outcome.shouldBeInstanceOf<RenderOutcome.Failed>()
         withClue("the instantiated value must never reach the rendered SQL") {
@@ -89,7 +89,7 @@ class SstiMatrixTest {
     @Test
     fun `class-reaching vectors are blocked at render even when the save scan is bypassed`() {
         RENDER_VECTORS.forEach { (body, context) ->
-            val outcome = engineFor(body).execute(TemplateRef("evil.sql", 1), context)
+            val outcome = engineFor(body).execute(TemplateRef("test/evil.sql", 1), context)
             withClue("render must NOT succeed for: $body") {
                 outcome.shouldBeInstanceOf<RenderOutcome.Failed>()
             }
@@ -102,12 +102,12 @@ class SstiMatrixTest {
         // guard against it — but §4.3's resolver confines what a leaked ?eval could do to
         // expressions over the context. Both halves are asserted so the claim is not just prose.
         engineFor("\${\"1+1\"?eval}")
-            .execute(TemplateRef("evil.sql", 1), emptyMap())
+            .execute(TemplateRef("test/evil.sql", 1), emptyMap())
             .shouldBeInstanceOf<RenderOutcome.Success>()
             .sql shouldBe "2"
 
         engineFor("\${\"\\\"java.lang.String\\\"?new(\\\"PWNED\\\")\"?eval}")
-            .execute(TemplateRef("evil.sql", 1), emptyMap())
+            .execute(TemplateRef("test/evil.sql", 1), emptyMap())
             .shouldBeInstanceOf<RenderOutcome.Failed>()
     }
 
@@ -120,7 +120,7 @@ class SstiMatrixTest {
         // here rather than in production.
         val outcome =
             engineFor("<@\"\${payload}\"?interpret />")
-                .execute(TemplateRef("evil.sql", 1), mapOf("payload" to "INJECTED"))
+                .execute(TemplateRef("test/evil.sql", 1), mapOf("payload" to "INJECTED"))
 
         outcome.shouldBeInstanceOf<RenderOutcome.Success>().sql shouldBe "INJECTED"
 
@@ -137,7 +137,7 @@ class SstiMatrixTest {
             withClue("loader must not resolve: $body") {
                 // Any non-Success is containment; which flavour (not-found vs failed) is §8.2's
                 // classification concern, asserted in TemplateEngineTest.
-                val outcome = engineFor(body).execute(TemplateRef("evil.sql", 1), emptyMap())
+                val outcome = engineFor(body).execute(TemplateRef("test/evil.sql", 1), emptyMap())
                 (outcome is RenderOutcome.Success) shouldBe false
             }
         }
@@ -164,7 +164,7 @@ class SstiMatrixTest {
                 // scan for the wrong reason and this suite would read green while the bypass was
                 // never reproduced. Rendering it through the engine proves the payload executes.
                 engineFor(body)
-                    .execute(TemplateRef("evil.sql", 1), emptyMap())
+                    .execute(TemplateRef("test/evil.sql", 1), emptyMap())
                     .shouldBeInstanceOf<RenderOutcome.Success>()
                     .sql shouldContain rendersTo
             }
@@ -184,7 +184,7 @@ class SstiMatrixTest {
         }
         SQUARE_BRACKET_DIRECTIVE_VECTORS.forEach { body ->
             withClue("and with the save scan bypassed, the loader must still contain it: $body") {
-                (engineFor(body).execute(TemplateRef("evil.sql", 1), emptyMap()) is RenderOutcome.Success) shouldBe false
+                (engineFor(body).execute(TemplateRef("test/evil.sql", 1), emptyMap()) is RenderOutcome.Success) shouldBe false
             }
         }
     }
@@ -207,7 +207,7 @@ class SstiMatrixTest {
         val engine = engineFor("SELECT '\${note}'")
 
         engine
-            .execute(TemplateRef("evil.sql", 1), mapOf("note" to payload))
+            .execute(TemplateRef("test/evil.sql", 1), mapOf("note" to payload))
             .shouldBeInstanceOf<RenderOutcome.Success>()
             .sql shouldBe "SELECT '$payload'"
     }

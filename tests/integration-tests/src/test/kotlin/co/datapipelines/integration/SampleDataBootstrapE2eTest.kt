@@ -378,8 +378,8 @@ class SampleDataBootstrapE2eTest {
         private const val ADMIN_EMAIL = "bootstrap-e2e-admin@example.com"
         private const val BOOT_RO = "bootstrap-e2e-readonly"
         private const val BOOT_RW = "bootstrap-e2e-writable"
-        private const val EXAMPLE_TEMPLATE = "bootstrap_e2e_example.sql"
-        private const val EXAMPLE_PIPELINE = "bootstrap_e2e_example"
+        private const val EXAMPLE_TEMPLATE = "test/bootstrap_e2e_example.sql"
+        private const val EXAMPLE_PIPELINE = "test/bootstrap_e2e_example"
 
         /**
          * The file's literal credential. Placeholder RESOLUTION is proved against an injected

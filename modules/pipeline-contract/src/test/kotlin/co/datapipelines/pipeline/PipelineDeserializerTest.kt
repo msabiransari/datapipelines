@@ -32,9 +32,9 @@ class PipelineDeserializerTest {
             parse(
                 pipelineJson(
                     """{"id":"a","description":"d","type":"DML","source":"pg-prod",
-                       "template":{"id":"t.sql","version":1},"depends_on":[]}""",
+                       "template":{"id":"test/t.sql","version":1},"depends_on":[]}""",
                     """{"id":"b","description":"d","type":"DDL","source":"pg-prod",
-                       "template":{"id":"t.sql","version":1},"depends_on":[]}""",
+                       "template":{"id":"test/t.sql","version":1},"depends_on":[]}""",
                 ),
             )
 
@@ -89,7 +89,7 @@ class PipelineDeserializerTest {
             parse(
                 pipelineJson(
                     """{"id":"revenue","description":"d","type":"PIPELINE",
-                       "pipeline":{"name":"monthly_revenue","version":4},
+                       "pipeline":{"name":"test/monthly_revenue","version":4},
                        "parameters":{"start_date":"${'$'}{start_date}","region":"EU"},
                        "output":{"target":"tempdb","table":"stg_revenue"},"depends_on":[]}""",
                 ),
@@ -97,7 +97,7 @@ class PipelineDeserializerTest {
         val node = pipeline.nodes.single()
 
         node.type shouldBe NodeType.PIPELINE
-        node.pipeline shouldBe PipelineNodeRef("monthly_revenue", 4)
+        node.pipeline shouldBe PipelineNodeRef("test/monthly_revenue", 4)
         node.parameters shouldBe
             mapOf("start_date" to Fixtures.json("\"\${start_date}\""), "region" to Fixtures.json("\"EU\""))
         node.output shouldBe NodeOutput.Tempdb("stg_revenue")
@@ -111,7 +111,7 @@ class PipelineDeserializerTest {
             parse(
                 pipelineJson(
                     """{"id":"revenue","description":"d","type":"PIPELINE",
-                       "pipeline":{"name":"monthly_revenue","version":4},"depends_on":[]}""",
+                       "pipeline":{"name":"test/monthly_revenue","version":4},"depends_on":[]}""",
                 ),
             )
 
@@ -248,7 +248,7 @@ class PipelineDeserializerTest {
     private companion object {
         const val NODE_NO_OUTPUT =
             """{"id":"active_users","description":"d","type":"DQL","source":"pg-prod",
-               "template":{"id":"t.sql","version":1},"depends_on":[]}"""
+               "template":{"id":"test/t.sql","version":1},"depends_on":[]}"""
 
         fun node(
             output: String?,
@@ -256,7 +256,7 @@ class PipelineDeserializerTest {
             type: String = "DQL",
         ): String =
             """{"id":"$id","description":"d","type":"$type","source":"pg-prod",
-               "template":{"id":"t.sql","version":1},"depends_on":[]
+               "template":{"id":"test/t.sql","version":1},"depends_on":[]
                ${output?.let { ",\"output\":$it" }.orEmpty()}}"""
 
         fun pipelineJson(

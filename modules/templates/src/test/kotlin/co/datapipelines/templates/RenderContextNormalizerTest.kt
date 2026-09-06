@@ -43,13 +43,13 @@ class RenderContextNormalizerTest {
     ): String {
         val engine =
             TemplateEngine(
-                InMemoryTemplateRegistry(listOf(TemplateFixtures.version("t.sql", body = body))),
+                InMemoryTemplateRegistry(listOf(TemplateFixtures.version("test/t.sql", body = body))),
                 cacheSize = 10,
                 renderTimeoutMs = 5_000,
                 maxOutputChars = 100_000,
             ).also { engines += it }
         return engine
-            .execute(TemplateRef("t.sql", 1), mapOf("v" to value))
+            .execute(TemplateRef("test/t.sql", 1), mapOf("v" to value))
             .shouldBeInstanceOf<RenderOutcome.Success>()
             .sql
     }

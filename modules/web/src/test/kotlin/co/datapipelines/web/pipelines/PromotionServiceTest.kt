@@ -210,18 +210,18 @@ class PromotionServiceTest {
     @Test
     fun `template imports are carried before the templates that import them`() {
         val root = record("root", version = 1)
-        stubReleased(root, bodyOf("root", template = "importer.sql" to 4))
+        stubReleased(root, bodyOf("root", template = "test/importer.sql" to 4))
         every { client.inventory(workspace) } returns inventory()
-        // importer.sql imports base.sql@2 — the transitive imports_json closure (§10.4 step 1).
-        every { templates.lookupVersion(workspaceId, "importer.sql", 4) } returns
-            templateVersion("importer.sql", 4, imports = listOf(TemplateImport("base.sql", 2, "base")))
-        every { templates.lookupVersion(workspaceId, "base.sql", 2) } returns templateVersion("base.sql", 2)
-        every { templates.findVersion(workspaceId, "importer.sql", 4) } returns storedTemplate("importer.sql", 4)
-        every { templates.findVersion(workspaceId, "base.sql", 2) } returns storedTemplate("base.sql", 2)
+        // test/importer.sql imports test/base.sql@2 — the transitive imports_json closure (§10.4 step 1).
+        every { templates.lookupVersion(workspaceId, "test/importer.sql", 4) } returns
+            templateVersion("test/importer.sql", 4, imports = listOf(TemplateImport("test/base.sql", 2, "base")))
+        every { templates.lookupVersion(workspaceId, "test/base.sql", 2) } returns templateVersion("test/base.sql", 2)
+        every { templates.findVersion(workspaceId, "test/importer.sql", 4) } returns storedTemplate("test/importer.sql", 4)
+        every { templates.findVersion(workspaceId, "test/base.sql", 2) } returns storedTemplate("test/base.sql", 2)
 
         val batch = capturePush { service.promote(workspaceId, workspace, listOf("root")) }
 
-        batch.templates.map { it.get("id").asText() } shouldContainExactly listOf("base.sql", "importer.sql")
+        batch.templates.map { it.get("id").asText() } shouldContainExactly listOf("test/base.sql", "test/importer.sql")
     }
 
     @Test
@@ -373,7 +373,7 @@ class PromotionServiceTest {
     ): String {
         val dql =
             sources.mapIndexed { index, source ->
-                val ref = template ?: ("q_$name.sql" to 1)
+                val ref = template ?: ("test/q_$name.sql" to 1)
                 """
                 {"id": "n$index", "type": "DQL", "source": "$source",
                  "template": {"id": "${ref.first}", "version": ${ref.second}},

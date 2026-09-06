@@ -132,7 +132,7 @@ class TracerBulletE2eTest {
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .body(
                 """
-                {"id": "active_users.sql", "dialect": "POSTGRES", "display_name": "Active Users",
+                {"id": "test/active_users.sql", "dialect": "POSTGRES", "display_name": "Active Users",
                  "description": "Get all active users. Declares no parameters.", "imports": [],
                  "body": "SELECT id, email, name, created_at FROM users WHERE is_active = true ORDER BY created_at DESC"}
                 """.trimIndent(),
@@ -154,7 +154,7 @@ class TracerBulletE2eTest {
                     {"schema_version": 1, "name": "active_users", "display_name": "Active Users",
                      "description": "List all active users from local PG", "parameters": {},
                      "nodes": [{"id": "fetch_active_users", "description": "Fetch active users", "type": "DQL",
-                                "source": "pg-local", "template": {"id": "active_users.sql", "version": 1},
+                                "source": "pg-local", "template": {"id": "test/active_users.sql", "version": 1},
                                 "depends_on": []}]}
                     """.trimIndent(),
                 ).`when`()

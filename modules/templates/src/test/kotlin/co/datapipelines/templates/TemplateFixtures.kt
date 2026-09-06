@@ -17,7 +17,7 @@ internal object TemplateFixtures {
     val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
 
     fun draft(
-        id: String? = "fetch_orders.sql",
+        id: String? = "test/fetch_orders.sql",
         dialect: Dialect? = Dialect.POSTGRES,
         body: String = "SELECT 1",
         imports: List<TemplateImport> = emptyList(),

@@ -71,7 +71,7 @@ class RepositoryPipelineResolverTest {
                         description = "q",
                         type = NodeType.DQL,
                         source = "tempdb",
-                        template = TemplateRef("tq", 1),
+                        template = TemplateRef("test/tq", 1),
                         output = NodeOutput.Caller,
                         dependsOn = emptyList(),
                     ),

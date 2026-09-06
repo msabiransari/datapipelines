@@ -94,7 +94,7 @@ class PipelineRepositoryIntegrationTest {
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         record.currentVersion shouldBe 1
-        record.name shouldBe "monthly_revenue"
+        record.name shouldBe "test/monthly_revenue"
         record.isDeleted shouldBe false
         // Server-generated, not asserted from a hand-built object (metadata-db §6.1).
         record.createdAt shouldNotBe null
@@ -286,12 +286,12 @@ class PipelineRepositoryIntegrationTest {
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
 
         repository.findById(WORKSPACE_ID, record.id) shouldBe record
-        repository.findByName(WORKSPACE_ID, "monthly_revenue") shouldBe record
+        repository.findByName(WORKSPACE_ID, "test/monthly_revenue") shouldBe record
 
         repository.softDelete(WORKSPACE_ID, record.id) shouldBe true
 
         repository.findById(WORKSPACE_ID, record.id).shouldBeNull()
-        repository.findByName(WORKSPACE_ID, "monthly_revenue").shouldBeNull()
+        repository.findByName(WORKSPACE_ID, "test/monthly_revenue").shouldBeNull()
         // A second delete finds nothing live to delete.
         repository.softDelete(WORKSPACE_ID, record.id) shouldBe false
         // The row survives, so the name stays taken (metadata-db §4.4).
@@ -492,7 +492,7 @@ class PipelineRepositoryIntegrationTest {
             }
 
         thrown.code shouldBe PipelineErrorCodes.Validation.DUPLICATE_NAME
-        thrown.details["name"] shouldBe "monthly_revenue"
+        thrown.details["name"] shouldBe "test/monthly_revenue"
         // Nothing partially written: the CTE is one statement.
         countRows("pipelines") shouldBe 1
         countRows("pipeline_versions") shouldBe 1
@@ -606,7 +606,7 @@ class PipelineRepositoryIntegrationTest {
                 String::class.java,
             )
 
-        nameFromJsonb shouldBe "monthly_revenue"
+        nameFromJsonb shouldBe "test/monthly_revenue"
     }
 
     // =============================================================================================
@@ -624,7 +624,7 @@ class PipelineRepositoryIntegrationTest {
     ): String = serializer.write(base.copy(description = description))
 
     /** Creates v1 and returns (record, v1 body, v1's stored detail) — the base every lifecycle test starts from. */
-    private fun createdPipeline(name: String = "monthly_revenue"): Triple<PipelineRecord, Pipeline, PipelineVersionDetail> {
+    private fun createdPipeline(name: String = "test/monthly_revenue"): Triple<PipelineRecord, Pipeline, PipelineVersionDetail> {
         val body = Fixtures.pipeline(name = name)
         val record = repository.create(WORKSPACE_ID, NewPipeline.from(body, owner), serializer.write(body), owner)
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
@@ -768,7 +768,7 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `releaseDraft flips the draft, bumps the pointer, and rides the metadata`() {
         val (record, v1, v1Detail) = createdPipeline()
-        val v2 = v1.copy(name = "monthly_revenue", displayName = "The Draft Name", description = "The draft description")
+        val v2 = v1.copy(name = "test/monthly_revenue", displayName = "The Draft Name", description = "The draft description")
         val draft = checkNotNull(repository.createDraft(WORKSPACE_ID, record.id, serializer.write(v2), v1Detail.bodyHash, owner))
 
         val released =
@@ -1042,7 +1042,7 @@ class PipelineRepositoryIntegrationTest {
         val (record, v1, v1Detail) = createdPipeline()
         repository.createDraft(WORKSPACE_ID, record.id, changedBody(v1, "draft"), v1Detail.bodyHash, owner)
 
-        repository.findAllDraftPipelineNames() shouldContainExactly listOf("monthly_revenue")
+        repository.findAllDraftPipelineNames() shouldContainExactly listOf("test/monthly_revenue")
     }
 
     @Test
@@ -1169,18 +1169,18 @@ class PipelineRepositoryIntegrationTest {
     @Test
     fun `the working-version scan sees a draft that just adopted a pin - a current_version-only scan misses it`() {
         // p1: v1 RELEASED pins t@1; a DRAFT v2 adopts t@2. p2 stays on t@1 released.
-        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
         val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
-        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
         repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
-        val draftBody = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        val draftBody = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         checkNotNull(
             repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(draftBody), releasedHash, owner),
         )
 
         // Direction 1: the working scan reports the draft's adoption of t@2.
-        val pinsOfTwo = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 2)
+        val pinsOfTwo = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 2)
         pinsOfTwo.map { it.pipelineName to it.pipelineVersion to it.versionStatus } shouldContainExactly
             listOf("p1" to 2 to PipelineVersionStatus.DRAFT)
         pinsOfTwo.single().nodeId shouldBe "fetch"
@@ -1188,20 +1188,20 @@ class PipelineRepositoryIntegrationTest {
         // Direction 2: the datasource scan's shape (join on current_version only) does NOT see
         // the draft — mechanically proven with the old join, not asserted in prose. This is the
         // under-report a released-only used-by answer would ship.
-        currentVersionOnlyPins("t.sql", 2) shouldBe emptyList()
+        currentVersionOnlyPins("test/t.sql", 2) shouldBe emptyList()
 
         // The draft owns p1's working state, so p1 no longer counts as using t@1 — p2 still does.
-        val pinsOfOne = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 1)
+        val pinsOfOne = repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 1)
         pinsOfOne.map { it.pipelineName } shouldContainExactly listOf("p2")
     }
 
     @Test
     fun `the any-version scan sees historical pins the working scan reports as gone`() {
         // p1 moves from t@1 (v1) to t@2 (v2, released) — v1's pin is historical but still real.
-        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p1 = Fixtures.pipeline(name = "p1", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
         val p1Record = repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
         val releasedHash = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, p1Record.id)).bodyHash
-        val v2Body = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        val v2Body = p1.copy(nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         val draft =
             checkNotNull(repository.createDraft(WORKSPACE_ID, p1Record.id, serializer.write(v2Body), releasedHash, owner))
         checkNotNull(
@@ -1209,11 +1209,11 @@ class PipelineRepositoryIntegrationTest {
         )
 
         // The working scan says nobody uses t@1 anymore…
-        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 1) shouldBe emptyList()
+        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 1) shouldBe emptyList()
 
         // …but the any-version scan reports both pins, historical one included, each with its
         // own pinned version and the status of the pipeline version carrying it.
-        val anyPins = repository.findAnyVersionTemplatePins(WORKSPACE_ID, "t.sql")
+        val anyPins = repository.findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql")
         anyPins.map { it.pipelineVersion to it.versionStatus to it.pinnedVersion } shouldContainExactly
             listOf(2 to PipelineVersionStatus.RELEASED to 2, 1 to PipelineVersionStatus.RELEASED to 1)
     }
@@ -1226,26 +1226,26 @@ class PipelineRepositoryIntegrationTest {
                 name = "p1",
                 nodes =
                     listOf(
-                        Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1)),
-                        Fixtures.node(id = "again", template = TemplateRef("t.sql", 1), output = NodeOutput.Tempdb("stg_again")),
+                        Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1)),
+                        Fixtures.node(id = "again", template = TemplateRef("test/t.sql", 1), output = NodeOutput.Tempdb("stg_again")),
                     ),
             )
         repository.create(WORKSPACE_ID, NewPipeline.from(p1, owner), serializer.write(p1), owner)
-        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 1))))
+        val p2 = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 1))))
         repository.create(WORKSPACE_ID, NewPipeline.from(p2, owner), serializer.write(p2), owner)
-        val p3 = Fixtures.pipeline(name = "p3", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("t.sql", 2))))
+        val p3 = Fixtures.pipeline(name = "p3", nodes = listOf(Fixtures.node(id = "fetch", template = TemplateRef("test/t.sql", 2))))
         repository.create(WORKSPACE_ID, NewPipeline.from(p3, owner), serializer.write(p3), owner)
 
-        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "t.sql") shouldBe mapOf(1 to 2, 2 to 1)
+        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "test/t.sql") shouldBe mapOf(1 to 2, 2 to 1)
 
         // Soft-deleted pipelines drop out of the working scan (and therefore the counts).
         val p3Record = checkNotNull(repository.findByName(WORKSPACE_ID, "p3"))
         repository.softDelete(WORKSPACE_ID, p3Record.id)
-        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "t.sql") shouldBe mapOf(1 to 2)
-        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "t.sql", 2) shouldBe emptyList()
+        repository.countWorkingTemplatePinsByPinnedVersion(WORKSPACE_ID, "test/t.sql") shouldBe mapOf(1 to 2)
+        repository.findWorkingVersionTemplatePins(WORKSPACE_ID, "test/t.sql", 2) shouldBe emptyList()
         // …and the any-version scan agrees: a soft-deleted pipeline can no longer be edited or
         // executed, so its stored pins are inert and excluded there too (the documented choice).
-        repository.findAnyVersionTemplatePins(WORKSPACE_ID, "t.sql").map { it.pipelineName } shouldContainExactly listOf("p1", "p1", "p2")
+        repository.findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql").map { it.pipelineName } shouldContainExactly listOf("p1", "p1", "p2")
     }
 
     /** The datasource reverse-scan's own join shape (current_version only), so the tests prove the miss mechanically. */

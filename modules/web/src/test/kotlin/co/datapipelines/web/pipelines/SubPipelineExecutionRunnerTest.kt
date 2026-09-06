@@ -96,7 +96,7 @@ class SubPipelineExecutionRunnerTest {
           },
           "nodes": [
             {"id": "q", "description": "q", "type": "DQL", "source": "tempdb",
-             "template": {"id": "tq", "version": 1}, "output": {"target": "caller"}}
+             "template": {"id": "test/tq", "version": 1}, "output": {"target": "caller"}}
           ]
         }
         """.trimIndent()

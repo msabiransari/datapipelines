@@ -70,7 +70,7 @@ class ExhaustiveValidationTest {
                     Fixtures.node(
                         id = "tempdb",
                         source = "jdbc:postgresql://db.internal:5432/orders",
-                        template = TemplateRef("missing.sql", 1),
+                        template = TemplateRef("test/missing.sql", 1),
                         output = NodeOutput.Tempdb("u"),
                     ),
                     // Two caller nodes.
@@ -87,7 +87,7 @@ class ExhaustiveValidationTest {
         Fixtures.validator(
             templates =
                 StubTemplates(
-                    lookups = mapOf("missing.sql" to TemplateLookup.TemplateNotFound),
+                    lookups = mapOf("test/missing.sql" to TemplateLookup.TemplateNotFound),
                     defaultLookup = TemplateLookup.Found(Dialect.POSTGRES),
                 ),
         )
@@ -162,9 +162,9 @@ class ExhaustiveValidationTest {
                   "parameters": {"p": {"type": "MONEY"}},
                   "nodes": [
                     {"id": "a", "description": "d", "type": "SELECT", "source": "pg-prod",
-                     "template": {"id": "t.sql", "version": 1}, "depends_on": []},
+                     "template": {"id": "test/t.sql", "version": 1}, "depends_on": []},
                     {"id": "b", "description": "d", "type": "DQL", "source": "pg-prod",
-                     "template": {"id": "t.sql", "version": 1}, "depends_on": [],
+                     "template": {"id": "test/t.sql", "version": 1}, "depends_on": [],
                      "output": {"target": "kafka"}}
                   ]
                 }

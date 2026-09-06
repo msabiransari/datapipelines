@@ -392,7 +392,7 @@ class JarSmokeE2eTest {
         val TEMPLATE = UUID.randomUUID().toString()
         const val SEEDED_EXECUTION = "44444444-4444-4444-4444-444444444444"
         const val SEEDED_DATASOURCE = "smoke_ds"
-        const val SEEDED_TEMPLATE = "smoke_tpl"
+        const val SEEDED_TEMPLATE = "test/smoke_tpl"
         const val REDIS_PORT = 6379
         const val APP_BOOT_TIMEOUT_MS = 120_000L
 

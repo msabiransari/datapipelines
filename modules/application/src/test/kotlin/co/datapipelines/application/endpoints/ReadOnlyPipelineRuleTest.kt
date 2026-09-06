@@ -218,7 +218,7 @@ class ReadOnlyPipelineRuleTest {
         description = "",
         type = type,
         source = "pg",
-        template = TemplateRef("$id.sql", 1),
+        template = TemplateRef("test/$id.sql", 1),
         output = output,
         dependsOn = emptyList(),
     )

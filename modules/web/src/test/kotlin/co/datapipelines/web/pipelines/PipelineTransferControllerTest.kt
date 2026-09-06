@@ -180,7 +180,7 @@ class PipelineTransferControllerTest {
         val withNodes =
             body.replace(
                 "\"nodes\":[]",
-                """"nodes":[{"id":"n","type":"DQL","source":"pg","template":{"id":"t.sql","version":2},"depends_on":[]}]""",
+                """"nodes":[{"id":"n","type":"DQL","source":"pg","template":{"id":"test/t.sql","version":2},"depends_on":[]}]""",
             )
         every { pipelines.findById(any(), pipelineId) } returns record
         every { pipelines.findVersionBody(any(), pipelineId, 3) } returns withNodes
@@ -193,9 +193,9 @@ class PipelineTransferControllerTest {
                 createdAt = Instant.EPOCH,
                 createdBy = userId,
             )
-        every { templates.lookupVersion(any(), "t.sql", 2) } returns
+        every { templates.lookupVersion(any(), "test/t.sql", 2) } returns
             co.datapipelines.templates.TemplateVersion(
-                id = "t.sql",
+                id = "test/t.sql",
                 version = 2,
                 dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
                 isLibrary = false,
@@ -204,9 +204,9 @@ class PipelineTransferControllerTest {
                 createdAt = Instant.EPOCH,
                 createdBy = userId,
             )
-        every { templates.findVersion(any(), "t.sql", 2) } returns
+        every { templates.findVersion(any(), "test/t.sql", 2) } returns
             co.datapipelines.templates.Template(
-                id = "t.sql",
+                id = "test/t.sql",
                 version = 2,
                 dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
                 displayName = "T",

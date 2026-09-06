@@ -2,7 +2,7 @@
   "templates": [
     {
       "schema_version": 1,
-      "id": "sample_trips_monthly.sql",
+      "id": "nyc/mobility/sample_trips_monthly.sql",
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Monthly trips by pickup zone",
@@ -13,7 +13,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_trips_daily.sql",
+      "id": "nyc/mobility/sample_trips_daily.sql",
       "engine": "freemarker",
       "dialect": "POSTGRES",
       "display_name": "Daily trip counts and revenue",
@@ -24,7 +24,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_zones.sql",
+      "id": "nyc/reference/sample_zones.sql",
       "engine": "freemarker",
       "dialect": "SQLITE",
       "display_name": "TLC taxi zones and boroughs",
@@ -35,7 +35,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_calendar.sql",
+      "id": "nyc/reference/sample_calendar.sql",
       "engine": "freemarker",
       "dialect": "SQLITE",
       "display_name": "Weekend and US federal holiday calendar",
@@ -46,7 +46,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_daily_rain.sql",
+      "id": "nyc/weather/sample_daily_rain.sql",
       "engine": "freemarker",
       "dialect": "MYSQL",
       "display_name": "Daily precipitation across the NYC stations",
@@ -57,7 +57,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_revenue_by_borough.sql",
+      "id": "nyc/mobility/sample_revenue_by_borough.sql",
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Join staged trips to staged zones, roll up by borough",
@@ -68,7 +68,7 @@
     },
     {
       "schema_version": 1,
-      "id": "sample_rain_vs_dry.sql",
+      "id": "nyc/mobility/sample_rain_vs_dry.sql",
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Compare ridership on rainy versus dry days, by day type",
@@ -250,7 +250,7 @@
           "type": "DQL",
           "source": "sample-trips",
           "template": {
-            "id": "sample_trips_monthly.sql",
+            "id": "nyc/mobility/sample_trips_monthly.sql",
             "version": 1
           },
           "output": {
@@ -265,7 +265,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_zones.sql",
+            "id": "nyc/reference/sample_zones.sql",
             "version": 1
           },
           "output": {
@@ -280,7 +280,7 @@
           "type": "DQL",
           "source": "tempdb",
           "template": {
-            "id": "sample_revenue_by_borough.sql",
+            "id": "nyc/mobility/sample_revenue_by_borough.sql",
             "version": 1
           },
           "output": {
@@ -332,7 +332,7 @@
           "type": "DQL",
           "source": "sample-trips",
           "template": {
-            "id": "sample_trips_daily.sql",
+            "id": "nyc/mobility/sample_trips_daily.sql",
             "version": 1
           },
           "output": {
@@ -347,7 +347,7 @@
           "type": "DQL",
           "source": "sample-weather",
           "template": {
-            "id": "sample_daily_rain.sql",
+            "id": "nyc/weather/sample_daily_rain.sql",
             "version": 1
           },
           "output": {
@@ -362,7 +362,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_calendar.sql",
+            "id": "nyc/reference/sample_calendar.sql",
             "version": 1
           },
           "output": {
@@ -377,7 +377,7 @@
           "type": "DQL",
           "source": "tempdb",
           "template": {
-            "id": "sample_rain_vs_dry.sql",
+            "id": "nyc/mobility/sample_rain_vs_dry.sql",
             "version": 1
           },
           "output": {
@@ -443,7 +443,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_zones.sql",
+            "id": "nyc/reference/sample_zones.sql",
             "version": 1
           },
           "output": {
@@ -517,7 +517,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_zones.sql",
+            "id": "nyc/reference/sample_zones.sql",
             "version": 1
           },
           "output": {
@@ -649,7 +649,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_zones.sql",
+            "id": "nyc/reference/sample_zones.sql",
             "version": 1
           },
           "output": {
@@ -664,7 +664,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_calendar.sql",
+            "id": "nyc/reference/sample_calendar.sql",
             "version": 1
           },
           "output": {
@@ -744,7 +744,7 @@
           "type": "DQL",
           "source": "sample-reference",
           "template": {
-            "id": "sample_zones.sql",
+            "id": "nyc/reference/sample_zones.sql",
             "version": 1
           },
           "output": {
