@@ -1,7 +1,6 @@
 package co.datapipelines.web.ui
 
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.stereotype.Component
 import java.util.UUID
 
 /**
@@ -23,8 +22,10 @@ data class PipelineName(
  *
  * A deleted pipeline leaves its executions behind; those ids simply do not appear in
  * the result and the template falls back to the truncated id — no crash, no lie.
+ *
+ * A plain class wired in `DomainConfiguration` — this project forbids stereotype
+ * annotations in production code (ArchitectureGuardTest).
  */
-@Component
 class PipelineNames(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {

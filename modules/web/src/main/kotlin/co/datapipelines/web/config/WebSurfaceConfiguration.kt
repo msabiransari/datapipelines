@@ -36,6 +36,7 @@ import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.SseJson
 import co.datapipelines.web.sse.SseLogStreamer
+import co.datapipelines.web.ui.PipelineNames
 import co.datapipelines.web.workspace.RedisLastUsedWorkspaceStore
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -45,6 +46,7 @@ import kotlinx.coroutines.SupervisorJob
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 
@@ -58,6 +60,10 @@ import java.util.concurrent.ScheduledExecutorService
  */
 @Configuration
 class WebSurfaceConfiguration {
+    /** T114: the execution lists' one-batch-query pipeline-name lookup (076 §D). */
+    @Bean
+    fun pipelineNames(jdbc: NamedParameterJdbcTemplate): PipelineNames = PipelineNames(jdbc)
+
     /** The per-user limiter the [co.datapipelines.web.ratelimit.RateLimitFilter] enforces. */
     @Bean
     fun rateLimiter(
