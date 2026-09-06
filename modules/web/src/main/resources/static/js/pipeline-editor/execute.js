@@ -10,6 +10,11 @@
 
     if (editor.graph) editor.graph.resetAll();
     editor.nodeStates = {};
+    // 080 §B: the per-run fact maps reset with the run — a stale child execution id
+    // or calculator value on the Details pane would describe a run that is gone.
+    if (editor.nodeValues) editor.nodeValues = {};
+    if (editor.childExecutions) editor.childExecutions = {};
+    if (editor.nodeErrors) editor.nodeErrors = {};
     // 065 §B "execute started": this run's Errors list empties and the dock stays
     // exactly where the user left it. A Results tab still holding the previous
     // run's page is LABELLED as such until data_ready replaces it.

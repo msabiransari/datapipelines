@@ -1,18 +1,17 @@
-// 065 §B — the bottom dock's transition table (pipeline-editor.md §10), one case
-// per ROW plus the two rules the table states in prose: Esc is a no-op, and a
-// minimised dock keeps its badge.
+// 080 §B — the bottom dock's transition table, one case per ROW plus the rules the
+// table states in prose: Esc is a no-op, a collapsed dock keeps its badge, and
+// there is NO close.
 //
 // Runs on Node's built-in runner (`node --test`, the 027b harness), same loader
 // convention as result-paging / graph-card: dock.js is a browser IIFE that also
-// publishes module.exports, and every assertion here is against the three fields
-// the template actually binds — `state`, `tab`, `errors.length`. There are no
-// derived getters to drift from what the browser renders.
+// publishes module.exports, and every assertion here is against the fields the
+// template actually binds — `state`, `tab`, `errors.length`, `resultsRows`,
+// `detailsNodeId`. There are no derived getters to drift from what the browser
+// renders.
 //
-// What this pins that the old panel could not have: there is NO close. The
-// reported defect was that `resultPanel.visible = false` lost the pane with no
-// way back short of re-running the pipeline; a dock whose only contraction is
-// `minimized` cannot reproduce it, and "minimise from open" plus "a tab click
-// restores" are the two transitions that have to hold for that to stay true.
+// What changed from 065: the inspector overlay is gone, Details is a TAB, and the
+// dock is always present — the `hidden` state has no page left to live on, and
+// `minimized` is renamed `collapsed` (the mock's chevron).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,21 +30,43 @@ function loadDock() {
 
 const failure = (code) => ({ code, message: "boom " + code, node: { id: "n", type: "DQL" } });
 
-test("page load: hidden, on Results, with no failures — nothing has run", () => {
+test("page load: OPEN on Details, nothing selected, no failures — the dock is always present", () => {
   const d = loadDock();
-  assert.equal(d.state, "hidden");
-  assert.equal(d.tab, "results");
+  assert.equal(d.state, "open");
+  assert.equal(d.tab, "details");
+  assert.equal(d.detailsNodeId, null);
   assert.deepEqual(d.errors, []);
   assert.equal(d.resultsStale, false);
+  assert.equal(d.resultsRows, null);
+});
+
+test("selectNode fills Details and surfaces the tab — from ANY resting state", () => {
+  for (const start of ["open", "collapsed"]) {
+    const d = loadDock();
+    d.state = start;
+    d.tab = "events";
+    d.selectNode("trips_by_borough");
+    assert.equal(d.detailsNodeId, "trips_by_borough");
+    assert.equal(d.tab, "details", `Details surfaces from ${start}`);
+    assert.equal(d.state, "open", `a ${start} dock opens to show the node`);
+  }
+});
+
+test("clearSelection empties the pane but keeps the tab — canvas background taps are not tab changes", () => {
+  const d = loadDock();
+  d.selectNode("a");
+  d.clearSelection();
+  assert.equal(d.detailsNodeId, null);
+  assert.equal(d.tab, "details");
+  assert.equal(d.state, "open");
 });
 
 test("execute started: this run's errors clear, the STATE does not move", () => {
-  for (const start of ["hidden", "minimized", "open"]) {
+  for (const start of ["open", "collapsed"]) {
     const d = loadDock();
-    d.state = start;
-    d.tab = "errors";
     d.nodeFailed("a", failure("x"));
     d.state = start; // nodeFailed may have raised it; the row under test is execute-started
+    d.tab = "errors";
     d.executeStarted();
     assert.deepEqual(d.errors, [], `errors cleared from ${start}`);
     assert.equal(d.state, start, `state unchanged from ${start}`);
@@ -57,51 +78,43 @@ test("execute started marks the Results tab 'previous run' only when a page is a
   const d = loadDock();
   d.executeStarted();
   assert.equal(d.resultsStale, false, "nothing has ever run — there is no previous page to label");
-  d.dataReady();
+  d.dataReady(5);
   assert.equal(d.resultsStale, false, "fresh data is not stale");
   d.executeStarted();
   assert.equal(d.resultsStale, true, "the page on screen is now from the earlier run");
-  d.dataReady();
+  d.dataReady(7);
   assert.equal(d.resultsStale, false, "…and the label clears the moment new data lands");
 });
 
-test("data_ready from hidden: the dock OPENS on Results", () => {
-  const d = loadDock();
-  d.dataReady();
-  assert.equal(d.state, "open");
-  assert.equal(d.tab, "results");
-});
-
-test("data_ready from minimized / open: the state is the user's; the tab follows the data", () => {
-  for (const start of ["minimized", "open"]) {
+test("data_ready: the badge takes the row count and the tab follows the data", () => {
+  for (const start of ["open", "collapsed"]) {
     const d = loadDock();
     d.state = start;
-    d.tab = "errors";
-    d.dataReady();
+    d.tab = "details";
+    d.dataReady(5);
     assert.equal(d.state, start, `data must not re-open a ${start} dock`);
     assert.equal(d.tab, "results", "with nothing failed, the data raises its own tab");
+    assert.equal(d.resultsRows, 5, "the Results badge shows the row count on success");
   }
 });
 
 test("data_ready leaves the tab alone while unread failures exist", () => {
   const d = loadDock();
-  d.nodeFailed("a", failure("x")); // hidden -> open/errors
+  d.nodeFailed("a", failure("x"));
   assert.equal(d.tab, "errors");
-  d.dataReady();
+  d.dataReady(3);
   assert.equal(d.state, "open");
   assert.equal(d.tab, "errors", "a failure the user has not read outranks a partial result");
 });
 
-test("the FIRST node_failed of a run raises a hidden or minimised dock onto Errors", () => {
-  for (const start of ["hidden", "minimized"]) {
-    const d = loadDock();
-    d.state = start;
-    d.nodeFailed("stage_daily_trips", failure("pipeline.node.sql_error"));
-    assert.equal(d.state, "open", `a failure from ${start} must surface`);
-    assert.equal(d.tab, "errors");
-    assert.equal(d.errors.length, 1);
-    assert.equal(d.errors[0].nodeId, "stage_daily_trips");
-  }
+test("the FIRST node_failed of a run raises a collapsed dock onto Errors", () => {
+  const d = loadDock();
+  d.toggleCollapse();
+  d.nodeFailed("stage_daily_trips", failure("pipeline.node.sql_error"));
+  assert.equal(d.state, "open", "a failure must surface");
+  assert.equal(d.tab, "errors");
+  assert.equal(d.errors.length, 1);
+  assert.equal(d.errors[0].nodeId, "stage_daily_trips");
 });
 
 test("subsequent node_failed: append and move the badge; state and tab stay put", () => {
@@ -124,79 +137,53 @@ test("the same failure arriving twice lists once — node_failed then the pipeli
   assert.equal(d.errors.length, 1, "one entry per failed node, not one per event");
 });
 
-test("minimise: only an OPEN dock has anything to minimise", () => {
-  const open = loadDock();
-  open.dataReady();
-  assert.equal(open.minimise(), "minimized");
-
-  const hidden = loadDock();
-  assert.equal(hidden.minimise(), "hidden", "there is nothing on screen to contract");
-
-  const min = loadDock();
-  min.state = "minimized";
-  assert.equal(min.minimise(), "minimized", "idempotent");
+test("the chevron toggles open <-> collapsed; there is still NO close", () => {
+  const d = loadDock();
+  assert.equal(d.toggleCollapse(), "collapsed");
+  assert.equal(d.toggleCollapse(), "open");
+  assert.equal(d.toggleCollapse(), "collapsed", "idempotent per call, never hidden");
+  const api = Object.keys(d).filter((k) => typeof d[k] === "function");
+  assert.ok(!api.some((k) => /close|hide|dismiss/i.test(k)), `no close-shaped transition: ${api.join(", ")}`);
 });
 
-test("a tab click on a MINIMISED dock restores it onto that tab", () => {
+test("a tab click on a COLLAPSED dock restores it onto that tab", () => {
   const d = loadDock();
-  d.dataReady();
-  d.minimise();
-  d.selectTab("errors");
+  d.toggleCollapse();
+  d.selectTab("events");
   assert.equal(d.state, "open");
-  assert.equal(d.tab, "errors");
+  assert.equal(d.tab, "events");
 });
 
-test("a tab click on an OPEN dock switches the tab and leaves the state", () => {
+test("a tab click switches among all four tabs; an unknown name is inert", () => {
   const d = loadDock();
-  d.dataReady();
-  d.selectTab("errors");
-  assert.equal(d.state, "open");
-  assert.equal(d.tab, "errors");
-  d.selectTab("results");
-  assert.equal(d.tab, "results");
+  for (const tab of ["details", "results", "errors", "events"]) {
+    d.selectTab(tab);
+    assert.equal(d.tab, tab);
+    assert.equal(d.state, "open");
+  }
   d.selectTab("nonsense");
-  assert.equal(d.tab, "results", "an unknown tab name changes nothing");
+  assert.equal(d.tab, "events", "an unknown tab name changes nothing");
 });
 
-test("a tab click on a HIDDEN dock is inert — there are no tabs to click yet", () => {
+test("Esc is a NO-OP on the dock — a tab has nothing to close", () => {
   const d = loadDock();
-  d.selectTab("errors");
-  assert.equal(d.state, "hidden");
-  assert.equal(d.tab, "results");
-});
-
-test("Esc is a NO-OP on the dock — the key belongs to the inspector", () => {
-  const d = loadDock();
-  d.dataReady();
   d.nodeFailed("a", failure("x"));
   const before = { state: d.state, tab: d.tab, n: d.errors.length };
   assert.equal(d.handleEscape(), false, "the dock does not consume Escape");
   assert.deepEqual({ state: d.state, tab: d.tab, n: d.errors.length }, before);
 
-  d.minimise();
+  d.toggleCollapse();
   assert.equal(d.handleEscape(), false);
-  assert.equal(d.state, "minimized", "and it certainly does not close");
+  assert.equal(d.state, "collapsed", "and it certainly does not close");
 });
 
-test("a minimised dock KEEPS its badge — the header strip is what stays on screen", () => {
+test("a collapsed dock KEEPS its badge — the header strip is what stays on screen", () => {
   const d = loadDock();
   d.nodeFailed("a", failure("c1"));
   d.nodeFailed("b", failure("c2"));
-  d.minimise();
-  assert.equal(d.state, "minimized");
-  assert.equal(d.errors.length, 2, "minimising hides the body, never the count");
+  d.toggleCollapse();
+  assert.equal(d.state, "collapsed");
+  assert.equal(d.errors.length, 2, "collapsing hides the body, never the count");
   d.nodeFailed("c", failure("c3"));
-  assert.equal(d.errors.length, 3, "and the count keeps moving while minimised");
-  assert.equal(d.state, "minimized", "a later failure does not re-open what the user minimised");
-});
-
-test("there is NO close: nothing in the module can take the dock back to hidden", () => {
-  const d = loadDock();
-  d.dataReady();
-  const api = Object.keys(d).filter((k) => typeof d[k] === "function");
-  assert.ok(!api.some((k) => /close|hide|dismiss/i.test(k)), `no close-shaped transition: ${api.join(", ")}`);
-  api.forEach((k) => {
-    d[k]("results");
-    assert.notEqual(d.state, "hidden", `${k}() must never return the dock to hidden`);
-  });
+  assert.equal(d.errors.length, 3, "and the count keeps moving while collapsed");
 });

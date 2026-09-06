@@ -9,12 +9,11 @@
     installEscapeHandler();
   }
 
-  // §14.1: Escape closes the TOPMOST open surface — the error modal, then the node
-  // inspector — one per press. 065 §B removed the middle rung: the dock has no
-  // close and Esc is a NO-OP on it, so a key press aimed at the panel above can no
-  // longer take the results away. Closing the inspector hands focus back to the
-  // card button that opened it (inspector.js owns the reference). Attached once:
-  // setupA11y re-runs would otherwise stack duplicate listeners.
+  // §14.1: Escape closes the TOPMOST open surface — the error modal. 065 §B removed
+  // the middle rung (the dock has no close; Esc is a NO-OP on it), and 080 §B removed
+  // the inspector overlay altogether — Details is a dock tab now, and a tab has
+  // nothing to close. Attached once: setupA11y re-runs would otherwise stack
+  // duplicate listeners.
   var escapeInstalled = false;
   function installEscapeHandler() {
     if (escapeInstalled || typeof document.addEventListener !== "function") return;
@@ -24,8 +23,6 @@
       if (editor.errorModal && editor.errorModal.visible) {
         editor.errorModal.visible = false;
         editor.errorModal.message = "";
-      } else if (editor.inspector && editor.inspector.open) {
-        editor.closeNodeDetails();
       } else {
         return;
       }
@@ -57,9 +54,9 @@
         editor.selectNodeById(id);
       });
       li.addEventListener("keydown", function (e) {
-        // 065 §C keyboard parity: a click on the row SELECTS (what tapping a card
-        // does); Enter/Space on the selected row OPENS the inspector (what the
-        // card's button does), and this row is the element focus returns to.
+        // 080 §B keyboard parity: a click on the row SELECTS (what tapping a card
+        // does); Enter/Space on the selected row opens the dock's Details tab
+        // (what the card's expand button does), and this row keeps the focus.
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           var id = this.getAttribute("data-node-id");

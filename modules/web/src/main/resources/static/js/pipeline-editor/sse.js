@@ -164,6 +164,11 @@
       payload = data;
     }
 
+    // 080 §B: EVERY event lands in the dock's Events tab, in arrival order — the
+    // toast only ever announces the terminal one. execution_started also resets
+    // the log and starts the top bar's clock (init.js owns both DOM effects).
+    if (editor.logEvent) editor.logEvent(eventType, payload);
+
     switch (eventType) {
       case "execution_started":
         if (payload.execution_id) self.executionId = payload.execution_id;
@@ -180,37 +185,45 @@
         break;
 
       case "node_started":
+        // 080 §A: setNodeState owns the edge transition now — the curves INTO a
+        // running node flow (active), no separate edge call here.
         if (editor.graph) {
           editor.graph.setNodeState(payload.node_id, "running");
-          editor.graph.setEdgesToNodeActive(payload.node_id, true);
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "running";
         editor.announceStatus("Node " + payload.node_id + " started");
         break;
 
       case "node_completed":
+        // 080 §A: success turns the incoming edges --edge-done inside setNodeState.
         if (editor.graph) {
           editor.graph.setNodeState(payload.node_id, "success");
-          editor.graph.setEdgesToNodeActive(payload.node_id, true);
-          editor.graph.setEdgesFromNodeActive(payload.node_id, true);
         }
         // 059 §A line 5: the event carries the node's stats FLAT (SseEventProjection:
         // duration_ms / rows_out / bytes_out — not a nested stats object) and the
-        // completion branch used to drop them. One hand-off populates the card's run
-        // line ("1.2 s · 366 rows"); rows_out is NOT_MEASURED (-1) on a no-row node,
-        // which formatRunLine renders as the elapsed time alone.
+        // completion branch used to drop them. One hand-off populates the card's
+        // run line ("5 rows · 37 ms"); rows_out is NOT_MEASURED (-1) on a no-row
+        // node, which formatRunLine renders as the elapsed time alone. 080 §A: the
+        // CALCULATOR's context_value rides along for the footer, and setNodeStats
+        // labels the OUTGOING edges with the count flowing out of this node.
         if (editor.graph && editor.graph.setNodeStats) {
           editor.graph.setNodeStats(payload.node_id, {
             duration_ms: payload.duration_ms,
             rows_out: payload.rows_out,
+            context_value: payload.context_key ? payload.context_value : undefined,
           });
         }
         // 072: a CALCULATOR node's whole output is one value. Recorded per node for the
-        // inspector's Calculator section, and merged into the Context so a LATER node's
+        // Details pane's Calculator rows, and merged into the Context so a LATER node's
         // `$reference` to it resolves on screen the way it resolved in the run.
         if (payload.context_key) {
           if (editor.nodeValues) editor.nodeValues[payload.node_id] = payload.context_value;
           if (editor.contextValues) editor.contextValues[payload.context_key] = payload.context_value;
+        }
+        // 080 §B: a PIPELINE node's completion links to the child it spawned — the
+        // Details pane's Execution row reads it.
+        if (payload.child_execution_id && editor.childExecutions) {
+          editor.childExecutions[payload.node_id] = payload.child_execution_id;
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "success";
         editor.announceStatus("Node " + payload.node_id + " completed");
@@ -219,7 +232,6 @@
       case "node_failed":
         if (editor.graph) {
           editor.graph.setNodeState(payload.node_id, "failed");
-          editor.graph.setEdgesToNodeActive(payload.node_id, true);
         }
         if (editor.nodeStates) editor.nodeStates[payload.node_id] = "failed";
         // 057/T85: the error object is the failure record — code, message, node context,
@@ -242,6 +254,9 @@
       case "pipeline_completed":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        // 080 §D: the top bar's status takes its terminal text (elapsed from the
+        // clock, the row count data_ready left on runStatus.rows).
+        if (editor.stopRunClock) editor.stopRunClock("done");
         // Shape D (ui-screens.md §5.1): a stream-borne event has no HTTP response
         // to hang an OOB swap on, so the ONE client-side builder reports it. The
         // terminal events also ANNOUNCE now — they previously did not (only
@@ -255,6 +270,7 @@
       case "pipeline_failed":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        if (editor.stopRunClock) editor.stopRunClock("failed");
         // 057: the FULL payload goes to the result panel's failure mode — the code, the
         // message, the correlation id, the rendered SQL and the exception chain, on the
         // screen the engineer is already looking at. The modal keeps a one-line summary
@@ -276,6 +292,7 @@
       case "execution_aborted":
         self.terminalSeen = true;
         editor.isExecuting = false;
+        if (editor.stopRunClock) editor.stopRunClock("aborted");
         if (editor.graph) {
           editor.graph.cy.nodes().forEach(function (node) {
             var state = (editor.nodeStates && editor.nodeStates[node.id()]) || node.classes().join("");
@@ -363,9 +380,11 @@
         var status = (data.status || (data.data && data.data.status) || "").toLowerCase();
         if (status === "completed" || status === "success") {
           self.editor.isExecuting = false;
+          if (self.editor.stopRunClock) self.editor.stopRunClock("done");
           self.editor.setBanner("Pipeline completed", "success");
         } else if (status === "failed") {
           self.editor.isExecuting = false;
+          if (self.editor.stopRunClock) self.editor.stopRunClock("failed");
           // 057: even the degraded recovery path names the CODE — a bare "Pipeline failed"
           // was the exact screen the owner reported (T85). The full record is a click away
           // on the execution page; this banner at least says what failed.
@@ -376,6 +395,7 @@
           // The recovery poll previously had no aborted branch (031 F5): a cancel
           // that raced a dropped stream fell through to "Connection lost".
           self.editor.isExecuting = false;
+          if (self.editor.stopRunClock) self.editor.stopRunClock("aborted");
           if (window.DpToast && window.DpToast.show) {
             window.DpToast.show("warning", "Execution aborted", "The execution was aborted");
           }

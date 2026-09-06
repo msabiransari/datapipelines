@@ -57,7 +57,7 @@ function loadEditor() {
   globalThis.document = doc;
   globalThis.PEDockShim = true;
   globalThis.window.PEDock = { createDock: () => ({}) };
-  globalThis.window.PEInspector = { createInspector: () => ({}) };
+  globalThis.window.PEEvents = { createEventsLog: () => ({}) };
   globalThis.ResultPanel = class {
     constructor() {
       this.cursorEndpoint = null;
