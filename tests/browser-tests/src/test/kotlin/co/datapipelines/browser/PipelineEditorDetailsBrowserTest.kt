@@ -61,11 +61,12 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         val name = "browser_ped_" + generatedPassword("p").take(6).lowercase()
         seedCalculatorPipeline(name) shouldBe 201
 
-        // The explorer: find the pipeline, select the leaf (its detail swaps into
-        // #pipeline-detail), then open the editor — a FULL document load
-        // (hx-boost="false", 87c20d4), so this is a plain navigation wait.
+        // The explorer: find the pipeline, select it (search mode renders a FLAT
+        // list of `tpl-result` rows; the tree presentation uses `tpl-leaf`), its
+        // detail swaps into #pipeline-detail, then open the editor — a FULL
+        // document load (hx-boost="false", 87c20d4), so this is a plain navigation wait.
         page.navigate("$baseUrl/pipelines?q=$name")
-        page.locator("button.tpl-leaf").first().click()
+        page.locator("button.tpl-result, button.tpl-leaf").first().click()
         page.locator("a:has-text('Open in editor')").first().click()
         page.waitForURL("**/pipelines/*/editor")
 

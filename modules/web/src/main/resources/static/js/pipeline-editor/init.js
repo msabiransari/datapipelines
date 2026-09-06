@@ -183,6 +183,16 @@
           self.graph.render();
           self.cy = self.graph.cy;
 
+          // The first fit ran at layoutstop, which can precede Alpine's x-show
+          // flush (the banner/modal hide only then, growing the stage). One refit
+          // after the flush keeps the graph centred in the canvas it really has.
+          // $nextTick is Alpine's — absent under node --test.
+          if (typeof self.$nextTick === "function") {
+            self.$nextTick(function () {
+              if (self.graph && self.graph.fitToView) self.graph.fitToView();
+            });
+          }
+
           setupA11y(self);
           wireSqlCopy(self);
           wireFitKey(self);

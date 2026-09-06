@@ -80,7 +80,7 @@
     </div>
 
     <!-- Execution status banner (connection loss / recovery) -->
-    <div x-show="banner.text" class="pe-banner" x-bind:class="banner.type" role="alert">
+    <div x-show="banner.text" class="pe-banner" x-bind:class="banner.type" role="alert" x-cloak>
       <span x-text="banner.text"></span>
       <button class="pe-banner-dismiss" @click="banner.text = ''" aria-label="Dismiss">&times;</button>
     </div>
@@ -230,7 +230,7 @@
            key/value facts for the node type, and the rendered SQL (htmx partial,
            sql-highlight.js keeps its highlighter) or the calculator evaluation /
            child mapping. -->
-      <div class="pe-dock-body" id="pe-pane-details" role="tabpanel"
+      <div class="pe-dock-body" id="pe-pane-details" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-details"
            x-show="dock.tab === 'details'">
         <div class="pe-empty" x-show="!selectedNode">Select a node to see its source, template, output and last run.</div>
@@ -276,7 +276,7 @@
 
       <!-- Results: the 065 body, unchanged — TTL line, expired card, .ds-table,
            the 027b-frozen paging row and the downloads. -->
-      <div class="pe-dock-body" id="pe-pane-results" role="tabpanel"
+      <div class="pe-dock-body" id="pe-pane-results" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-results"
            x-show="dock.tab === 'results'">
         <div class="pe-empty" x-show="!resultPanel.data && !resultPanel.expired">Run the pipeline to see the caller output here.</div>
@@ -326,7 +326,7 @@
 
       <!-- Errors: one entry per failed node of this run, newest LAST. The 057
            markup, driven by the same failureView(record) — same record, read-only. -->
-      <div class="pe-dock-body" id="pe-pane-errors" role="tabpanel"
+      <div class="pe-dock-body" id="pe-pane-errors" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-errors"
            x-show="dock.tab === 'errors'">
         <div class="pe-empty" x-show="dock.errors.length === 0">No failures in this run.</div>
@@ -378,7 +378,7 @@
       <!-- Events (080 §B): every SSE event in arrival order — the toast only ever
            announces the terminal one. Rows are appended by init.js; the badge is
            the log's live count. -->
-      <div class="pe-dock-body" id="pe-pane-events" role="tabpanel"
+      <div class="pe-dock-body" id="pe-pane-events" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-events"
            x-show="dock.tab === 'events'">
         <div class="pe-empty" x-show="eventsLog.count() === 0">Every event the execution stream emits lands here, in order — the toast only ever announces the terminal one.</div>
@@ -387,7 +387,7 @@
     </section>
 
     <!-- Error modal -->
-    <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="errorModal.hide()">
+    <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="errorModal.hide()" x-cloak>
       <div class="pe-modal" role="alertdialog" aria-label="Execution error">
         <div class="pe-modal-header">
           <h2>Execution Failed</h2>
