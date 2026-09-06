@@ -38,18 +38,36 @@ cp -R deploy/sample-data "$tmp/deploy/sample-data"
 cp deploy/env/posture/development.env deploy/env/posture/hardened.env "$tmp/deploy/env/posture/"
 cp deploy/env/demo.env "$tmp/deploy/env/"
 
-# A stub docker that answers `build`/`run` as no-ops and passes `compose` through to the real
-# one: `compose config` renders, it does not start anything, and that render IS the evidence.
+# The stub docker. STRICT ALLOWLIST — `compose config` and nothing else.
+#
+# The first version of this passed every `docker compose …` through to the real daemon
+# "because config needs it", and app.sh --start then ran a REAL `compose up -d --wait`
+# under the DEFAULT project and stopped the live stack on this machine. `-p` is not the
+# only thing that decides which project a compose command touches; a stub that forwards a
+# verb it did not mean to forward decides it too. So: the verb is checked, not the flag,
+# and the sandbox additionally pins a project and port of its own so even a stub that
+# leaked could not resolve to `dp`.
 mkdir -p "$tmp/bin"
-cat >"$tmp/bin/docker" <<'STUB'
+real_docker=$(command -v docker)
+cat >"$tmp/bin/docker" <<STUB
 #!/usr/bin/env bash
-if [[ ${1:-} == compose ]]; then exec /usr/local/bin/docker "$@"; fi
+# Only \`docker compose [flags] config …\` reaches the daemon; every other verb is a no-op.
+if [[ \${1:-} == compose ]]; then
+  for arg in "\$@"; do
+    case "\$arg" in
+      config) exec "$real_docker" "\$@" ;;
+      up|down|start|stop|restart|rm|kill|create|run|exec) exit 0 ;;
+    esac
+  done
+  exit 0
+fi
 exit 0
 STUB
 chmod +x "$tmp/bin/docker"
-# Locate the real docker once, and bake it into the stub.
-real_docker=$(command -v docker)
-sed -i.bak "s|/usr/local/bin/docker|$real_docker|" "$tmp/bin/docker" && rm -f "$tmp/bin/docker.bak"
+
+# Belt to the stub's braces: a project and a port that are nobody's.
+export APP_COMPOSE_PROJECT="apppwtest$$"
+export APP_HOST_PORT=18975
 
 fail() { echo "app-sh-secrets-test: $*" >&2; exit 1; }
 
@@ -63,7 +81,7 @@ file_email=$(grep -E '^DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=' "$tmp/deploy/s
 
 # 2. The FAR END: what compose would hand the container, with the same env-file list app.sh
 #    composes (posture, then secrets — secrets last).
-rendered=$(cd "$tmp" && docker compose -p apppwtest \
+rendered=$(cd "$tmp" && docker compose -p "$APP_COMPOSE_PROJECT" \
   -f deploy/compose.yml -f deploy/compose.local-build.yml \
   --env-file deploy/env/posture/development.env \
   --env-file deploy/secrets.env \
@@ -90,7 +108,7 @@ print(env.get("DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL", ""))
 #    is not a guard, and this one compares two reads that could both come from one place.
 sed -i.bak "s|^DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=.*|DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=doctored|" \
   "$tmp/deploy/secrets.env" && rm -f "$tmp/deploy/secrets.env.bak"
-doctored=$(cd "$tmp" && docker compose -p apppwtest \
+doctored=$(cd "$tmp" && docker compose -p "$APP_COMPOSE_PROJECT" \
   -f deploy/compose.yml -f deploy/compose.local-build.yml \
   --env-file deploy/env/posture/development.env --env-file deploy/secrets.env \
   config --format json | python3 -c '
