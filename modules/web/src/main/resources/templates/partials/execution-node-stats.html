@@ -6,6 +6,7 @@
         <th class="num">Rows In</th>
         <th class="num">Rows Out</th>
         <th class="num">Duration</th>
+        <th class="num">Context</th>
       </tr>
     </thead>
     <tbody>
@@ -15,6 +16,12 @@
           <td class="num" th:text="${n.has('rows_in') ? n.get('rows_in').asLong() : '-'}">in</td>
           <td class="num" th:text="${n.has('rows_out') ? n.get('rows_out').asLong() : '-'}">out</td>
           <td class="num" th:text="${n.has('duration_ms') ? n.get('duration_ms').asLong() + 'ms' : '-'}">dur</td>
+          <!-- CALCULATOR nodes only (NodeStats §4.10): the Context key the node wrote and
+               the value it wrote, mono because it is an identifier + value, and the one
+               place a wrong-quarter debug session looks. Every other node type gets the
+               em-dash; the keys are NON_NULL-included, so they are absent, not null. -->
+          <td class="num"
+              th:text="${n.has('context_key')} ? ${n.get('context_key').asText() + ' → ' + (n.has('context_value') ? n.get('context_value').asText() : '')} : '—'">ctx</td>
         </tr>
       </th:block>
     </tbody>

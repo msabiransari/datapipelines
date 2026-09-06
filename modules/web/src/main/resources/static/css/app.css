@@ -237,6 +237,10 @@ body {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-default);
+  /* 076 §D: every table aligns figures — dates and counts share a column's rhythm.
+     `.num` cells keep their mono face on top of this; dates render proportional
+     but tabular, so a column of timestamps still scans. */
+  font-variant-numeric: tabular-nums;
 }
 
 .ds-table thead th {

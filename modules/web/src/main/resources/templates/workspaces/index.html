@@ -3,14 +3,14 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Workspaces</h1>
+    <h1 class="ds-headline">Workspaces</h1>
   </div>
 
   <!-- The ?ok=/?error= redirect flashes render as toasts in the layout's #toast stack
        (§5.1) — the redirect contract is unchanged; there is no banner here any more. -->
 
   <section th:if="${canCreate}" class="app-reading" style="margin-bottom: var(--gap-xl);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Create a workspace</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Create a workspace</h2>
     <form th:action="@{/workspaces/create}" method="post" style="display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
       <input type="text" name="name" class="ds-input" placeholder="team-etl" required
              style="padding: var(--gap-sm) var(--gap-md); border: 1px solid var(--border-default); border-radius: var(--radius-base); background: var(--surface-raised); color: var(--text-primary); font-size: var(--text-sm); width: 220px;">
@@ -24,7 +24,7 @@
   </section>
 
   <section th:if="${openJoin and !#lists.isEmpty(joinable)}" class="app-reading" style="margin-bottom: var(--gap-xl);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Joinable workspaces</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Joinable workspaces</h2>
     <div style="display: flex; flex-wrap: wrap; gap: var(--gap-md);">
       <div class="ds-card" th:each="ws : ${joinable}" style="padding: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center;">
         <span style="font-weight: var(--weight-medium);" th:text="${ws.displayName}">Team</span>
@@ -37,7 +37,7 @@
   </section>
 
   <section style="margin-bottom: var(--gap-xl);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Your workspaces</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Your workspaces</h2>
     <div th:if="${#lists.isEmpty(own)}" class="ds-empty">
       <p class="ds-empty-title">No workspaces yet</p>
       <p class="ds-empty-description">You are not a member of any workspace yet.</p>
@@ -76,7 +76,7 @@
   </section>
 
   <section th:each="entry : ${managed}" style="margin-bottom: var(--gap-xl);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">
       Members — <span th:text="${entry.key}">team</span>
     </h2>
     <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->

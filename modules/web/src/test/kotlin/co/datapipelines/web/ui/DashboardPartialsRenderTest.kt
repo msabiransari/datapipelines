@@ -62,6 +62,41 @@ class DashboardPartialsRenderTest {
         html shouldNotContain "Error resolving fragment"
     }
 
+    @Test
+    fun `recent-executions renders the pipeline display name with the machine name on title`() {
+        // T114: same web-side join as the executions history — the dashboard's recent list
+        // shows the display name, not the truncated UUID.
+        val record =
+            co.datapipelines.executor.ExecutionRecord(
+                executionId = java.util.UUID.randomUUID(),
+                pipelineId = java.util.UUID.randomUUID(),
+                pipelineVersion = 3,
+                status = co.datapipelines.executor.ExecutionStatus.SUCCESS,
+                parametersJson = "{}",
+                triggeredBy = java.util.UUID.randomUUID(),
+                triggeredVia = co.datapipelines.executor.ExecutionTrigger.REST,
+                startedAt = java.time.Instant.parse("2026-09-01T10:00:00Z"),
+                durationMs = 900,
+            )
+        val application = JakartaServletWebApplication.buildApplication(MockServletContext())
+        val exchange = application.buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
+        val html =
+            engine.process(
+                "partials/recent-executions",
+                WebContext(exchange).apply {
+                    setVariable("executions", listOf(record))
+                    setVariable(
+                        "pipelineNames",
+                        mapOf(record.pipelineId to PipelineName(name = "nyc/mobility/stage_trips", displayName = "Stage trips")),
+                    )
+                },
+            )
+
+        html shouldContain "Stage trips"
+        html shouldContain "title=\"nyc/mobility/stage_trips\""
+        html shouldNotContain record.pipelineId.toString().substring(0, 8)
+    }
+
     /**
      * 025 C1: the theme-swap fragment's OOB link must come out RENDERED — a resolved href
      * (context-pathed by @{...}), no surviving th: attributes. The old hand-built string

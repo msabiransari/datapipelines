@@ -23,7 +23,11 @@
       </thead>
       <tbody>
         <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
-          <td th:text="${r.pipelineId.toString().substring(0, 8) + '...'}">pipeline</td>
+          <td>
+            <span th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
+                  th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
+                  th:title="${p != null} ? ${p.name} : null">pipeline</span>
+          </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>
             <span class="ds-badge"

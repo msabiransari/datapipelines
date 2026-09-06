@@ -3,7 +3,7 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-lg);">
-    <h1 style="font-size: var(--text-2xl); font-weight: var(--weight-bold);">Promotion</h1>
+    <h1 class="ds-headline">Promotion</h1>
     <span th:if="${hasTarget}" class="ds-badge" th:text="${targetBaseUrl}">https://uat.example.com</span>
   </div>
 

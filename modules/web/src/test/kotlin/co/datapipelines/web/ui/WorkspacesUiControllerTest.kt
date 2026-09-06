@@ -132,14 +132,16 @@ class WorkspacesUiControllerTest {
                 webContextWithParams("ok" to "created").apply { fillPageModel() },
             )
 
-        // Server-rendered INSIDE #toast, so toast.js arms it at DOMContentLoaded.
-        Regex("""id="toast"[^>]*>(?:[\s\S](?!<main))*ds-toast ds-toast-success""")
+        // 076 §B: server-rendered inside the hidden #toast-flash bin (INSIDE #app-main,
+        // so a boosted swap carries it); toast.js adopts it into the persistent #toast
+        // stack on init/settle. The stack itself renders empty.
+        Regex("""id="toast-flash"[^>]*>[\s\S]*?ds-toast ds-toast-success""")
             .containsMatchIn(html) shouldBe true
         html shouldNotContain "class=\"ds-surface\"" // the banner element is gone
         // EXACTLY ONE toast: th:replace outranks th:if on the same element (the host
         // is discarded before the condition runs), so a keyed block written as
         // `<div th:if th:replace>` renders EVERY keyed toast at once (030 bug).
-        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
+        Regex("ds-toast-title").findAll(html).count() shouldBe 1
     }
 
     @Test
@@ -150,12 +152,12 @@ class WorkspacesUiControllerTest {
                 webContextWithParams("error" to "in_use").apply { fillPageModel() },
             )
 
-        Regex("""id="toast"[^>]*>(?:[\s\S](?!<main))*ds-toast ds-toast-danger""")
+        Regex("""id="toast-flash"[^>]*>[\s\S]*?ds-toast ds-toast-danger""")
             .containsMatchIn(html) shouldBe true
         html shouldContain "This workspace still owns content (pipelines, templates or datasources), or still needs its owner."
         html shouldNotContain "class=\"ds-surface\""
         // One flash, one toast — not one per keyed message (see the ok-flash test).
-        Regex("ds-toast-title").findAll(html.substringBefore("<main")).count() shouldBe 1
+        Regex("ds-toast-title").findAll(html).count() shouldBe 1
     }
 
     private fun WebContext.fillPageModel() {

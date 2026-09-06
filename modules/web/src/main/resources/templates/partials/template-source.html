@@ -64,7 +64,7 @@
   <th:block th:unless="${readOnly}">
     <div class="te-panel-head">
       <h2>Template Source</h2>
-      <span style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase">Freemarker</span>
+      <span class="ds-caption">Freemarker</span>
     </div>
     <textarea id="templateBody" class="ds-textarea" th:text="${template?.body ?: ''}">Template body</textarea>
   </th:block>

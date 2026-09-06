@@ -21,7 +21,13 @@
       <tbody>
         <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
           <td>
-            <span th:text="${r.pipelineId.toString().substring(0, 8) + '...'}">pipeline</span>
+            <!-- T114: the display name is prose — it renders in the body face, not mono
+                 (mono is for identifiers). The machine name (a folder path) rides on
+                 `title`; a pipeline whose row is gone (deleted, execution remains) falls
+                 back to the truncated id. -->
+            <span th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
+                  th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
+                  th:title="${p != null} ? ${p.name} : null">pipeline</span>
             <div th:if="${r.parentExecutionId != null}" style="font-size: var(--text-xs);">
               <a th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
                  onclick="event.stopPropagation()"

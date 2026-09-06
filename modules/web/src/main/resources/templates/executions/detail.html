@@ -9,8 +9,9 @@
   <div class="ds-card" style="margin-bottom: var(--gap-lg);">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--gap-md);">
       <div>
-        <h1 style="font-size: var(--text-xl); font-weight: var(--weight-bold); margin-bottom: var(--gap-xs);"
-            th:text="${pipeline?.displayName ?: record.pipelineId.toString().substring(0, 8)}">Pipeline</h1>
+        <h1 class="ds-headline" style="margin-bottom: var(--gap-xs);"
+            th:text="${pipeline?.displayName ?: record.pipelineId.toString().substring(0, 8)}"
+            th:title="${pipeline?.name}">Pipeline</h1>
         <div style="display: flex; gap: var(--gap-sm); align-items: center; flex-wrap: wrap; margin-bottom: var(--gap-sm);">
           <span class="ds-badge"
                 th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
@@ -58,7 +59,7 @@
 
   <th:block th:if="${family.size() > 1}">
     <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-      <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Execution Family</h2>
+      <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Execution Family</h2>
       <table class="ds-table">
         <thead>
           <tr>
@@ -96,7 +97,7 @@
 
   <th:block th:if="${record.status.name() == 'FAILED' && errorJson != null}">
     <div class="ds-card" style="border-color: var(--accent-danger); margin-bottom: var(--gap-lg);">
-      <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-sm); color: var(--accent-danger);">Error</h2>
+      <h2 class="ds-title" style="margin-bottom: var(--gap-sm); color: var(--accent-danger);">Error</h2>
       <!-- 057: the structured failure record (code, message, correlation id, node context,
            rendered SQL, exception chain root-first) — not a raw JSON dump. -->
       <div th:replace="~{partials/execution-error :: error}">error</div>
@@ -104,7 +105,7 @@
   </th:block>
 
   <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Node Stats</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Node Stats</h2>
     <th:block th:if="${nodeStats != null && !nodeStats.isEmpty()}">
       <div th:replace="~{partials/execution-node-stats :: stats(${nodeStats})}">node stats</div>
     </th:block>
@@ -116,7 +117,7 @@
   </div>
 
   <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Result</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Result</h2>
 
     <th:block th:if="${resultState == 'not-applicable'}">
       <div class="ds-empty">
@@ -164,7 +165,7 @@
   </div>
 
   <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 style="font-size: var(--text-lg); font-weight: var(--weight-semibold); margin-bottom: var(--gap-md);">Events</h2>
+    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Events</h2>
     <a th:href="${'/api/v1/executions/' + record.executionId + '/events'}"
        class="ds-button ds-button-secondary"
        style="text-decoration: none;"

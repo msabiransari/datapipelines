@@ -29,7 +29,8 @@ import java.util.UUID
  */
 class ExecutionHistoryPartialControllerTest {
     private val executions = mockk<ExecutionRepository>()
-    private val controller = ExecutionHistoryPartialController(executions)
+    private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
+    private val controller = ExecutionHistoryPartialController(executions, pipelineNames)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

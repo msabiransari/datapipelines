@@ -26,18 +26,21 @@ class InlineWidthAuditTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
 
     private val templates: Map<String, String> =
-        resolver
-            .getResources("classpath*:templates/**/*.html")
-            .toList()
-            .filter { it.filename != null }
-            .filterNot { resource ->
-                val path = resource.uri.path
-                path.contains("/templates/layouts/") ||
-                    path.contains("/templates/site/") ||
-                    resource.filename == "index-public.html" ||
-                    resource.filename == "doc-public.html"
-            }
-            .associate { it.uri.path.substringAfter("/templates/") to it.inputStream.readBytes().decodeToString() }
+        run {
+            val appTemplates =
+                resolver
+                    .getResources("classpath*:templates/**/*.html")
+                    .toList()
+                    .filter { it.filename != null }
+                    .filterNot { resource ->
+                        val path = resource.uri.path
+                        path.contains("/templates/layouts/") ||
+                            path.contains("/templates/site/") ||
+                            resource.filename == "index-public.html" ||
+                            resource.filename == "doc-public.html"
+                    }
+            appTemplates.associate { it.uri.path.substringAfter("/templates/") to it.inputStream.readBytes().decodeToString() }
+        }
 
     @Test
     fun `the sweep covers the app templates`() {

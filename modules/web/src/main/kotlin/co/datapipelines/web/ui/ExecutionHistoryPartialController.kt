@@ -18,6 +18,7 @@ import java.util.UUID
 @RequestMapping("/partials")
 class ExecutionHistoryPartialController(
     private val executions: ExecutionRepository,
+    private val pipelineNames: PipelineNames,
 ) {
     @GetMapping("/executions")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -57,6 +58,7 @@ class ExecutionHistoryPartialController(
         val hasMore = raw.size > pageSize
 
         model.addAttribute("executions", items)
+        model.addAttribute("pipelineNames", pipelineNames.lookup(workspaceId, items.map { it.pipelineId }))
         model.addAttribute("offset", offset)
         model.addAttribute("pageSize", pageSize)
         model.addAttribute("hasMore", hasMore)

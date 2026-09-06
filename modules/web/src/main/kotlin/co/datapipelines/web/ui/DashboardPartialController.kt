@@ -19,6 +19,7 @@ import java.time.ZoneOffset
 class DashboardPartialController(
     private val executions: ExecutionRepository,
     private val pipelines: PipelineRepository,
+    private val pipelineNames: PipelineNames,
 ) {
     @GetMapping("/dashboard-stats")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -62,6 +63,7 @@ class DashboardPartialController(
             }
 
         model.addAttribute("executions", executions)
+        model.addAttribute("pipelineNames", pipelineNames.lookup(workspaceId, executions.map { it.pipelineId }))
         return "partials/recent-executions"
     }
 
