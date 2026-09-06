@@ -1,12 +1,14 @@
 # Production deployment — deployment.md Appendix A, docs/environments.md.
 #
 #   docker compose -f deploy/compose.yml \
-#     --env-file deploy/env/posture/hardened.env --env-file deploy/secrets.env up -d
+#     --env-file deploy/env/defaults.env --env-file deploy/secrets.env up -d
 #
 # COMPOSE IS ONE LOADER, NOT THE CONTRACT (environments.md). Everything this file
 # needs is an ordinary environment variable that also works under `java -jar`,
-# systemd, Kubernetes, ECS and Nomad; deploy/env/ holds the portable files, and
-# nothing the product needs lives only here. `./app.sh --start` is the same thing
+# systemd, Kubernetes, ECS and Nomad. There are exactly TWO env files, in this order:
+# deploy/env/defaults.env (tracked, every non-secret default) then deploy/secrets.env
+# (git-ignored, the secrets and this deployment's own overrides). Nothing the product
+# needs lives only here. `./app.sh --start` is the same thing
 # with the env-file list assembled for you.
 #
 # Secrets are EXTERNAL — never committed; deploy/secrets.env is git-ignored and
@@ -59,7 +61,12 @@ services:
       # Redis on the compose network: the host is the SERVICE name, deliberately not
       # the application.yml default (loopback) — see the compose-env-audit allowlist.
       DATAPIPELINES_REDIS_HOST: redis
-      DATAPIPELINES_REDIS_PORT: ${DATAPIPELINES_REDIS_PORT:-6379}
+      # Redis on the compose network is the SERVICE, so BOTH halves of its address are
+      # this file's, not the env file's: deploy/env/defaults.env carries the LAPTOP's
+      # published port (6381), and passing that through would point the container at a
+      # port nothing listens on inside the network. Same reason as the host line above,
+      # and declared beside it in the compose-env-audit allowlist.
+      DATAPIPELINES_REDIS_PORT: 6379
       DATAPIPELINES_REDIS_PASSWORD: ${DATAPIPELINES_REDIS_PASSWORD:-}
 
       # REQUIRED, no fallback. Exactly 32 bytes base64.
@@ -115,7 +122,7 @@ services:
       # these lines can sit unconditionally in the production file: without the
       # `demo` profile nothing sets them, so the features stay off and the app's
       # effective configuration is byte-for-byte what it was. The demo profile
-      # supplies them from deploy/secrets.env, pointing at the read-only sample volume
+      # supplies them from the --demo markers, pointing at the read-only sample volume
       # the one-shot loaders populate.
       DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}"
       DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}"
@@ -200,9 +207,26 @@ services:
       DATAPIPELINES_ENV: ${DATAPIPELINES_ENV:-local}
       DATAPIPELINES_POSTURE: ${DATAPIPELINES_POSTURE:-}
       DATAPIPELINES_DEMO: ${DATAPIPELINES_DEMO:-}
-      DATAPIPELINES_AUTH_COOKIE_SECURE: ${DATAPIPELINES_AUTH_COOKIE_SECURE:-}
+      #
+      # THE TWO POSTURE-DEPENDENT KEYS, and the one place in this file that is NOT a
+      # `${VAR:-default}` pass-through (081 §B). Their default IS the posture, and it is
+      # carried by the profile above; an env-file default here would outrank the profile
+      # and every posture would ship the same stance (075 booted a `hardened` stack with
+      # `authoring=on` for exactly that reason, and papered over it by repeating the
+      # posture defaults in the env files — the files 081 deleted).
+      #
+      # A VALUELESS mapping entry is the only form Compose has that passes a variable
+      # ONLY WHEN IT IS SET. Measured on this Compose, three forms, one container each:
+      #   `${VAR:-}`         unset -> ""      the variable IS set, to empty: profile lost
+      #   `${VAR:+${VAR}}`   unset -> ""      same; `:+` yields an empty string, not nothing
+      #   `VAR:`             unset -> absent  the profile's default applies
+      # and `VAR:` still resolves from an --env-file, so deploy/secrets.env can override
+      # either of them explicitly. compose-env-audit.sh knows this form by name and
+      # requires it for exactly these two keys; PostureDefaultsSpecDriftTest pins the
+      # other half (defaults.env names neither; both profile ymls carry both).
+      DATAPIPELINES_AUTH_COOKIE_SECURE:
+      DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:
       DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY: ${DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY:-false}
-      DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:-true}
       # versioning §10.6 — the promotion peer credential. Both are BEARER SECRETS: keep
       # them in deploy/secrets.env like every other secret, never inline here. Empty server-key
       # means this deployment refuses promotion (fail closed).
@@ -306,8 +330,8 @@ services:
   # demo-nyc (mobility) and demo-trade (trade/v1) — so an engineer pays for
   # exactly the sample data they asked for. Both together is fine: the app's
   # bootstrap keys are comma-separated lists built by compose from the
-  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers (deploy/env/demo.env, scaffolded by
-  # app.sh from --demo nyc,trade).
+  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers, which app.sh exports from --demo
+  # nyc,trade (the sample-data VERSIONS are pinned in deploy/env/defaults.env).
   #
   # WHAT THE NON-DEMO PATH INHERITS, precisely — Compose has no per-profile env,
   # volume or dependency, so the additions to `datapipelines` above are
@@ -325,7 +349,7 @@ services:
   #   docker compose -f deploy/compose.yml -f deploy/compose.local-build.yml \
   #     --profile demo-nyc --profile demo-trade up -d --wait
   #
-  # Requires the SAMPLE_* keys (deploy/env/demo.env + deploy/secrets.env) and, for the MySQL
+  # Requires the SAMPLE_* keys (deploy/env/defaults.env + deploy/secrets.env) and, for the MySQL
   # sample, an image built with -Pmysql — Connector/J is not in the default build
   # (datasources.md §10.2). deployment.md Appendix B is the quickstart.
 

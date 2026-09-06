@@ -10,6 +10,13 @@
 # in a yml — they are ConfigValidator §7 checks, which name the variable and the
 # posture in every refusal.
 #
+# AND NOWHERE ELSE (081). `deploy/env/defaults.env` must never name these two keys: it
+# is loaded for every posture, so a value there is one posture's answer imposed on both —
+# which is exactly how a `hardened` stack booted with `authoring=on` before 081.
+# `deploy/compose.yml` passes them in Compose's valueless form so an unset variable stays
+# unset and this file's default survives. `PostureDefaultsSpecDriftTest` and
+# `compose-env-audit.sh` check 7 hold both halves of that.
+#
 # The `hardened` row of the posture table (environments.md):
 #   authoring-enabled   FALSE  — a hardened deployment is a promotion RECEIVER by
 #                                default; set the variable to true for a one-box
