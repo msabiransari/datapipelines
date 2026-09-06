@@ -34,6 +34,30 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+  # 075 — THE POSTURE IS THE PROFILE. `datapipelines.posture` is the operator-facing
+  # contract (DATAPIPELINES_POSTURE, environments.md); the Spring profile is how the
+  # posture's non-secret defaults are loaded (application-development.yml /
+  # application-hardened.yml). Deriving it HERE means every loader — compose, a bare
+  # jar, systemd, Kubernetes — sets one variable and gets the right defaults; nothing
+  # the product needs lives only in a launcher (environments.md, "the variable
+  # contract"). SPRING_PROFILES_ACTIVE still wins (an environment variable outranks
+  # this file), and ConfigValidator §7 REFUSES a value that disagrees with the posture
+  # rather than letting the two drift apart silently.
+  profiles:
+    # The ENVIRONMENT VARIABLE first — that is the contract — and the bound property as the
+    # fallback, so a posture supplied any other way Spring accepts (`--datapipelines.posture=`,
+    # a mounted yml, SPRING_APPLICATION_JSON) also selects its profile. Without the second
+    # form the property and the profile silently disagree: §7 would judge `hardened` while
+    # `application-hardened.yml` never loaded and its defaults never applied. §7 refuses that
+    # state outright as a backstop — see PostureRules.checkPostureProfileAlignment.
+    #
+    # No literal default: empty means NO profile is active, and the base file's own defaults
+    # ARE the `development` column of the posture table, so `local` with no posture behaves
+    # exactly as `development` — which is what §7 resolves it to. A `development` default here
+    # would also give this variable TWO different shipped defaults in one file, which
+    # compose-env-audit reads as drift.
+    active: ${DATAPIPELINES_POSTURE:${datapipelines.posture:}}
+
 server:
   port: ${SERVER_PORT:8080}
   # Spring Boot's own framework wiring key (like `management.server.port` above — not a
@@ -165,6 +189,18 @@ datapipelines:
       lockout:
         max-failures: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_MAX_FAILURES:5}
         duration-minutes: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_DURATION_MINUTES:15}
+    # §3.4 (075) — the `Secure` flag on the cookies this deployment mints. EMPTY (the
+    # shipped default) keeps the historical derivation from `base-url`'s scheme: an
+    # explicit `http://` base-url drops the flag so local login works, anything else
+    # keeps it. `application-hardened.yml` defaults it to `true`, which is the posture
+    # table's row — a hardened deployment is https, and a dropped Secure flag there is
+    # a session cookie on the wire. Explicitly settable either way, in both postures.
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:}
+    # §3.4 (075) — the operator's explicit acknowledgement that this HARDENED deployment
+    # runs on local password accounts with no OIDC provider. Under `development` it is
+    # inert; under `hardened` the §7 rule requires either a configured OIDC provider or
+    # this flag, and logs the acknowledgement so it is visible in the deployment's logs.
+    allow-local-only: ${DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY:false}
 
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
@@ -197,7 +233,6 @@ datapipelines:
   # Both keys are bearer secrets: never logged, never in an error message, compared in
   # constant time. A deployment may hold either half, both, or neither.
   deployment:
-    name: ${DATAPIPELINES_DEPLOYMENT_NAME:}
     authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
     promotion:
       server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:}
@@ -301,3 +336,23 @@ datapipelines:
     timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
     timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
     timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}
+
+  # 075 — the two variables an org actually sets (configuration.md §3.23, docs/environments.md).
+  # Appended after the whole datapipelines: tree on purpose: a block inserted between two
+  # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).
+  #
+  # `env` is the ORG's label for this deployment — free text, `[a-z0-9][a-z0-9_-]{0,31}`.
+  # Nothing branches on it (pinned by DeploymentNameBranchingGuardTest); it is the boot
+  # line's identity and the promotion `source_env`. It replaces the 039 spelling
+  # `datapipelines.deployment.name`, which survives one release as a WARNing alias.
+  #
+  # `posture` is the PRODUCT's stance and has exactly two values, `development` and
+  # `hardened`. It has NO shipped default: the placeholder resolves to empty, and §7
+  # supplies `development` only when `env` is `local`. Any other env with no posture
+  # refuses to start naming both variables — explicit beats guessed.
+  #
+  # `demo` is a FLAG, not an environment: a comma list of sample-data families to load
+  # out of the box (`nyc`, `trade`). Empty = off. Refused under `hardened`.
+  env: ${DATAPIPELINES_ENV:local}
+  posture: ${DATAPIPELINES_POSTURE:}
+  demo: ${DATAPIPELINES_DEMO:}

@@ -147,6 +147,8 @@ The app **does not** require inbound network access beyond the HTTP/MCP ports it
 
 Env var names are derivable, never memorized: `datapipelines.` → `DATAPIPELINES_`, remaining YAML path upper-snake-cased ([Configuration §1](configuration.md#1-purpose)).
 
+**Before any of this, two variables:** `DATAPIPELINES_ENV` is your organisation's name for this deployment and `DATAPIPELINES_POSTURE` is `development` or `hardened`. A named environment with no posture does not start. [Environments](environments.md) is the page for that decision; [Configuration §3.23](configuration.md#323-environment-and-posture) is the key reference.
+
 ### 5.1 What the app requires to start
 
 The app **fail-fasts** on startup if any of the following is missing. Full definitions: [Configuration §2](configuration.md#2-required-configuration).
@@ -169,7 +171,7 @@ The keys an operator most often changes at deploy time are `datapipelines.result
 
 ### 5.3 Full config file
 
-Operators can mount `application.yml` at `/etc/datapipelines/application.yml` (configurable via `SPRING_CONFIG_ADDITIONAL_LOCATION`). Every key is expressible either as YAML or as its derived env var; the OIDC provider list is a nested structure and is normally supplied as YAML with `${...}` placeholders for the secrets. A complete annotated template is in [Configuration §5](configuration.md#5-full-applicationyml-template).
+Every setting is an environment variable, and `deploy/env/example.env` lists all of them with their shipped defaults — [Environments](environments.md) is the operator's page for what to set and where. Operators who prefer a YAML file can mount `application.yml` at `/etc/datapipelines/application.yml` (configurable via `SPRING_CONFIG_ADDITIONAL_LOCATION`); this is the supported route for **more than one OIDC provider**, whose nested list is awkward as variables. Every key is expressible either as YAML or as its derived env var; the OIDC provider list is a nested structure and is normally supplied as YAML with `${...}` placeholders for the secrets. A complete annotated template is in [Configuration §5](configuration.md#5-full-applicationyml-template).
 
 ---
 
@@ -261,14 +263,24 @@ in front behaves exactly as before, and the header stays ignored.
 
 ### 6.3 Docker Compose (dev / evaluation)
 
-Reference `docker-compose.yml` provided in `deploy/docker-compose.yml`. Single instance + Postgres + Redis.
+Reference compose file provided in `deploy/compose.yml`. Single instance + Postgres + Redis.
+
+Compose is **one loader of the environment-variable contract**, not the contract itself ([Environments §3](environments.md#3-the-variable-contract)): the same settings drive a bare JAR, systemd, Kubernetes, ECS and Nomad. The env files it reads live in `deploy/env/` and are tracked; `deploy/secrets.env` is git-ignored and holds every credential.
+
+```bash
+docker compose -f deploy/compose.yml \
+  --env-file deploy/env/posture/hardened.env \
+  --env-file deploy/secrets.env up -d
+```
 
 The app service passes **every** `DATAPIPELINES_*` variable the app binds, each with
 the same default `application.yml` ships — so a key that works against a host-run app
 (by exporting the variable) reaches the container too, and leaving it unset yields the
 shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
-`application.yml`'s placeholders and fails on a missing pass-through or a diverged
-default.
+`application.yml`'s placeholders — and `deploy/env/example.env`, the reference every
+non-compose deployer copies — and fails on a missing pass-through, a diverged default
+or a variable missing from that reference. It runs on **every `./gradlew build`**, not
+when someone remembers to run it.
 
 ### 6.3A Promotion: a receiver deployment (055)
 
@@ -277,26 +289,29 @@ A second deployment that receives released content from the first ([Versioning �
 **On the RECEIVER (e.g. uat):**
 
 ```bash
-DATAPIPELINES_DEPLOYMENT_NAME=uat
-DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=false          # a receiver never authors (D7)
+DATAPIPELINES_ENV=uat
+DATAPIPELINES_POSTURE=hardened                            # authoring defaults OFF here
 DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY=<the shared secret>
 ```
 
 **On the SENDER (e.g. dev):**
 
 ```bash
-DATAPIPELINES_DEPLOYMENT_NAME=dev
+DATAPIPELINES_ENV=dev
+DATAPIPELINES_POSTURE=development                         # this is where content is built
 DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL=https://uat.example.com
 DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY=<the same shared secret>
 ```
 
-Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/.env` with the rest of the secrets, never inline in a compose file or a chart's values.
+`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. Set `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` explicitly if this one box must do both ([Environments §1](environments.md#1-why-two-variables)).
+
+Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/secrets.env` with the rest of the secrets, never inline in a compose file or a chart's values.
 
 What each setting buys, and what goes wrong without it:
 
 | Setting | Consequence if wrong |
 |---|---|
-| `authoring-enabled: false` on the receiver | With it `true`, promotion into it is **refused** (`pipeline.promotion.target_is_authoring`) — deliberately, because drafts belong in the authoring environment. Startup also REFUSES on a receiver that already holds drafts, naming them ([Configuration §7](configuration.md#7-config-validation)) |
+| `posture: hardened` (or an explicit `authoring-enabled: false`) on the receiver | With it `true`, promotion into it is **refused** (`pipeline.promotion.target_is_authoring`) — deliberately, because drafts belong in the authoring environment. Startup also REFUSES on a receiver that already holds drafts, naming them ([Configuration §7](configuration.md#7-config-validation)) |
 | `server-key` on the receiver | **Absent means promotion is refused, always.** Fail closed: a deployment that never configured a key does not silently accept pushes |
 | `target.base-url` + `target.server-key` on the sender | A base-url without a key **refuses startup**, naming both. A key that does not match the receiver's gets `401 auth.promotion.key_invalid` at push time |
 | Matching workspace NAMES on both | Promotion addresses workspaces by name (names are a global namespace; ids are not). A workspace that does not exist on the receiver is `404 workspace.not_found` — create it there first |
@@ -533,9 +548,9 @@ LICENSE and NOTICE files at repo root.
 
 ---
 
-## Appendix A: Reference docker-compose.yml Sketch
+## Appendix A: Reference compose.yml Sketch
 
-This sketch **boots** — it satisfies every §5.1 startup requirement. Removing any of the marked items produces a container that exits during context startup, not one that runs degraded.
+This sketch **boots** — it satisfies every §5.1 startup requirement. Removing any of the marked items produces a container that exits during context startup, not one that runs degraded. `deploy/compose.yml` is the real file; every secret below comes from `deploy/secrets.env` under **the same name the app binds**, so the same file is sourceable by a bare `java -jar`, a systemd `EnvironmentFile` or a Kubernetes `Secret` ([Environments §4](environments.md#4-loaders)).
 
 ```yaml
 services:
@@ -546,18 +561,18 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
       SPRING_DATASOURCE_USERNAME: datapipelines
-      SPRING_DATASOURCE_PASSWORD: ${METADATA_DB_PASSWORD}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
 
       DATAPIPELINES_REDIS_HOST: redis
       # REQUIRED whenever redis runs with --requirepass. Must be the SAME value
       # the redis service below is started with, or every Redis call fails at runtime.
-      DATAPIPELINES_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DATAPIPELINES_REDIS_PASSWORD: ${DATAPIPELINES_REDIS_PASSWORD}
 
       # REQUIRED, no fallback. Generate once: openssl rand -base64 32
-      DATAPIPELINES_JWT_SECRET: ${JWT_SECRET}
+      DATAPIPELINES_JWT_SECRET: ${DATAPIPELINES_JWT_SECRET}
       # REQUIRED, no fallback. Exactly 32 bytes base64: openssl rand -base64 32
       # Losing this makes every stored datasource credential unrecoverable.
-      DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      DATAPIPELINES_DB_ENCRYPTION_KEY: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
 
       # REQUIRED: at least ONE authentication method (ConfigValidator §7) — an OIDC
       # provider configured below, or local accounts (auth.md §5A: set
@@ -580,7 +595,7 @@ services:
     environment:
       POSTGRES_DB: datapipelines
       POSTGRES_USER: datapipelines
-      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -591,7 +606,7 @@ services:
     # idempotency keys, and cancellation flags. Same password as the app above.
     command: >
       redis-server
-      --requirepass ${REDIS_PASSWORD}
+      --requirepass ${DATAPIPELINES_REDIS_PASSWORD}
       --maxmemory 512mb
       --maxmemory-policy noeviction
     restart: unless-stopped
@@ -633,40 +648,45 @@ an engineer spins up exactly the data they need:
 
 | Family | Flag / profile | What you get |
 |---|---|---|
-| **nyc** (mobility) | `--demo-nyc` / `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
-| **trade** (trade/v2) | `--demo-trade` / `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
+| **nyc** (mobility) | `--demo nyc` / profile `demo-nyc` | NYC TLC yellow-taxi trips on Postgres (~4.9M sampled rows, plus rollups), NOAA weather on MySQL, TLC reference on SQLite — 3 datasources + 2 example pipelines |
+| **trade** (trade/v3) | `--demo trade` / profile `demo-trade` | US Census monthly imports/exports at HS-6 grain on **DuckDB** (2.4M rows), UN Comtrade mirror statistics on MySQL, Federal Reserve H.10 exchange rates on SQLite — 3 datasources + 3 example pipelines |
 
 Both together is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
 
 ### One command
 
-The published artifacts live at
-`https://datapipelines-co.s3.amazonaws.com/sample-data/mobility/v5/` and
-`https://datapipelines-co.s3.amazonaws.com/sample-data/trade/v4/` (us-east-1;
-app.sh defaults to these). For the raw compose path, fill in the `SAMPLE_*`
-block of [`deploy/.env.example`](../deploy/.env.example) — the base URLs, the
-versions, the `SAMPLE_*_ON` markers for the families you want, and the demo
-login's passwords — then:
+The base URLs and the pinned versions live in **`deploy/env/demo.env`**, which is
+tracked — a data change is a new version directory and a commit, so what a
+deployment loads is visible in the repository. From a checkout that builds its own
+image, the whole thing is:
 
 ```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+./app.sh --start --demo nyc,trade
+```
+
+For the raw compose path, set the family ON markers your invocation wants and pass
+the same env files `app.sh` does — secrets last:
+
+```bash
+SAMPLE_NYC_ON=1 SAMPLE_TRADE_ON=1 docker compose \
+  -f deploy/compose.yml -f deploy/compose.local-build.yml \
+  --env-file deploy/env/posture/development.env \
+  --env-file deploy/env/demo.env \
+  --env-file deploy/secrets.env \
   --profile demo-nyc --profile demo-trade up -d --wait
 ```
 
-That is the whole thing. `--wait` returns when the app is healthy, and by then
-the artifacts have been downloaded, every checksum verified, the databases
-restored, the SELECT-only demo login created, and the families' datasources
-registered. From a checkout that builds its own image:
+`--wait` returns when the app is healthy, and by then the artifacts have been
+downloaded, every checksum verified, the databases restored, the SELECT-only demo
+login created, and the families' datasources registered.
 
-```bash
-./app.sh --start --demo-nyc --demo-trade
-```
-
-Either family flag also builds the jar with `-Pmysql` (see the driver note
-below). `./app.sh --stop` and `--status` take the same flags, so the demo
-services are not left running invisibly. The old `--demo` flag is gone
-(2026-09-04, the two-family split): pass the family you actually want.
+Either family also builds the jar with `-Pmysql` (see the driver note below).
+`./app.sh --stop` and `--status` take the same `--demo` list, so the demo services
+are not left running invisibly. **Demo is a flag, not an environment**
+([Environments §5](environments.md#5-demo)): `DATAPIPELINES_DEMO` is the source of
+truth, `--demo` merely sets it, and the `hardened` posture refuses it at boot. The
+per-family `--demo-nyc` / `--demo-trade` switches are gone.
 
 **MySQL driver.** MySQL Connector/J is GPL with a FOSS exception and is *not* in
 the default build (§3.5, [Datasources §10.2](datasources.md#102-strategy)). The
@@ -678,23 +698,21 @@ Build with the driver:
 ./gradlew -Pmysql :modules:app:bootJar && docker build -t datapipelines:local .
 ```
 
-or drop the jar into `lib/`. `./app.sh --start --demo-nyc [--demo-trade]` does
-the `-Pmysql` build for you.
+or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade]` does the
+`-Pmysql` build for you.
 
 ### Point an agent at it — three steps
 
-1. **Log in** at `http://localhost:8080` with the **local account**
-   `demo-admin@demo.local` — the demo needs **no OIDC client at all**
-   ([Auth §5A](auth.md#5a-local-password-accounts-optional)); the app asks
-   you to set a new password on first sign-in. (An OIDC provider configured in
-   `deploy/.env` works too.) The **password depends on what your first
-   `./app.sh --start` scaffolded**: with Google creds already in `.env.local`
-   it is the demo seed `demo-admin`; on a clean checkout `app.sh` scaffolds
-   local accounts FIRST (a no-OIDC machine cannot start without them) with a
-   GENERATED one-time password, which beats the demo file's seed — read it
-   back with `grep DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD deploy/.env`
-   (it was also printed once when `deploy/.env` was written). The first login
-   provisions your personal workspace and seeds the example pipelines into it.
+1. **Log in** with the account `./app.sh --start` prints. The demo needs **no OIDC
+   client at all** ([Auth §5A](auth.md#5a-local-password-accounts-optional)): local
+   password accounts are enabled and the first admin gets a GENERATED one-time
+   password, written to `deploy/secrets.env` at first scaffold and forced to change
+   at first sign-in. `app.sh` reads the seeded account back **out of the database**
+   after the stack is healthy and prints the login that actually exists — the seed
+   fires once, at row creation, so a `DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL`
+   changed later names an account that was never created ([Environments
+   §8](environments.md#8-first-login)). The first login provisions your personal
+   workspace and seeds the example pipelines into it.
 2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
    is shown exactly once.
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
@@ -704,18 +722,15 @@ the `-Pmysql` build for you.
 
 ### What the demo profile turns on
 
-The profile adds a `mysql` service and two one-shot loaders, and points the app
-at the files they place on a read-only volume. It enables **local password
-accounts** with a one-time seed (`demo-admin@demo.local`, forced to change at
-first login — [Auth §5A.2](auth.md#5a2-seeding-the-first-admin)), so the demo
-needs no OIDC client. The seed value is `demo-admin` **when the demo env file
-supplies it** — i.e. when your first `./app.sh --start` found Google creds and
-did not scaffold a generated password into `deploy/.env`. On a clean checkout
-`app.sh` enables local accounts itself at first scaffold (a machine with no
-OIDC client cannot start otherwise) with a GENERATED bootstrap password, and
-`deploy/.env` takes precedence over the demo file — that generated password,
-not `demo-admin`, is what logs you in (see the three steps above for reading it
-back). It also sets the §7 demo posture: `auto-per-user` provisioning (every
+The profiles add a `mysql` service and the families' one-shot loaders, and point
+the app at the files they place on a read-only volume. `deploy/env/demo.env`
+enables **local password accounts** so the demo needs no OIDC client, and names
+the account the credential lands on; the password itself is a secret and is
+GENERATED into `deploy/secrets.env` — never a constant in a tracked file, on an
+app that binds every interface ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)).
+There is now exactly ONE place the credential is written and ONE place it is read
+back from, which is why `app.sh` can print a login that works. It also sets the §7
+demo posture: `auto-per-user` provisioning (every
 visitor gets their own workspace) and `member-datasources-enabled=false` (an
 open datasource form on a public server is an SSRF and port-scan primitive —
 demo users get the seeded datasources only). Without `--profile demo` none of
@@ -825,7 +840,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-09-06 | v1.12 | mobility v5 + trade v4 (077 mandatory folders) | Both artifact sets republish with every template id under a folder (`nyc/mobility/…`, `nyc/reference/…`, `nyc/weather/…`, `trade/…`) — 13 of 25 demo templates were flat and are refused by 077's rule at seed time. Data files unchanged in content. Pins → `SAMPLE_VERSION=v5`, `SAMPLE_TRADE_VERSION=v4`; `check-published.sh v5` / `--family trade v4` byte-identical on publish. |
+| 2026-09-06 | v1.13 | mobility v5 + trade v4 (077 mandatory folders) | Both artifact sets republish with every template id under a folder (`nyc/mobility/…`, `nyc/reference/…`, `nyc/weather/…`, `trade/…`) — 13 of 25 demo templates were flat and are refused by 077's rule at seed time. Data files unchanged in content. Pins → `SAMPLE_VERSION=v5`, `SAMPLE_TRADE_VERSION=v4`; `check-published.sh v5` / `--family trade v4` byte-identical on publish. |
+| 2026-09-05 | v1.12 | 075 environments and posture | **[Environments](environments.md) joins the spec set** — the operator page for `DATAPIPELINES_ENV` (the org's label) and `DATAPIPELINES_POSTURE` (`development` \| `hardened`), with the normative posture table, the environment-variable contract, and loader recipes for Compose, a bare JAR, systemd, Kubernetes, ECS and Nomad. The `deploy/` layout is renamed with no shims: `docker-compose.yml` → **`compose.yml`**, `docker-compose.local.yml` → **`compose.local-build.yml`**, `docker-compose.dev.yml` → **`compose.laptop-infra.yml`**; `deploy/application.yml` is **folded away** (every line was already in the image's own `application.yml` behind the same placeholders) and orgs wanting a yml use `SPRING_CONFIG_ADDITIONAL_LOCATION`; `deploy/.env`/`.env.demo`/`.env.example` and the root `.env.example` are replaced by tracked `deploy/env/**` (posture, demo, laptop, and `example.env` — every variable with its shipped default) plus git-ignored `deploy/secrets.env`. Secrets carry **the app's own variable names** (`DATAPIPELINES_JWT_SECRET`, `SPRING_DATASOURCE_PASSWORD`, …) instead of compose-only renames, so one file feeds every loader. §6.3A's promotion example is now env+posture. Demo is a **flag**: `DATAPIPELINES_DEMO=nyc,trade` (`./app.sh --demo nyc,trade`) replaces `--demo-nyc`/`--demo-trade`, with the versions in tracked `deploy/env/demo.env`, and `hardened` refuses it. `scripts/compose-env-audit.sh` now runs on every `./gradlew build` (it had drifted: 074's three `endpoints` keys shipped with no compose pass-through) and also checks `deploy/env/example.env`. Compose volume names derive from `COMPOSE_PROJECT_NAME`, so `-p <lane>` alone scopes a second copy's data. |
 | 2026-09-05 | v1.11 | mobility v4 + trade v3 (067 pipeline folders) | Both artifact sets republish with `examples.json` carrying the folder convention (`nyc/…`, `trade/…`); data files unchanged in content (every pinned table checksum re-derived identical; the DuckDB file's bytes differ as DuckDB files are not byte-deterministic). Pins move to `SAMPLE_VERSION=v4`, `SAMPLE_TRADE_VERSION=v3`. Until an operator moves the pin, a fresh demo seeds the old flat names — expected, version pins are operator config. |
 | 2026-09-04 | v1.10 | trade/v2 — Binance out, Federal Reserve H.10 in | The trade family republishes as **trade/v2**. The Binance market slice is **removed entirely** (its Vision terms are CC BY-NC-SA with an explicit no-hosting-of-derivative-feeds clause and a separate enterprise licence for commercial use — owner ruling 2026-09-04); the SQLite artifact is now `fx_rates.db`, built from the **Federal Reserve H.10** daily noon buying rates and their G.5 monthly averages for the five reconciled partners' currencies (a US Government work — no copyright), and the datasource is renamed `sample-market` → **`sample-fx`**. A third example pipeline, `imports_in_partner_currency`, restates US import value in the partner's own money across three engines (DuckDB facts → SQLite rates → H2 join). Two licence conditions that were never in the tree now ship with the data: the **verbatim Census notice** ("This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.") in the family README, the `sample-trade-us` datasource description and the manifest's Census provenance entry, and the **UN Comtrade citation** with the under-100,000-record note. `check-published.sh` learns `--family trade`; `SAMPLE_TRADE_VERSION` defaults to `v2` in `app.sh`, `deploy/.env.example` and the compose services. **An existing `deploy/.env.demo` pinning `SAMPLE_TRADE_VERSION=v1` is not rewritten by `app.sh` (version pins are operator config) — edit it, or the loader fetches a version whose market object no longer exists.** |
 | 2026-09-04 | v1.10 | mobility v3 (070 showcase pipelines) | **Mobility artifact v3 published** — v2's data files byte-identical, `examples.json` now 17 templates / 6 pipelines (the 070 showcase set, baselined by `check-baselines.sh`); `SAMPLE_VERSION` default → v3. Operators with an existing `.env.demo` set `SAMPLE_VERSION=v3` by hand — `app.sh` never overwrites present keys. |

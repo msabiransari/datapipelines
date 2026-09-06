@@ -7,7 +7,7 @@
 # NO SECRETS HERE. Every credential is a ${VAR} placeholder resolved against the
 # app process's environment by the app's OWN substitution (§8A.2) — not Spring's:
 # this file is runtime data read after the context is built. Supply the values in
-# deploy/.env (see deploy/.env.example); deploy/sample-data/load.sh creates the
+# deploy/secrets.env (see deploy/env/secrets.env.example); deploy/sample-data/load.sh creates the
 # very same login on each engine before the app starts.
 #
 # ONLY the bare ${VAR} form is supported. `${VAR:-default}` is NOT a placeholder

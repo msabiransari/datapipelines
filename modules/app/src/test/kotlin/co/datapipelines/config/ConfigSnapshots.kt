@@ -57,4 +57,19 @@ internal object ConfigSnapshots {
             activeProfiles = emptySet(),
             vendoredThemes = setOf("saas", "high-contrast"),
         )
+
+    /**
+     * The same baseline under the OTHER posture (§3.23, 075): a named environment that
+     * declared `hardened`. Every value in [valid] already satisfies the hardened rules —
+     * non-loopback metadata DB and Redis, a fully-configured OIDC provider, no seeded
+     * credential, no demo — which is the point: `hardened` is not a different configuration,
+     * it is the same one with the shortcuts refused. A posture test that had to change five
+     * other fields to go green would be testing the fixture, not the rule.
+     *
+     * The `hardened` PROFILE is active here because that is what a real hardened boot looks
+     * like — `application.yml` derives `spring.profiles.active` from the posture, and §7
+     * refuses a hardened posture whose profile did not load (its DEFAULTS would silently be
+     * the other column's).
+     */
+    fun hardened() = valid().copy(env = "prod", posture = "hardened", activeProfiles = setOf("hardened"))
 }

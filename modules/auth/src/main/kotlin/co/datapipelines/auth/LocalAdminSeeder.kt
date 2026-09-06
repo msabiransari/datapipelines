@@ -75,6 +75,27 @@ class LocalAdminSeeder(
             return
         }
 
+        // 075 §G — the configured address has no row. Before creating one, ask whether a
+        // PREVIOUS boot already seeded a DIFFERENT address: seeding is idempotent by design,
+        // so a changed variable is carried by the container and never reaches the database,
+        // and the deployment then runs a login nobody was told about. Do NOT auto-reseed —
+        // that would silently create a SECOND admin and leave the first one live. Say what
+        // is true and what to do about it, and leave the database alone.
+        val seeded = userRepository.findSeededBootstrapActor()
+        if (seeded != null) {
+            log.warn(
+                "event=auth.local.bootstrap_mismatch configured={} seeded={} " +
+                    "message=\"datapipelines.auth.bootstrap-admin-email names an account this deployment has " +
+                    "never seeded; the local admin credential was seeded once, onto the account named by " +
+                    "seeded=, and a later change to the variable does not re-seed (auth.md §5A.2). Sign in as " +
+                    "the seeded account and reset the other from Admin -> Users, or start from an empty " +
+                    "database. NOTHING was changed by this boot.\"",
+                email,
+                seeded.email,
+            )
+            return
+        }
+
         // The ONE creation path (§4.4): insert + bootstrap-admin grant + its audit,
         // with the 'bootstrap' provider placeholder the first OIDC login completes.
         val user = userService.provisionBootstrapActor()

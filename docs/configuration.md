@@ -99,6 +99,8 @@ The deployment defines these env var names in `application.yml` — they're not 
 | `datapipelines.auth.local.bootstrap-password` | (none) | Plaintext alternative to the hash form, accepted for zero-setup demos: always sets `must_change_password`, is never logged, and startup is refused when both forms are set |
 | `datapipelines.auth.local.lockout.max-failures` | `5` | Consecutive failed local logins that lock the account — per-account, complementing the per-IP `rate-limit.login-per-minute`, which cannot stop a slow spray against one account |
 | `datapipelines.auth.local.lockout.duration-minutes` | `15` | How long a locked account refuses local login. An admin unlock or password reset clears the lock early |
+| `datapipelines.auth.cookie-secure` | (empty) | The `Secure` flag on the cookies this deployment mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`). **Empty = derived from `base-url`'s scheme**: an explicit `http://` base-url drops the flag so local login works over plain HTTP, anything else keeps it. `true`/`false` pin it. The `hardened` posture ships `true` (§3.23) — a hardened deployment runs https, and a dropped flag there puts the session cookie on the wire |
+| `datapipelines.auth.allow-local-only` | `false` | The operator's **explicit acknowledgement** that a `hardened` deployment has no OIDC provider configured and authenticates with local password accounts only. Inert under `development`. Under `hardened`, startup is refused unless either an OIDC provider is fully configured or this is `true`, and setting it logs the acknowledgement (§3.23, §7) |
 
 ### 3.5 Results
 
@@ -231,12 +233,13 @@ Both values are **comma-separated LISTS of paths** (one entry per sample-data fa
 
 ### 3.19 Deployment
 
-The deployment-role settings ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) — grouped one-per-concern like `auth`, `executor`, `staging`. **`name` is a LABEL only**: nothing branches on it (a single-server deployment honestly writes `prod` and must not be treated differently for it — the no-branching rule is pinned by a guard test). It is logged once at startup beside the authoring state, and is deliberately not exposed on `/info`.
+The deployment-role settings ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) — grouped one-per-concern like `auth`, `executor`, `staging`.
+
+> **Renamed in 075.** `datapipelines.deployment.name` — the deployment LABEL — is now **`datapipelines.env`** (`DATAPIPELINES_ENV`), documented in §3.23 beside the posture it is deliberately separate from. The old key is honoured for **one release**: set alone it still names the deployment and startup logs `event=config.deployment_name_deprecated`; set together with `datapipelines.env` and disagreeing, startup is refused naming both. See [Environments](environments.md).
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `datapipelines.deployment.name` | `DATAPIPELINES_DEPLOYMENT_NAME` | (empty) | The deployment's label (e.g. `dev`, `prod`). No behaviour depends on it — its only consumer is the startup posture log line. A later round may surface it to signed-in users in the UI banner |
-| `datapipelines.deployment.authoring-enabled` | `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` | `true` | The authoring **capability**. When `false`, every pipeline/template authoring write (create, update/draft, release, discard, delete) is refused with `pipeline.authoring.disabled` / `template.authoring.disabled` — fail-closed, naming the reason. Reads, execution and **import are unaffected** (promotion imports RELEASED versions; that is the one writer a receiver must accept). Startup REFUSES if drafts still exist while this is `false` (§7) |
+| `datapipelines.deployment.authoring-enabled` | `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` | `true` (`false` under the `hardened` posture — §3.23) | The authoring **capability**. When `false`, every pipeline/template authoring write (create, update/draft, release, discard, delete) is refused with `pipeline.authoring.disabled` / `template.authoring.disabled` — fail-closed, naming the reason. Reads, execution and **import are unaffected** (promotion imports RELEASED versions; that is the one writer a receiver must accept). Startup REFUSES if drafts still exist while this is `false` (§7) |
 
 #### Promotion (the deployment-to-deployment channel)
 
@@ -296,6 +299,38 @@ The timeout bounds for a released pipeline published as a `GET` endpoint under `
 
 **There is deliberately no `page-rows-max` key here.** The `DP-Result-Page-Rows` request header is **one contract** across a published endpoint and `POST /pipelines/{id}/execute`, and both clamp it to `datapipelines.result.page-max-rows` (§3.5). A second key that had to equal the first would be a second authority for one bound, and an operator who retuned one and not the other would get two different clamps on one documented header.
 
+### 3.23 Environment and posture
+
+The two variables an organisation sets (round 075). [Environments](environments.md) is the page written for the DevOps engineer who deploys this; this section is the key reference.
+
+**The environment's NAME belongs to the org; the POSTURE belongs to the product.** Organisations have `dev`, `qa`, `uat`, `perf`, `sandbox-eu`, `prod` — any names, any count — and the product must never branch on one: a single-server user honestly writes `prod` as their label, and the first `if (env == "prod")` anywhere locks them out of authoring on the only server they have. What the product branches on is a **closed, two-valued posture** with the documented semantics below, and the org maps each of its environments onto one.
+
+| YAML path | Env var | Default | Description |
+|---|---|---|---|
+| `datapipelines.env` | `DATAPIPELINES_ENV` | `local` | The org's label for this deployment. Grammar: `[a-z0-9][a-z0-9_-]{0,31}` — lowercase letters, digits, `_` and `-`, at most 32 characters. It is the boot line's identity and the `source_env` a promotion receiver records; **nothing branches on it** (pinned by a guard test) and it is deliberately not on `/info`, which is permitAll |
+| `datapipelines.posture` | `DATAPIPELINES_POSTURE` | (none) | The product's stance: `development` or `hardened`. **There is no shipped default.** §7 supplies `development` only when `datapipelines.env` is `local`; any other environment with no posture refuses to start, naming both variables — explicit beats guessed |
+| `datapipelines.demo` | `DATAPIPELINES_DEMO` | (empty) | The sample-data families to load out of the box, comma-separated: `nyc`, `trade`. Empty = off. **Demo is a flag, not an environment**: it is out-of-the-box evaluation inside a `development` environment, and a non-empty value is REFUSED under `hardened` |
+
+#### The posture table (normative)
+
+| Rule | `development` | `hardened` |
+|---|---|---|
+| `datapipelines.deployment.authoring-enabled` default | `true` | **`false`** — a promotion receiver; explicitly settable either way |
+| `datapipelines.demo` | allowed | **refused** at boot |
+| local bootstrap password (`datapipelines.auth.local.bootstrap-password[-hash]`) | allowed | **refused** at boot. Local accounts themselves stay allowed — a seeded credential is what has no place in a hardened deployment |
+| loopback metadata DB / Redis | allowed | **refused** at boot |
+| `datapipelines.auth.cookie-secure` default | derived from `base-url`'s scheme | **`true`** |
+| OIDC | optional | **required unless `DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true`** (an explicit acknowledgement, logged) |
+| boot line | `event=config.posture env=<env> posture=development authoring=on demo=nyc,trade` | same shape |
+
+#### The posture IS the Spring profile
+
+`spring.profiles.active` is **derived from `DATAPIPELINES_POSTURE`** in `application.yml`, and `application-development.yml` / `application-hardened.yml` carry the posture's non-secret defaults (the first two rows above). One variable therefore gives every loader — Compose, a bare `java -jar`, systemd, Kubernetes, ECS, Nomad — the right defaults, and nothing the product needs lives only in a launcher. Setting `SPRING_PROFILES_ACTIVE` yourself is unnecessary; a value that disagrees with the posture refuses startup (§7) rather than silently loading one posture's defaults while every posture RULE judges the other. 075 renamed the `dev` profile to `development`; a deployment still asking for `dev` is refused, not ignored.
+
+#### Nothing lives only in a compose file
+
+The contract is environment variables. `deploy/env/example.env` lists every `DATAPIPELINES_*` variable this build binds with its shipped default, and `scripts/compose-env-audit.sh` — which runs on every `./gradlew build` — fails when that file, `deploy/compose.yml` and `application.yml` disagree about which variables exist or what they default to. Secrets are separate from settings: settings are tracked in the repo, and `deploy/secrets.env` (git-ignored) is the only file that holds credentials.
+
 ---
 
 ## 4. Precedence
@@ -303,8 +338,10 @@ The timeout bounds for a released pipeline published as a `GET` endpoint under `
 Resolution order for any key, highest first:
 
 1. Environment variable (via the `${ENV:default}` placeholder).
-2. Active profile YAML (`application-dev.yml`, etc.).
+2. Active profile YAML — the POSTURE file, `application-development.yml` or `application-hardened.yml` (§3.23).
 3. Base `application.yml` default.
+
+Under a loader that assembles env files (`docker compose --env-file`, `set -a; . file`), the files are read in order and the LAST one wins; `app.sh` passes `deploy/env/posture/<posture>.env`, then `deploy/env/demo.env` when demo is on, then `deploy/secrets.env` — secrets last, so a value an operator sets there always wins.
 
 Two documented per-entity overrides sit above global config at runtime (they are data, not config):
 - Pipeline `settings.tempdb.config.max_memory_mb` overrides `datapipelines.staging.h2.max-memory-mb` for that pipeline.
@@ -320,6 +357,10 @@ Complete — a deployment assembled from this block gets the framework wiring (�
 spring:
   application:
     name: datapipelines
+  profiles:
+    # §3.23 — the POSTURE selects the profile that carries its defaults. Empty means no
+    # profile, and the base defaults below ARE the `development` column.
+    active: ${DATAPIPELINES_POSTURE:}
   datasource:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
@@ -401,6 +442,8 @@ datapipelines:
       lockout:
         max-failures: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_MAX_FAILURES:5}
         duration-minutes: ${DATAPIPELINES_AUTH_LOCAL_LOCKOUT_DURATION_MINUTES:15}
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:}
+    allow-local-only: ${DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY:false}
 
   executor:
     max-parallel-nodes: ${DATAPIPELINES_EXECUTOR_MAX_PARALLEL_NODES:4}
@@ -415,7 +458,6 @@ datapipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}
 
   deployment:
-    name: ${DATAPIPELINES_DEPLOYMENT_NAME:}
     authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
     promotion:
       server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:}
@@ -493,6 +535,12 @@ datapipelines:
     timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
     timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
     timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}
+  # §3.23 — appended after the whole datapipelines: tree, never inserted between two of
+  # its children (a 2-space block placed mid-tree closes its predecessor and silently
+  # re-parents whatever follows it).
+  env: ${DATAPIPELINES_ENV:local}
+  posture: ${DATAPIPELINES_POSTURE:}
+  demo: ${DATAPIPELINES_DEMO:}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -501,43 +549,50 @@ datapipelines:
 
 ---
 
-## 6. Dev Profile (`application-dev.yml`)
+## 6. Posture Profiles (`application-development.yml` / `application-hardened.yml`)
 
-Overrides for local development. Activated via `--spring.profiles.active=dev`.
+The POSTURE's non-secret defaults (§3.23). `spring.profiles.active` is derived from `DATAPIPELINES_POSTURE` in `application.yml`, so setting that one variable loads the right file under every loader — Compose, a bare `java -jar`, systemd, Kubernetes. Setting `SPRING_PROFILES_ACTIVE` yourself is unnecessary, and a value that disagrees with the posture refuses startup (§7).
 
-**No literal secrets, even in dev (2026-08-07 security review):** the dev profile references `${DATAPIPELINES_JWT_SECRET}` and `${DATAPIPELINES_DB_ENCRYPTION_KEY}` exactly like production — the values come from the developer's git-ignored `.env.local` ([DEVELOPMENT.md §4](../DEVELOPMENT.md), generated with `openssl rand -base64 32`). Earlier revisions embedded working literals here; those were packaged into every production jar (`src/main/resources`), meaning one stray `SPRING_PROFILES_ACTIVE=dev` in a production manifest would have run real infrastructure on publicly-known keys — forgeable admin JWTs and decryptable datasource credentials. (The literals were also invalid: the "32-byte" AES key decoded to 28 bytes, and the JWT secret was not legal base64 — either would have failed the §7 validator.) The `ConfigValidator` additionally refuses to start when the `dev` profile is active against non-localhost infrastructure (§7).
+**These files carry POSTURE, never INFRASTRUCTURE.** Before 075 this section documented `application-dev.yml`, which was really a LAPTOP file: `localhost:5434`, console logging, one developer's host ports. An org's `dev` environment on Kubernetes runs the `development` posture too and must not inherit any of that. The laptop's values moved to `deploy/env/laptop.env`, which a laptop loads like any other env file ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md)).
+
+**No literal secrets, in either file (2026-08-07 security review):** both ship inside every production jar (`src/main/resources`), so a working literal there means one stray `SPRING_PROFILES_ACTIVE` on a production manifest runs real infrastructure on publicly-known keys — forgeable admin JWTs and decryptable datasource credentials. Every secret is a placeholder resolved from the deployment's own environment, in every posture.
 
 ```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5434/datapipelines   # host port 5434 — see note below
-    username: datapipelines
-    password: datapipelines
-
+# application-development.yml
 datapipelines:
-  redis:
-    host: localhost
-    port: 6381
-
-  jwt:
-    secret: ${DATAPIPELINES_JWT_SECRET}         # from .env.local — never a literal, even in dev (see note below)
-
-  db:
-    encryption-key: ${DATAPIPELINES_DB_ENCRYPTION_KEY}   # from .env.local — never a literal, even in dev
-
+  deployment:
+    authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}
   auth:
-    allowlist:
-      domains: ""                  # open provisioning in dev
-
-  ui:
-    theme: saas
-
-  observability:
-    logging:
-      format: console               # human-readable in dev
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:}
 ```
 
-> **Dev host ports (2026-08-12):** the dev Postgres listens on host port **5434** and dev Redis on **6381** — not the universal defaults 5432/6379, which collide with other local stacks on developer machines (Postgres.app/brew default to 5432). The host mapping lives in `deploy/docker-compose.dev.yml`; these YAML values must stay in sync with it and with DEVELOPMENT.md §2/§4. In production, `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` are operator-set and unaffected.
+```yaml
+# application-hardened.yml
+datapipelines:
+  deployment:
+    authoring-enabled: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:false}
+  auth:
+    cookie-secure: ${DATAPIPELINES_AUTH_COOKIE_SECURE:true}
+```
+
+Everything else the posture means is a §7 REFUSAL, which no YAML file can carry: demo, a seeded bootstrap credential, loopback infrastructure and a missing OIDC provider are all refused under `hardened`. The full table is §3.23.
+
+The laptop's own settings, for reference ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md), `deploy/env/laptop.env`). It is loaded **last** on that path — the one inversion of the secrets-last rule, because it names a different database from the one `deploy/secrets.env`'s generated password belongs to:
+
+```bash
+DATAPIPELINES_ENV=local
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5434/datapipelines
+SPRING_DATASOURCE_USERNAME=datapipelines
+SPRING_DATASOURCE_PASSWORD=datapipelines
+DATAPIPELINES_REDIS_HOST=localhost
+DATAPIPELINES_REDIS_PORT=6381
+DATAPIPELINES_REDIS_PASSWORD=
+DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT=console
+DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=
+DATAPIPELINES_AUTH_BASE_URL=http://localhost:8080
+```
+
+> **Dev host ports (2026-08-12):** the laptop's Postgres listens on host port **5434** and Redis on **6381** — not the universal defaults 5432/6379, which collide with other local stacks on developer machines (Postgres.app/brew default to 5432). The host mapping lives in `deploy/compose.laptop-infra.yml`; `deploy/env/laptop.env` must stay in sync with it and with DEVELOPMENT.md §2/§4. In production, `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` are operator-set and unaffected.
 
 ---
 
@@ -561,13 +616,16 @@ On startup, the app validates:
 - `datapipelines.bootstrap.datasources-file` is not set without `datapipelines.auth.bootstrap-admin-email` (§3.18) — the violation names both keys.
 - `datapipelines.bootstrap.examples-file` is not set while `datapipelines.workspaces.provisioning-mode` is anything but `auto-per-user` (§3.18) — the violation names both keys. Only `auto-per-user` provisions the personal workspace the examples are seeded into, so any other mode (the shipped default included) leaves the configured file permanently unseeded. A mode that is misspelled is reported by the mode check alone, not twice.
 - No OIDC provider is **named** `bootstrap`, `local` or `system`. Those are the `users.provider` values the system writes for identities it creates itself (§6.1 bootstrap actor, §5A local accounts, [Auth §4.5](auth.md#45-the-system-service-account-r7) system service account), and a provider's configured name is written to that column verbatim — an external provider under any of them would be indistinguishable from them, and for `system` that indistinguishability is the whole of the account's safety argument. The reservation is case-insensitive and applies to an entry with a blank `client-id` too.
-- **Dev-profile guard:** when the `dev` profile is active and any production indicator is present (non-localhost `spring.datasource.url`, non-localhost `datapipelines.redis.host`, or a `prod`/`production` profile also active), startup fails with a clear error. Dev convenience settings must never run against production infrastructure.
+- **Environment name (§3.23):** `datapipelines.env` matches `[a-z0-9][a-z0-9_-]{0,31}`. The deprecated `datapipelines.deployment.name` alias: set alone it still names the deployment and startup logs `event=config.deployment_name_deprecated`; set together with `datapipelines.env` and disagreeing, startup is REFUSED naming both keys.
+- **Posture (§3.23):** `datapipelines.posture` is `development` or `hardened`. A named environment with **no** posture refuses to start, naming both variables — the sole exception is the environment named `local`, which resolves to `development`. Explicit beats guessed: the product cannot infer a stance from a name it is forbidden to branch on.
+- **Posture / profile alignment (§3.23):** `spring.profiles.active` is derived from the posture, so setting `SPRING_PROFILES_ACTIVE` to a DIFFERENT posture refuses startup naming both — otherwise one posture's defaults would load while every posture rule below judged the other. The `dev` profile was renamed `development` in 075; a deployment still asking for `dev` is refused rather than silently getting no posture file at all.
+- **The `hardened` posture (§3.23),** each refusal naming the variable and the posture: `datapipelines.demo` must be empty; no local bootstrap credential may be set (`bootstrap-password` or `bootstrap-password-hash` — local accounts themselves stay allowed); `spring.datasource.url` and `datapipelines.redis.host` must not be loopback (039's dev-profile guard, inverted and reused — "dev convenience must never touch production infrastructure" is the same fact as "a hardened deployment does not run against a laptop's database"); and at least one OIDC provider must be fully configured unless `datapipelines.auth.allow-local-only=true`, which is logged as `event=config.auth_local_only`.
 - **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
 - **Redis auth warning:** when `datapipelines.redis.password` is empty and `datapipelines.redis.host` is not loopback, log a structured WARN (production Redis holds materialized caller results — [Deployment §7.3](deployment.md#9-security-hardening-checklist-deployment)).
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
-- **Deployment posture (§3.19):** the deployment `name` and the authoring state are logged once at boot (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
+- **The boot line (§3.23):** `event=config.posture env=<env> posture=<posture> authoring=<on|off> demo=<families>` is logged once (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
-The validator's own test suite must assert that the documented dev setup (env vars from `.env.local`) passes the **production** rules — so a broken dev value gets fixed at the data, never by weakening the check.
+The validator's own test suite must assert that the documented laptop setup (`deploy/env/posture/development.env` + `deploy/env/laptop.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
 
 Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop startup with a clear log message listing every missing/invalid key.
 
@@ -577,6 +635,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-05 | v1.13 | 075 environments and posture | New **§3.23 Environment and posture**: `datapipelines.env` (`DATAPIPELINES_ENV`, default `local` — the ORG's label, renamed from §3.19's `datapipelines.deployment.name`, which survives one release as a WARNing alias), `datapipelines.posture` (`development` \| `hardened`, no default — only the env named `local` gets one for free) and `datapipelines.demo` (a FLAG: the sample-data families; refused under `hardened`), with the normative posture table. §3.4 gains `cookie-secure` (empty = derived from base-url's scheme; `hardened` ships `true`) and `allow-local-only` (the explicit no-OIDC acknowledgement). §6 is now the POSTURE profiles — `application-dev.yml` was really a laptop file and its infrastructure moved to `deploy/env/laptop.env`; `application-development.yml` and `application-hardened.yml` carry the posture defaults, and `spring.profiles.active` is derived from `DATAPIPELINES_POSTURE`. §7 gains four rules (env grammar + alias, posture required, posture/profile alignment, the hardened refusals) and loses the dev-profile guard, which those refusals subsume. §4 and §5 updated. [Environments](environments.md) is the new operator page. |
 | 2026-09-05 | v1.12 | 074 published endpoints | New **§3.22 Published endpoints**: `datapipelines.endpoints.timeout-default-seconds` (30) / `-min-seconds` (1) / `-max-seconds` (300); one new §7 rule (min ≤ default ≤ max, min ≥ 1 — the four report together). Deliberately no `page-rows-max`: `DP-Result-Page-Rows` clamps to `result.page-max-rows` on both surfaces (R-EP4). §5 template block appended after `org:`. |
 | 2026-09-04 | v1.11 | 072 calculators | New **§3.21 Organisation**: `datapipelines.org.currency.name` / `.symbol`, `fiscal-start-date` (`MM-DD`), `week-start`, `timezone` — five keys that enter every execution Context as `org_*` (calculators design §0.1/§0.2, [Pipeline Contract §7.2](pipeline-contract.md#72-whats-in-the-context--one-namespace-five-tiers)). §5 template block and one new §7 validation rule (all four org checks report together; a month name in `fiscal-start-date` is refused with a message naming `MM-DD`) |
 | 2026-09-04 | v1.10 | 068 key-provider seam | New **§3.20 credential key provider**: `datapipelines.db.key-provider` (default `env`, so no deployment needs a config edit), plus the `env` provider's optional `encryption-keys` rotation map and `encryption-key-current`. §2's `encryption-key` row now states that it is key version 1, forever. §5 template and §7 updated — one new validation rule: the provider name must be one this build ships, and that provider's own settings must be present and well-formed (an unknown name short-circuits the rest). |

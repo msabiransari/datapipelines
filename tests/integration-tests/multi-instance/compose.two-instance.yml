@@ -1,17 +1,17 @@
 # 036 two-instance override — see README.md in this directory.
 #
 # Two app services (`app1`, `app2`) on DISTINCT host ports, layered on top of
-# deploy/docker-compose.yml + deploy/docker-compose.local.yml. The base
+# deploy/compose.yml + deploy/compose.local-build.yml. The base
 # `datapipelines` service is simply never started (`up -d postgres redis app1
 # app2`); compose cannot reliably REPLACE its published port across files
 # (ports concatenate), so these are new services duplicating the base service's
 # environment/volumes/depends_on. Any change to the base service's contract in
-# deploy/docker-compose.yml must be mirrored here.
+# deploy/compose.yml must be mirrored here.
 #
 #   docker compose -p mi036 \
-#     -f deploy/docker-compose.yml \
-#     -f deploy/docker-compose.local.yml \
-#     -f tests/integration-tests/multi-instance/docker-compose.two-instance.yml \
+#     -f deploy/compose.yml \
+#     -f deploy/compose.local-build.yml \
+#     -f tests/integration-tests/multi-instance/compose.two-instance.yml \
 #     config
 #
 # `restart: "no"` is load-bearing: the harness kills these containers on
@@ -28,13 +28,13 @@ x-app-common: &app-common
   environment:
     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
     SPRING_DATASOURCE_USERNAME: datapipelines
-    SPRING_DATASOURCE_PASSWORD: ${METADATA_DB_PASSWORD}
+    SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
 
     DATAPIPELINES_REDIS_HOST: redis
-    DATAPIPELINES_REDIS_PASSWORD: ${REDIS_PASSWORD}
+    DATAPIPELINES_REDIS_PASSWORD: ${DATAPIPELINES_REDIS_PASSWORD}
 
-    DATAPIPELINES_JWT_SECRET: ${JWT_SECRET}
-    DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    DATAPIPELINES_JWT_SECRET: ${DATAPIPELINES_JWT_SECRET}
+    DATAPIPELINES_DB_ENCRYPTION_KEY: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
 
     DATAPIPELINES_AUTH_BASE_URL: ${DATAPIPELINES_AUTH_BASE_URL}
 
@@ -46,6 +46,14 @@ x-app-common: &app-common
     DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD: "mi036-onetime"
     DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL: "mi-admin@example.com"
     DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS: ""
+
+    # 075: the two variables. `local` + `development` is what these instances ARE — a
+    # harness stack on loopback Testcontainers-shaped infrastructure — and stating them
+    # here rather than inheriting keeps the override file self-describing, which is the
+    # contract the header asks for.
+    DATAPIPELINES_ENV: "local"
+    DATAPIPELINES_POSTURE: "development"
+    DATAPIPELINES_DEMO: ""
 
     DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: "auto-per-user"
 
@@ -64,12 +72,10 @@ x-app-common: &app-common
     SAMPLE_PG_PASSWORD: ""
     SAMPLE_MYSQL_PASSWORD: ""
   volumes:
-    # Spring Boot's default config search includes the working directory (/),
-    # so this bind supplies the auth section exactly as the base stack does.
-    # ABSOLUTE path required: Compose v5 resolves relative bind sources against
-    # the directory of the file that DECLARES them (this one), not the first -f
-    # file — run.sh exports MI036_REPO_ROOT before any compose invocation.
-    - ${MI036_REPO_ROOT:?run.sh sets MI036_REPO_ROOT}/deploy/application.yml:/application.yml:ro
+    # 075 folded deploy/application.yml away — every line it carried was already in
+    # the image's own application.yml behind the same placeholders. The auth section
+    # these instances need now arrives as the environment variables above, exactly as
+    # it does for the base service.
     - sample-data:/srv/sample:ro
   depends_on:
     postgres:

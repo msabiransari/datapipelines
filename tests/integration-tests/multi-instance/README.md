@@ -42,10 +42,10 @@ byte-identical to `login.html`, `settings/password.html` and
 `UserSettingsController` as they stand. Nothing was changed to make it run.
 
 One real drift DOES exist here and is deliberately left alone: the
-`x-app-common` block in `docker-compose.two-instance.yml` carries ~12 of the
-base service's environment keys, while `deploy/docker-compose.yml` now passes
-~45 (the T32 pass-through contract). The missing keys fall back to the
-`application.yml` defaults the bind-mount supplies, which is why the harness is
+`x-app-common` block in `compose.two-instance.yml` carries ~12 of the
+base service's environment keys, while `deploy/compose.yml` now passes
+~74 (the T32 pass-through contract). The missing keys fall back to the
+`application.yml` defaults inside the image, which is why the harness is
 green — but the "any change to the base service's contract must be mirrored
 here" note below is not currently true. Mirroring them is a change to a working
 harness with no failing symptom, so it is reported rather than made.
@@ -57,8 +57,8 @@ harness with no failing symptom, so it is reported rather than made.
 ```
 
 Prerequisites: the bootJar built (`modules/app/build/libs/datapipelines-app.jar`),
-Docker running, and `deploy/.env` present (the script copies it from the main
-checkout at `/Users/msabir/development/projects/datapipelines/deploy/.env` if
+Docker running, and `deploy/secrets.env` present (the script copies it from the main
+checkout at `/Users/msabir/development/projects/datapipelines/deploy/secrets.env` if
 absent — secrets stay local; the file is git-ignored). The image
 `datapipelines:local-mi036` is built on first run if missing.
 
@@ -68,16 +68,21 @@ The script exits non-zero unless BOTH tests pass, and always tears down with
 
 ## How it is put together
 
-- `docker-compose.two-instance.yml` defines two NEW services (`app1` on
-  host port 18080, `app2` on 18081) layered over `deploy/docker-compose.yml`
-  + `deploy/docker-compose.local.yml`; the base `datapipelines` service is
+- `compose.two-instance.yml` defines two NEW services (`app1` on
+  host port 18080, `app2` on 18081) layered over `deploy/compose.yml`
+  + `deploy/compose.local-build.yml`; the base `datapipelines` service is
   never started. Compose concatenates `ports` across files, so overriding the
   base service's port is unreliable — new services are the robust shape. Their
   environment duplicates the base service's contract; `restart: "no"` is
   load-bearing because the harness kills these containers on purpose.
-- Compose v5 resolves relative bind sources against the file that DECLARES
-  them, so the `application.yml` bind uses `${MI036_REPO_ROOT}`, exported by
-  `run.sh` before every compose invocation.
+- 075 folded `deploy/application.yml` away (its content was already in the image's
+  own `application.yml` behind the same placeholders), so there is no config bind
+  left to resolve; `${MI036_REPO_ROOT}` is still exported by `run.sh` for any future
+  bind, because Compose v5 resolves relative bind sources against the file that
+  DECLARES them, not against the first `-f` file.
+- 075 also replaced compose's implicit `deploy/.env` pickup with an explicit
+  `--env-file deploy/env/posture/development.env --env-file deploy/secrets.env`
+  list, secrets last.
 - Auth: the seeded local admin (`mi-admin@example.com` / one-time
   `mi036-onetime`) is logged in with the CSRF double-submit dance (GET /login
   for the `dp_csrf` cookie + hidden `_csrf`, then POST the form), the forced

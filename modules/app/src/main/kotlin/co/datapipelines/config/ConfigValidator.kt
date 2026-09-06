@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.DeploymentEnv
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.bind.Bindable
@@ -15,7 +16,8 @@ import java.util.Base64
  * A **violation** stops startup: `@PostConstruct` throws, the context fails to refresh,
  * and the log line names every offending key at once so the operator fixes one file,
  * not one key per restart. A **warning** is logged structured and startup continues —
- * §7 defines exactly one of those (passwordless Redis off loopback).
+ * passwordless Redis off loopback, the deprecated executor and deployment-name aliases,
+ * and a hardened deployment's explicit local-accounts-only acknowledgement (§3.23).
  *
  * The checks are pure functions of a [ConfigSnapshot] so the test suite can drive them
  * without a Spring context — including the §7 closing rule that the *documented dev
@@ -49,7 +51,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 19
+        internal const val CHECK_COUNT = 22
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -95,7 +97,12 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
-            checkDevProfileGuard(snapshot, violations)
+            // §3.23 (075) — the four posture rules live in their own file (PostureRules); the
+            // CHECK_COUNT guard counts `check*` across both, so moving them cannot hide one.
+            PostureRules.checkEnvName(snapshot, violations, warnings)
+            PostureRules.checkPosture(snapshot, violations)
+            PostureRules.checkPostureProfileAlignment(snapshot, violations)
+            PostureRules.checkHardenedPosture(snapshot, violations, warnings)
             checkWorkspacesProvisioningMode(snapshot, violations)
             checkWorkspacesOpenJoinMode(snapshot, violations)
             checkExamplesSeederReachable(snapshot, violations)
@@ -402,30 +409,6 @@ class ConfigValidator(
                 violations +=
                     "datapipelines.endpoints timeouts out of order: timeout-min-seconds ($min) <= " +
                     "timeout-default-seconds ($default) <= timeout-max-seconds ($max) must hold (§7)."
-            }
-        }
-
-        /** §7 — the dev-profile guard: dev convenience must never touch production infra. */
-        private fun checkDevProfileGuard(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            val profiles = snapshot.activeProfiles.map { it.lowercase() }.toSet()
-            if ("dev" !in profiles) return
-            val reasons = mutableListOf<String>()
-            if ("prod" in profiles || "production" in profiles) {
-                reasons += "profiles ${profiles.filter { it == "prod" || it == "production" }} are also active"
-            }
-            if (!isLoopback(jdbcHost(snapshot.datasourceUrl))) {
-                reasons += "spring.datasource.url points at non-localhost '${jdbcHost(snapshot.datasourceUrl)}'"
-            }
-            if (!isLoopback(snapshot.redisHost?.trim())) {
-                reasons += "datapipelines.redis.host is non-localhost '${snapshot.redisHost}'"
-            }
-            if (reasons.isNotEmpty()) {
-                violations +=
-                    "The 'dev' profile is active against production indicators (${reasons.joinToString("; ")}). " +
-                    "Dev convenience settings must never run against production infrastructure (§7)."
             }
         }
 
@@ -762,6 +745,15 @@ class ConfigValidator(
                 orgTimezone = environment.getProperty("datapipelines.org.timezone"),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
+                // §3.23 (075) — the org's label, the product's posture, the demo flag, and the
+                // one deprecated alias. Read through DeploymentEnv's constants so `app` and
+                // `web` cannot drift about which key is which.
+                env = environment.getProperty(DeploymentEnv.ENV_KEY),
+                posture = environment.getProperty(DeploymentEnv.POSTURE_KEY),
+                demo = environment.getProperty(DeploymentEnv.DEMO_KEY),
+                deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
+                authAllowLocalOnly =
+                    environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
             )
 
         /**
@@ -926,6 +918,16 @@ internal data class ConfigSnapshot(
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
+    /** §3.23 (075) — the ORG's label for this deployment; nothing branches on it. */
+    val env: String? = null,
+    /** §3.23 (075) — the PRODUCT's stance: `development` | `hardened`. Blank = undeclared. */
+    val posture: String? = null,
+    /** §3.23 (075) — the sample-data families to load; blank = off. Refused under `hardened`. */
+    val demo: String? = null,
+    /** §3.19 → §3.23 — 039's deployment-name key ([DeploymentEnv.LEGACY_ENV_KEY]), deprecated by 075. */
+    val deploymentName: String? = null,
+    /** §3.4 (075) — the explicit acknowledgement that a hardened deployment has no OIDC. */
+    val authAllowLocalOnly: Boolean = false,
 ) {
     override fun toString() =
         "ConfigSnapshot(" +
@@ -962,7 +964,12 @@ internal data class ConfigSnapshot(
             "orgWeekStart=$orgWeekStart, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +
-            "vendoredThemes=$vendoredThemes)"
+            "vendoredThemes=$vendoredThemes, " +
+            "env=$env, " +
+            "posture=$posture, " +
+            "demo=$demo, " +
+            "deploymentName=$deploymentName, " +
+            "authAllowLocalOnly=$authAllowLocalOnly)"
 }
 
 /** One `datapipelines.auth.oidc.providers[]` entry (auth.md §11.1), bound by relaxed binding. */

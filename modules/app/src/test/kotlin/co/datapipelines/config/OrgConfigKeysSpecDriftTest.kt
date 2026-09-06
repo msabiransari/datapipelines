@@ -10,9 +10,16 @@ import org.springframework.core.io.FileSystemResource
 import java.io.File
 
 /**
- * The `datapipelines.org.*` keys (072 calculators, configuration.md §3.21), pinned in the four
- * places they have to agree: the doc (the authority), `application.yml` and `application-dev.yml`
- * (the shipped defaults) and [ConfigValidator] (the §7 rules that read them).
+ * The `datapipelines.org.*` keys (072 calculators, configuration.md §3.21), pinned in the three
+ * places they have to agree: the doc (the authority), `application.yml` (the shipped defaults)
+ * and [ConfigValidator] (the §7 rules that read them).
+ *
+ * 075 removed the fourth: `application-dev.yml` used to spell the same five keys, and this test
+ * read it. That file is now `application-development.yml`, a POSTURE file — and org facts are
+ * not a posture (an org's currency does not change because a deployment is hardened), so the
+ * block does not belong there and is gone. The §7 closing rule it enforced — the documented
+ * setup must pass the PRODUCTION checks — now applies to the SHIPPED defaults, which is what a
+ * deployment that sets nothing actually runs.
  *
  * Same shape and the same two targets as [BootstrapConfigKeysSpecDriftTest]:
  *
@@ -26,7 +33,6 @@ import java.io.File
  */
 class OrgConfigKeysSpecDriftTest {
     private val shipped: Map<String, Any?> by lazy { load("modules/app/src/main/resources/application.yml") }
-    private val dev: Map<String, Any?> by lazy { load("modules/app/src/main/resources/application-dev.yml") }
 
     @Test
     fun `configuration_md, application_yml and ConfigValidator name exactly the same org keys`() {
@@ -50,23 +56,29 @@ class OrgConfigKeysSpecDriftTest {
     }
 
     @Test
-    fun `the dev profile spells the same five keys and passes the production rules`() {
-        dev.keys.filter { it.startsWith(PREFIX) }.sorted() shouldContainExactly EXPECTED
-
-        // §7's closing rule, for this block: the documented dev setup must satisfy the
-        // PRODUCTION checks — a broken dev value is fixed at the data, never by weakening
-        // the rule. The dev file carries literals, so they can be validated directly.
+    fun `the shipped org defaults pass the production rules`() {
+        // §7's closing rule, for this block: the setup this product SHIPS must satisfy the
+        // production checks — a broken default is fixed at the data, never by weakening the
+        // rule. The values are the placeholders' defaults, i.e. what a deployment that sets
+        // none of the five variables runs on.
         val report =
             ConfigValidator.validate(
                 ConfigSnapshots.valid().copy(
-                    orgCurrencyName = dev["$PREFIX.currency.name"] as String?,
-                    orgCurrencySymbol = dev["$PREFIX.currency.symbol"]?.toString(),
-                    orgFiscalStartDate = dev["$PREFIX.fiscal-start-date"] as String?,
-                    orgWeekStart = dev["$PREFIX.week-start"] as String?,
-                    orgTimezone = dev["$PREFIX.timezone"] as String?,
+                    orgCurrencyName = defaultOf("$PREFIX.currency.name"),
+                    orgCurrencySymbol = defaultOf("$PREFIX.currency.symbol"),
+                    orgFiscalStartDate = defaultOf("$PREFIX.fiscal-start-date"),
+                    orgWeekStart = defaultOf("$PREFIX.week-start"),
+                    orgTimezone = defaultOf("$PREFIX.timezone"),
                 ),
             )
         report.violations shouldContainExactly emptyList()
+    }
+
+    /** The default out of a `${'$'}{VAR:default}` placeholder — what an unset variable resolves to. */
+    private fun defaultOf(key: String): String {
+        val raw = checkNotNull(shipped[key]?.toString()) { "application.yml has no $key" }
+        return checkNotNull(PLACEHOLDER_DEFAULT.find(raw)) { "$key is not a placeholder with a default: $raw" }
+            .groupValues[1]
     }
 
     @Test
@@ -83,9 +95,12 @@ class OrgConfigKeysSpecDriftTest {
             "\${DATAPIPELINES_WORKSPACES_PROVISIONING_MODE:self-serve}"
         shipped["datapipelines.jwt.secret"] shouldBe "\${DATAPIPELINES_JWT_SECRET}"
 
-        // The dev file's org block was appended after ITS last block too.
-        dev["datapipelines.observability.logging.format"] shouldBe "console"
-        dev["datapipelines.ui.theme"] shouldBe "saas"
+        // 075 appended env/posture/demo after the whole tree, for the same reason. If THAT
+        // insert had gone in at the wrong depth, the block above it is what would have moved.
+        shipped["datapipelines.endpoints.timeout-default-seconds"] shouldBe
+            "\${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}"
+        shipped["datapipelines.env"] shouldBe "\${DATAPIPELINES_ENV:local}"
+        shipped["datapipelines.posture"] shouldBe "\${DATAPIPELINES_POSTURE:}"
     }
 
     private fun load(relative: String): Map<String, Any?> =
@@ -114,6 +129,9 @@ class OrgConfigKeysSpecDriftTest {
 
     private companion object {
         const val PREFIX = "datapipelines.org"
+
+        /** `${'$'}{VAR:default}` — group 1 is the default. */
+        val PLACEHOLDER_DEFAULT = Regex("""^\$\{[A-Z0-9_]+:([^}]*)\}${'$'}""")
 
         val EXPECTED =
             listOf(

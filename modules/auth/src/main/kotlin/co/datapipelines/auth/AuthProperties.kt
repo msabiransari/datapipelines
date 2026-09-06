@@ -47,6 +47,25 @@ data class AuthProperties(
     val trustedProxies: List<String> = emptyList(),
     /** Configuration §3.4 / auth.md §4.4. `null` = no bootstrap admin. */
     val bootstrapAdminEmail: String? = null,
+    /**
+     * `datapipelines.auth.cookie-secure` (Configuration §3.4, 075): the `Secure` flag on the
+     * cookies this module mints, as a THREE-valued setting. `null`/blank — the shipped
+     * default — keeps the historical derivation from [baseUrl]'s scheme (see
+     * [secureCookies]); `true`/`false` pin it. `application-hardened.yml` defaults it to
+     * `true`, which is the posture table's row: a hardened deployment runs https, and a
+     * dropped Secure flag there puts the session cookie on the wire.
+     *
+     * A String, not a Boolean: "unset" and "false" must stay distinguishable, and a
+     * `Boolean?` bound from an empty environment variable is a binder failure, not a null.
+     */
+    val cookieSecure: String? = null,
+    /**
+     * `datapipelines.auth.allow-local-only` (Configuration §3.4, 075): the operator's
+     * explicit acknowledgement that a HARDENED deployment runs on local password accounts
+     * with no OIDC provider configured. Inert under `development`; under `hardened` the §7
+     * rule requires either a configured provider or this flag, and logs the acknowledgement.
+     */
+    val allowLocalOnly: Boolean = false,
 ) {
     data class Oidc(
         val providers: List<Provider> = emptyList(),
@@ -128,6 +147,12 @@ data class AuthProperties(
      * MUST run https (auth.md §8.4 note), and the wrong default would silently drop
      * sessions there, while the wrong non-default only inconveniences a dev who can see
      * the base-url they set.
+     *
+     * 075: [cookieSecure] now overrides that derivation when it is set. The posture files
+     * are its two columns — `hardened` ships `true`, `development` ships empty (the
+     * derivation) — and an operator may pin either value in either posture.
      */
-    fun secureCookies(): Boolean = baseUrl?.startsWith("http://") != true
+    fun secureCookies(): Boolean =
+        cookieSecure?.trim()?.takeIf { it.isNotEmpty() }?.toBooleanStrictOrNull()
+            ?: (baseUrl?.startsWith("http://") != true)
 }

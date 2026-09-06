@@ -33,14 +33,23 @@ API humans use.
 ## Quick start
 
 ```bash
-cd deploy
-cp .env.example .env       # fill in secrets — see the comments in the file
-docker compose up
+./app.sh --start --demo nyc     # builds and runs the whole stack, with sample data
 ```
 
-Then open `http://localhost:8080`. Full setup, configuration reference, and
-development instructions: [DEVELOPMENT.md](DEVELOPMENT.md) and the specs
-under [`docs/`](docs/).
+Then open `http://localhost:8080` and sign in with the login it prints.
+
+Deploying it for real is two variables — your name for the environment, and how
+careful the product should be:
+
+```bash
+cp deploy/env/secrets.env.example deploy/secrets.env   # generate the values it names
+docker compose -f deploy/compose.yml \
+  --env-file deploy/env/posture/hardened.env \
+  --env-file deploy/secrets.env up -d
+```
+
+Full setup and the variable reference: [`docs/environments.md`](docs/environments.md),
+[DEVELOPMENT.md](DEVELOPMENT.md), and the specs under [`docs/`](docs/).
 
 ## Documentation
 

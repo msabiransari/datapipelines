@@ -220,6 +220,15 @@ expected.
 
 ## Connecting
 
+- **Which host?** The user's own deployment — this product is self-hosted, so there is no
+  default endpoint and you must ask for one rather than assume `localhost`. If the user has
+  no server yet, one command on a machine with Docker gives them a working one with sample
+  data in it: `./app.sh --start --demo nyc` from a checkout. That deployment is
+  `DATAPIPELINES_ENV=local` under the `development` posture, and `app.sh` prints the login
+  that exists after it is healthy. A deployment their organisation runs will be named
+  something else and may be `hardened`, which refuses authoring writes — see the
+  `*.authoring.disabled` row in the error table.
+
 - **MCP:** Streamable HTTP at `POST {host}/mcp` — stateless, protocol pinned to
   `2025-06-18`. Auth is API-key-only: `DP-API-Key: dpk_<id>.<secret>` or
   `Authorization: Bearer dpk_<id>.<secret>`. Browser session cookies are rejected on

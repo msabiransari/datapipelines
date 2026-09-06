@@ -18,22 +18,24 @@ class ConfigValidatorTest {
 
     private fun validSnapshot() = ConfigSnapshots.valid()
 
-    // §7 closing rule — the documented dev setup must pass the PRODUCTION rules, so a
-    // broken dev value is fixed at the data, never by weakening the check.
+    // §7 closing rule — the documented laptop setup must pass the PRODUCTION rules, so a
+    // broken local value is fixed at the data, never by weakening the check.
     @Test
-    fun `the documented dev setup passes every production rule`() {
-        // configuration.md §6 verbatim in shape: localhost metadata DB and Redis,
-        // passwordless loopback Redis, open theme default, secrets from .env.local
-        // (openssl rand -base64 32 → 32 decoded bytes each).
-        val dev =
+    fun `the documented laptop setup passes every production rule`() {
+        // configuration.md §6 verbatim in shape: the `local` env under the `development`
+        // posture, localhost metadata DB and Redis, passwordless loopback Redis, open theme
+        // default, secrets from deploy/secrets.env (openssl rand -base64 32 → 32 bytes each).
+        val laptop =
             validSnapshot().copy(
                 datasourceUrl = "jdbc:postgresql://localhost:5434/datapipelines",
                 redisHost = "localhost",
                 redisPassword = "",
-                activeProfiles = setOf("dev"),
+                env = "local",
+                posture = "development",
+                activeProfiles = setOf("development"),
             )
 
-        val report = ConfigValidator.validate(dev)
+        val report = ConfigValidator.validate(laptop)
 
         report.violations.shouldBeEmpty()
         report.warnings.shouldBeEmpty()
@@ -136,42 +138,6 @@ class ConfigValidatorTest {
 
         report.violations.shouldHaveSize(1)
         report.violations.single().shouldContain("ttl")
-    }
-
-    @Test
-    fun `dev profile against non-localhost infrastructure refuses to start`() {
-        val remoteDb =
-            ConfigValidator.validate(
-                validSnapshot().copy(activeProfiles = setOf("dev")),
-            )
-        remoteDb.violations.shouldHaveSize(1)
-        remoteDb.violations.single().shouldContain("dev")
-        remoteDb.violations.single().shouldContain("db.internal")
-
-        val remoteRedis =
-            ConfigValidator.validate(
-                validSnapshot().copy(
-                    datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
-                    activeProfiles = setOf("dev"),
-                ),
-            )
-        remoteRedis.violations.shouldHaveSize(1)
-        remoteRedis.violations.single().shouldContain("redis.internal")
-    }
-
-    @Test
-    fun `dev and prod profiles together refuse to start even on localhost`() {
-        val report =
-            ConfigValidator.validate(
-                validSnapshot().copy(
-                    datasourceUrl = "jdbc:postgresql://localhost:5432/datapipelines",
-                    redisHost = "localhost",
-                    activeProfiles = setOf("dev", "production"),
-                ),
-            )
-
-        report.violations.shouldHaveSize(1)
-        report.violations.single().shouldContain("production")
     }
 
     @Test

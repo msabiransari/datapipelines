@@ -1,30 +1,38 @@
-# Production deployment — deployment.md Appendix A.
+# Production deployment — deployment.md Appendix A, docs/environments.md.
 #
-#   docker compose -f deploy/docker-compose.yml up -d
-#   docker compose -f deploy/docker-compose.yml ps
+#   docker compose -f deploy/compose.yml \
+#     --env-file deploy/env/posture/hardened.env --env-file deploy/secrets.env up -d
 #
-# Secrets are EXTERNAL — never committed. Generate before first boot:
-#   openssl rand -base64 32  # JWT_SECRET + DB_ENCRYPTION_KEY
-#   echo "REDIS_PASSWORD=$(openssl rand -base64 24)"
-#   echo "METADATA_DB_PASSWORD=$(openssl rand -base64 24)"
+# COMPOSE IS ONE LOADER, NOT THE CONTRACT (environments.md). Everything this file
+# needs is an ordinary environment variable that also works under `java -jar`,
+# systemd, Kubernetes, ECS and Nomad; deploy/env/ holds the portable files, and
+# nothing the product needs lives only here. `./app.sh --start` is the same thing
+# with the env-file list assembled for you.
+#
+# Secrets are EXTERNAL — never committed; deploy/secrets.env is git-ignored and
+# app.sh scaffolds it. Generate them by hand with:
+#   openssl rand -base64 32  # DATAPIPELINES_JWT_SECRET, DATAPIPELINES_DB_ENCRYPTION_KEY
+#   openssl rand -base64 24  # SPRING_DATASOURCE_PASSWORD, DATAPIPELINES_REDIS_PASSWORD
 #
 # The app image is built via `./gradlew bootJar` and containerised via
 # the Dockerfile at the repo root (deployment.md §6.1).
 #
-# OIDC providers are supplied via the mounted application.yml (see Appendix A);
-# at least one authentication method is required — a fully-configured OIDC
-# provider or local accounts (auth.md §5A) — or startup fails (ConfigValidator §7).
+# OIDC providers: the stock `google` entry ships in the image's application.yml and
+# binds GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. At least one authentication method
+# is required — a fully-configured OIDC provider or local accounts (auth.md §5A) —
+# or startup fails (ConfigValidator §7). More providers than the stock one need a
+# yml: mount it and set SPRING_CONFIG_ADDITIONAL_LOCATION (environments.md).
 
 # Pinned to an explicit project name so every container this stack creates
 # carries the dp- prefix (dp-postgres-1, dp-datapipelines-1, …) — the
 # datapipelines instances are distinguishable at a glance from the other
 # projects on a shared Docker host. The pin also exists because Compose
 # derives the project name from the DIRECTORY: without explicit names, this
-# file and docker-compose.dev.yml form the SAME project and their same-named
+# file and compose.laptop-infra.yml form the SAME project and their same-named
 # services replace each other (bit us live, 2026-08-28).
-# The volumes keep explicit `name:` pins below — a project rename must never
-# orphan them (deploy_postgres-data held the metadata DB across the
-# 2026-09-04 rename to `dp`; it was migrated to dp-postgres-data).
+# The volumes derive their names from COMPOSE_PROJECT_NAME below — which `-p`
+# sets — so a second isolated copy gets its own data with the flag alone (T116).
+# The default `dp` keeps the historical names byte-for-byte.
 name: dp
 
 services:
@@ -33,26 +41,32 @@ services:
     ports:
       # APP_HOST_PORT is the LANE knob, not app config (hence no DATAPIPELINES_
       # prefix — compose-env-audit.sh scopes that namespace to keys the app binds).
-      # A second isolated project (APP_COMPOSE_PROJECT) needs its own host port or
-      # it collides with the first on 8080; deployment.md §6.3A promotion rehearsal
-      # is the case that needs it. The container port never moves.
+      # A second isolated project (`-p <lane>`) needs its own host port or it collides
+      # with the first on 8080; deployment.md §6.3A promotion rehearsal is the case
+      # that needs it. Unlike the volume names below, this cannot be derived from the
+      # project name — a port is a number — so app.sh refuses a non-default project
+      # with no APP_HOST_PORT rather than letting it bind the live stack's port.
+      # The container port never moves.
       - "${APP_HOST_PORT:-8080}:8080"
     environment:
+      # The metadata DB lives on this compose network; only the PASSWORD comes from
+      # deploy/secrets.env, under the SAME name the app binds — a bare `java -jar`
+      # reads that file and the variable means the same thing there (environments.md).
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/datapipelines
       SPRING_DATASOURCE_USERNAME: datapipelines
-      SPRING_DATASOURCE_PASSWORD: ${METADATA_DB_PASSWORD}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
 
       # Redis on the compose network: the host is the SERVICE name, deliberately not
       # the application.yml default (loopback) — see the compose-env-audit allowlist.
       DATAPIPELINES_REDIS_HOST: redis
       DATAPIPELINES_REDIS_PORT: ${DATAPIPELINES_REDIS_PORT:-6379}
-      DATAPIPELINES_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      DATAPIPELINES_REDIS_PASSWORD: ${DATAPIPELINES_REDIS_PASSWORD:-}
 
       # REQUIRED, no fallback. Exactly 32 bytes base64.
-      DATAPIPELINES_JWT_SECRET: ${JWT_SECRET}
+      DATAPIPELINES_JWT_SECRET: ${DATAPIPELINES_JWT_SECRET}
       # REQUIRED, exactly 32 bytes base64. Losing this makes every stored
       # datasource credential unrecoverable.
-      DATAPIPELINES_DB_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      DATAPIPELINES_DB_ENCRYPTION_KEY: ${DATAPIPELINES_DB_ENCRYPTION_KEY}
 
       # REQUIRED when OIDC providers are configured (auth.md §5.2). Compose renders the
       # empty default explicitly so an unset variable yields no interpolation warning.
@@ -101,7 +115,7 @@ services:
       # these lines can sit unconditionally in the production file: without the
       # `demo` profile nothing sets them, so the features stay off and the app's
       # effective configuration is byte-for-byte what it was. The demo profile
-      # supplies them from deploy/.env, pointing at the read-only sample volume
+      # supplies them from deploy/secrets.env, pointing at the read-only sample volume
       # the one-shot loaders populate.
       DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}"
       DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}"
@@ -109,7 +123,7 @@ services:
       # The full DATAPIPELINES_* pass-through contract (T32). Every such variable the
       # app binds from its environment is passed here with the SAME default
       # application.yml ships, so a key that works in dev (host env) cannot be silently
-      # absent under compose: setting the variable in deploy/.env (or the shell) reaches
+      # absent under compose: setting the variable in deploy/secrets.env (or the shell) reaches
       # the container, and leaving it unset yields the shipped default — the effective
       # configuration is byte-for-byte what application.yml alone would produce.
       # scripts/compose-env-audit.sh diffs this block against application.yml's
@@ -152,13 +166,20 @@ services:
       DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES: ${DATAPIPELINES_EXECUTIONS_STALE_TIMEOUT_MINUTES:-60}
       DATAPIPELINES_EXECUTIONS_ERROR_DETAIL: ${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:-full}
       DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:-json}
+      # 074 — the published-endpoint timeout bounds. These three were added to
+      # application.yml without their compose pass-throughs; the audit that finds that
+      # class of gap only ran by hand, so nothing said so until 075 wired it into the
+      # build (T119). min <= default <= max, min >= 1, refused at boot otherwise.
+      DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:-30}
+      DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:-1}
+      DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:-300}
 
       # 072 — the organisation facts (configuration.md §3.21). Every one of these lands in
       # EVERY execution's Context as an `org_*` key, so a deployment that cannot set them
       # runs every pipeline against the shipped defaults with nothing to say so. The
       # currency symbol's default is written `$$`: a lone `$` is Compose's interpolation
       # sigil, and `$$` is its escape for a literal one (the container receives `$`).
-      # 068's key-provider selector; without this line a deployment that sets aws-kms in .env
+      # 068's key-provider selector; without this line a deployment that sets aws-kms in its env file
       # would silently run on the env provider (compose-env-audit finding, fixed at the 072 merge).
       DATAPIPELINES_DB_KEY_PROVIDER: ${DATAPIPELINES_DB_KEY_PROVIDER:-env}
       DATAPIPELINES_ORG_CURRENCY_NAME: ${DATAPIPELINES_ORG_CURRENCY_NAME:-Dollar}
@@ -168,10 +189,22 @@ services:
       DATAPIPELINES_ORG_TIMEZONE: ${DATAPIPELINES_ORG_TIMEZONE:-UTC}
       DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:-false}
       DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-saas}
-      DATAPIPELINES_DEPLOYMENT_NAME: ${DATAPIPELINES_DEPLOYMENT_NAME:-}
+      # 075 — the two variables an org sets (configuration.md §3.23, environments.md).
+      # `DATAPIPELINES_ENV` is the ORG's label for this deployment; `DATAPIPELINES_POSTURE`
+      # is the PRODUCT's stance and also selects the Spring profile that carries the
+      # posture's defaults (the app derives it — SPRING_PROFILES_ACTIVE is deliberately
+      # NOT passed here: an empty pass-through would deactivate the profile the posture
+      # just selected, and the validator refuses a value that disagrees anyway).
+      # `DATAPIPELINES_DEMO` is a FLAG: the sample-data families to load. Empty = off,
+      # and `hardened` refuses a non-empty value at boot.
+      DATAPIPELINES_ENV: ${DATAPIPELINES_ENV:-local}
+      DATAPIPELINES_POSTURE: ${DATAPIPELINES_POSTURE:-}
+      DATAPIPELINES_DEMO: ${DATAPIPELINES_DEMO:-}
+      DATAPIPELINES_AUTH_COOKIE_SECURE: ${DATAPIPELINES_AUTH_COOKIE_SECURE:-}
+      DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY: ${DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY:-false}
       DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED: ${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:-true}
       # versioning §10.6 — the promotion peer credential. Both are BEARER SECRETS: keep
-      # them in deploy/.env like every other secret, never inline here. Empty server-key
+      # them in deploy/secrets.env like every other secret, never inline here. Empty server-key
       # means this deployment refuses promotion (fail closed).
       DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_SERVER_KEY:-}
       DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:-}
@@ -194,7 +227,12 @@ services:
       SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD:-}
       SAMPLE_MYSQL_PASSWORD: ${SAMPLE_MYSQL_PASSWORD:-}
     volumes:
-      - ./application.yml:/application.yml:ro
+      # 075: deploy/application.yml is GONE. Every line it carried was already in the
+      # image's own application.yml behind the same placeholders, so the mount was a
+      # second copy of the defaults that could — and did — drift. An org that wants a
+      # yml anyway (extra OIDC providers, a house config-management format) mounts one
+      # and points SPRING_CONFIG_ADDITIONAL_LOCATION at it; Spring supports that
+      # already and environments.md documents it.
       # The sample volume: nyc_reference.db (the SQLITE datasource's file),
       # examples.json, and the bootstrap datasources file. READ-ONLY into the app
       # — the app never writes sample data, and the SQLITE datasource additionally
@@ -233,7 +271,11 @@ services:
     environment:
       POSTGRES_DB: datapipelines
       POSTGRES_USER: datapipelines
-      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD}
+      # ONE name for the metadata DB password: the app's own SPRING_DATASOURCE_PASSWORD.
+      # Compose starts this database, so it is the same secret on both sides — a second
+      # spelling (the old METADATA_DB_PASSWORD) meant deploy/secrets.env could not be
+      # sourced verbatim by a bare jar, which is the whole point of the env-file contract.
+      POSTGRES_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -247,11 +289,11 @@ services:
     image: redis:7-alpine
     command: >
       redis-server
-      --requirepass ${REDIS_PASSWORD}
+      --requirepass ${DATAPIPELINES_REDIS_PASSWORD}
       --maxmemory 512mb
       --maxmemory-policy noeviction
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${DATAPIPELINES_REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -264,8 +306,8 @@ services:
   # demo-nyc (mobility) and demo-trade (trade/v1) — so an engineer pays for
   # exactly the sample data they asked for. Both together is fine: the app's
   # bootstrap keys are comma-separated lists built by compose from the
-  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers (deploy/.env.demo, scaffolded by
-  # app.sh from the --demo-nyc / --demo-trade flags).
+  # SAMPLE_NYC_ON / SAMPLE_TRADE_ON env markers (deploy/env/demo.env, scaffolded by
+  # app.sh from --demo nyc,trade).
   #
   # WHAT THE NON-DEMO PATH INHERITS, precisely — Compose has no per-profile env,
   # volume or dependency, so the additions to `datapipelines` above are
@@ -280,10 +322,10 @@ services:
   #     `mysql-data` from the rendered config entirely without the profiles,
   #     since no enabled service references it).
   #
-  #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+  #   docker compose -f deploy/compose.yml -f deploy/compose.local-build.yml \
   #     --profile demo-nyc --profile demo-trade up -d --wait
   #
-  # Requires SAMPLE_* in deploy/.env (deploy/.env.example) and, for the MySQL
+  # Requires the SAMPLE_* keys (deploy/env/demo.env + deploy/secrets.env) and, for the MySQL
   # sample, an image built with -Pmysql — Connector/J is not in the default build
   # (datasources.md §10.2). deployment.md Appendix B is the quickstart.
 
@@ -324,7 +366,7 @@ services:
       # login has. PGDATABASE is the database it connects to in order to do that.
       PGHOST: postgres
       PGUSER: datapipelines
-      PGPASSWORD: ${METADATA_DB_PASSWORD}
+      PGPASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       PGDATABASE: datapipelines
       SAMPLE_DB_USER: ${SAMPLE_DB_USER:-dp_demo_ro}
       SAMPLE_PG_PASSWORD: ${SAMPLE_PG_PASSWORD}
@@ -404,16 +446,23 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-# 071 §I: volume names follow the compose project. The default project `dp`
-# keeps the historical names (dp-postgres-data, …) byte-for-byte, so the live
-# deployment is untouched; a lane's APP_COMPOSE_PROJECT=<x> now gets <x>-*
-# volumes instead of mounting the live stack's data (which a fixed name did).
+# 071 §I / T116: volume names follow the compose PROJECT, and the project name is
+# read from COMPOSE_PROJECT_NAME — the variable `-p` itself sets (verified against
+# this Compose: `-p lane7` renders `lane7-postgres-data`). Before 075 the names
+# interpolated a custom `APP_COMPOSE_PROJECT`, so `docker compose -p lane …` scoped
+# the containers but every volume still resolved to the LIVE stack's data — the
+# 2026-09-04 near-miss. The default project `dp` keeps the historical names
+# (dp-postgres-data, …) byte-for-byte, so the live deployment is untouched.
+#
+# The host PORT cannot be derived this way — a port is a number, not a name — so it
+# stays the explicit APP_HOST_PORT knob above, and `app.sh` refuses to start a
+# non-default project without one.
 volumes:
   postgres-data:
-    name: ${APP_COMPOSE_PROJECT:-dp}-postgres-data
+    name: ${COMPOSE_PROJECT_NAME:-dp}-postgres-data
   # Demo-profile data. Declared unconditionally because a Compose volume cannot
   # carry a profile; unused and empty without it.
   mysql-data:
-    name: ${APP_COMPOSE_PROJECT:-dp}-mysql-data
+    name: ${COMPOSE_PROJECT_NAME:-dp}-mysql-data
   sample-data:
-    name: ${APP_COMPOSE_PROJECT:-dp}-sample-data
+    name: ${COMPOSE_PROJECT_NAME:-dp}-sample-data

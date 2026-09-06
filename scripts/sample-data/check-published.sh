@@ -6,6 +6,7 @@
 # 500ed on first login for two days because nothing compared the two.
 #
 #   ./scripts/sample-data/check-published.sh [--family nyc|trade] <version>
+#   ./scripts/sample-data/check-published.sh                 # the version deploy/env/demo.env pins
 #   SAMPLE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh v2
 #   SAMPLE_TRADE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh --family trade v2
 #   SAMPLE_BASE_URL=file://$PWD/scripts/sample-data/work/artifacts-parent ...
@@ -38,6 +39,17 @@ SD_ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SD_ROOT/../.." && pwd)"
 source "$SD_ROOT/lib/common.sh"
 
+# 075/T117: the family's base URL and its pinned VERSION come from the TRACKED
+# deploy/env/demo.env — the same file the running deployment loads. They used to live
+# in a git-ignored scaffold, so the repo could not say which version the demo pinned
+# and two stacks in one week loaded a version the repo had moved past. `<version>` is
+# now OPTIONAL: with no argument this checks the version the repo actually ships.
+DEMO_ENV="$REPO_ROOT/deploy/env/demo.env"
+demo_env_get() { # key
+  [ -f "$DEMO_ENV" ] || return 0
+  grep -E "^$1=" "$DEMO_ENV" | head -1 | cut -d= -f2- || true
+}
+
 FAMILY=nyc
 VERSION=""
 while [ $# -gt 0 ]; do
@@ -49,7 +61,6 @@ while [ $# -gt 0 ]; do
        VERSION="$1"; shift ;;
   esac
 done
-[ -n "$VERSION" ] || die "usage: $0 [--family nyc|trade] <version>   (e.g. v2) — the version directory under the family's base URL"
 
 # Each family has its OWN content directory and its OWN base-URL variable — the
 # same two names the demo profile and app.sh already use, so a local-serve
@@ -57,12 +68,17 @@ done
 case "$FAMILY" in
   nyc)
     REPO_COPY="$REPO_ROOT/scripts/sample-data/content/examples.json"
-    BASE="${SAMPLE_BASE_URL:-https://datapipelines-co.s3.amazonaws.com/sample-data/mobility}" ;;
+    BASE="${SAMPLE_BASE_URL:-$(demo_env_get SAMPLE_BASE_URL)}"
+    [ -n "$VERSION" ] || VERSION="$(demo_env_get SAMPLE_VERSION)" ;;
   trade)
     REPO_COPY="$REPO_ROOT/scripts/sample-data-trade/content/examples.json"
-    BASE="${SAMPLE_TRADE_BASE_URL:-https://datapipelines-co.s3.amazonaws.com/sample-data/trade}" ;;
+    BASE="${SAMPLE_TRADE_BASE_URL:-$(demo_env_get SAMPLE_TRADE_BASE_URL)}"
+    [ -n "$VERSION" ] || VERSION="$(demo_env_get SAMPLE_TRADE_VERSION)" ;;
   *) die "unknown family '$FAMILY' — the sample-data families are nyc (mobility) and trade" ;;
 esac
+[ -n "$BASE" ] || die "no base URL for family '$FAMILY': set SAMPLE_BASE_URL / SAMPLE_TRADE_BASE_URL, or fix $DEMO_ENV"
+[ -n "$VERSION" ] || die "no version for family '$FAMILY': pass one, or fix SAMPLE_VERSION / SAMPLE_TRADE_VERSION in $DEMO_ENV"
+
 [ -f "$REPO_COPY" ] || die "repo copy '$REPO_COPY' does not exist"
 
 WORK="$(mktemp -d)"

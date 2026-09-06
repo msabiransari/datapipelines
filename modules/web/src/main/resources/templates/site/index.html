@@ -137,10 +137,10 @@
           <p class="hero-sub">Declarative SQL pipelines that AI agents create, execute and inspect over MCP — self-hosted, multi-engine, open source (AGPL-3.0).</p>
           <!-- claim: docs/deployment.md Appendix B -->
           <div class="code-block">
-            <pre><code>./app.sh --start --demo-nyc</code></pre>
+            <pre><code>./app.sh --start --demo nyc</code></pre>
             <button type="button" class="copy-btn" hidden>Copy</button>
           </div>
-          <p class="hero-note">One command, real NYC data. Add <code>--demo-trade</code> for the second family.</p>
+          <p class="hero-note">One command, real NYC data. Add <code>--demo nyc,trade</code> for the second family.</p>
           <div class="btn-row">
             <a class="btn btn-primary" th:href="@{/login}">Try Right Now</a>
             <a class="btn btn-secondary" href="#demo">Get started</a>
@@ -653,7 +653,7 @@
         <p class="kicker">The demo is the quickstart</p>
         <h2 id="demo-title" class="ds-headline">Real NYC data, one command</h2>
         <!-- claim: docs/deployment.md Appendix B -->
-        <p class="section-lede"><code>./app.sh --start --demo-nyc</code> builds the jar, downloads the published mobility/v2 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds 17 templates and six example pipelines into your workspace at first login.</p>
+        <p class="section-lede"><code>./app.sh --start --demo nyc</code> builds the jar, downloads the published mobility/v2 sample set, verifies every checksum before touching an engine, restores three databases, creates a SELECT-only demo login, registers three global read-only datasources, and seeds 17 templates and six example pipelines into your workspace at first login.</p>
 
         <div class="demo-grid">
           <div class="demo-copy">
@@ -669,7 +669,7 @@
             </ul>
             <p class="demo-note">Same command, same bytes, same rows — every time. Your agent gets a reproducible sandbox with something real to chew on.</p>
             <!-- claim: docs/deployment.md Appendix B (the demo families table), deploy/sample-data/bootstrap-datasources-census.yml -->
-            <p class="demo-note"><strong>A second family ships beside it.</strong> <code>--demo-trade</code> adds US Census monthly imports and exports at HS-6 grain on <strong>DuckDB</strong> — the demo's fourth engine — UN Comtrade mirror statistics on MySQL, and Federal Reserve H.10 exchange rates on SQLite, with three more example pipelines that reconcile what the United States reports against what its partners report. This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.</p>
+            <p class="demo-note"><strong>A second family ships beside it.</strong> <code>--demo nyc,trade</code> adds US Census monthly imports and exports at HS-6 grain on <strong>DuckDB</strong> — the demo's fourth engine — UN Comtrade mirror statistics on MySQL, and Federal Reserve H.10 exchange rates on SQLite, with three more example pipelines that reconcile what the United States reports against what its partners report. This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.</p>
           </div>
 
           <figure class="demo-figure">
