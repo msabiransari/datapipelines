@@ -59,6 +59,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [deployment.md](deployment.md) | v1.2 | Docker image, compose/k8s, multi-instance model, Redis requirements, graceful shutdown, sizing |
+| [environments.md](environments.md) | v1.0 | The two variables an org sets — `DATAPIPELINES_ENV` (their name) and `DATAPIPELINES_POSTURE` (`development` \| `hardened`) — the posture table, the env-var contract, loader recipes, demo as a flag, secrets, first login |
 | [observability.md](observability.md) | v1.1 draft | JSON logs + correlation IDs, metric naming/cardinality rules, redaction (normative), health endpoints |
 | [module-structure.md](module-structure.md) | v1.2 | Gradle modules, exhaustive dependency table, persistence ownership, version catalog + implementation gates |
 

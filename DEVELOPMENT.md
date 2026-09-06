@@ -30,7 +30,7 @@ cd datapipelines
 ## 2. Start Local Infrastructure
 
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up -d
+docker compose -f deploy/compose.laptop-infra.yml up -d
 ```
 
 This starts:
@@ -38,19 +38,20 @@ This starts:
 - **Redis 7** on `localhost:6381` (no password)
 
 The host ports are deliberately NOT the defaults (5432/6379) — those collide with
-other local stacks on most developer machines. Keep them in sync with
-`application-dev.yml` and configuration.md §6 if you ever change them.
+other local stacks on most developer machines. They are declared in
+`deploy/env/laptop.env`, which §4 loads; keep the two files and configuration.md §6
+in sync if you ever change them.
 
 Verify:
 ```bash
-docker compose -f deploy/docker-compose.dev.yml ps
+docker compose -f deploy/compose.laptop-infra.yml ps
 ```
 
 ---
 
 ## 3. OIDC Provider Setup — optional (skip with local login)
 
-**You no longer need this section to run the app.** Local password login ([auth.md §5A](docs/auth.md#5a-local-password-accounts-optional)) is the zero-setup path: the stock `.env.example` (§4) enables it with a one-time dev credential, and you sign in as `dev@example.com` / `dev-admin`, setting a new password on first login. Come back here when you want to try the OIDC path itself.
+**You no longer need this section to run the app.** Local password login ([auth.md §5A](docs/auth.md#5a-local-password-accounts-optional)) is the zero-setup path: the `deploy/secrets.env` template (§4) enables it with a one-time dev credential, and you sign in as the bootstrap admin, setting a new password on first login. Come back here when you want to try the OIDC path itself.
 
 The app uses **generic OIDC** — any OIDC-compliant provider works (Google, Microsoft, Okta, Auth0, Keycloak, etc.). For local development, set up one or two providers.
 
@@ -100,58 +101,37 @@ Common issuer URIs:
 
 ## 4. Configure Environment
 
-Create `.env.local` in the project root (git-ignored — never commit secrets):
+Two kinds of file, and the split matters: **settings are tracked in this repository, secrets are not** ([Environments §6](docs/environments.md#6-secrets)).
+
+The laptop's settings already exist and need no editing — `deploy/env/posture/development.env` (the posture) and `deploy/env/laptop.env` (the host ports §2 publishes, console logging, `DATAPIPELINES_ENV=local`). What you create is the one git-ignored file that holds credentials:
 
 ```bash
-# Metadata DB
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5434/datapipelines
-SPRING_DATASOURCE_USERNAME=datapipelines
-SPRING_DATASOURCE_PASSWORD=datapipelines
+cp deploy/env/secrets.env.example deploy/secrets.env
+chmod 600 deploy/secrets.env
+```
 
-# Redis
-DATAPIPELINES_REDIS_HOST=localhost
-DATAPIPELINES_REDIS_PORT=6381
+Then fill in four lines. Everything else in the template is optional:
 
-# JWT signing secret — MUST be real base64 of ≥32 random bytes; a placeholder here
-# fails startup validation (configuration.md §7) by design
+```bash
+# MUST be real base64 of >=32 random bytes; a placeholder here fails startup
+# validation (configuration.md §7) by design.
 DATAPIPELINES_JWT_SECRET=<paste output of: openssl rand -base64 32>
-
-# DB encryption key — MUST decode to exactly 32 bytes
+# MUST decode to exactly 32 bytes.
 DATAPIPELINES_DB_ENCRYPTION_KEY=<paste output of: openssl rand -base64 32>
-
-# Email allowlist (optional — your email domain)
-DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=yourdomain.com
-
-# Auth base URL — REQUIRED whenever OIDC providers are configured (auth §5.2/§11.3).
-# Startup fails without it; OIDC redirect URIs are built from it, never from request headers.
-DATAPIPELINES_AUTH_BASE_URL=http://localhost:8080
 
 # Local password login (auth §5A) — the zero-setup path, no OIDC client needed.
 # The seed is the FIRST ADMIN's one-time credential; you set a new password on
 # first sign-in. Delete these two lines to go OIDC-only.
 DATAPIPELINES_AUTH_LOCAL_ENABLED=true
 DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=dev-admin
-
-# Bootstrap admin — the account the local seed lands on; with OIDC, this email
-# becomes admin on first sign-in instead (auth §4.4)
 DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=dev@example.com
-
-# UI theme
-DATAPIPELINES_UI_THEME=saas
-
-# OIDC provider secrets — OPTIONAL while local login is enabled above (§3).
-# For Google (the only provider the stock application.yml ships):
-# GOOGLE_CLIENT_ID=your-google-client-id
-# GOOGLE_CLIENT_SECRET=your-google-client-secret
-
-# For Microsoft: only needed if you uncommented the microsoft provider block (§3.2).
-# MICROSOFT_CLIENT_ID=...
-# MICROSOFT_CLIENT_SECRET=...
-
-# For any other OIDC provider, add its env vars here and configure it in application-dev.yml
-# OKTA_CLIENT_ID=...
-# OKTA_CLIENT_SECRET=...
 ```
+
+`deploy/env/laptop.env` already sets `SPRING_DATASOURCE_*`, `DATAPIPELINES_REDIS_*` and `DATAPIPELINES_AUTH_BASE_URL` for the infrastructure §2 started, so `deploy/secrets.env` only carries what must not be tracked. `deploy/env/example.env` is the full reference: every `DATAPIPELINES_*` variable this build binds, with the default it ships.
+
+**OIDC secrets** are optional while local login is enabled (§3). For Google — the only provider the stock `application.yml` ships — add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `deploy/secrets.env`. For Microsoft, uncomment the provider block (§3.2) first; for any other provider, mount your own yml with `SPRING_CONFIG_ADDITIONAL_LOCATION` ([Environments §3](docs/environments.md#3-the-variable-contract)).
+
+**The two variables** ([Environments](docs/environments.md)): a laptop is `DATAPIPELINES_ENV=local` — which `laptop.env` sets — and `local` is the one environment that gets its posture (`development`) for free. Every other environment name must say which posture it wants or the app refuses to start.
 
 The provider list itself (names, issuer URIs, display names) is configured in `application.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
 
@@ -193,24 +173,32 @@ The one-command path is `./app.sh` at the repo root — fully Dockerized, no loc
 Java or Gradle: `./app.sh --start` builds the jar with the pinned Gradle wrapper
 inside a JDK container (cache in git-ignored `.gradle-docker/`), packages it with
 the repo Dockerfile as `datapipelines:local`, and runs the **production-shape
-stack** (`deploy/docker-compose.yml` + the `docker-compose.local.yml` image
+stack** (`deploy/compose.yml` + the `compose.local-build.yml` image
 override — the same stack deployment.md Appendix A describes; secrets in
-`deploy/.env`, scaffolded from `.env.local` on first run). `./app.sh --stop`
+git-ignored `deploy/secrets.env`, scaffolded with generated values on first
+run). `./app.sh --stop`
 stops it; `--status` / `--logs` inspect it. The rest of this section is the
 Gradle-on-host development flow the IDE path also uses:
 
 ```bash
-# Load env vars
-export $(grep -v '^#' .env.local | xargs)
+# Load the env files, in precedence order — secrets last. `set -a` exports every
+# variable they assign; this is exactly what the bare-jar deployment does
+# (docs/environments.md §4 "Loaders").
+set -a
+. deploy/env/posture/development.env
+. deploy/env/laptop.env
+. deploy/secrets.env
+set +a
 
 # Build (skip tests for speed during dev)
 ./gradlew build -x test
 
-# Run with dev profile
-./gradlew :modules:app:bootRun --args='--spring.profiles.active=dev'
+# Run. The POSTURE selects the Spring profile — do NOT pass --spring.profiles.active
+# yourself; a value that disagrees with DATAPIPELINES_POSTURE refuses startup.
+./gradlew :modules:app:bootRun
 ```
 
-Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, active profile `dev`, env vars from `.env.local`.
+Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, environment variables from the three files above.
 
 The app starts on `http://localhost:8080`.
 
@@ -219,8 +207,8 @@ The app starts on `http://localhost:8080`.
 1. **Run → Edit Configurations → + → Application.**
 2. **Main class:** `co.datapipelines.DatapipelinesApplicationKt`
 3. **Module classpath:** the `app` Gradle module's `main` source set (in the module picker this reads as the app project's main source set)
-4. **Program arguments:** `--spring.profiles.active=dev`
-5. **Environment variables:** load them from `.env.local`. In the run configuration, the *Environment variables* field has a file-picker icon on the right — select your project-root `.env.local`. IntelliJ exports it into the launched process, same as the `export $(grep -v '^#' .env.local | xargs)` line above. (Do not paste the secrets into the stored run config.)
+4. **Program arguments:** none. `DATAPIPELINES_POSTURE` (from `deploy/env/posture/development.env`) selects the Spring profile; setting `--spring.profiles.active` yourself to a different posture refuses startup.
+5. **Environment variables:** the *Environment variables* field has a file-picker icon on the right, and IntelliJ accepts several files — select `deploy/env/posture/development.env`, `deploy/env/laptop.env` and `deploy/secrets.env`, in that order (later wins, same as the shell). IntelliJ exports them into the launched process. (Do not paste the secrets into the stored run config.)
 6. **Working directory:** the project root (default).
 
 Debug works as usual — set a breakpoint and use the bug icon instead of run. Live reload is not configured; re-run after code changes.
@@ -452,7 +440,7 @@ download a chromium binary on first use and launch a real browser.
 
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
-./app.sh --start --demo-nyc                      # the deployment being photographed
+./app.sh --start --demo nyc                      # the deployment being photographed
 ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
                     -PshotsEmail=you@example.com -PshotsPassword=…
 ```
@@ -482,7 +470,7 @@ If a screen renders broken, it is **reported, not photographed** — and not edi
 **Reproducing `failure-detail.png`.** No seeded pipeline fails — a demo whose examples break
 would be a bad demo — so the failure shot needs a throwaway pipeline, named with
 `-PshotsFailingPipeline`. Without it the driver prints `SKIP failure-detail.png` and produces
-the other nine. The state is made honestly (nothing is illustrated); against a `--demo-nyc`
+the other nine. The state is made honestly (nothing is illustrated); against a `--demo nyc`
 stack it is four steps:
 
 ```bash
@@ -739,8 +727,11 @@ datapipelines/
 │   ├── README.md               ← spec index (start here)
 │   └── SPEC-REVIEW-2026-08.md  ← ratified cross-doc decisions D1–D15 (permanent record)
 ├── deploy/
-│   ├── docker-compose.dev.yml  ← local dev infra (Postgres + Redis)
-│   └── docker-compose.yml      ← reference production compose
+│   ├── compose.yml             ← reference production compose
+│   ├── compose.local-build.yml ← override: build the image from this checkout
+│   ├── compose.laptop-infra.yml ← local dev infra only (Postgres + Redis)
+│   ├── env/                    ← TRACKED settings: posture/, demo.env, laptop.env, example.env
+│   └── secrets.env             ← git-ignored credentials (scaffolded by app.sh)
 ├── scripts/
 │   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
 │   ├── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
@@ -774,15 +765,15 @@ datapipelines/
 
 Another process is using port 8080. Either kill it or change the app port:
 ```bash
-./gradlew bootRun --args='--server.port=8090 --spring.profiles.active=dev'
+./gradlew bootRun --args='--server.port=8090'
 ```
 
 ### "Flyway migration failed"
 
 The metadata DB has a dirty migration state. Drop and recreate:
 ```bash
-docker compose -f deploy/docker-compose.dev.yml down -v
-docker compose -f deploy/docker-compose.dev.yml up -d
+docker compose -f deploy/compose.laptop-infra.yml down -v
+docker compose -f deploy/compose.laptop-infra.yml up -d
 ```
 
 ### "OIDC login redirect_uri mismatch"
@@ -837,15 +828,15 @@ For someone with just Docker running — no OIDC client needed (local login, [au
 
 ```bash
 git clone <repo-url> datapipelines && cd datapipelines && \
-docker compose -f deploy/docker-compose.dev.yml up -d && \
-cp .env.example .env.local && \
-nano .env.local && \                           # fill in the two openssl secrets (JWT/encryption)
+docker compose -f deploy/compose.laptop-infra.yml up -d && \
+cp deploy/env/secrets.env.example deploy/secrets.env && \
+nano deploy/secrets.env && \                   # the two openssl secrets + the local-login block (§4)
 cd ../design-system-starter && npm install && npm run build && cd - && \
 ./scripts/sync-design-system.sh && \
-export $(grep -v '^#' .env.local | xargs) && \
-./gradlew :modules:app:bootRun --args='--spring.profiles.active=dev'
+set -a && . deploy/env/posture/development.env && . deploy/env/laptop.env && . deploy/secrets.env && set +a && \
+./gradlew :modules:app:bootRun
 ```
 
-Then sign in at `http://localhost:8080` as `dev@example.com` / `dev-admin` (one-time — you set a new password on first login). To use an OIDC provider instead, fill its credentials in `.env.local` (§3).
+Then sign in at `http://localhost:8080` as `dev@example.com` / `dev-admin` (one-time — you set a new password on first login). To use an OIDC provider instead, put its credentials in `deploy/secrets.env` (§3).
 
 Then open `http://localhost:8080/login`.
