@@ -51,14 +51,27 @@ Three disjoint URL spaces. A given URL belongs to exactly one of them, and the r
 All authenticated pages use a shared layout:
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ Navbar: Logo | Pipelines | Datasources | Templates    │  --header-height (60px)
-│           | Executions | Settings | [User Avatar ▾]   │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│                   Page Content                        │
-│                                                       │
-└──────────────────────────────────────────────────────┘
+┌──────────────┬───────────────────────────────────────────────────────┐
+│ ▣ datapipe…  │ Build / Pipelines     [⌘K search]  ☀  (MS)            │ --header-height
+│ ┌──────────┐ ├───────────────────────────────────────────────────────┤
+│ │TS workspc│ │                                                       │
+│ └──────────┘ │                                                       │
+│  Dashboard   │                   Page content                        │
+│  BUILD       │                                                       │
+│  Pipelines 9 │                                                       │
+│  Templates 27│                                                       │
+│  Datasources │                                                       │
+│  OPERATE     │                                                       │
+│  Executions  │                                                       │
+│  API         │                                                       │
+│  Promotion   │                                                       │
+│  ORGANISATION│                                                       │
+│  Workspaces  │                                                       │
+│  Admin       │                                                       │
+│  Docs        │                                                       │
+│ ◀ Collapse   │                                                       │
+└──────────────┴───────────────────────────────────────────────────────┘
+ --app-rail-width (232px, or 60px collapsed)
 ```
 
 Thymeleaf layout: `layouts/default.html` — includes navbar, design system CSS, htmx, theme switcher.
@@ -90,7 +103,7 @@ htmx is **vendored** (webjar) like the rest of the frontend stack — no CDN ref
 Measured on the owner's ~3,000px window (2026-09-05): four content widths across eleven screens — a 1600px cap on most, bespoke narrower columns on Settings, full-bleed on Templates and the editor. The policy that replaces them:
 
 1. **Every app screen is full-bleed.** `<main>` spans the viewport minus one gutter (`var(--gap-lg)`), exactly as the editor always has. `--app-content-max`, `.app-main-bleed` and the editor's `fullBleed` opt-in are deleted — the opt-in became the rule. The nav spans the viewport with the same gutter. `EditorLayoutRenderTest` pins the editor and a list page rendering the SAME `<main>`.
-2. **Reading content gets a reading column, not a different container.** Docs prose, Settings cards, empty states and forms sit in `.app-reading` (`max-width: 90ch`, LEFT-aligned inside the full-bleed main — never centred). Tables and trees never use it.
+2. **Reading content gets a reading column, not a different container.** Docs prose, empty states and forms sit in `.app-reading` (`max-width: 90ch`, LEFT-aligned inside the full-bleed main — never centred). Tables and trees never use it. **Amended 079 §D:** Settings, Admin and Workspaces do NOT — a 90ch measure is right for prose and wrong for a grid of independent cards, which is what left three quarters of a wide window empty; Settings is a two-column card grid at ≥1100px and one column below (owner ruling 2026-09-05, option (a)). `.app-reading` stays on Docs, where the content really is prose.
 3. **Width lives in classes, never inline.** No app template carries an inline `max-width` or `grid-template-columns` — modals, search inputs, auth cards and the stats grid use the `app.css` classes (`app-modal*`, `app-search-input`, `app-card-auth`, `app-stats-grid`, …). `InlineWidthAuditTest` scans the templates and fails the build on a regression.
 
 ### 3.2 Boosted navigation (the app shell, 076)
@@ -102,6 +115,70 @@ Measured on the owner's ~3,000px window (2026-09-05): four content widths across
 - **The progress signal.** A document load used to say "loading" with a white flash; a swap must not flash, so one 2px bar under the nav (`#app-progress`, tokens only, reduced-motion respected) shows between `htmx:beforeRequest` and `htmx:afterSettle` for boosted requests only.
 - **Active-section state.** Server-computed from `currentPath` for the first paint; after swaps `shell.js` mirrors the same rule (Dashboard exact, others prefix) off `data-nav-section` + `window.location.pathname`.
 - **Scripts re-arm per swap.** Page scripts whose tags ride inside `#app-main` re-execute on arrival; anything document-level installs ONCE per session. The pipeline editor tears down on host-replacing swaps — the execution stream's reader is ABORTED (never `cancel()`: the run continues server-side, visible on `/executions`), the Cytoscape instance is destroyed, timers and document listeners come off — and re-binds through Alpine on `htmx:afterSettle` when a history restore brings its DOM back without re-executing scripts. `toast.js` and `template-explorer.js` follow the same idempotent-init contract; `editorJsTest` pins all three.
+
+### 3.4 The shell chrome (079, normative)
+
+The 076 horizontal navbar became a left rail plus a top bar
+(`design-records/mocks/2026-09-05-app-shell-v2.html`, owner approved 2026-09-05). The boosted
+-navigation contract of §3.2 is unchanged — same `nav.app-nav`, same `hx-boost`, same swap
+target, same `data-nav-section` mirror. Only where the links sit changed, and what the shell
+must therefore keep true after a swap grew.
+
+**The rail** (`--app-rail-width`, 232px; 60px collapsed). Brand, then the workspace switcher as
+a card (keeping its POST form and its `<select>`, which is present and operable and simply
+styled transparent over the card), then the sections grouped **Build** / **Operate** /
+**Organisation** with Dashboard alone above them, then the collapse control at the foot. The
+nav packs to the top; the free space below it is deliberate.
+
+- **Counts.** Pipelines and Templates carry a badge from `NavCounts`, one cheap `COUNT(*)`
+  each behind a 60-second TTL keyed by workspace. There is no general metadata cache in this
+  tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives
+  in `modules/auth`, which by design cannot see the `pipelines` or `templates` tables — so
+  `NavCounts` copies the former's discipline (ConcurrentHashMap, injected ticker, lazy expiry,
+  misses never cached) rather than its instance. A count that cannot be read renders **no
+  badge**, never a zero.
+- **The collapsed state** is a class on `<html>`, written by the layout's ONE inline script
+  before the first paint and toggled by `shell.js` afterwards. This is the single deliberate
+  exception to "no inline scripts": a deferred external script runs after the document paints,
+  so the rail would render at 232px and snap to 60px on every navigation.
+- **The active item** is `--brand-soft` background, `--brand` text and icon, **plus a 3px
+  `--border-focus` left bar**. The bar is not decoration: §2.8 is normative that
+  `surface-selected` reaches only 1.5:1 and a tint alone cannot carry selection. The mock
+  paints the tint only; the bar is the accessible half of the same signal.
+- **Icons** are inline SVG sized by the design system's `.ds-icon` utilities. The vendored
+  icon set (`lucide-static`, a 12-glyph subset) covers four of the ten rows, and one nav column
+  drawn from two sources at two stroke weights is worse than one drawn from one.
+
+**The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
+a search field **placeholder**, the light/dark toggle, and the avatar menu.
+
+- **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
+  client-side after a boosted swap from the active rail link's own `data-nav-group` /
+  `data-nav-label`. `ShellRenderTest` asserts the Kotlin table and the rendered markup agree
+  for every link, so the highlighted section and the crumb cannot drift apart.
+- **The search field is wired to nothing this round.** It is a `<div>`, not an `<input>`, and
+  `aria-hidden` — deliberately, so nobody types into a box that cannot answer. The `⌘K` chip
+  is a promise about a later round, not a live shortcut.
+- **The avatar** renders the OIDC `picture` claim when there is one and initials otherwise.
+  The claim IS stored: `users.profile_picture_url`, written by `OidcSuccessHandler` through
+  `UserRepository` on every login, and rendered on Settings since 025.
+- **The menu** carries the signed-in identity, Appearance, the theme swatches, Settings, API
+  keys and Log out (which keeps its POST form and `hx-boost="false"`). Escape and an outside
+  click close it; arrow keys move focus within it without activating anything; the trigger
+  carries `aria-expanded` and the popover `role="menu"`.
+
+**One theme preference, three views.** The design system ships ONE STYLESHEET PER LOOK, so
+`light`, `dark` and `auto` are three of the nine values `users.theme_preference` can take and
+the six palettes (`saas`, `ocean`, `forest`, `healthcare`, `minimal`, `professional`) are the
+rest. There is no separate "mode" column and the app does not invent one. The top bar's
+sun/moon toggle, the menu's Appearance segment, the menu's swatches and Settings' Mode row and
+Theme select are five controls over that single field, all PATCHing
+`/partials/profile/theme`, which answers with an out-of-band swap of `#theme-link` plus a
+toast. `shell.js` reads the SWAPPED href back and brings every control and `<html data-theme>`
+in line — reading the href rather than the value we asked for is what makes a refused write
+leave the controls where they were.
+
+---
 
 ### 3.3 Type and density scale (076, normative)
 
@@ -127,7 +204,7 @@ sans and the mono 500 are not (the app renders almost no italic, and an unused p
 stylesheet or template starts naming a font host over the network. The marketing site (`site/**`) does not load
 `app.css` and keeps the system fallback this round.
 
-1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`.
+1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`. **Amended 079 §E:** inside `.app-main` the headline is `--text-xl` and `.ds-title` is `--text-base`, to match the denser shell. The value moved; the rule that there is exactly ONE of it, expressed as a property of the class rather than of a screen, did not. Every page header is `.app-page-h` — title, a muted `.app-page-sub` subtitle of at most 70ch, actions right.
 2. **Every table is `.ds-table` with `font-variant-numeric: tabular-nums`** (app.css). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
 3. **Mono is for identifiers only**: machine names, ids, template refs (`path @ vN`), SQL, keys/prefixes, `context_key → value`. Display names, usernames, badges and dates are prose. The per-table decision:
 
@@ -343,6 +420,10 @@ For anything that must outlive the TTL, the answer is not a longer TTL: write it
 
 ### 4.10 API Keys
 
+**079 §C**: this screen remains the place keys are ISSUED and REVOKED. A read-only view of
+the same keys — with their kind, prefix, scopes-or-bindings and expiry — is one of §4.18's
+three cards, which links here for the management actions.
+
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings/api-keys` |
@@ -362,6 +443,18 @@ Content:
 - **Never shows**: the full key (only the prefix after creation), the hash.
 
 ### 4.11 User Settings
+
+**Amended 079 §D** — a two-column card grid at ≥1100px (Profile, Appearance, Session,
+Password, API), one column below; `.app-reading` is gone from this screen (§3.1). Scopes render
+as chips, not four spans strung across the card. Appearance gains a Mode row (Light / Dark /
+System) alongside the Theme select — **two views of ONE field**, see §3.4 — and a Density row
+whose Compact option is rendered DISABLED: the preference has nowhere to live until `users`
+grows a column, and a control that silently changes nothing is worse than an absent one. The
+`#themeSelect` id is load-bearing beyond this screen: `siteShots`' `app` set drives its dark
+pass through that exact select, because it is the control a user has. The API-keys card became
+a link to §4.18, and the page-foot Logout button is gone — logging out is a shell action and
+lives in the avatar menu, where every screen has it.
+
 
 | Attribute | Value |
 |---|---|
@@ -494,6 +587,15 @@ Content: the packaged `docs/*.md` set (the exclusion policy — `docs/superpower
 | JS | None |
 | htmx | No — a plain form POST with a redirect flash. A promotion is a whole-environment action, not a fragment swap |
 
+**079 §F: the redirect flash is a TOAST, not a banner.** `?ok=`/`?error=` used to render two
+full-width `.ds-card` blocks at the top of the screen that pushed the page down and stayed
+until the next navigation. They are now §5.1 Shape A — the workspaces pattern. What is NOT
+shared is the vocabulary: promotion's outcomes are its own ("the target already serves that
+version"), and folding them into the layout's shared code→text map would put one screen's
+language in every screen's shell. So this screen renders its OWN hidden bin, marked
+`[data-toast-flash]`, and `toast.js` drains every marked bin rather than only the layout's
+`#toast-flash`. Any screen with its own refusal vocabulary can now do the same.
+
 **This screen is the only way to promote.** [Versioning §10.1](versioning.md#101-policy) D8 makes promotion a human, UI-triggered action: there is no MCP tool and no schedule, and 055's fence excluded `modules/mcp-server` so that is mechanical rather than remembered.
 
 The listing is exactly [§10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)'s set — RELEASED, and a version strictly greater than the target's, with same-hash entries dropped. Drafts and same-version entries never appear. The rule lives in the sender service, not in the template, so the screen cannot drift from it.
@@ -509,6 +611,68 @@ Three states, told apart because the operator's next step differs in each:
 A target with `authoring-enabled: true` renders its own banner and disables the button ([D7](versioning.md#101-policy): dev is where drafts live). That is a courtesy, not the control — the sender re-checks it and the receiver refuses independently.
 
 Each row shows the pipeline's version here and on the target (`absent` when the target does not have it). Selection defaults to all. The Promote action re-runs every §10.3 guard against a FRESH inventory server-side and recomputes the dependency closure from scratch: what the screen showed may be minutes old, and a release that landed in between must not sail through on a stale decision. Outcomes return as `?ok=` / `?error=` flashes rendered by the layout's toast stack (§5.1), so a refusal lands on the listing the operator can act on.
+
+---
+
+### 4.18 API section (079 §C, closes T139)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /api-console` |
+| Auth required | Yes — `read` (`ScopeMatrix.RestOperation.READ_RESOURCES`), the same floor `EndpointsController.list` uses |
+| Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the keys that may call them, the MCP connection |
+| Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-code`, `.app-empty` |
+| JS | None |
+| htmx | No — the screen is read-only; every action on it is a link |
+
+**Why the route is `/api-console` and not something under `/api`.** That prefix is the
+programmatic surface, split in two — the `/api/v1` REST envelope and the `/api/x` published
+endpoints this page lists — and §2.1's three-URL-space rule says a page never lives in the
+JSON space. `api-console` is a different first path segment from `api`, so Spring's
+segment-wise matching cannot let either shadow the other. It needs no `SecurityConfig` entry:
+that chain's `permitAll` list is explicit and everything else is `.anyRequest().authenticated()`.
+Because `@RequiredScope` is enforced on any path once declared (the `/api` and `/partials`
+prefixes govern only where an UNannotated handler is default-denied), the annotation is a real
+gate here — and it is also what refuses an `endpoint`-kind key, which carries no scopes by
+design ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and reaches only the published-endpoint surface.
+
+**Read-only, deliberately.** Publishing, binding and revoking stay on REST/MCP this round —
+074 step 6's intent. `author` sees the management links; `read` does not, because actions a
+principal lacks scope for are not rendered (§4 preamble). The server re-checks regardless.
+
+Three cards:
+
+1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
+   for pipeline names and one for released versions (never a query per row, the rule
+   `PipelineNames` was written for). Columns: path, pipeline, timeout, bound keys.
+   - The method is always **GET**: `PublishedEndpointController` refuses everything else with
+     `Allow: GET`, so it is a fact about the surface rather than a column that could vary.
+   - The version shown is the **released** one, not `pipelines.current_version`. An endpoint
+     pins a PIPELINE and serves its latest release, so a draft number would describe something
+     no call will ever run. A pipeline with no release renders "no released version" — an
+     endpoint can outlive the release it was published against, and that is worth seeing.
+   - "N bound" is the **exact-node** binding count, which is what the REST surface reports.
+     It is deliberately not the EFFECTIVE authorization, which walks ancestors and takes the
+     nearest node carrying any binding (`EndpointAuthorizer`); and zero bindings does not mean
+     nobody can call it — a `user` key pinned to this workspace with `execute` still may.
+   - **There is no "calls in the last 24 h" column, and the mock has one.** Nothing in this
+     system records endpoint serves: no counter column on `published_endpoints`, no Micrometer
+     counter, no query. The only trace is an append-only `endpoint.served` audit row whose one
+     production reader is a per-execution boolean and whose KDoc argues explicitly against
+     broadening it. A column filled from a sample would be a plausible number and a false one,
+     so the card states the absence instead. Adding the column means adding the counter first.
+2. **API keys** — the caller's own keys, read-only, with the fields the management screen does
+   not show: kind, prefix, and either scopes (a `user` key) or the paths it is bound to (an
+   `endpoint` key, which has no scopes at all — an empty scope cell would read as "this key
+   can do nothing"). Issue and revoke stay at §4.10, which this card links to.
+3. **MCP server** — the connection JSON, the live tool count and the P32 rule. The count is
+   `McpToolCatalog.NAMES.size` at request time, never a literal, exactly as the marketing site
+   renders it. The header name is `ApiKeyCredential.HEADER`. The server URL comes from
+   `datapipelines.auth.base-url`, the deployment's DECLARED external origin — never derived
+   from the request, for the reason `OidcConfig` documents: a hostile `Host` /
+   `X-Forwarded-Host` would otherwise choose a URL a reader is invited to paste into an agent's
+   config next to a live API key. Unset, the card shows the `{host}/mcp` placeholder the
+   marketing site already uses rather than guessing.
 
 ---
 
@@ -664,5 +828,6 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 | 2026-08-31 | v1.14 | execute page redesign (032) | §4.4 Pipeline Editor expanded from the bare pointer into the rows that touch this document's shared contracts: the new `READ_RESOURCES` node-SQL read partial (`GET /partials/pipelines/{id}/nodes/{nodeId}/sql`, spec §8.3) with the deliberately-NOT-a-toast copy confirmation (live region + 1.5s label swap); the result grid moved onto the shared `.ds-table` (bespoke `.pe-result-table` styles deleted; paging stays the client-side cursor contract, restyled to the shared pager's look); and the SSE terminal events land on §5.1's Shape D — `pipeline_completed`/`execution_aborted` toast via `DpToast.show` (stream-borne, no HTTP response), `pipeline_failed` keeps the error modal — with all three announcing on the live region. No §5.1 amendment was needed: Shape D already existed (v1.13) and the copy button does not use it. |
 | 2026-09-03 | v1.20 | datasource credentials (061/T84) | §4.5 gains the **Last test** column: an `ok`/`failed`/`never tested` badge with the timestamp and the driver's message on hover, from the datasource row's stored outcome ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). It exists because listing never connects — on 2026-09-02 this screen showed a datasource as fine while every execution failed at CONNECT. The §5.1 Search rule follows the new column (`ok` / `failed` / `never tested` all match). No polling is added. §4.5's delete note now points at the any-version in-use guard (T79). |
 | 2026-09-05 | v1.22 | pipeline folders (067) | §4.3 becomes the **Pipelines Explorer**: pipeline names are folder paths, so the flat table is a tree LEFT + selected pipeline RIGHT — the §4.6 shape, reusing `template-tree.css` and `template-explorer.js` (which now finds its pane by a `data-explorer-pane` marker rather than a hard-coded id, so one file serves both screens). One level per request; a non-empty `q` is a flat list of full paths; the detail pane is read-only and carries settings, parameters, versions and Open in editor. **T108:** the permanently-`disabled` "Create Pipeline" button and its "Phase 2 other worktree" tooltip are deleted — an affordance the server does not have, advertised with an internal note — replaced by a sentence naming MCP as the authoring path and the roadmap as the plan. |
+| 2026-09-06 | v1.24 | shell v2 + the API section (079) | **The shell became a rail + top bar** (new **§3.4**, normative): 232px collapsible rail grouped Build/Operate/Organisation with Dashboard above, workspace switcher as a card, Pipelines/Templates counts behind a 60s `NavCounts` TTL (no general metadata cache existed to reuse), collapsed state on `<html>` written by the layout's ONE inline script before first paint; a top bar with a breadcrumb derived from `AppNav` (and re-derived client-side from the active link after a boosted swap — `ShellRenderTest` asserts the table and the markup agree), a search field that is a `<div>` wired to nothing, a light/dark toggle and an avatar menu (OIDC `picture` when stored, initials otherwise; Escape/outside-click/arrow keys; `aria-expanded` + `role="menu"`). The 076 boost contract is unchanged. The active item gains a 3px `--border-focus` bar the mock does not have, because §2.8 says a tint alone cannot carry selection. **One theme preference, five controls**: the design system ships one stylesheet per look, so light/dark/auto and the six palettes are nine values of `users.theme_preference` — there is no mode column and none was invented. **New §4.18, the API section** at `/api-console` (`read`): published endpoints (released version, exact-node binding count, and NO calls column — nothing in the system records endpoint serves, stated rather than sampled), a read-only key list showing an endpoint key's BINDINGS instead of its absent scopes, and the MCP card with `McpToolCatalog.NAMES.size` and a `base-url`-derived URL (never request-derived). **§4.11 Settings** is a card grid (owner ruling, option (a)) with scopes as chips, a Mode row, a disabled Compact density and no `.app-reading`. **§3.1 amended**: Settings/Admin/Workspaces leave the reading column. **§3.3 amended**: the headline is `--text-xl` in the app shell, and **§3.3 gains the faces** — Inter and JetBrains Mono vendored under `static/vendor/fonts` (OFL-1.1, owner-confirmed AGPL-compatible), which closes the gap that `light`, `dark` and `minimal` named neither face at all. **§4.17 promotion** flashes become toasts, with `toast.js` draining any `[data-toast-flash]` bin. `InlineWidthAuditTest` widened from "no inline width" to **no inline `style=` and no literal colour on any app template**, allowlist empty and asserted empty; the 330 attributes became the `u-*` utility layer plus semantic `app-*` classes, all token-only. |
 | 2026-09-05 | v1.23 | app shell + coherence (076) | One width policy (new **§3.1**, normative): every screen full-bleed with one gutter — `--app-content-max`, `.app-main-bleed` and the editor's `fullBleed` opt-in deleted (the opt-in became the rule); reading content in `.app-reading` (90ch, left); inline `max-width`/`grid-template-columns` out of every app template (`InlineWidthAuditTest`). **Boosted navigation** (new **§3.2**): `hx-boost` on nav + `<main id="app-main">` with the swap policy in `shell.js` (NOT inherited attributes — that would hijack partial swaps), `#app-progress` as the loading signal, client-mirrored active-section state, the five full-navigation routes marked `hx-boost="false"` (`ShellRenderTest`), editor teardown/re-bind semantics, and server redirect flashes rendered into a hidden `#toast-flash` bin inside the swapped region (`WorkspacesUiControllerTest` re-pinned). **Bootstrap out**: the 5.3.8 webjar, its layout `<link>` and every lockfile/verification reference deleted — no app screen used a Bootstrap class; what its reboot silently provided (`<code>`, `<pre>`, `<small>`, `<strong>`) is restated on tokens in app.css (`LayoutStylesheetOrderTest` rewritten, `SiteAssetAuditTest` sweeps for the reference). One type/density scale (new **§3.3**): `.ds-headline` titles everywhere (`TypeScaleAuditTest`), tabular tables, dates always proportional, mono for identifiers only with the per-column decision table. **T114**: execution lists show the pipeline display name (machine path on hover) via ONE web-side batch query per page — no dag/pipeline-contract change, no request per row. §4.9's node-stats table gains the Context column (`context_key → value` for CALCULATOR nodes — the claim `pipeline-contract.md`/`dag-executor.md` always made, now true). |
 | 2026-09-05 | v1.24 | mandatory folders (077) | Both explorers' ROOT level holds **folders only** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)): a name carries a folder, so neither browse model queries the root's leaves and both level fragments lose the `prefix.isEmpty() ? name : name.substring(…)` label branch. §4.6's create modal gains the helper line `folder/name — e.g. test/scratch`; the templates empty state says to author one under a folder. A pre-077 flat PIPELINE can still exist (no migration gate on that side) and stays reachable by search, by `pipelines_list` and by its own URL — it is simply not a row the root level draws. |

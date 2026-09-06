@@ -94,6 +94,8 @@ object SiteShotsMain {
             "/datasources",
             "/templates",
             "/executions",
+            // 079 §C: the API section joins the shot list — it is a top-level screen now.
+            "/api-console",
             "/workspaces",
             "/promotion",
             "/settings",

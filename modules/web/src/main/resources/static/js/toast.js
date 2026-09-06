@@ -145,11 +145,27 @@
    */
   function adoptFlashToasts(stack, doc) {
     if (!stack) return;
-    var flash = (doc || document).getElementById("toast-flash");
-    if (!flash) return;
-    while (flash.firstElementChild) {
-      stack.appendChild(flash.firstElementChild);
+    var root = doc || document;
+    /* 079 §F: EVERY bin, not just the layout's. The layout owns #toast-flash for the
+       workspace redirect codes; a screen whose refusal vocabulary is its own —
+       promotion's "the target already serves that version" — renders its own bin
+       inside its content and marks it [data-toast-flash]. Piling one screen's copy
+       into the layout's shared code→text map would put promotion's language in
+       every screen's shell, which is precisely the argument that kept promotion on
+       a banner until now. The layout's bin carries the attribute too, so there is
+       one drain path; the id lookup stays for the (tested) minimal-DOM case. */
+    var bins = [];
+    if (root.querySelectorAll) {
+      var marked = root.querySelectorAll("[data-toast-flash]");
+      for (var i = 0; i < marked.length; i++) bins.push(marked[i]);
     }
+    var byId = root.getElementById ? root.getElementById("toast-flash") : null;
+    if (byId && bins.indexOf(byId) === -1) bins.push(byId);
+    bins.forEach(function (flash) {
+      while (flash.firstElementChild) {
+        stack.appendChild(flash.firstElementChild);
+      }
+    });
   }
 
   function init() {
