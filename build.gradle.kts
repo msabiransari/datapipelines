@@ -235,20 +235,23 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
 // T119 (075): the compose env-contract audit runs on every `build`, not when someone
 // remembers. It was born in 051 as a hand-run script, and 074 then shipped three
 // application.yml keys with no compose pass-through — the exact class it detects — and
-// nothing said so for a round. It also checks deploy/env/example.env, the reference a
-// Kubernetes/systemd/bare-jar deployer copies, against the same source of truth.
+// nothing said so for a round. Since 081 it also proves the ONE-AUTHORITY rule over the
+// two tracked env files: every variable the app binds is declared in exactly one of
+// deploy/env/defaults.env and deploy/secrets.env.example (and the posture-dependent pair
+// in neither, because their default is the profile's).
 //
 // Inputs are declared so an unchanged tree skips it; the gate's `--rerun-tasks` forces
 // it regardless, and `> Task :composeEnvAudit UP-TO-DATE` in a log is the tell that a
 // run you are citing did not actually execute (MISTAKES.md, the lint variant).
 val composeEnvAudit = tasks.register<Exec>("composeEnvAudit") {
     group = "verification"
-    description = "Fails if deploy/compose.yml or deploy/env/example.env drift from application.yml's env contract."
+    description = "Fails if compose.yml, defaults.env or secrets.env.example drift from application.yml's env contract."
     val script = layout.projectDirectory.file("scripts/compose-env-audit.sh")
     inputs.file(script)
     inputs.file(layout.projectDirectory.file("modules/app/src/main/resources/application.yml"))
     inputs.file(layout.projectDirectory.file("deploy/compose.yml"))
-    inputs.file(layout.projectDirectory.file("deploy/env/example.env"))
+    inputs.file(layout.projectDirectory.file("deploy/env/defaults.env"))
+    inputs.file(layout.projectDirectory.file("deploy/secrets.env.example"))
     outputs.file(layout.buildDirectory.file("compose-env-audit.ok"))
     val stamp = layout.buildDirectory.file("compose-env-audit.ok")
     commandLine("bash", script.asFile.absolutePath)
