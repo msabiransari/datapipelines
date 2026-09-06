@@ -4,8 +4,8 @@
 <th:block th:fragment="content">
   <link th:href="@{/css/docs.css}" rel="stylesheet">
   <div class="app-reading">
-  <p style="margin-bottom: var(--gap-md);">
-    <a th:href="@{/docs}" style="color: var(--text-secondary); font-size: var(--text-sm);">&larr; Documentation</a>
+  <p class="u-mb-md">
+    <a th:href="@{/docs}" class="u-secondary u-text-sm">&larr; Documentation</a>
   </p>
   <!-- 033/B1: th:utext — the rendered markdown is DATA. A "${" inside it (13 packaged docs
        carry ${VAR} placeholders legitimately) is inserted literally; Thymeleaf never

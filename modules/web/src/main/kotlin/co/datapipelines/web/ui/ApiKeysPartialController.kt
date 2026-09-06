@@ -139,10 +139,9 @@ class ApiKeysPartialController(
     ): String {
         val revokeBtn =
             if (!key.isRevoked) {
-                """<button class="ds-button ds-button-ghost ds-button-sm" """ +
+                """<button class="ds-button ds-button-ghost ds-button-sm u-danger" """ +
                     """hx-delete="/partials/api-keys/${key.id}" """ +
-                    """hx-target="#keys-table-body" hx-confirm="Revoke this key?" """ +
-                    """style="color:var(--accent-danger)">Revoke</button>"""
+                    """hx-target="#keys-table-body" hx-confirm="Revoke this key?">Revoke</button>"""
             } else {
                 ""
             }

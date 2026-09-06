@@ -2,79 +2,170 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <h1 class="ds-headline" style="margin:0 0 var(--gap-lg) 0">Settings</h1>
+  <!-- 079 §D — Settings as a card grid (owner ruling 2026-09-05, option (a): the
+       cards use the width). The 076 `.app-reading` column is GONE from this screen:
+       a 90ch measure is right for prose and wrong for four independent cards, which
+       is what left three quarters of a wide window empty. `.app-reading` stays on
+       Docs, where the content really is prose.
 
-  <div class="app-reading app-stack">
-
-    <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Profile</h2>
-      <div style="display:flex;align-items:center;gap:var(--gap-md);margin-bottom:var(--gap-md)">
-        <th:block th:if="${user?.profilePictureUrl != null}">
-          <img th:src="${user.profilePictureUrl}" alt="Avatar" style="width:48px;height:48px;border-radius:50%;object-fit:cover">
-        </th:block>
-        <th:block th:if="${user?.profilePictureUrl == null}">
-          <div style="width:48px;height:48px;border-radius:50%;background:var(--surface-tertiary);display:flex;align-items:center;justify-content:center;font-size:var(--text-lg);color:var(--text-secondary)" th:text="${user?.displayName != null ? #strings.substring(user.displayName, 0, 1)?.toUpperCase() : '?'}">?</div>
-        </th:block>
-        <div>
-          <p style="font-weight:var(--weight-semibold);margin:0" th:text="${user?.displayName ?: 'Unknown'}">Display Name</p>
-          <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0" th:text="${user?.email ?: '—'}">email@example.com</p>
-        </div>
-      </div>
-      <div style="display:flex;gap:var(--gap-sm);margin-bottom:var(--gap-md)">
-        <span style="font-size:var(--text-xs);background:var(--surface-tertiary);padding:2px var(--gap-xs);border-radius:var(--radius-base);color:var(--text-secondary)" th:text="${user?.provider ?: 'N/A'}">Google</span>
-        <span style="font-size:var(--text-xs);background:var(--surface-tertiary);padding:2px var(--gap-xs);border-radius:var(--radius-base);color:var(--text-secondary)" th:text="${authMethod}">OIDC</span>
-      </div>
+       No inline `style=` anywhere on this page. InlineWidthAuditTest was widened in
+       this round from "no inline width" to "no inline style at all on an app
+       template", with an allowlist that must stay empty — and this screen carried
+       nineteen of them. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Settings</h1>
+      <p class="app-page-sub">Your account, how the app looks, and the session you are signed in with.</p>
     </div>
+  </div>
 
-    <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Appearance</h2>
-      <div style="display:flex;align-items:center;gap:var(--gap-sm)">
-        <label for="themeSelect" style="color:var(--text-secondary);font-size:var(--text-sm);white-space:nowrap">Theme</label>
-        <!-- Shape B (§5.1): no content target — the response is only the OOB stylesheet
-             link and the confirmation toast. A refusal arrives retargeted at #toast and
-             is admitted by toast.js's bridgeErrors. -->
-        <select id="themeSelect" class="ds-select" style="flex:1" hx-patch="/partials/profile/theme" hx-include="this" name="theme" hx-swap="none">
-          <option value="" th:selected="${user?.themePreference == null}">Default (deployment)</option>
-          <th:block th:each="theme : ${themes}">
-            <option th:value="${theme}" th:selected="${theme == user?.themePreference}" th:text="${theme}">theme</option>
-          </th:block>
-        </select>
+  <div class="app-grid app-grid-2">
+
+    <!-- ------------------------------------------------------------------ profile -->
+    <div class="ds-card">
+      <div class="app-card-h app-card-h-flush">
+        <h2 class="ds-title">Profile</h2>
       </div>
-    </div>
-
-    <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Session</h2>
-      <div style="font-size:var(--text-sm)">
-        <div style="display:flex;justify-content:space-between;padding:var(--gap-xs) 0;border-bottom:1px solid var(--border-default)">
-          <span style="color:var(--text-secondary)">Scopes</span>
-          <span th:each="s,stat : ${sessionScopes}"><span style="font-family:var(--font-mono)" th:text="${s}">read</span><th:block th:if="!${stat.last}">, </th:block></span>
+      <div class="app-card-b app-card-b-flush">
+        <div class="app-identity">
+          <img th:if="${user?.profilePictureUrl != null}" class="app-identity-avatar"
+               th:src="${user.profilePictureUrl}" alt="" referrerpolicy="no-referrer">
+          <span th:if="${user?.profilePictureUrl == null}" class="app-identity-avatar app-identity-initials"
+                th:text="${user?.displayName != null} ? ${#strings.toUpperCase(#strings.substring(user.displayName, 0, user.displayName.length() >= 2 ? 2 : 1))} : '?'">MS</span>
+          <div class="app-identity-text">
+            <b th:text="${user?.displayName} ?: 'Unknown'">Display Name</b>
+            <span th:text="${user?.email} ?: '—'">email@example.com</span>
+          </div>
         </div>
-        <div style="display:flex;justify-content:space-between;padding:var(--gap-xs) 0;border-bottom:1px solid var(--border-default)">
-          <span style="color:var(--text-secondary)">User ID</span>
-          <span style="font-family:var(--font-mono);font-size:var(--text-xs)" th:text="${user?.id}">uuid</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:var(--gap-xs) 0">
-          <span style="color:var(--text-secondary)">Last Login</span>
-          <span style="color:var(--text-secondary)" th:text="${user?.lastLoginAt != null ? #temporals.format(user.lastLoginAt, 'yyyy-MM-dd HH:mm') : '—'}">2026-08-01 12:00</span>
+        <div class="app-rows">
+          <div class="app-row">
+            <span class="app-row-k">Provider</span>
+            <span class="app-row-v" th:text="${user?.provider} ?: 'N/A'">google</span>
+          </div>
+          <div class="app-row">
+            <span class="app-row-k">Sign-in method</span>
+            <span class="app-row-v" th:text="${authMethod}">OIDC</span>
+          </div>
+          <div class="app-row">
+            <span class="app-row-k">Last sign-in</span>
+            <span class="app-row-v" th:text="${user?.lastLoginAt != null} ? ${#temporals.format(user.lastLoginAt, 'yyyy-MM-dd HH:mm')} : '—'">2026-09-06 12:00</span>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Password</h2>
-      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Change your local password, or see which sign-in method your account uses.</p>
-      <a th:href="@{/settings/password}" class="ds-button ds-button-secondary">Change password</a>
+    <!-- --------------------------------------------------------------- appearance -->
+    <div class="ds-card">
+      <div class="app-card-h app-card-h-flush">
+        <h2 class="ds-title">Appearance</h2>
+      </div>
+      <div class="app-card-b app-card-b-flush">
+        <div class="app-rows">
+          <!-- Mode and Theme are TWO VIEWS OF ONE FIELD. The design system ships one
+               stylesheet per look, so `light`, `dark` and `auto` are three of the nine
+               values `users.theme_preference` can take and the six palettes are the rest.
+               There is no separate mode column, and inventing one would be a schema change
+               this round is fenced out of. Both controls PATCH the same endpoint, and the
+               top bar's toggle and swatches are a third view of it. -->
+          <div class="app-row">
+            <span class="app-row-k">Mode</span>
+            <span class="app-seg">
+              <button type="button" hx-patch="/partials/profile/theme" hx-vals='{"theme":"light"}' hx-swap="none"
+                      th:attr="aria-pressed=${activeTheme == 'light'} ? 'true' : 'false'">Light</button>
+              <button type="button" hx-patch="/partials/profile/theme" hx-vals='{"theme":"dark"}' hx-swap="none"
+                      th:attr="aria-pressed=${activeTheme == 'dark'} ? 'true' : 'false'">Dark</button>
+              <button type="button" hx-patch="/partials/profile/theme" hx-vals='{"theme":"auto"}' hx-swap="none"
+                      th:attr="aria-pressed=${activeTheme == 'auto'} ? 'true' : 'false'">System</button>
+            </span>
+          </div>
+          <div class="app-row">
+            <label class="app-row-k" for="themeSelect">Theme</label>
+            <!-- Shape B (§5.1): no content target — the response is only the OOB stylesheet
+                 link and the confirmation toast. A refusal arrives retargeted at #toast and
+                 is admitted by toast.js's bridgeErrors.
+                 The id is load-bearing beyond this screen: siteShots' `app` set drives its
+                 dark pass through this exact select, because it is the control a user has. -->
+            <select id="themeSelect" class="ds-select app-select-inline" hx-patch="/partials/profile/theme"
+                    hx-include="this" name="theme" hx-swap="none">
+              <option value="" th:selected="${user?.themePreference == null}">Default (deployment)</option>
+              <th:block th:each="theme : ${themes}">
+                <option th:value="${theme}" th:selected="${theme == user?.themePreference}" th:text="${theme}">theme</option>
+              </th:block>
+            </select>
+          </div>
+          <div class="app-row">
+            <span class="app-row-k">Density</span>
+            <!-- Comfortable is the only density that EXISTS. Compact renders DISABLED rather
+                 than as a live control that silently does nothing: the preference has nowhere
+                 to live until `users` grows a column, and a toggle that changes nothing is
+                 worse than an absent one. -->
+            <span class="app-seg">
+              <button type="button" aria-pressed="true" disabled>Comfortable</button>
+              <button type="button" aria-pressed="false" disabled>Compact</button>
+            </span>
+          </div>
+        </div>
+        <p class="app-card-note app-note-block">Compact density arrives with a stored preference; the control is
+          disabled until then.</p>
+      </div>
     </div>
 
-    <div class="ds-card" style="padding:var(--gap-lg)">
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">API Keys</h2>
-      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0 0 var(--gap-md) 0">Keys authenticate agents against the MCP endpoint and REST API. Each key is pinned to one workspace and carries its own scopes (read, execute, author).</p>
-      <a th:href="@{/settings/api-keys}" class="ds-button ds-button-secondary">Manage API keys</a>
+    <!-- ------------------------------------------------------------------ session -->
+    <div class="ds-card">
+      <div class="app-card-h app-card-h-flush">
+        <h2 class="ds-title">Session</h2>
+      </div>
+      <div class="app-card-b app-card-b-flush">
+        <div class="app-rows">
+          <div class="app-row">
+            <span class="app-row-k">Scopes</span>
+            <!-- §D: this row used to spread four bare comma-separated spans across the card.
+                 Scopes are a SET of grants, and a set reads as chips. -->
+            <span class="app-chips">
+              <span class="app-chip app-chip-mono" th:each="s : ${sessionScopes}" th:text="${s}">read</span>
+            </span>
+          </div>
+          <div class="app-row">
+            <span class="app-row-k">Workspace</span>
+            <span class="app-row-v" th:text="${activeWorkspace} ?: '—'">acme</span>
+          </div>
+          <div class="app-row">
+            <span class="app-row-k">User id</span>
+            <span class="app-row-v ds-mono" th:text="${user?.id}">uuid</span>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <form th:action="@{/logout}" method="post" style="margin-top:var(--gap-sm)">
-      <button type="submit" class="ds-button ds-button-secondary" style="width:100%">Logout</button>
-    </form>
+    <!-- ----------------------------------------------------------------- password -->
+    <div class="ds-card">
+      <div class="app-card-h app-card-h-flush">
+        <h2 class="ds-title">Password</h2>
+      </div>
+      <div class="app-card-b app-card-b-flush">
+        <p class="app-page-sub app-note-flush">Change your local password, or see which sign-in method your
+          account uses.</p>
+        <a th:href="@{/settings/password}" class="ds-button ds-button-secondary">Change password</a>
+      </div>
+    </div>
+
+    <!-- ---------------------------------------------------------------------- api -->
+    <div class="ds-card">
+      <div class="app-card-h app-card-h-flush">
+        <h2 class="ds-title">API</h2>
+      </div>
+      <div class="app-card-b app-card-b-flush">
+        <!-- §C moved the API surface into its own section. Settings keeps the LINK, because
+             this is where people have looked for keys since 025 — a card that silently
+             disappears is how a feature gets reported missing. -->
+        <p class="app-page-sub app-note-flush">Published endpoints, API keys and the MCP connection now live in
+          their own section.</p>
+        <a th:href="@{/api-console}" class="ds-button ds-button-secondary">Open the API section</a>
+      </div>
+    </div>
+
+    <!-- The logout button that used to sit at the foot of this column is gone: logging out
+         is a shell action and lives in the avatar menu now (§B), where every screen has it. -->
 
   </div>
 </th:block>

@@ -26,7 +26,7 @@
            are gone. It promised an affordance the server does not have, and a tooltip naming a
            worktree is an internal note leaking into the product. This says what is true today
            and where authoring actually happens. -->
-      <p class="tplx-authoring-note" style="color: var(--text-secondary); font-size: var(--text-sm); margin: var(--gap-xs) 0 0 0;">
+      <p class="tplx-authoring-note u-secondary u-text-sm u-m0 u-mt-xs">
         Pipelines are authored through agents over the
         <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it
         a folder path like <code>nyc/mobility/revenue_by_borough</code>. Creating and editing
@@ -38,7 +38,7 @@
          list fragment into the stable #pipeline-list-wrapper root, so the control is never
          re-rendered and the search keeps focus and value. A non-empty search switches the LEFT
          pane to a flat list of full paths; clearing it returns to the tree. -->
-    <div style="display: flex; gap: var(--gap-md); align-items: center;">
+    <div class="u-row-md">
       <input type="search" id="pipeline-filter-q" name="q" th:value="${q}"
              placeholder="Search pipelines..."
              th:attr="hx-get=@{/partials/pipelines}, hx-target='#pipeline-list-wrapper', hx-swap='outerHTML'"

@@ -2,12 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-lg)">
-    <h1 class="ds-headline" style="margin:0">API Keys</h1>
+  <div class="u-flex u-items-center u-between u-mb-lg">
+    <h1 class="ds-headline u-m0">API Keys</h1>
     <button class="ds-button ds-button-primary" onclick="showCreateModal()">Generate Key</button>
   </div>
 
-  <div id="keyCreated" style="display:none;background:var(--accent-success-bg);border:1px solid var(--accent-success);padding:var(--gap-md);border-radius:var(--radius-base);margin-bottom:var(--gap-md)"></div>
+  <div id="keyCreated" class="app-alert-success u-mb-md u-hidden"></div>
 
   <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it.
        The table renders even when empty: the revoke path swaps Kotlin-built rows into
@@ -56,57 +56,56 @@
         </td>
         <td class="num">
           <th:block th:if="!${key.isRevoked}">
-            <button class="ds-button ds-button-ghost ds-button-sm"
+            <button class="ds-button ds-button-ghost ds-button-sm u-danger"
                     th:attr="hx-delete=@{/partials/api-keys/{id}(id=${key.id})}"
                     hx-target="#keys-table-body"
-                    hx-confirm="Revoke this key?"
-                    style="color:var(--accent-danger)">Revoke</button>
+                    hx-confirm="Revoke this key?">Revoke</button>
           </th:block>
         </td>
       </tr>
     </tbody>
   </table>
 
-  <div id="create-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div id="create-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-sm">
-      <button class="ds-button ds-button-ghost ds-button-sm" onclick="hideCreateModal()" style="position:absolute;top:var(--gap-sm);right:var(--gap-sm);font-size:var(--text-xl)">&times;</button>
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Generate API Key</h2>
+      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateModal()">&times;</button>
+      <h2 class="ds-title u-m0 u-mb-md">Generate API Key</h2>
       <form id="createKeyForm"
             th:attr="hx-post=@{/partials/api-keys}"
             hx-target="#keyCreated"
             hx-swap="innerHTML">
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Name</label>
-          <input type="text" name="name" class="ds-input" style="width:100%" placeholder="My Key" required>
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Name</label>
+          <input type="text" name="name" class="ds-input u-full" placeholder="My Key" required>
         </div>
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Scopes (comma-separated)</label>
-          <input type="text" name="scopes" class="ds-input" style="width:100%" placeholder="read, execute" th:attr="placeholder='Available: ' + ${#strings.listJoin(scopes, ', ')}">
-          <p style="color:var(--text-tertiary);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">Available: <th:block th:each="s,stat : ${scopes}"><span th:text="${s}">read</span><th:block th:if="!${stat.last}">, </th:block></th:block></p>
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Scopes (comma-separated)</label>
+          <input type="text" name="scopes" class="ds-input u-full" placeholder="read, execute" th:attr="placeholder='Available: ' + ${#strings.listJoin(scopes, ', ')}">
+          <p class="u-text-xs u-m0 u-mt-xs">Available: <th:block th:each="s,stat : ${scopes}"><span th:text="${s}">read</span><th:block th:if="!${stat.last}">, </th:block></th:block></p>
         </div>
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Expiry (days, optional)</label>
-          <input type="number" name="expiryDays" class="ds-input" style="width:100%" placeholder="Leave blank for no expiry" min="1">
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Expiry (days, optional)</label>
+          <input type="number" name="expiryDays" class="ds-input u-full" placeholder="Leave blank for no expiry" min="1">
         </div>
         <!-- §7.7 — the two endpoint-key fields. Both optional: leaving them alone mints exactly
              the user key this form has always minted. Publishing and binding otherwise happen
              through MCP/REST (R10), so this stays a form change, not a new authoring surface. -->
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Kind</label>
-          <select name="kind" class="ds-input" style="width:100%">
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Kind</label>
+          <select name="kind" class="ds-input u-full">
             <option value="user">user — scopes, the whole API</option>
             <option value="endpoint">endpoint — published endpoints only</option>
           </select>
         </div>
-        <div style="margin-bottom:var(--gap-lg)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Endpoint bindings (comma-separated)</label>
-          <input type="text" name="bindings" class="ds-input" style="width:100%" placeholder="/lending, /nyc/revenue">
-          <p style="color:var(--text-tertiary);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">
+        <div class="u-mb-lg">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Endpoint bindings (comma-separated)</label>
+          <input type="text" name="bindings" class="ds-input u-full" placeholder="/lending, /nyc/revenue">
+          <p class="u-text-xs u-m0 u-mt-xs">
             Tree nodes an endpoint key may call. A binding at <code>/lending</code> covers everything beneath it;
             a binding deeper down replaces it there. An endpoint key with no binding authorises nothing.
           </p>
         </div>
-        <button type="submit" class="ds-button ds-button-primary" style="width:100%" onclick="setTimeout(hideCreateModal, 200)">Generate</button>
+        <button type="submit" class="ds-button ds-button-primary u-full" onclick="setTimeout(hideCreateModal, 200)">Generate</button>
       </form>
     </div>
   </div>
@@ -121,8 +120,11 @@
     document.addEventListener('DOMContentLoaded', function() {
       var observer = new MutationObserver(function() {
         var created = document.getElementById('keyCreated');
-        if (created.children.length > 0 && created.style.display === 'none') {
-          created.style.display = 'block';
+        // 079 §D: the panel's initial hidden state is the `u-hidden` CLASS, not an
+        // inline style — reading `created.style.display` would see "" forever and the
+        // one-time secret would never appear. Test the class, and drop it to reveal.
+        if (created.children.length > 0 && created.classList.contains('u-hidden')) {
+          created.classList.remove('u-hidden');
           hideCreateModal();
           // The create response itself refreshes #keys-table-body out-of-band and
           // points a toast at this panel (030) — no refetch; just select the secret.

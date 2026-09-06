@@ -16,7 +16,7 @@
        rendered INTO. -->
   <div class="tplx-page">
 
-    <div style="display: flex; align-items: center; justify-content: space-between;">
+    <div class="u-row u-between">
       <h1 class="ds-headline">Templates</h1>
       <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
         <button class="ds-button ds-button-primary" onclick="showCreateTemplateModal()">Create Template</button>
@@ -30,7 +30,7 @@
     <!-- `.ds-input` is `width: 100%`, so a bare select in a flex row grows without bound.
          With three controls instead of two that starved the search box to a few pixels, so
          the selects are sized by their content and only the search box flexes. -->
-    <div style="margin-bottom: var(--gap-md); display: flex; gap: var(--gap-md); align-items: center; flex-wrap: wrap;">
+    <div class="u-row-md u-wrap u-mb-md">
       <input type="search" id="template-filter-q" name="q" th:value="${q}"
              placeholder="Search templates..."
              th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
@@ -38,7 +38,7 @@
              hx-include="#template-filter-dialect, #template-filter-type"
              hx-indicator="#template-filter-spinner"
              class="ds-input app-search-input">
-      <select id="template-filter-dialect" name="dialect" class="ds-input" style="flex: 0 0 auto; width: auto;"
+      <select id="template-filter-dialect" name="dialect" class="ds-input app-select-auto"
               th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
               hx-trigger="change"
               hx-include="#template-filter-q, #template-filter-type"
@@ -48,7 +48,7 @@
                 th:selected="${d == selectedDialect}"></option>
       </select>
       <!-- 046 shipped `type` on the version row; it filters like `dialect` and joins it here. -->
-      <select id="template-filter-type" name="type" class="ds-input" style="flex: 0 0 auto; width: auto;"
+      <select id="template-filter-type" name="type" class="ds-input app-select-auto"
               th:attr="hx-get=@{/partials/templates}, hx-target='#template-list-wrapper', hx-swap='outerHTML'"
               hx-trigger="change"
               hx-include="#template-filter-q, #template-filter-dialect"
@@ -89,40 +89,40 @@
        immutable after creation (§5.3), so the edit screen shows it as a read-only value.
        `name` is likewise create-time only — §4.5 offers no rename, anywhere, so this modal
        is the only place a template name is ever typed. -->
-  <div id="create-template-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div id="create-template-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-lg">
-      <button class="ds-button ds-button-ghost ds-button-sm" onclick="hideCreateTemplateModal()" style="position:absolute;top:var(--gap-sm);right:var(--gap-sm);font-size:var(--text-xl)">&times;</button>
-      <h2 class="ds-title" style="margin:0 0 var(--gap-md) 0">Create Template</h2>
+      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateTemplateModal()">&times;</button>
+      <h2 class="ds-title u-m0 u-mb-md">Create Template</h2>
       <form th:attr="hx-post=@{/partials/templates}"
             hx-target="#template-create-result"
             hx-swap="innerHTML">
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Name (path)</label>
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Name (path)</label>
           <!-- §9.5: `pattern` and `maxlength` are RENDERED FROM the server's own grammar
                (TemplateNameGrammar reads the validator's Regex and its length cap) — not a
                regex retyped beside it, which is the drift this project has been bitten by.
                The check is a convenience that saves a round-trip; the server validates every
                write regardless and its rejection is the one that counts. -->
-          <input type="text" name="name" class="ds-input" style="width:100%"
+          <input type="text" name="name" class="ds-input"
                  placeholder="acme/finance/monthly_revenue" required
                  th:attr="pattern=${namePattern}, maxlength=${nameMaxLength}, title=${nameHint}">
           <!-- 077: the folder is mandatory, and the `pattern` above already refuses a bare
                name because it is the server's own grammar. This line is what tells someone
                WHY the field went red before they have to read the full rule below it. -->
-          <p style="color:var(--text-muted);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">
+          <p class="u-muted u-text-xs u-m0 u-mt-xs">
             folder/name &mdash; e.g. <code>test/scratch</code>
           </p>
-          <p style="color:var(--text-muted);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0"
+          <p class="u-muted u-text-xs u-m0 u-mt-xs"
              th:text="${nameHint}">grammar</p>
         </div>
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Display name (optional)</label>
-          <input type="text" name="displayName" class="ds-input" style="width:100%" placeholder="Monthly Revenue">
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Display name (optional)</label>
+          <input type="text" name="displayName" class="ds-input" placeholder="Monthly Revenue">
         </div>
-        <div style="display:flex;gap:var(--gap-md);margin-bottom:var(--gap-md)">
-          <div style="flex:1">
-            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Type</label>
-            <select id="create-template-type" name="type" class="ds-input" style="width:100%" required
+        <div class="u-flex u-gap-md u-mb-md">
+          <div class="u-grow">
+            <label class="u-block u-secondary u-text-sm u-mb-xs">Type</label>
+            <select id="create-template-type" name="type" class="ds-input" required
                     onchange="syncTemplateDialect()">
               <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
                       th:selected="${ty == 'sql'}">sql</option>
@@ -132,25 +132,25 @@
                the submitted form for `html`. chk_type_dialect is the database's backstop and
                the controller drops the field for `html` regardless — the form is not the
                authority on that rule (§5.1). -->
-          <div style="flex:1" id="create-template-dialect-field">
-            <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Dialect</label>
-            <select id="create-template-dialect" name="dialect" class="ds-input" style="width:100%" required>
+          <div class="u-grow" id="create-template-dialect-field">
+            <label class="u-block u-secondary u-text-sm u-mb-xs">Dialect</label>
+            <select id="create-template-dialect" name="dialect" class="ds-input" required>
               <option th:each="d : ${dialects}" th:value="${d}" th:text="${d}">POSTGRES</option>
             </select>
           </div>
         </div>
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Description</label>
-          <input type="text" name="description" class="ds-input" style="width:100%"
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Description</label>
+          <input type="text" name="description" class="ds-input"
                  placeholder="What this template expects and produces" required>
         </div>
-        <div style="margin-bottom:var(--gap-md)">
-          <label style="display:block;color:var(--text-secondary);font-size:var(--text-sm);margin-bottom:var(--gap-xs)">Body</label>
-          <textarea name="body" class="ds-input" style="width:100%;min-height:140px;font-family:var(--font-mono);font-size:var(--text-sm)"
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Body</label>
+          <textarea name="body" class="ds-input app-template-body-input"
                     placeholder="SELECT 1" required></textarea>
         </div>
-        <div id="template-create-result" style="margin-bottom:var(--gap-md);"></div>
-        <button type="submit" class="ds-button ds-button-primary" style="width:100%">Create</button>
+        <div id="template-create-result" class="u-mb-md"></div>
+        <button type="submit" class="ds-button ds-button-primary u-full">Create</button>
       </form>
     </div>
   </div>

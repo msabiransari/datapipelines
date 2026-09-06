@@ -15,10 +15,10 @@
        --app-detail-width token), SQL source RIGHT taking the remainder, preview
        output below the editor sharing its width (template-editor.css). -->
   <div class="te-page">
-  <div style="display:flex;align-items:center;justify-content:space-between">
+  <div class="u-row u-between">
     <div>
-      <h1 class="ds-headline" style="margin:0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
-      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0"
+      <h1 class="ds-headline u-m0" th:text="${template?.displayName ?: 'Unknown Template'}">Template Name</h1>
+      <p class="u-secondary u-text-sm u-m0 u-mt-xs"
          th:text="'ID: ' + ${template?.id ?: '—'}" th:title="${template?.id}">Template ID</p>
       <!-- §9.3: `type` is a create-time input and IMMUTABLE afterwards (§5.3), so it renders
            here as a read-only VALUE — never as a disabled control. A disabled <select> is
@@ -26,7 +26,7 @@
            `template.validation.type_immutable` either way, but the UI must not present a lock
            it does not own. `dialect` shows for the same reason: it belongs to the type.
            There is no name control here either — §4.5 offers no rename, anywhere. -->
-      <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:var(--gap-xs) 0 0 0">
+      <p class="u-secondary u-text-sm u-m0 u-mt-xs">
         <span>Type:</span>
         <span class="ds-badge ds-badge-default" th:text="${template?.type?.wire ?: '—'}">sql</span>
         <th:block th:if="${template?.dialect != null}">
@@ -35,7 +35,7 @@
         </th:block>
       </p>
     </div>
-    <div style="display:flex;gap:var(--gap-sm);align-items:center">
+    <div class="u-row">
       <!-- versioning §6/§7: the pending-release affordance. Release is the human action
            that publishes the draft (agents never release, D4); discard deletes it (a
            template draft is always deletable — nothing references it by FK). -->
@@ -52,8 +52,8 @@
            first); the select's own `version` value rides along, and the name is a
            server-rendered @{...} parameter because it is fixed for the page (§9.6: never
            a path segment). -->
-      <label for="versionSelect" style="color:var(--text-secondary);font-size:var(--text-sm)">Version:</label>
-      <select id="versionSelect" name="version" class="ds-select" style="font-size:var(--text-sm)"
+      <label for="versionSelect" class="u-secondary u-text-sm">Version:</label>
+      <select id="versionSelect" name="version" class="ds-select u-text-sm"
               th:attr="hx-get=@{/partials/templates/editor/source(name=${templateName})}"
               hx-trigger="change" hx-target="#template-source" hx-swap="outerHTML">
         <th:block th:each="v : ${versions}">
@@ -70,12 +70,12 @@
       <div>
         <div class="te-panel-head">
           <h2>Render Context</h2>
-          <div style="display:flex;gap:var(--gap-xs)">
-            <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('kv')" id="tab-kv-btn" style="font-weight:var(--weight-semibold);border-bottom:2px solid var(--accent-primary)">Key/Value</button>
-            <button class="ds-button ds-button-ghost ds-button-sm" onclick="switchTab('json')" id="tab-json-btn" style="border-bottom:2px solid transparent">JSON</button>
+          <div class="u-flex u-gap-xs">
+            <button class="ds-button ds-button-ghost ds-button-sm u-semibold app-tab-active" onclick="switchTab('kv')" id="tab-kv-btn">Key/Value</button>
+            <button class="ds-button ds-button-ghost ds-button-sm app-tab-idle" onclick="switchTab('json')" id="tab-json-btn">JSON</button>
           </div>
         </div>
-        <div id="context-kv" style="margin-bottom:var(--gap-sm)">
+        <div id="context-kv" class="u-mb-sm">
           <!-- The row markup addContextRow() clones — styled once, in template-editor.css. -->
           <div id="context-rows" class="te-context-rows">
             <div class="context-row">
@@ -86,7 +86,7 @@
           </div>
           <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()">+ Add Row</button>
         </div>
-        <div id="context-json" style="display:none">
+        <div id="context-json" class="u-hidden">
           <textarea id="contextJsonTextarea" class="ds-textarea" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
         </div>
       </div>
@@ -232,7 +232,7 @@
              pass is a no-op on shapes without a <pre> (the error card). */
           if (window.TplPreviewHighlight) window.TplPreviewHighlight.highlightPreview(pane);
         })
-        .catch(function(e) { pane.innerHTML = '<div class="ds-card" style="padding:var(--gap-md);border-color:var(--accent-danger)"><p style="color:var(--accent-danger);font-size:var(--text-sm)">' + e.message + '</p></div>'; })
+        .catch(function(e) { pane.innerHTML = '<div class="ds-card app-error-card u-p-md"><p class="u-danger u-text-sm">' + e.message + '</p></div>'; })
         .finally(function() { btn.disabled = false; spinner.style.display = 'none'; });
     }
   </script>
