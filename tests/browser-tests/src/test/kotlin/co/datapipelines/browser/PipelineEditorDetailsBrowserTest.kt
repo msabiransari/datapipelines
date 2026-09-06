@@ -58,7 +58,8 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
     fun `explorer to editor to a selected node's Details - the P0 shape`() {
         startTrace()
         loginReadyUser()
-        val name = "browser_ped_" + generatedPassword("p").take(6).lowercase()
+        // 077: a pipeline name carries a folder; `test/` is the scratch convention.
+        val name = "test/browser_ped_" + generatedPassword("p").take(6).lowercase()
         seedCalculatorPipeline(name) shouldBe 201
 
         // The explorer: find the pipeline, select it (search mode renders a FLAT
