@@ -44,6 +44,10 @@ internal object StructuralRules {
      * `nyc/mobility/daily_by_zone.sql` if both kinds of asset spell a path the same way.
      * Node ids, output tables and parameter names keep their own narrower rules — see
      * [checkNodeIdentifiers] and [ParameterRules].
+     *
+     * Since 077 the path needs at least TWO segments — a folder is mandatory — and the
+     * failure carries `details.reason` so a caller can tell that refusal from a bad
+     * character ([PipelineNameGrammar.refusalReason]).
      */
     private fun checkName(
         pipeline: Pipeline,
@@ -53,9 +57,15 @@ internal object StructuralRules {
         into.add(
             Validation.NAME_INVALID,
             "name",
-            "Pipeline name '${pipeline.name.truncateForError()}' must be a path of 1-10 '/'-separated segments, " +
-                "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total.",
-            mapOf("value" to pipeline.name.truncateForError()),
+            "Pipeline name '${pipeline.name.truncateForError()}' must be a path of 2-10 '/'-separated segments, " +
+                "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total — a folder is required " +
+                "(test/scratch, not scratch).",
+            // `reason` separates "you forgot the folder" from "you used a bad character"
+            // without an agent parsing the message (§4.1, 077).
+            mapOf(
+                "value" to pipeline.name.truncateForError(),
+                "reason" to PipelineNameGrammar.refusalReason(pipeline.name),
+            ),
         )
     }
 

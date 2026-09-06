@@ -107,7 +107,7 @@ class PipelinesListTool(
         prefix: String?,
         limit: Int,
     ): Map<String, Any?> {
-        if (prefix != null && !PipelineNameGrammar.matches(prefix)) return emptyLevel(prefix)
+        if (prefix != null && !PipelineNameGrammar.matchesPrefix(prefix)) return emptyLevel(prefix)
         val level = repository.listFolder(workspaceId, prefix, offset = 0, limit = limit)
         return mapOf(
             "prefix" to prefix.orEmpty(),

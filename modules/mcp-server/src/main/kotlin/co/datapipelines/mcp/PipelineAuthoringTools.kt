@@ -12,18 +12,19 @@ import java.util.UUID
 /**
  * The `name` argument's description on both write tools (§6.2.4, §6.2.5).
  *
- * 067 made the name a FOLDER PATH, and the schema's `pattern` is
- * [PipelineNameGrammar.pattern] itself — read from the validator, never retyped beside it, so
+ * 067 made the name a FOLDER PATH and 077 made the folder mandatory; the schema's `pattern`
+ * is [PipelineNameGrammar.pattern] itself — read from the validator, never retyped beside it, so
  * what an agent is told and what the server enforces cannot drift. The prose is what a regex
  * cannot say: which folder to choose, and that choosing one is a decision taken once, because
  * there is no rename.
  */
 internal const val NAME_ARG_DESC: String =
-    "Machine name, and a FOLDER PATH: 1-10 lower-case '/'-separated segments " +
-        "(finance/payments/daily_settlement). The root segment says who owns it — list the existing roots with " +
-        "pipelines_list {prefix: ''} and reuse one; ASK before minting a new root. Keep a pipeline under the same " +
-        "prefix as the templates it uses. There is no rename: the name is the pipeline's identity, so choose the " +
-        "folder now."
+    "Machine name, and a FOLDER PATH: 2-10 lower-case '/'-separated segments " +
+        "(finance/payments/daily_settlement). A FOLDER IS REQUIRED — a bare 'daily_settlement' is refused with " +
+        "pipeline.validation.name_invalid and details.reason='folder_required'; put experiments under test/. The " +
+        "root segment says who owns it — list the existing roots with pipelines_list {prefix: ''} and reuse one; " +
+        "ASK before minting a new root. Keep a pipeline under the same prefix as the templates it uses. There is " +
+        "no rename: the name is the pipeline's identity, so choose the folder now."
 
 /**
  * The **wire shapes** `pipelines_create` and `pipelines_update` share (§6.2.4, §6.2.5): the §3

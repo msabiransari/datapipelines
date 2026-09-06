@@ -78,7 +78,7 @@ internal object CompositionRules {
                 Validation.NAME_INVALID,
                 "nodes[$index].pipeline.name",
                 "PIPELINE node '${node.id.truncateForError()}' references '${ref.name.truncateForError()}', which is not a " +
-                    "legal pipeline name: a path of 1-10 '/'-separated segments, each [a-z0-9][a-z0-9_.-], " +
+                    "legal pipeline name: a path of 2-10 '/'-separated segments, each [a-z0-9][a-z0-9_.-], " +
                     "at most 64 chars, 200 total.",
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )

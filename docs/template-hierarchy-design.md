@@ -53,11 +53,20 @@ Everything remains stored in the database, editable and releasable at runtime, p
 ### 4.1 Grammar
 
 ```
-path    := segment ("/" segment){0,9}          -- 1 to 10 segments
+path    := segment ("/" segment){1,9}          -- 2 to 10 segments; the first is the FOLDER
 segment := [a-z0-9][a-z0-9_.-]{0,63}           -- 1 to 64 chars, starts alphanumeric
 ```
 
 Total path length: **≤ 200 chars** (raised from today's 100 — paths are longer than flat names).
+
+**A folder is mandatory (077, owner ruling 2026-09-05).** A path has **at least two** segments: the first is a
+folder, the last is the asset. `active_users` is refused; `test/active_users` is accepted. The reason is that
+§4.5 gives no rename — a name minted at the root is stuck at the root forever — so the root would accumulate
+every scratch and every experiment with no way to tidy it, and the tree UI would degrade into the flat list it
+exists to replace. Requiring the folder at the one moment a name is chosen costs an agent one segment and buys
+a root that only ever holds folders. The refusal is the existing catalogued code
+(`template.validation.id_invalid` / `pipeline.validation.name_invalid`) with `details.reason = "folder_required"`,
+so a caller can tell a missing folder from a bad character without parsing the message.
 
 ### 4.2 Rules and rationale
 
@@ -66,13 +75,15 @@ Total path length: **≤ 200 chars** (raised from today's 100 — paths are long
 | Separator is `/` only. Backslash rejected. | Freemarker name normalization is `/`-based; `\` would create a second, invisible path language and Windows-style ambiguity. |
 | Segments start with `[a-z0-9]` | Forbids `.` and `..` segments (path-traversal shape) and `-`/`.`-leading oddities without a special-case list. **Narrower than today's rule** — see §4.6. |
 | Lowercase only (unchanged) | Matches current rule (`TemplateValidation.kt:69`); avoids case-folding disputes across databases and any future export to case-insensitive filesystems. |
-| Dots and dashes inside segments (unchanged) | Existing names (`fetch_orders.sql`, `lib_aggregate.sql`) remain valid; extension-style suffixes stay a pure convention, never required or interpreted. |
+| Dots and dashes inside segments (unchanged) | Extension-style suffixes (`nyc/mobility/daily_by_zone.sql`, `nyc/lib/metrics.sql`) stay a pure convention, never required or interpreted. |
 | No `@` (unchanged) | `@` is the `{name}@{version}` separator in registry/loader keys (`TemplateRef.key`, `RegistryTemplateLoader.parseKey`). |
 | Segment ≤ 64 chars | Keeps a single path element readable in a tree and bounded in a loader key. **Narrower than today's flat 100** — see §4.6. |
+| **At least 2 segments** — a folder is mandatory | §4.5 gives no rename, so a root-level name is permanent. Requiring the folder at creation keeps the root a directory of folders instead of a dumping ground (077, owner ruling 2026-09-05). |
 | Max 10 segments, ≤ 200 chars | Bounds the tree UI depth, the synthesized import prologue length, and loader key size. 10/200 is generous for real libraries and cheap to relax later (relaxation is additive; tightening is not). |
 | No leading/trailing `/`, no empty segments | A path is a sequence of segments, not a string that happens to contain slashes. |
 
-Single-segment names (everything that exists today) are valid paths — they sit at the tree root.
+Single-segment names are **not** valid paths: the tree root holds folders only (§4.1). `test/` is the sanctioned
+scratch folder — an experiment goes to `test/…`, never to the root.
 
 ### 4.3 Uniqueness and identity
 
@@ -116,7 +127,21 @@ So a stored name that becomes illegal breaks **execution of already-released, al
 - §4.5 forbids rename, so there is no in-place repair after the fact.
 - `TemplateRepository.lookupVersion` is deliberately *not* filtered by `is_deleted` (`TemplateRepository.kt:102-107`, templates.md §5.1) — pinned refs to a **soft-deleted** template still resolve. Soft-deleted rows are therefore in scope for the check, not exempt from it.
 
-**Decision (2026-09-01):** keep the strict grammar and make the incompatibility loud at deploy time rather than silent at render time. The migration opens with a pre-check that aborts the migration and names every offender. *(Filename amended 2026-09-02, round 043: the design was written as one round, so it says `V7__typed_hierarchical_templates.sql` — but naming and typing shipped as separate rounds. The gate below landed as **`V7__hierarchical_template_names.sql`** in 043; typing follows as `V8__typed_templates.sql` in 046, and §5.1's heading means that one.)*
+**Decision (2026-09-01):** keep the strict grammar and make the incompatibility loud at deploy time rather than silent at render time. The migration opens with a pre-check that aborts the migration and names every offender. *(Filename amended 2026-09-02, round 043: the design was written as one round, so it says `V7__typed_hierarchical_templates.sql` — but naming and typing shipped as separate rounds. The first gate landed as **`V7__hierarchical_template_names.sql`** in 043; typing follows as `V8__typed_templates.sql` in 046, and §5.1's heading means that one.)*
+
+**The gate is re-issued whenever §4.1 narrows (077, 2026-09-05).** It is one pattern in this document and one
+`DO`-block shape, but a *new* migration each time, because an applied migration's text is frozen by its Flyway
+checksum and may never be edited in place. The block below is always the **current** §4.1 pattern:
+
+| Migration | Narrowing it gates | Pattern it enforced when it ran |
+|---|---|---|
+| `V7__hierarchical_template_names.sql` (043) | segments must start `[a-z0-9]`; a segment caps at 64 | the 1-to-10-segment form, which was the rule at that time |
+| `V12__folder_required.sql` (077) | a folder is mandatory — at least 2 segments | the block below |
+
+`V7`'s file on disk still spells the 1-to-10-segment repetition and always will: it is an applied migration, its checksum is validated on
+every startup, and its 043 text is a faithful record of the rule 043 enforced. The one grep that must come back empty
+is over `docs/`, the two grammar objects and the agent skill — not over the migration history.
+
 
 ```sql
 -- §4.6 legacy-name gate. Runs FIRST, before any DDL, so a violating deployment
@@ -129,14 +154,20 @@ BEGIN
     SELECT string_agg(name, ', ' ORDER BY name) INTO offenders
       FROM templates
      WHERE length(name) > 200
-        OR name !~ '^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){0,9}$';
+        OR name !~ '^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$';
     IF offenders IS NOT NULL THEN
         RAISE EXCEPTION
-            'V7 aborted: template name(s) violate the v1 naming grammar: %. '
+            'Migration aborted: template name(s) violate the v1 naming grammar: %. '
             'Remediation: docs/template-hierarchy-design.md §4.6.', offenders;
     END IF;
 END $$;
 ```
+
+**Pipelines are deliberately NOT gated.** A pipeline name is validated at SAVE only (§14): nothing on the execute
+path re-checks it, `PipelineResolver` looks a child reference up by name without consulting the grammar, and
+pipelines are UUID-addressed over HTTP. A legacy flat pipeline therefore keeps listing, keeps opening and keeps
+executing; its next save is refused, naming the value. A template has two more doors — `parseKey` at render and the
+import-prologue synthesis — which is the whole reason templates need a deploy-time gate and pipelines do not.
 
 **Operator remediation, per offending name** (pre-deploy; §4.5 forbids rename, so this is a re-create, not a fix):
 
@@ -144,7 +175,9 @@ END $$;
 2. Repoint every pipeline that references the old name — draft, edit the `TemplateRef`, release.
 3. Delete the old template's rows outright. A *soft* delete is not enough: soft-deleted names still resolve and still trip the pre-check, by design.
 
-**Known exposure at design time:** every template name in the shipped example seed (`fetch_orders.sql`, `active_users.sql`, `record_execution.sql`, `revenue_by_customer`, …) already satisfies §4.1. The gate is a safety net for customer-authored content, not a known blocker for the reference deployment.
+**Known exposure, MEASURED 2026-09-05 (077) — and it was not zero.** Every *pipeline* name in the shipped demo content carries a folder; **13 template ids did not**: 7 in the mobility family (`sample_trips_monthly.sql`, `sample_trips_daily.sql`, `sample_zones.sql`, `sample_calendar.sql`, `sample_daily_rain.sql`, `sample_revenue_by_borough.sql`, `sample_rain_vs_dry.sql`) and 6 in the trade family (`trade_monthly_window.sql`, `sample_trade_balance.sql`, `comtrade_reported.sql`, `sample_trade_reconciliation.sql`, `trade_reference_lookups.sql`, `trade_hhi.sql`). 067 gave the *new* demo templates folders and left the older `sample_*` ones flat, which reads as compliant if you only count pipeline names. The repo copies now carry folders under the family each already belonged to (`nyc/mobility/`, `nyc/reference/`, `nyc/weather/`, `trade/`), and `SampleDataExamplesContentTest` is the build input that measures it.
+
+**This makes a republish of both demo families a RELEASE PREREQUISITE.** `examples.json` is a file the loader downloads from the published artifact, not one the app reads out of the repo (`deploy/sample-data/load.sh`), so the published mobility v4 and trade v3 still carry the flat ids and a `--demo` seed against them would be refused template-by-template at bootstrap. `scripts/sample-data/check-published.sh` — which asserts the published copy equals the repo copy — is the guard that will say so. Repack, republish and re-pin both families (mobility v5, trade v4) before the release tag.
 
 ## 5. The `type` field
 
@@ -383,6 +416,8 @@ Dual addressing was considered and rejected. It breaks nothing, but it is a perm
 11. **UI — paths do not break the pipeline editor.** A node referencing `acme/finance/monthly_revenue` renders truncated with the full path in `title`, in both `pipelines/editor.html` and `partials/pipeline-node-sql.html`, including the `template-missing` state.
 12. **Addressing (§9.6)** — end-to-end over the added routes only, for a name containing `/`: create, read, render, release, delete. Plus a companion asserting the ten existing routes still answer identically for a flat name. *Falsification:* point the first at the old `/{id}` route and it must return 400 — the measured behaviour, not an assumed one.
 13. **Hash stability (§5.2, §11)** — assert `TEMPLATE_HASH_EXPR` is unchanged by this round, and an integration test that a no-op PUT against a template released **before** V8 still returns the no-op and creates **no** draft after V8. *Falsification:* add `'type', type` to the expression and this test must go red. A gate that cannot go red on the change it forbids is not a gate.
+14. **Folder requirement (§4.1, 077)** — both grammar unit tests: `a/b` accepted, `a` refused with `details.reason = "folder_required"`, 10 segments accepted, 11 refused. Both spec-drift tests (`PipelineNameGrammarSpecDriftTest`, `TemplateNameGrammarSpecDriftTest`) derive the repetition bound from §4.1's own grammar block, so the doc is the authority for both copies. Migration test over `V12__folder_required.sql`: clean apply on an empty DB; abort naming **both** offenders when one active and one soft-deleted flat template are seeded. *Falsification:* revert either regex to the 1-to-10-segment form and the drift tests must go red — shown red before the code change and green after it, in round 077's handback.
+
 
 ## 13. Decisions log
 
@@ -448,6 +483,13 @@ remediation, when its owner next wants to edit it, is the §4.5 one: create it a
 and let the old name be deprecated. There is no migration, no pre-check, and no `%2F` problem
 — which is why 067 is a smaller round than 043 despite shipping the same convention.
 
+**077 adds a second narrowing on the same terms.** Requiring a folder (§4.1) makes a flat
+`active_users` illegal for both asset kinds. Templates get `V12__folder_required.sql`, for the
+render-time reason in the table above. Pipelines get nothing, for the save-time reason in the
+same table — and the explorer's root level, which can no longer contain a leaf, stops
+rendering one; a legacy flat pipeline stays reachable by search (`q`, a flat list of full
+paths), by `pipelines_list`, and by its UUID URL, which is how it is opened and executed.
+
 ### 14.3 Deferred, deliberately
 
 - **Per-workspace `allowed_roots` policy.** A guardrail ("this workspace may only create under
@@ -480,6 +522,11 @@ pipeline under `finance/` grants nobody anything, and moving it would not revoke
   area's work, whichever asset kind you are browsing.
 - **Shared macros live under `<owner>/lib/`** — `nyc/lib/metrics.sql`. A library that everyone
   imports sits beside its owner, not at the root.
+- **`test/` is the sanctioned scratch folder.** An experiment, a spike, a throwaway goes to
+  `test/…`. It is a convention and nothing more: no folder is reserved, none is auto-created,
+  and `test/` exists exactly when something is named under it (§3.1, §9.1). Naming it here is
+  what keeps scratch work out of a root that §4.1 now reserves for folders and §4.5 gives no
+  way to tidy.
 
 ### 15.3 List the roots first; ask before minting a new one
 
@@ -495,9 +542,12 @@ Never mint a root silently.
   move. This is the reason §15.3 asks before minting rather than after.
 - **Not a schema dimension.** No `folder` column, no folder rows, no folder ids (§3.1). A
   folder exists exactly as long as something is named under it.
+- **Not optional.** §4.1 requires one. There is no root-level asset and no way to create one.
 
 ---
 
 *Design settled in conversation, 2026-09-01: path-in-name hierarchy; generic store with `type: sql|html`; no component taxonomy at template level; `dialect` nullable and SQL-only; runtime-only operations; dashboards deferred to a separate design.*
 
 *Extended 2026-09-05 (067): §14 applies the same convention to pipelines; §15 states the convention the agent follows when it names either kind of asset.*
+
+*Amended 2026-09-05 (077, owner ruling): §4.1 requires a folder — a path is 2 to 10 segments and the root holds folders only. §4.2's single-segment sentence is reversed; §4.6's gate is re-issued as `V12__folder_required.sql` for templates and §14.2 records why pipelines still need none; §15.2 names `test/` as the sanctioned scratch folder.*

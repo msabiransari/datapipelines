@@ -525,8 +525,8 @@ against the real draft version number; nothing about the execution schema weaken
 Both import paths renumber today: pipeline import **strips** the `version` field
 (`PipelineImportService` `SERVER_FIELDS`) and allocates `current_version + 1`; template
 import calls the same bump-and-append. That breaks the export bundle round-trip silently:
-a dev pipeline pins `foo.sql@2`, the bundled template lands on a fresh target as
-`foo.sql@1`, and the pipeline's pin fails `template_version_not_found`. The export/import
+a dev pipeline pins `acme/lib/foo.sql@2`, the bundled template lands on a fresh target as
+`acme/lib/foo.sql@1`, and the pipeline's pin fails `template_version_not_found`. The export/import
 pair only round-trips when both environments' numbers happen to be in lockstep — i.e.,
 never after any drift. Pins are version numbers; cross-env renumbering is a
 correctness-breaking hazard, not a cosmetic one. D5 fixes this by construction.

@@ -62,6 +62,33 @@ class TemplateNameGrammarTest {
         }
     }
 
+    // ---- 077: a folder is mandatory, and the refusal says which kind it is ----
+
+    @Test
+    fun `save - a flat name is refused with reason folder_required, a malformed one with reason grammar`() {
+        val validator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+
+        // The point of `reason`: an agent that sent `scratch` must learn to send `test/scratch`,
+        // and an agent that sent `_helper` must NOT — `test/_helper` is illegal too, so telling
+        // it to add a folder would send it round the loop a second time.
+        reasonFor(validator, "scratch") shouldBe TemplateNameGrammar.REASON_FOLDER_REQUIRED
+        reasonFor(validator, "fetch_orders.sql") shouldBe TemplateNameGrammar.REASON_FOLDER_REQUIRED
+        reasonFor(validator, "_helper") shouldBe TemplateNameGrammar.REASON_GRAMMAR
+        reasonFor(validator, "Acme") shouldBe TemplateNameGrammar.REASON_GRAMMAR
+        reasonFor(validator, "a".repeat(201)) shouldBe TemplateNameGrammar.REASON_GRAMMAR
+        reasonFor(validator, "a/b/c/d/e/f/g/h/i/j/k") shouldBe TemplateNameGrammar.REASON_GRAMMAR
+    }
+
+    private fun reasonFor(
+        validator: TemplateValidator,
+        name: String,
+    ): String? =
+        validator
+            .validate(TemplateFixtures.draft(id = name), workspaceId)
+            .failures
+            .first { it.code == PipelineErrorCodes.Template.ID_INVALID }
+            .details["reason"] as String?
+
     // ---- Call site 2: RegistryTemplateLoader.parseKey (render) ----
 
     @Test
@@ -109,13 +136,13 @@ class TemplateNameGrammarTest {
         ILLEGAL.forEach { name ->
             val main =
                 TemplateFixtures.version(
-                    "main.sql",
+                    "test/main.sql",
                     imports = listOf(TemplateImport(name, 1, "d")),
                     body = "SELECT 1",
                 )
             val loader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(main)))
             withClue("prologue must refuse import id: '$name'") {
-                shouldThrow<IOException> { loader.findTemplateSource("main.sql@1") }
+                shouldThrow<IOException> { loader.findTemplateSource("test/main.sql@1") }
             }
         }
     }
@@ -194,11 +221,11 @@ class TemplateNameGrammarTest {
     private companion object {
         val LEGAL =
             listOf(
-                "fetch_orders.sql", // today's flat name shape — valid at the tree root (§4.2)
+                "test/fetch_orders.sql", // the scratch folder (§15.2) — the shortest legal shape
+                "a/b", // exactly 2 segments: the minimum since 077
                 "acme/finance/monthly_revenue",
                 "a/b/c/d/e/f/g/h/i/j", // exactly 10 segments
-                "a".repeat(64), // a maximal segment
-                "x/" + "y".repeat(64),
+                "x/" + "y".repeat(64), // a maximal segment
                 (listOf("a".repeat(64), "b".repeat(64), "c".repeat(64), "d4")).joinToString("/"), // 196 chars, 4 segments
             )
 
@@ -215,7 +242,9 @@ class TemplateNameGrammarTest {
                 "Acme/report", // uppercase
                 "acme/Report",
                 "a/b/c/d/e/f/g/h/i/j/k", // 11 segments
-                "a".repeat(65), // a 65-char segment — legal under the pre-043 flat rule (§4.6)
+                "a", // ONE segment — legal until 077, refused now: a folder is mandatory (§4.1)
+                "fetch_orders.sql", // the pre-077 flat shape, the whole point of this round
+                "a".repeat(64), // a maximal segment, still one segment
                 "x/" + "y".repeat(65),
                 "a".repeat(201), // over the 200-char total cap
                 (listOf("a".repeat(64), "b".repeat(64), "c".repeat(64), "d".repeat(9))).joinToString("/"), // 201 chars

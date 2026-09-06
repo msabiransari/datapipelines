@@ -281,8 +281,8 @@ class TemplateRepository(
      *
      * "Direct" is the whole contract: a name whose remainder after `prefix/` still contains a
      * `/` belongs to a sub-folder and is NOT returned here. With [prefix] `null` the level is
-     * the root and the leaves are the flat, single-segment names — every template that exists
-     * today (§4.1: single-segment names are valid paths that sit at the root).
+     * the root and, since 077, it has no leaves at all: §4.1 requires a folder, so every
+     * template name has a prefix and the root level is a list of folders.
      *
      * [q] is deliberately absent: browsing and searching are different presentations (§9.2),
      * and search is a flat list of full paths served by [list], not a pruned tree.
@@ -851,9 +851,20 @@ class TemplateRepository(
                 .replace("%", "\\%")
                 .replace("_", "\\_")
 
-        /** The §4.1 name grammar (templates.md §3.2). A hex suffix keeps generated ids inside the rule. */
+        /**
+         * A generated name for a create that omitted one (templates.md §3.2). A hex suffix
+         * keeps it inside the §4.1 grammar and collision-free.
+         *
+         * The `test/` prefix is not decoration: §4.1 has required a folder since 077, and this
+         * path RUNS AFTER validation — the validator only sees an id the caller supplied — so
+         * a flat `template_1a2b…` here would write a name the next save, the tree UI and the
+         * `V12` deploy gate all refuse. `test/` is the sanctioned scratch folder (§15.2), and
+         * a template whose author did not name it is scratch by definition. Pinned by
+         * `TemplateRepositoryIntegrationTest`, which asserts the generated id against the
+         * grammar object rather than against a literal shape.
+         */
         private fun generateId(): String =
-            "template_" +
+            "test/template_" +
                 UUID
                     .randomUUID()
                     .toString()

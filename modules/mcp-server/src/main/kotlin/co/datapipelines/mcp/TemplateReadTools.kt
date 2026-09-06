@@ -115,7 +115,7 @@ class TemplatesListTool(
         isLibrary: Boolean?,
         limit: Int,
     ): Map<String, Any?> {
-        if (prefix != null && !TemplateNameGrammar.matches(prefix)) {
+        if (prefix != null && !TemplateNameGrammar.matchesPrefix(prefix)) {
             return mapOf(
                 "prefix" to prefix,
                 "folders" to emptyList<Map<String, Any?>>(),
