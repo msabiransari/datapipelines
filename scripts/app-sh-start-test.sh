@@ -121,6 +121,22 @@ grep -q "LOGIN: admin@local.test / stubpw" <<<"$out" \
   || fail "a healthy --start must print the seeded login and its one-time password, got:
 $out"
 
+# 5. A machine with NO deploy/secrets.env: --start scaffolds it AND says the one-time
+#    admin credential is seeded at THIS boot and no later one. The owner started without
+#    scaffolding, got demo-admin@demo.local seeded, and no later edit could move it.
+rm -f "$tmp/deploy/secrets.env"
+make_stub_docker "running" ""
+make_stub_curl up
+out=$(run_start 10) || fail "--start on a machine with no secrets.env must still work, got:
+$out"
+[ -f "$tmp/deploy/secrets.env" ] || fail "--start did not scaffold the missing deploy/secrets.env"
+grep -q "FIRST START" <<<"$out" || fail "--start must say the seed fires at THIS boot, got:
+$out"
+grep -q "app.sh --scaffold" <<<"$out" \
+  || fail "the first-start notice must point at --scaffold, which is how the address is chosen
+  BEFORE the seed. Got:
+$out"
+
 # 4. THE REFUSAL (P34). Every argv the run issued is in the log; the ones the fakes above
 #    do not answer must exit non-zero. `compose up` WITHOUT `--wait` is the shape that took
 #    the owner's stack down — the 075 stub answered it with a silent `exit 0` after
@@ -136,4 +152,5 @@ echo "app-sh-start-test: the stub's refusal, verbatim —"
 sed 's/^/    /' "$tmp/refusal.txt"
 
 echo "app-sh-start-test: OK (bounded wait exits 0 with guidance; dead container exits 1;"
-echo "                       a healthy boot prints the seeded login; the stub refuses and records)"
+echo "                       a healthy boot prints the seeded login; a first start scaffolds and"
+echo "                       says the seed fires now; the stub refuses and records)"
