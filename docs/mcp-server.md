@@ -240,7 +240,7 @@ Returns: array of pipeline metadata objects. Datasource references are per-node 
   }
   ```
 
-  `folders` are the prefix's DIRECT sub-folders with their whole-subtree counts; `pipelines` are its direct children only. Never a subtree, never the whole list. `owner`, `datasource` and `q` are ignored while `prefix` is present — browse and search are different presentations. A prefix that is not a legal pipeline name answers an empty level, not an error.
+  `folders` are the prefix's DIRECT sub-folders with their whole-subtree counts; `pipelines` are its direct children only. Never a subtree, never the whole list. `owner`, `datasource` and `q` are ignored while `prefix` is present — browse and search are different presentations. A prefix is a FOLDER PATH — 1 to 9 segments, not the 2-to-10 a NAME takes since 077 — so `nyc` browses; one that is not a legal folder path answers an empty level, not an error.
 
 **When to use which:** `prefix` to discover structure ("what roots exist? what is under `finance`?"), `q` to find something by name across full paths. Start a naming decision with `prefix: ""`.
 

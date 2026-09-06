@@ -231,7 +231,7 @@ class ParameterBindingIntegrationTest {
 
     private companion object {
         const val DATASOURCE = "pg_injection"
-        const val TEMPLATE_ID = "inj.sql"
+        const val TEMPLATE_ID = "test/inj.sql"
 
         /**
          * A scratch database on the module's shared container: this suite builds its own

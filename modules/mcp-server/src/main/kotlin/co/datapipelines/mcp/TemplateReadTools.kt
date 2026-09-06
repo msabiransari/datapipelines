@@ -102,7 +102,7 @@ class TemplatesListTool(
      * ONE level of the template tree, in the same shape `pipelines_list` returns for a prefix
      * and the templates explorer renders from.
      *
-     * A prefix that is not a legal template name cannot name a real folder, so it answers an
+     * A prefix that is not a legal FOLDER PATH cannot name a real folder, so it answers an
      * ordinary EMPTY level rather than an error — the rule `TemplateBrowseModel.fillLevel`
      * settled on, restated here rather than re-decided.
      */

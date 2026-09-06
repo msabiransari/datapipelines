@@ -195,7 +195,7 @@ class ReferenceRulesTest {
                 template = TemplateRef(),
                 output = NodeOutput.Datasource("pg-prod", "cache", WriteMode.APPEND),
                 dependsOn = emptyList(),
-                pipeline = PipelineNodeRef("child", 1),
+                pipeline = PipelineNodeRef("test/child", 1),
                 parameters = null,
             )
 

@@ -290,7 +290,7 @@ The tree keeps that contract rather than replacing it:
 - **One level per request.** Expanding a folder issues `hx-get="/partials/templates?prefix=acme/finance"` and swaps that folder's child container. The stable swap root and the OOB/indicator conventions of the existing SPA table (`ui-screens.md` §4.5) carry over unchanged — this is a new fragment shape on an existing surface, not a new surface.
 - **Leaves expand to versions**, with RELEASED/DRAFT lifecycle badges (`V6__version_lifecycle.sql`).
 - **Filters:** `dialect` and `q` keep working; a `type` filter joins them.
-- **Flat legacy names sit at the tree root.** Nothing is renamed or reorganized — §4.5 forbids it and §4.6 explains what happens to names that cannot survive the new grammar.
+- **The root level holds FOLDERS ONLY (077).** §4.1 requires a folder, so no template sits directly at the root and the level does not query for one. `V12__folder_required.sql` is what makes that true of stored rows: a deployment carrying a flat template name aborts rather than rendering a root the tree cannot represent. Nothing is renamed or reorganized — §4.5 forbids it and §4.6 explains what happens to names that cannot survive a grammar change.
 
 **Browse vs. search are different presentations (decided, §13.8).** Browsing shows the tree, one level per request. A non-empty `q` shows a **flat result list of full paths**, not a tree pruned to matching leaves: pruning requires walking ancestors of every match, which is precisely the whole-list-in-the-browser work §9.1 forbids, and a flat list of full paths is what a user searching `finance/agg` actually wants to see. Clearing `q` returns to the tree.
 

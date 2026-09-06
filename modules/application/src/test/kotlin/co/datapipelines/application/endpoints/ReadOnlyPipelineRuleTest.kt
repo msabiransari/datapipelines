@@ -196,7 +196,7 @@ class ReadOnlyPipelineRuleTest {
     private fun pipeline(vararg nodes: Node) =
         Pipeline(
             schemaVersion = Pipeline.SUPPORTED_SCHEMA_VERSION,
-            name = "fixture",
+            name = "test/fixture",
             displayName = "Fixture",
             description = "",
             settings = PipelineSettings(),

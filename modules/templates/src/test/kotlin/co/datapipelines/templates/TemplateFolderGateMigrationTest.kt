@@ -63,8 +63,11 @@ class TemplateFolderGateMigrationTest {
             // refs, so their names are still subject to the loader's grammar (§4.6).
             thrown.message shouldContain "active_users.sql"
             thrown.message shouldContain "legacy_report"
-            // The remediation an operator needs is in the message, not only in the doc.
-            thrown.message shouldContain "test/"
+            // The remediation an operator needs is in the message, not only in the doc. The
+            // whole sentence, so the text quoted in an operator runbook is one a green test
+            // stands behind rather than one somebody retyped.
+            thrown.message shouldContain "Every template name needs a folder (test/<name> for scratch)."
+            thrown.message shouldContain "Remediation: docs/template-hierarchy-design.md §4.6."
         } finally {
             jdbc.jdbcTemplate.execute("DELETE FROM templates WHERE name IN ('active_users.sql', 'legacy_report')")
         }

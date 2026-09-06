@@ -117,7 +117,7 @@ class ExecutionLauncherTest {
     private fun pipeline() =
         Pipeline(
             schemaVersion = Pipeline.SUPPORTED_SCHEMA_VERSION,
-            name = "monthly_revenue",
+            name = "test/monthly_revenue",
             displayName = "Monthly Revenue",
             description = "",
             settings = PipelineSettings(),

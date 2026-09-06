@@ -72,9 +72,9 @@ class McpResourceReaderTest {
 
     @Test
     fun `a template reads as its Freemarker body`() {
-        every { templates.findLatest(any(), "revenue.sql") } returns McpFixtures.template()
+        every { templates.findLatest(any(), "test/revenue.sql") } returns McpFixtures.template()
 
-        val contents = contents(McpResourceUri.template("revenue.sql"))
+        val contents = contents(McpResourceUri.template("test/revenue.sql"))
 
         assertAll(
             { contents.mimeType() shouldBe McpResourceCatalog.MIME_FREEMARKER_SQL },
@@ -145,9 +145,9 @@ class McpResourceReaderTest {
 
     @Test
     fun `a specific template version reads that version's body`() {
-        every { templates.lookupVersion(any(), "revenue.sql", 2) } returns
+        every { templates.lookupVersion(any(), "test/revenue.sql", 2) } returns
             TemplateVersion(
-                id = "revenue.sql",
+                id = "test/revenue.sql",
                 version = 2,
                 dialect = Dialect.POSTGRES,
                 isLibrary = false,

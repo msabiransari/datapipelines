@@ -31,7 +31,7 @@ class TemplateWireShapeTest {
         val draft = TemplateDeserializer().readOrThrow(SPEC_JSON)
 
         draft.schemaVersion shouldBe 1
-        draft.id shouldBe "fetch_orders.sql"
+        draft.id shouldBe "test/fetch_orders.sql"
         draft.engine shouldBe "freemarker"
         draft.dialect shouldBe Dialect.POSTGRES
         draft.displayName shouldBe "Fetch Orders in Date Range"
@@ -158,7 +158,7 @@ class TemplateWireShapeTest {
             """
             {
               "schema_version": 1,
-              "id": "fetch_orders.sql",
+              "id": "test/fetch_orders.sql",
               "version": 2,
               "engine": "freemarker",
               "dialect": "POSTGRES",
@@ -178,7 +178,7 @@ class TemplateWireShapeTest {
 
         val TEMPLATE =
             Template(
-                id = "fetch_orders.sql",
+                id = "test/fetch_orders.sql",
                 version = 2,
                 dialect = Dialect.POSTGRES,
                 displayName = "Fetch Orders in Date Range",
