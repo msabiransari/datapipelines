@@ -72,7 +72,7 @@
   <section class="section" aria-labelledby="worked-title">
     <div class="container">
       <p class="kicker">Worked example</p>
-      <h2 id="worked-title" class="ds-headline">Join Postgres and SQLite in one query: <code>revenue_by_borough</code></h2>
+      <h2 id="worked-title" class="ds-headline">Join Postgres and SQLite in one query: <code>nyc/mobility/revenue_by_borough</code></h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
         Seeded by the NYC demo. The trip rollup lives in a Postgres datasource; the 265-row taxi-zone lookup that
@@ -109,7 +109,7 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
         correctness invariant of the identifier scheme, not an operator preference.
       </p>
       <p>
-        The demo family goes further than two engines: <code>rainy_vs_dry_ridership</code> joins the same Postgres
+        The demo family goes further than two engines: <code>nyc/mobility/rainy_vs_dry_ridership</code> joins the same Postgres
         trips to daily precipitation from a MySQL datasource and a calendar from SQLite — three engines, one query,
         nothing landed.
       </p>

@@ -27,7 +27,7 @@ dependencies {
 //
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
 //                       -PshotsEmail=you@example.com -PshotsPassword=… \
-//                       [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>]
+//                       [-PshotsSet=app] [-PshotsFailingPipeline=<name>] [-PshotsOut=<dir>]
 tasks.register<JavaExec>("siteShots") {
     group = "documentation"
     description = "Captures the marketing site's screenshots from a running demo deployment (070 §C)."
@@ -46,6 +46,7 @@ tasks.register<JavaExec>("siteShots") {
             "dp.shots.email" to "shotsEmail",
             "dp.shots.password" to "shotsPassword",
             "dp.shots.out" to "shotsOut",
+            "dp.shots.set" to "shotsSet",
             "dp.shots.failingPipeline" to "shotsFailingPipeline",
         ).forEach { (systemProperty, projectProperty) ->
             (project.findProperty(projectProperty) as String?)?.let { systemProperty(systemProperty, it) }
