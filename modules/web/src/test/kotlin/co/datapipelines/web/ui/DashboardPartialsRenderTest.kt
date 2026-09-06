@@ -48,9 +48,12 @@ class DashboardPartialsRenderTest {
                 },
             )
 
-        html shouldContain "Total Pipelines"
-        html shouldContain "Executions Today"
-        html shouldContain "50%"
+        html shouldContain "Total pipelines"
+        html shouldContain "Executions today"
+        // 079 §E: the figure and its unit are separate spans so the "%" can be smaller and
+        // muted, so the rendered text is no longer one contiguous "50%".
+        html shouldContain ">50<"
+        html shouldContain "app-stat-unit\">%<"
         html shouldNotContain "Error resolving fragment"
     }
 

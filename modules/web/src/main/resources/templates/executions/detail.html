@@ -2,47 +2,47 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div style="margin-bottom: var(--gap-lg);">
-    <a th:href="@{/executions}" style="color: var(--text-muted); font-size: var(--text-sm); text-decoration: none;">&larr; Back to executions</a>
+  <div class="u-mb-lg">
+    <a class="u-muted u-text-sm u-no-underline" th:href="@{/executions}">&larr; Back to executions</a>
   </div>
 
-  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--gap-md);">
+  <div class="ds-card u-mb-lg">
+    <div class="u-row-top u-between u-wrap app-gap-md">
       <div>
-        <h1 class="ds-headline" style="margin-bottom: var(--gap-xs);"
+        <h1 class="ds-headline u-mb-xs"
             th:text="${pipeline?.displayName ?: record.pipelineId.toString().substring(0, 8)}"
             th:title="${pipeline?.name}">Pipeline</h1>
-        <div style="display: flex; gap: var(--gap-sm); align-items: center; flex-wrap: wrap; margin-bottom: var(--gap-sm);">
+        <div class="u-row u-wrap u-mb-sm">
           <span class="ds-badge"
                 th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
                 th:text="${record.status.name()}">status</span>
-          <span style="font-size: var(--text-sm); color: var(--text-muted);">v<span th:text="${record.pipelineVersion}">1</span></span>
+          <span class="u-text-sm u-muted">v<span th:text="${record.pipelineVersion}">1</span></span>
         </div>
-        <div style="display: flex; flex-wrap: wrap; gap: var(--gap-md); font-size: var(--text-sm); color: var(--text-secondary);">
+        <div class="u-row-md u-wrap u-text-sm u-secondary">
           <div>
-            <span style="color: var(--text-muted);">Started:</span>
+            <span class="u-muted">Started:</span>
             <span th:text="${#temporals.format(record.startedAt, 'yyyy-MM-dd HH:mm:ss')}">date</span>
           </div>
           <div>
-            <span style="color: var(--text-muted);">Duration:</span>
+            <span class="u-muted">Duration:</span>
             <span th:text="${record.durationMs != null} ? ${record.durationMs + 'ms'} : '-'">dur</span>
           </div>
           <div>
-            <span style="color: var(--text-muted);">Correlation ID:</span>
-            <code style="font-size: var(--text-xs);" th:text="${correlationId}">corr-id</code>
+            <span class="u-muted">Correlation ID:</span>
+            <code class="u-text-xs" th:text="${correlationId}">corr-id</code>
           </div>
           <div>
-            <span style="color: var(--text-muted);">Triggered via:</span>
+            <span class="u-muted">Triggered via:</span>
             <span th:text="${record.triggeredVia.name()}">UI</span>
           </div>
           <div th:if="${record.parentExecutionId != null}">
-            <span style="color: var(--text-muted);">Spawned by:</span>
+            <span class="u-muted">Spawned by:</span>
             <a th:href="@{/executions/{id}(id=${record.parentExecutionId})}"
                th:text="${record.parentExecutionId.toString().substring(0, 8) + '...' + (record.parentNodeId != null ? ' / ' + record.parentNodeId : '')}">parent</a>
           </div>
         </div>
       </div>
-      <div style="display: flex; gap: var(--gap-sm);">
+      <div class="u-row">
         <th:block th:if="${canCancel}">
           <!-- th:attr + @{...}: hx-delete as a PLAIN attribute ships the literal
                ${...} text, htmx resolves it against the page URL and the DELETE
@@ -58,8 +58,8 @@
   </div>
 
   <th:block th:if="${family.size() > 1}">
-    <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-      <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Execution Family</h2>
+    <div class="ds-card u-mb-lg">
+      <h2 class="ds-title u-mb-md">Execution Family</h2>
       <table class="ds-table">
         <thead>
           <tr>
@@ -75,11 +75,11 @@
             <td>
               <a th:href="@{/executions/{id}(id=${f.executionId})}"
                  th:text="${f.executionId.toString().substring(0, 8) + '...'}">exec</a>
-              <span th:if="${f.executionId == record.executionId}" style="color: var(--text-muted); font-size: var(--text-xs);"> (this one)</span>
+              <span class="u-muted u-text-xs" th:if="${f.executionId == record.executionId}"> (this one)</span>
             </td>
             <td>
-              <span th:if="${f.parentExecutionId == null}" style="color: var(--text-secondary);">root</span>
-              <span th:unless="${f.parentExecutionId == null}" style="color: var(--text-secondary);"
+              <span class="u-secondary" th:if="${f.parentExecutionId == null}">root</span>
+              <span class="u-secondary" th:unless="${f.parentExecutionId == null}"
                     th:text="${'child of ' + f.parentExecutionId.toString().substring(0, 8) + '...' + (f.parentNodeId != null ? ' / ' + f.parentNodeId : '')}">child</span>
             </td>
             <td>
@@ -96,16 +96,16 @@
   </th:block>
 
   <th:block th:if="${record.status.name() == 'FAILED' && errorJson != null}">
-    <div class="ds-card" style="border-color: var(--accent-danger); margin-bottom: var(--gap-lg);">
-      <h2 class="ds-title" style="margin-bottom: var(--gap-sm); color: var(--accent-danger);">Error</h2>
+    <div class="ds-card app-card-danger u-mb-lg">
+      <h2 class="ds-title u-mb-sm u-danger">Error</h2>
       <!-- 057: the structured failure record (code, message, correlation id, node context,
            rendered SQL, exception chain root-first) — not a raw JSON dump. -->
       <div th:replace="~{partials/execution-error :: error}">error</div>
     </div>
   </th:block>
 
-  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Node Stats</h2>
+  <div class="ds-card u-mb-lg">
+    <h2 class="ds-title u-mb-md">Node Stats</h2>
     <th:block th:if="${nodeStats != null && !nodeStats.isEmpty()}">
       <div th:replace="~{partials/execution-node-stats :: stats(${nodeStats})}">node stats</div>
     </th:block>
@@ -116,8 +116,8 @@
     </th:block>
   </div>
 
-  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Result</h2>
+  <div class="ds-card u-mb-lg">
+    <h2 class="ds-title u-mb-md">Result</h2>
 
     <th:block th:if="${resultState == 'not-applicable'}">
       <div class="ds-empty">
@@ -134,7 +134,7 @@
     </th:block>
 
     <th:block th:if="${resultState == 'expired'}">
-      <div class="ds-card-flat" style="text-align: center;">
+      <div class="ds-card-flat u-center">
         <div class="ds-empty">
           <div class="ds-empty-title">Result expired</div>
           <div class="ds-empty-description">The result's TTL has elapsed. Re-run the pipeline to generate a fresh result.</div>
@@ -143,32 +143,32 @@
     </th:block>
 
     <th:block th:if="${resultState == 'available'}">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--gap-md);">
-        <div style="font-size: var(--text-sm); color: var(--text-secondary);">
+      <div class="u-row u-between u-mb-md">
+        <div class="u-text-sm u-secondary">
           <span th:text="${resultView.totalRows}">0</span> rows,
           <span th:text="${resultView.bytes}">0</span> bytes
           &middot; expires <span th:text="${#temporals.format(resultView.expiresAt, 'yyyy-MM-dd HH:mm')}">date</span>
         </div>
-        <a th:href="${resultUrl + '?format=json'}" class="ds-button ds-button-secondary ds-button-sm" style="text-decoration: none;">Download JSON</a>
+        <a th:href="${resultUrl + '?format=json'}" class="ds-button ds-button-secondary ds-button-sm u-no-underline">Download JSON</a>
       </div>
 
       <div id="result-content"
             th:attr="hx-get=@{/partials/executions/{id}/result(id=${record.executionId})}"
             hx-trigger="load"
             hx-swap="innerHTML">
-        <div style="text-align: center; padding: var(--gap-lg); color: var(--text-muted);">
-          <div class="ds-spinner" style="margin-bottom: var(--gap-md);"></div>
-          <div style="font-size: var(--text-sm);">Loading result...</div>
+        <div class="u-center u-p-lg u-muted">
+          <div class="ds-spinner u-mb-md"></div>
+          <div class="u-text-sm">Loading result...</div>
         </div>
       </div>
     </th:block>
   </div>
 
-  <div class="ds-card" style="margin-bottom: var(--gap-lg);">
-    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Events</h2>
+  <div class="ds-card u-mb-lg">
+    <h2 class="ds-title u-mb-md">Events</h2>
     <a th:href="${'/api/v1/executions/' + record.executionId + '/events'}"
-       class="ds-button ds-button-secondary"
-       style="text-decoration: none;"
+       class="ds-button ds-button-secondary u-no-underline"
+      
        target="_blank">View Event Stream</a>
   </div>
 </th:block>

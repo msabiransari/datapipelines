@@ -14,41 +14,45 @@
           <th>Version</th>
           <th>Status</th>
           <th>Started</th>
-          <th>Duration</th>
-          <th>Rows</th>
+          <th class="num">Duration</th>
+          <th class="num">Rows</th>
+          <th>Via</th>
         </tr>
       </thead>
       <tbody>
-        <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
+        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
           <td>
             <!-- T114: the display name is prose — it renders in the body face, not mono
                  (mono is for identifiers). The machine name (a folder path) rides on
                  `title`; a pipeline whose row is gone (deleted, execution remains) falls
                  back to the truncated id. -->
-            <span th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
+            <span class="app-name" th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
                   th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
                   th:title="${p != null} ? ${p.name} : null">pipeline</span>
-            <div th:if="${r.parentExecutionId != null}" style="font-size: var(--text-xs);">
-              <a th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
+            <span class="app-path" th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
+                  th:if="${p != null and p.displayName != null}" th:text="${p.name}">nyc/mobility/x</span>
+            <div class="u-text-xs" th:if="${r.parentExecutionId != null}">
+              <a class="u-muted" th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
                  onclick="event.stopPropagation()"
-                 style="color: var(--text-muted);"
                  th:text="${'spawned by ' + r.parentExecutionId.toString().substring(0, 8) + '...'}">spawned by</a>
             </div>
           </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>
-            <span class="ds-badge"
-                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${r.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${r.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
-                  th:text="${r.status.name()}">status</span>
+            <span class="app-chip"
+                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
           </td>
           <td th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>
-          <td th:text="${r.durationMs != null} ? ${r.durationMs + 'ms'} : '-'">dur</td>
-          <td th:text="${r.resultRowCount != null} ? ${r.resultRowCount} : '-'">rows</td>
+          <td class="num" th:text="${r.durationMs != null} ? ${r.durationMs + ' ms'} : '—'">dur</td>
+          <td class="num" th:text="${r.resultRowCount != null} ? ${r.resultRowCount} : '—'">rows</td>
+          <!-- 079 §E: `triggered_via` rides on every ExecutionRecord already (SELECT_COLUMNS
+               carries it) and was rendered only on the detail screen. -->
+          <td class="u-muted u-text-xs" th:text="${r.triggeredVia.name()}">MCP</td>
         </tr>
       </tbody>
     </table>
 
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--gap-md);">
+    <div class="u-row u-between u-mt-md">
       <th:block th:if="${offset > 0}">
         <button class="ds-button ds-button-secondary"
                 hx-get="/partials/executions"

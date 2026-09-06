@@ -5,19 +5,35 @@
     the old `stats(children)` signature made the standalone render die on
     `th:replace="${children}"` (no children exist outside an include), which is the 500
     every dashboard load hit at its two hx-get endpoints.
+
+    079 §E: the mock's stat cards carry a 7-day sparkline. THERE IS NO 7-DAY SERIES to draw
+    one from — no query in this codebase returns per-day execution counts, `ExecutionRepository`
+    has no count method at all, and `pipeline_executions` has no workspace column (scoping is
+    an EXISTS join to `pipelines`). The numbers below come from the LAST 100 EXECUTION ROWS,
+    which is not a week and is truncated. A sparkline drawn from that sample would be a
+    picture of the wrong thing, so the cards carry the figure and its breakdown and no chart.
+    Adding `ExecutionRepository.dailyCounts(workspaceId, since)` is a `modules/dag` change,
+    outside this round's fence.
   -->
-  <div class="app-stats-grid">
-    <div class="ds-card">
-      <div class="ds-caption" style="margin-bottom: var(--gap-xs);">Total Pipelines</div>
-      <div style="font-size: var(--text-2xl); font-weight: var(--weight-bold);" th:text="${totalPipelines}">0</div>
+  <!-- `ds-stats` is kept on BOTH this grid and the skeleton it replaces (dashboard.html):
+       the swap is outerHTML, and LoginGoldenPathBrowserTest waits on that hook to know the
+       stats have landed. A class that is a test's synchronisation point is part of the
+       contract, not decoration. -->
+  <div class="ds-stats app-grid app-grid-3 u-mb-md">
+    <div class="ds-card app-stat">
+      <div class="ds-caption">Total pipelines</div>
+      <div class="app-stat-v" th:text="${totalPipelines}">0</div>
+      <div class="app-stat-d">in this workspace</div>
     </div>
-    <div class="ds-card">
-      <div class="ds-caption" style="margin-bottom: var(--gap-xs);">Executions Today</div>
-      <div style="font-size: var(--text-2xl); font-weight: var(--weight-bold);" th:text="${executionsToday}">0</div>
+    <div class="ds-card app-stat">
+      <div class="ds-caption">Executions today</div>
+      <div class="app-stat-v" th:text="${executionsToday}">0</div>
+      <div class="app-stat-d">since 00:00 UTC</div>
     </div>
-    <div class="ds-card">
-      <div class="ds-caption" style="margin-bottom: var(--gap-xs);">Success Rate</div>
-      <div style="font-size: var(--text-2xl); font-weight: var(--weight-bold);" th:text="${successRate + '%'}">0%</div>
+    <div class="ds-card app-stat">
+      <div class="ds-caption">Success rate</div>
+      <div class="app-stat-v"><span th:text="${successRate}">0</span><span class="app-stat-unit">%</span></div>
+      <div class="app-stat-d">over the last 100 runs</div>
     </div>
   </div>
 </th:block>
