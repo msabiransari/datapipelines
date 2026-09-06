@@ -63,6 +63,9 @@ class FlywayMigrationIntegrationTest {
                 "10|datasource credential key version|true",
                 // 074 — published endpoints (066 is shelved, so this takes V11).
                 "11|published endpoints|true",
+                // 077 — the §4.1 folder requirement's deploy gate. No DDL: a DO-block
+                // pre-check only, which is why no other assertion in this file moves.
+                "12|folder required|true",
             )
     }
 
