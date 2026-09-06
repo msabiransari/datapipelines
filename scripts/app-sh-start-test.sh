@@ -18,15 +18,20 @@ cd "$(dirname "$0")/.."
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# The sandbox: app.sh cd's to its own directory, so give it one with a deploy/.env
-# (scaffold_deploy_env then returns early) and a stub docker first on PATH.
-mkdir -p "$tmp/bin" "$tmp/deploy"
+# The sandbox: app.sh cd's to its own directory, so give it one with the env files it
+# reads — the tracked posture file it refuses to start without, and a deploy/secrets.env
+# so scaffold_secrets_env returns early — plus a stub docker first on PATH. 075: the
+# posture file is COPIED from the repo rather than written here, so a change to the real
+# one cannot leave this harness passing against a shape that no longer exists.
+mkdir -p "$tmp/bin" "$tmp/deploy/env/posture"
 cp app.sh "$tmp/app.sh"
-cat >"$tmp/deploy/.env" <<'EOF'
-METADATA_DB_PASSWORD=stub
-REDIS_PASSWORD=stub
-JWT_SECRET=stub
-ENCRYPTION_KEY=stub
+cp deploy/env/posture/development.env "$tmp/deploy/env/posture/development.env"
+cp deploy/env/demo.env "$tmp/deploy/env/demo.env"
+cat >"$tmp/deploy/secrets.env" <<'EOF'
+SPRING_DATASOURCE_PASSWORD=stub
+DATAPIPELINES_REDIS_PASSWORD=stub
+DATAPIPELINES_JWT_SECRET=stub
+DATAPIPELINES_DB_ENCRYPTION_KEY=stub
 EOF
 
 # $1 = the State the app container reports ("running" | "exited")

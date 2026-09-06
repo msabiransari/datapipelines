@@ -50,12 +50,12 @@ BASE_URL="${1:-${SAMPLE_BASE_URL:-}}"
 VERSION="${2:-${SAMPLE_VERSION:-}}"
 [ -n "$BASE_URL" ] || die "no artifact base URL.
   usage: load.sh <base-url> <version> [--engines ...]
-  Under the compose demo profile this comes from SAMPLE_BASE_URL in deploy/.env
+  Under the compose demo profile this comes from SAMPLE_BASE_URL in deploy/env/demo.env
   (see deploy/env/demo.env). There is no default: the published bucket is named
   at publication time, and a built-in guess would silently load someone else data."
 [ -n "$VERSION" ]  || die "no artifact version.
   usage: load.sh <base-url> <version> [--engines ...]
-  Under the compose demo profile this comes from SAMPLE_VERSION in deploy/.env."
+  Under the compose demo profile this comes from SAMPLE_VERSION in deploy/env/demo.env."
 shift 2 2>/dev/null || true
 
 ENGINES=""

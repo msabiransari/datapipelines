@@ -28,13 +28,13 @@ import java.nio.file.Paths
  *
  * [BrowserSuite] boots the application against throwaway containers with NO sample data. A
  * screenshot of an empty workspace is a mockup with extra steps, so this driver points at a
- * REAL demo deployment — the one `./app.sh --start --demo-nyc` produces — and photographs
+ * REAL demo deployment — the one `./app.sh --start --demo nyc` produces — and photographs
  * exactly what an engineer evaluating the product sees. It shares that suite's browser
  * discipline (chromium, headless, fixed viewport, no timing sleeps: every wait is a
  * selector or a response) and none of its container plumbing.
  *
  * ```bash
- * ./app.sh --start --demo-nyc                       # the deployment being photographed
+ * ./app.sh --start --demo nyc                       # the deployment being photographed
  * ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
  *                     -PshotsEmail=you@example.com -PshotsPassword=...
  * ```

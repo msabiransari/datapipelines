@@ -22,7 +22,7 @@ dependencies {
 // nothing in production depends on it.
 //
 // Deliberately NOT part of build/check/browserTest: it drives a RUNNING demo deployment
-// (./app.sh --start --demo-nyc) and overwrites files under modules/web/.../static/site/img.
+// (./app.sh --start --demo nyc) and overwrites files under modules/web/.../static/site/img.
 // It is invoked explicitly, after a UI round, to make the page catch up with the product.
 //
 //   ./gradlew siteShots -PshotsUrl=http://localhost:8080 \
