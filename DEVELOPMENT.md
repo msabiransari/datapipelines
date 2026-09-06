@@ -186,8 +186,9 @@ Gradle-on-host development flow the IDE path also uses:
 # (docs/environments.md §4 "Loaders").
 set -a
 . deploy/env/posture/development.env
-. deploy/env/laptop.env
 . deploy/secrets.env
+. deploy/env/laptop.env      # LAST: this machine's infrastructure beats the compose
+                             # stack's generated SPRING_DATASOURCE_PASSWORD
 set +a
 
 # Build (skip tests for speed during dev)
@@ -208,7 +209,7 @@ The app starts on `http://localhost:8080`.
 2. **Main class:** `co.datapipelines.DatapipelinesApplicationKt`
 3. **Module classpath:** the `app` Gradle module's `main` source set (in the module picker this reads as the app project's main source set)
 4. **Program arguments:** none. `DATAPIPELINES_POSTURE` (from `deploy/env/posture/development.env`) selects the Spring profile; setting `--spring.profiles.active` yourself to a different posture refuses startup.
-5. **Environment variables:** the *Environment variables* field has a file-picker icon on the right, and IntelliJ accepts several files — select `deploy/env/posture/development.env`, `deploy/env/laptop.env` and `deploy/secrets.env`, in that order (later wins, same as the shell). IntelliJ exports them into the launched process. (Do not paste the secrets into the stored run config.)
+5. **Environment variables:** the *Environment variables* field has a file-picker icon on the right, and IntelliJ accepts several files — select `deploy/env/posture/development.env`, `deploy/secrets.env` and `deploy/env/laptop.env`, in that order — the laptop file LAST, because this machine's infrastructure must beat the compose stack's generated database password (later wins, same as the shell). IntelliJ exports them into the launched process. (Do not paste the secrets into the stored run config.)
 6. **Working directory:** the project root (default).
 
 Debug works as usual — set a breakpoint and use the bug icon instead of run. Live reload is not configured; re-run after code changes.
@@ -833,7 +834,7 @@ cp deploy/env/secrets.env.example deploy/secrets.env && \
 nano deploy/secrets.env && \                   # the two openssl secrets + the local-login block (§4)
 cd ../design-system-starter && npm install && npm run build && cd - && \
 ./scripts/sync-design-system.sh && \
-set -a && . deploy/env/posture/development.env && . deploy/env/laptop.env && . deploy/secrets.env && set +a && \
+set -a && . deploy/env/posture/development.env && . deploy/secrets.env && . deploy/env/laptop.env && set +a && \
 ./gradlew :modules:app:bootRun
 ```
 

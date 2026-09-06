@@ -577,7 +577,7 @@ datapipelines:
 
 Everything else the posture means is a §7 REFUSAL, which no YAML file can carry: demo, a seeded bootstrap credential, loopback infrastructure and a missing OIDC provider are all refused under `hardened`. The full table is §3.23.
 
-The laptop's own settings, for reference ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md), `deploy/env/laptop.env`):
+The laptop's own settings, for reference ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md), `deploy/env/laptop.env`). It is loaded **last** on that path — the one inversion of the secrets-last rule, because it names a different database from the one `deploy/secrets.env`'s generated password belongs to:
 
 ```bash
 DATAPIPELINES_ENV=local

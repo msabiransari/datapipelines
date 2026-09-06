@@ -142,7 +142,9 @@ set +a
 java -jar datapipelines-app.jar
 ```
 
-`set -a` exports every variable the files assign; `set +a` stops. That is the whole integration.
+`set -a` exports every variable the files assign; `set +a` stops. That is the whole integration — and the profile carrying the posture's defaults is selected by `DATAPIPELINES_POSTURE` alone, with no `SPRING_PROFILES_ACTIVE` in sight.
+
+One inversion, and only on a developer's laptop: `deploy/env/laptop.env` is loaded **after** `deploy/secrets.env`, because it names a different database from the one that file's generated password belongs to. Infrastructure beats policy when the two disagree about which machine you are on.
 
 ### systemd
 
