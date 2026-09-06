@@ -881,7 +881,12 @@ class PromotionTwoDeploymentE2eTest {
                             // without an OIDC stub; nothing here logs in interactively.
                             "--datapipelines.auth.local.enabled=true",
                             "--datapipelines.auth.base-url=http://localhost:8080",
-                            "--datapipelines.deployment.name=$name",
+                            // 075: the deployment LABEL is `datapipelines.env` now (the org names
+                            // its environments; the product carries the name as data). The posture
+                            // stays `development` here — these two in-process deployments run on
+                            // loopback Testcontainers, which `hardened` refuses by design.
+                            "--datapipelines.env=$name",
+                            "--datapipelines.posture=development",
                             "--datapipelines.deployment.authoring-enabled=$authoring",
                         ) + extra,
                 )

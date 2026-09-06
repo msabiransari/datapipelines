@@ -1,4 +1,3 @@
-.env.local
 .DS_Store
 
 # app.sh containerized-build Gradle cache
@@ -47,11 +46,14 @@ lib/*.jar
 # --- Local secrets ---
 # (2026-08-07 security review LOW-8: keystore/truststore and private-key formats
 #  added — a committed .p12 or .jks leaks a private key just as a .pem does.)
+# Dotenv files anywhere. 075 moved the deployment's settings into TRACKED files under
+# deploy/env/ (the repo is the source of truth for settings — a git-ignored version
+# number cost two stacks a week, T117) and left ONLY the secrets git-ignored.
 .env
 .env.*
-# ...but .env.example is the committed template DEVELOPMENT.md Appendix A tells
-# developers to copy. The negation must stay BELOW the `.env.*` line to win.
-!.env.example
+# deploy/secrets.env — the one file that holds credentials. `secrets.*` below already
+# matches it; named here so the rule is findable from the file it protects.
+deploy/secrets.env
 *.key
 *.pem
 *.p8
@@ -62,6 +64,11 @@ lib/*.jar
 *.truststore
 credentials.*
 secrets.*
+# ...but the TEMPLATE is committed — deploy/env/secrets.env.example is what a deployer
+# copies. The negation must stay BELOW `secrets.*` to win, and it must name the path:
+# git cannot re-include a file whose parent DIRECTORY is excluded, and `deploy/env/`
+# is not, so this works.
+!deploy/env/secrets.env.example
 .claude/worktrees/
 .gate-logs/
 gate-logs/

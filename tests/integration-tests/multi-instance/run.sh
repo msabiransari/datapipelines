@@ -30,9 +30,13 @@ NEW_PASSWORD="mi036-changed-$(date +%s)"
 LOG=gate-logs/036-two-instance.log
 
 COMPOSE=(docker compose -p "$PROJECT"
-  -f deploy/docker-compose.yml
-  -f deploy/docker-compose.local.yml
-  -f tests/integration-tests/multi-instance/docker-compose.two-instance.yml)
+  -f deploy/compose.yml
+  -f deploy/compose.local-build.yml
+  -f tests/integration-tests/multi-instance/compose.two-instance.yml
+  # 075: deploy/.env is gone, and compose's implicit `<project dir>/.env` pickup with
+  # it. The env-file list is explicit and in precedence order — secrets LAST.
+  --env-file deploy/env/posture/development.env
+  --env-file deploy/secrets.env)
 
 mkdir -p gate-logs
 exec > >(tee "$LOG") 2>&1
@@ -83,14 +87,14 @@ SWEEP_RESULT=FAIL
 # ---------------------------------------------------------------- preflight
 say "preflight"
 [ -f modules/app/build/libs/datapipelines-app.jar ] || fail "bootJar missing — run ./gradlew :modules:app:bootJar"
-if [ ! -f deploy/.env ]; then
-  SRC=/Users/msabir/development/projects/datapipelines/deploy/.env
-  [ -f "$SRC" ] || fail "deploy/.env missing and no source at $SRC"
-  cp "$SRC" deploy/.env
-  echo "copied deploy/.env from $SRC (secrets stay local; file is git-ignored)"
+if [ ! -f deploy/secrets.env ]; then
+  SRC=/Users/msabir/development/projects/datapipelines/deploy/secrets.env
+  [ -f "$SRC" ] || fail "deploy/secrets.env missing and no source at $SRC"
+  cp "$SRC" deploy/secrets.env
+  echo "copied deploy/secrets.env from $SRC (secrets stay local; file is git-ignored)"
 fi
-DB_PASSWORD=$(grep -E '^METADATA_DB_PASSWORD=' deploy/.env | head -1 | cut -d= -f2- | tr -d '"'"'")
-[ -n "$DB_PASSWORD" ] || fail "METADATA_DB_PASSWORD not found in deploy/.env"
+DB_PASSWORD=$(grep -E '^SPRING_DATASOURCE_PASSWORD=' deploy/secrets.env | head -1 | cut -d= -f2- | tr -d '"'"'")
+[ -n "$DB_PASSWORD" ] || fail "SPRING_DATASOURCE_PASSWORD not found in deploy/secrets.env"
 "${COMPOSE[@]}" config --quiet || fail "compose config invalid"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -t "$IMAGE" .
 echo "image: $(docker image inspect "$IMAGE" --format '{{.Id}} {{.Created}}')"

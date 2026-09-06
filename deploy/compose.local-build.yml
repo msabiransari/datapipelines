@@ -1,15 +1,16 @@
-# Local-build override for docker-compose.yml — swaps the published image for
+# Local-build override for compose.yml — swaps the published image for
 # one built from this checkout (`./app.sh --start` does the build; or manually:
 # jar via the Gradle wrapper, then `docker build -t datapipelines:local .`).
 #
-#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up -d
+#   docker compose -f deploy/compose.yml -f deploy/compose.local-build.yml \
+#     --env-file deploy/env/posture/development.env --env-file deploy/secrets.env up -d
 #
 # The tag interpolates IMAGE_TAG (default the documented `datapipelines:local`):
 # app.sh exports a per-PROJECT tag for second isolated copies, so one lane's
 # rebuild cannot swap the image under another lane's running stack (034 F2).
 # Everything else — services, env contract, healthchecks, volumes — is the
-# production shape from docker-compose.yml, unchanged. Secrets still come from
-# deploy/.env (see .env.example).
+# production shape from compose.yml, unchanged. Secrets still come from
+# deploy/secrets.env (see deploy/env/secrets.env.example).
 services:
   datapipelines:
     image: ${IMAGE_TAG:-datapipelines:local}

@@ -1,15 +1,15 @@
 # Local development infrastructure — DEVELOPMENT.md §2.
 #
-#   docker compose -f deploy/docker-compose.dev.yml up -d
-#   docker compose -f deploy/docker-compose.dev.yml ps
-#   docker compose -f deploy/docker-compose.dev.yml down -v    # reset a dirty Flyway state
+#   docker compose -f deploy/compose.laptop-infra.yml up -d
+#   docker compose -f deploy/compose.laptop-infra.yml ps
+#   docker compose -f deploy/compose.laptop-infra.yml down -v    # reset a dirty Flyway state
 #
 # Dev only: credentials are fixed and public, no passwords on Redis, no TLS.
 # The production shape is deployment.md Appendix A — do not copy this file there.
 # The app itself is NOT in this file; it runs from Gradle (DEVELOPMENT.md §6).
 #
 # Explicit project name: Compose derives project names from the DIRECTORY, so
-# without this the dev stack and deploy/docker-compose.yml would be one project
+# without this the laptop stack and deploy/compose.yml would be one project
 # ("deploy") whose same-named postgres/redis services replace each other —
 # starting the dev stack tore down a running production-shape stack (2026-08-28).
 # The dp- prefix keeps every datapipelines container recognisable on a shared
