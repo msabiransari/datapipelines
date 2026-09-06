@@ -80,9 +80,9 @@ The script exits non-zero unless BOTH tests pass, and always tears down with
   left to resolve; `${MI036_REPO_ROOT}` is still exported by `run.sh` for any future
   bind, because Compose v5 resolves relative bind sources against the file that
   DECLARES them, not against the first `-f` file.
-- 075 also replaced compose's implicit `deploy/.env` pickup with an explicit
-  `--env-file deploy/env/posture/development.env --env-file deploy/secrets.env`
-  list, secrets last.
+- 075 also replaced compose's implicit dotenv pickup with an explicit env-file list,
+  secrets last; 081 collapsed it to the two files every loader reads,
+  `--env-file deploy/env/defaults.env --env-file deploy/secrets.env`.
 - Auth: the seeded local admin (`mi-admin@example.com` / one-time
   `mi036-onetime`) is logged in with the CSRF double-submit dance (GET /login
   for the `dp_csrf` cookie + hidden `_csrf`, then POST the form), the forced

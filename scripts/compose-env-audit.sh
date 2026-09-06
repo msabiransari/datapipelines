@@ -131,8 +131,8 @@ DECLARED_OVERRIDES = {
     # deploy/env/defaults.env carries the laptop's PUBLISHED port (6381), and passing it
     # through would point the container at a port nothing listens on inside the network.
     "DATAPIPELINES_REDIS_PORT": "compose-internal port 6379, not the laptop's published 6381",
-    # 075 removed the three RENAMED secrets that used to live here (JWT_SECRET,
-    # ENCRYPTION_KEY, REDIS_PASSWORD in deploy/.env): deploy/secrets.env now carries
+    # 075 removed the three RENAMED secrets that used to live here — the old JWT_SECRET,
+    # ENCRYPTION_KEY and REDIS_PASSWORD spellings: deploy/secrets.env now carries
     # every secret under the SAME name the app binds, so the same file can be sourced
     # by a bare `java -jar`, a systemd EnvironmentFile or a Kubernetes Secret. A rename
     # that exists only inside compose is exactly what environments.md forbids.

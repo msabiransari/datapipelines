@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# scripts/sample-data-trade/manifest.sh — stage 4 of the trade/v2 build
-# (mirrors ../sample-data/manifest.sh): assemble manifest.json on STDOUT from
-# the artifacts + checksums.tsv + sources.lock params. stdout is the JSON; all
-# progress goes to stderr (house convention — a script's stdout stays usable
-# as data).
+# scripts/sample-data-trade/manifest.sh — stage 4 of the trade build
+# (mirrors ../sample-data/manifest.sh): assemble
+# scripts/sample-data-trade/work/artifacts/manifest.json from the artifacts +
+# checksums.tsv + sources.lock params.
 #
-#   ./scripts/sample-data-trade/manifest.sh > work/artifacts/manifest.json
+#   ./scripts/sample-data-trade/manifest.sh
+#
+# It WRITES THE FILE, exactly like the mobility script (T148). It used to print the
+# JSON on stdout and rely on the operator's `> work/artifacts/manifest.json`, which
+# tripped the orchestrator twice: a manifest printed into a transcript is a manifest
+# not on disk, and the next stage reads the file. Progress still goes to stderr, so
+# nothing else about the house convention changes — there is simply no data on stdout
+# to redirect any more.
 
 set -euo pipefail
 SD_SCRIPT=manifest
@@ -122,8 +128,12 @@ manifest = {
     "tables": table_checksums,
     "provenance": provenance,
 }
-json.dump(manifest, sys.stdout, indent=2)
-print()
+out = os.path.join(art_dir, "manifest.json")
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+print(f"manifest: wrote {out} — {len(artifacts)} artifacts, {len(table_checksums)} table "
+      f"fingerprints, {len(provenance)} provenance rows", file=sys.stderr)
 PY
 
-log "manifest written (license_verified is '${LICENSE_VERIFIED:-null}' — publishing with null blocks go-live, design §8)" >&2
+log "manifest written to work/artifacts/manifest.json (license_verified is '${LICENSE_VERIFIED:-null}' — publishing with null blocks go-live, design §8)" >&2

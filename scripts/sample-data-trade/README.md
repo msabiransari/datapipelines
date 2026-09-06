@@ -49,7 +49,7 @@ export CENSUS_API_KEY=<key>   # https://api.census.gov/data/key_signup.html — 
 ./scripts/sample-data-trade/pin.sh             #    MAINTAINER: record the extract pins (bootstrap once)
 ./scripts/sample-data-trade/transform.sh       # 2. DuckDB ETL + H.10 reshape -> work/csv/
 ./scripts/sample-data-trade/load-and-dump.sh   # 3. artifacts + checksums -> work/artifacts/
-./scripts/sample-data-trade/manifest.sh > scripts/sample-data-trade/work/artifacts/manifest.json
+./scripts/sample-data-trade/manifest.sh          # writes work/artifacts/manifest.json
 ./scripts/sample-data-trade/verify.sh          # the proof: re-derive everything from the artifacts
 ```
 

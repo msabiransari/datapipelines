@@ -456,6 +456,14 @@ A fresh local-accounts deployment has the chicken-and-egg §4.4 solves for OIDC:
 
 Both forms land on the `bootstrap-admin-email` account (created through the single §4.4 creation path, so the admin grant and its audit event fire exactly as for OIDC) and **always** seed with `must_change_password = TRUE`: the app refuses to proceed to any other screen until the seeded credential is replaced (§5A.4). Seeding is **create-if-absent and idempotent** — a restart never resets a changed password, and an account that already exists is left untouched. And the seeded credential cannot survive silently: every startup where the bootstrap-admin account still has `must_change_password = TRUE` logs a WARN (`event=auth.local.one_time_credential_pending`). Startup refuses the ambiguous shapes ([Configuration §7](configuration.md#7-config-validation)): both forms set, a seed without `local.enabled`, or a seed without `bootstrap-admin-email` — each naming both keys.
 
+**The seed fires ONCE, at row creation, so `bootstrap-admin-email` is a before-first-boot decision.** Changing it afterwards creates no second administrator and moves no credential — the account that exists is the account that works. Every subsequent startup says so, as a WARN, and changes nothing:
+
+```
+event=auth.local.bootstrap_mismatch configured=you@example.com seeded=admin@local.test
+```
+
+Sign in as the seeded address and add or reset the other from **Admin → Users**, or start again from an empty database. `./app.sh --scaffold` exists for exactly this: it writes `deploy/secrets.env` and stops, so the address can be set before the first `--start`. Both `./app.sh --start` and `./app.sh --status` read the seeded row out of the database and print the login that exists rather than the one the file names.
+
 ### 5A.3 Lockout
 
 Distinct from the per-IP login rate limit (§9, `rate_limit.exceeded`): that damper is IP/route-scoped and cannot stop a **slow spray against one account** from many addresses. After `datapipelines.auth.local.lockout.max-failures` (default 5) **consecutive** failed local logins, the account locks for `datapipelines.auth.local.lockout.duration-minutes` (default 15):

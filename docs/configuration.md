@@ -329,7 +329,7 @@ The two variables an organisation sets (round 075). [Environments](environments.
 
 #### Nothing lives only in a compose file
 
-The contract is environment variables. `deploy/env/example.env` lists every `DATAPIPELINES_*` variable this build binds with its shipped default, and `scripts/compose-env-audit.sh` — which runs on every `./gradlew build` — fails when that file, `deploy/compose.yml` and `application.yml` disagree about which variables exist or what they default to. Secrets are separate from settings: settings are tracked in the repo, and `deploy/secrets.env` (git-ignored) is the only file that holds credentials.
+The contract is environment variables, in **two files**: `deploy/env/defaults.env` (tracked — every non-secret variable this build binds, with the value it ships) and `deploy/secrets.env` (git-ignored — every credential, plus every override that belongs to this deployment). `deploy/secrets.env.example` is the template for the second and names every variable you may set. `scripts/compose-env-audit.sh` — which runs on every `./gradlew build` — fails when those files, `deploy/compose.yml` and `application.yml` disagree about which variables exist or what they default to, and when a variable is declared in both tracked files or in neither. Settings are tracked in the repo; secrets never are.
 
 ---
 
@@ -341,7 +341,7 @@ Resolution order for any key, highest first:
 2. Active profile YAML — the POSTURE file, `application-development.yml` or `application-hardened.yml` (§3.23).
 3. Base `application.yml` default.
 
-Under a loader that assembles env files (`docker compose --env-file`, `set -a; . file`), the files are read in order and the LAST one wins; `app.sh` passes `deploy/env/posture/<posture>.env`, then `deploy/env/demo.env` when demo is on, then `deploy/secrets.env` — secrets last, so a value an operator sets there always wins.
+Under a loader that assembles env files (`docker compose --env-file`, `set -a; . file`), the files are read in order and the LAST one wins; `app.sh` passes `deploy/env/defaults.env`, then `deploy/secrets.env` — secrets last, so a value an operator sets there always wins. Two files, that order, under every loader.
 
 Two documented per-entity overrides sit above global config at runtime (they are data, not config):
 - Pipeline `settings.tempdb.config.max_memory_mb` overrides `datapipelines.staging.h2.max-memory-mb` for that pipeline.
@@ -553,7 +553,9 @@ datapipelines:
 
 The POSTURE's non-secret defaults (§3.23). `spring.profiles.active` is derived from `DATAPIPELINES_POSTURE` in `application.yml`, so setting that one variable loads the right file under every loader — Compose, a bare `java -jar`, systemd, Kubernetes. Setting `SPRING_PROFILES_ACTIVE` yourself is unnecessary, and a value that disagrees with the posture refuses startup (§7).
 
-**These files carry POSTURE, never INFRASTRUCTURE.** Before 075 this section documented `application-dev.yml`, which was really a LAPTOP file: `localhost:5434`, console logging, one developer's host ports. An org's `dev` environment on Kubernetes runs the `development` posture too and must not inherit any of that. The laptop's values moved to `deploy/env/laptop.env`, which a laptop loads like any other env file ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md)).
+**These files carry POSTURE, never INFRASTRUCTURE.** Before 075 this section documented `application-dev.yml`, which was really a LAPTOP file: `localhost:5434`, console logging, one developer's host ports. An org's `dev` environment on Kubernetes runs the `development` posture too and must not inherit any of that. The laptop's values are ordinary lines in `deploy/env/defaults.env`, which every loader reads ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md)).
+
+**And they carry the posture's defaults ALONE (081).** No env file may name `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` or `DATAPIPELINES_AUTH_COOKIE_SECURE`: there is one tracked settings file, it is loaded for every posture, and an environment variable outranks a profile — so a value there would be one posture's answer imposed on both. 075 did exactly that and a `hardened` stack booted with `authoring=on`. `deploy/compose.yml` passes those two in Compose's valueless form (`DATAPIPELINES_AUTH_COOKIE_SECURE:`, nothing after the colon), the only form that leaves a variable *unset* rather than empty — an empty variable outranks a profile just as a set one does. An operator can still override either in `deploy/secrets.env`. `PostureDefaultsSpecDriftTest` and `compose-env-audit.sh` check 7 hold the two halves.
 
 **No literal secrets, in either file (2026-08-07 security review):** both ship inside every production jar (`src/main/resources`), so a working literal there means one stray `SPRING_PROFILES_ACTIVE` on a production manifest runs real infrastructure on publicly-known keys — forgeable admin JWTs and decryptable datasource credentials. Every secret is a placeholder resolved from the deployment's own environment, in every posture.
 
@@ -577,22 +579,22 @@ datapipelines:
 
 Everything else the posture means is a §7 REFUSAL, which no YAML file can carry: demo, a seeded bootstrap credential, loopback infrastructure and a missing OIDC provider are all refused under `hardened`. The full table is §3.23.
 
-The laptop's own settings, for reference ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md), `deploy/env/laptop.env`). It is loaded **last** on that path — the one inversion of the secrets-last rule, because it names a different database from the one `deploy/secrets.env`'s generated password belongs to:
+The laptop's own settings, for reference ([DEVELOPMENT.md §2/§4](../DEVELOPMENT.md)) — ordinary lines in `deploy/env/defaults.env`, read FIRST like every other default, with no inversion of the secrets-last rule:
 
 ```bash
 DATAPIPELINES_ENV=local
+DATAPIPELINES_POSTURE=development
 SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5434/datapipelines
 SPRING_DATASOURCE_USERNAME=datapipelines
-SPRING_DATASOURCE_PASSWORD=datapipelines
 DATAPIPELINES_REDIS_HOST=localhost
 DATAPIPELINES_REDIS_PORT=6381
-DATAPIPELINES_REDIS_PASSWORD=
 DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT=console
 DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS=
-DATAPIPELINES_AUTH_BASE_URL=http://localhost:8080
 ```
 
-> **Dev host ports (2026-08-12):** the laptop's Postgres listens on host port **5434** and Redis on **6381** — not the universal defaults 5432/6379, which collide with other local stacks on developer machines (Postgres.app/brew default to 5432). The host mapping lives in `deploy/compose.laptop-infra.yml`; `deploy/env/laptop.env` must stay in sync with it and with DEVELOPMENT.md §2/§4. In production, `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` are operator-set and unaffected.
+The two passwords are absent on purpose: they are secrets, they live only in `deploy/secrets.env`, and `deploy/compose.laptop-infra.yml` starts its Postgres and Redis **from those same two variables** (each keeping its historical fixed dev value as the interpolation default). Before 081 that file hard-coded `datapipelines` and no Redis password at all, and a third env file had to be loaded after the secrets to undo them — the one inversion this design used to have. `DATAPIPELINES_AUTH_BASE_URL` is likewise absent: it is this deployment's own identity and lives in `secrets.env`, where the scaffold writes `http://localhost:<port>`.
+
+> **Dev host ports (2026-08-12):** the laptop's Postgres listens on host port **5434** and Redis on **6381** — not the universal defaults 5432/6379, which collide with other local stacks on developer machines (Postgres.app/brew default to 5432). The host mapping lives in `deploy/compose.laptop-infra.yml`; `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_PORT` in `deploy/env/defaults.env` must stay in sync with it and with DEVELOPMENT.md §2/§4. In production, `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` are operator-set and unaffected.
 
 ---
 
@@ -625,7 +627,7 @@ On startup, the app validates:
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **The boot line (§3.23):** `event=config.posture env=<env> posture=<posture> authoring=<on|off> demo=<families>` is logged once (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
-The validator's own test suite must assert that the documented laptop setup (`deploy/env/posture/development.env` + `deploy/env/laptop.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
+The validator's own test suite must assert that the documented laptop setup (`deploy/env/defaults.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
 
 Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop startup with a clear log message listing every missing/invalid key.
 
@@ -635,6 +637,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-06 | v1.14 | 081 one env file | **§3.23, §4 and §6 rewritten to two files.** The contract is `deploy/env/defaults.env` (tracked, every non-secret variable with its shipped value) then `deploy/secrets.env` (git-ignored, credentials and this deployment's own overrides), in that order under every loader; `deploy/secrets.env.example` is the template and names every variable. The five files 075 shipped under `deploy/env/` are deleted, and with them the laptop's load-order inversion — `deploy/compose.laptop-infra.yml` now starts Postgres and Redis from `SPRING_DATASOURCE_PASSWORD` and `DATAPIPELINES_REDIS_PASSWORD`. §6: the posture's two default rows live ONLY in the profile ymls, and no env file may name them. `compose-env-audit.sh` gains the one-authority proof (each bound variable declared in exactly one tracked file) and the valueless-form check. |
 | 2026-09-05 | v1.13 | 075 environments and posture | New **§3.23 Environment and posture**: `datapipelines.env` (`DATAPIPELINES_ENV`, default `local` — the ORG's label, renamed from §3.19's `datapipelines.deployment.name`, which survives one release as a WARNing alias), `datapipelines.posture` (`development` \| `hardened`, no default — only the env named `local` gets one for free) and `datapipelines.demo` (a FLAG: the sample-data families; refused under `hardened`), with the normative posture table. §3.4 gains `cookie-secure` (empty = derived from base-url's scheme; `hardened` ships `true`) and `allow-local-only` (the explicit no-OIDC acknowledgement). §6 is now the POSTURE profiles — `application-dev.yml` was really a laptop file and its infrastructure moved to `deploy/env/laptop.env`; `application-development.yml` and `application-hardened.yml` carry the posture defaults, and `spring.profiles.active` is derived from `DATAPIPELINES_POSTURE`. §7 gains four rules (env grammar + alias, posture required, posture/profile alignment, the hardened refusals) and loses the dev-profile guard, which those refusals subsume. §4 and §5 updated. [Environments](environments.md) is the new operator page. |
 | 2026-09-05 | v1.12 | 074 published endpoints | New **§3.22 Published endpoints**: `datapipelines.endpoints.timeout-default-seconds` (30) / `-min-seconds` (1) / `-max-seconds` (300); one new §7 rule (min ≤ default ≤ max, min ≥ 1 — the four report together). Deliberately no `page-rows-max`: `DP-Result-Page-Rows` clamps to `result.page-max-rows` on both surfaces (R-EP4). §5 template block appended after `org:`. |
 | 2026-09-04 | v1.11 | 072 calculators | New **§3.21 Organisation**: `datapipelines.org.currency.name` / `.symbol`, `fiscal-start-date` (`MM-DD`), `week-start`, `timezone` — five keys that enter every execution Context as `org_*` (calculators design §0.1/§0.2, [Pipeline Contract §7.2](pipeline-contract.md#72-whats-in-the-context--one-namespace-five-tiers)). §5 template block and one new §7 validation rule (all four org checks report together; a month name in `fiscal-start-date` is refused with a message naming `MM-DD`) |

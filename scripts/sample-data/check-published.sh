@@ -6,7 +6,7 @@
 # 500ed on first login for two days because nothing compared the two.
 #
 #   ./scripts/sample-data/check-published.sh [--family nyc|trade] <version>
-#   ./scripts/sample-data/check-published.sh                 # the version deploy/env/demo.env pins
+#   ./scripts/sample-data/check-published.sh                 # the version defaults.env pins
 #   SAMPLE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh v2
 #   SAMPLE_TRADE_BASE_URL=http://host.docker.internal:8099 ./scripts/sample-data/check-published.sh --family trade v2
 #   SAMPLE_BASE_URL=file://$PWD/scripts/sample-data/work/artifacts-parent ...
@@ -39,15 +39,16 @@ SD_ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SD_ROOT/../.." && pwd)"
 source "$SD_ROOT/lib/common.sh"
 
-# 075/T117: the family's base URL and its pinned VERSION come from the TRACKED
-# deploy/env/demo.env — the same file the running deployment loads. They used to live
-# in a git-ignored scaffold, so the repo could not say which version the demo pinned
-# and two stacks in one week loaded a version the repo had moved past. `<version>` is
-# now OPTIONAL: with no argument this checks the version the repo actually ships.
-DEMO_ENV="$REPO_ROOT/deploy/env/demo.env"
+# 075/T117: the family's base URL and its pinned VERSION come from the TRACKED settings
+# file — the same file the running deployment loads. They used to live in a git-ignored
+# scaffold, so the repo could not say which version the demo pinned and two stacks in one
+# week loaded a version the repo had moved past. `<version>` is now OPTIONAL: with no
+# argument this checks the version the repo actually ships. (081 collapsed the five 075
+# env files into this one; the keys are unchanged.)
+DEFAULTS_ENV="$REPO_ROOT/deploy/env/defaults.env"
 demo_env_get() { # key
-  [ -f "$DEMO_ENV" ] || return 0
-  grep -E "^$1=" "$DEMO_ENV" | head -1 | cut -d= -f2- || true
+  [ -f "$DEFAULTS_ENV" ] || return 0
+  grep -E "^$1=" "$DEFAULTS_ENV" | head -1 | cut -d= -f2- || true
 }
 
 FAMILY=nyc

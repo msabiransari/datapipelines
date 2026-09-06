@@ -3,14 +3,14 @@
 # jar via the Gradle wrapper, then `docker build -t datapipelines:local .`).
 #
 #   docker compose -f deploy/compose.yml -f deploy/compose.local-build.yml \
-#     --env-file deploy/env/posture/development.env --env-file deploy/secrets.env up -d
+#     --env-file deploy/env/defaults.env --env-file deploy/secrets.env up -d
 #
 # The tag interpolates IMAGE_TAG (default the documented `datapipelines:local`):
 # app.sh exports a per-PROJECT tag for second isolated copies, so one lane's
 # rebuild cannot swap the image under another lane's running stack (034 F2).
 # Everything else — services, env contract, healthchecks, volumes — is the
 # production shape from compose.yml, unchanged. Secrets still come from
-# deploy/secrets.env (see deploy/env/secrets.env.example).
+# deploy/secrets.env (see deploy/secrets.env.example).
 services:
   datapipelines:
     image: ${IMAGE_TAG:-datapipelines:local}

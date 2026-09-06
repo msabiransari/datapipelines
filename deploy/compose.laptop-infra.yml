@@ -9,7 +9,7 @@
 # variables the APP binds — `SPRING_DATASOURCE_PASSWORD` and `DATAPIPELINES_REDIS_PASSWORD`
 # — so the laptop's infrastructure and the jar that talks to it read ONE value each, out
 # of deploy/secrets.env. Before 081 this file hard-coded `datapipelines` and no Redis
-# password at all, and deploy/env/laptop.env had to be loaded AFTER the secrets to undo
+# password at all, and a third (now deleted) env file had to be loaded AFTER the secrets to undo
 # them; that inversion is what the owner's "only one env with defaults + secrets" ruling
 # removed. Each keeps its historical value as the interpolation default, so a bare
 # `up -d` with no env files still starts the stack a pre-081 checkout started.
@@ -78,7 +78,7 @@ services:
     # only the memory ceiling differs.
     #
     # The password is the app's own DATAPIPELINES_REDIS_PASSWORD (081). Before that this
-    # Redis had NO password and deploy/env/laptop.env had to blank the app's — an
+    # Redis had NO password and a third env file had to blank the app's — an
     # unauthenticated Redis that configuration.md §7 warns about, kept alive by the very
     # file that made the two disagree. The dev default is fixed and public, like the
     # database's; deploy/secrets.env's generated value wins when the file is loaded.

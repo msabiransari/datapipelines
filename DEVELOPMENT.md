@@ -29,18 +29,29 @@ cd datapipelines
 
 ## 2. Start Local Infrastructure
 
+Do §4 first if you have no `deploy/secrets.env` yet — this stack takes its two passwords
+from it, so that the app and the database it talks to read ONE value each:
+
 ```bash
-docker compose -f deploy/compose.laptop-infra.yml up -d
+docker compose -f deploy/compose.laptop-infra.yml \
+  --env-file deploy/env/defaults.env --env-file deploy/secrets.env up -d
 ```
 
 This starts:
-- **Postgres 16** on `localhost:5434` (DB: `datapipelines`, user: `datapipelines`, password: `datapipelines`)
-- **Redis 7** on `localhost:6381` (no password)
+- **Postgres 16** on `localhost:5434` (DB: `datapipelines`, user: `datapipelines`, password: your `SPRING_DATASOURCE_PASSWORD`)
+- **Redis 7** on `localhost:6381` (password: your `DATAPIPELINES_REDIS_PASSWORD`)
+
+Without the env files both fall back to the fixed public dev value `datapipelines`, which
+is what a pre-2026-09-06 checkout used. **If you already have a `dp-postgres-dev-data`
+volume** it still holds the password it was initialised with, because Postgres reads
+`POSTGRES_PASSWORD` only on first init: either put `SPRING_DATASOURCE_PASSWORD=datapipelines`
+in your `deploy/secrets.env`, or reset the dev database with
+`docker compose -f deploy/compose.laptop-infra.yml down -v`.
 
 The host ports are deliberately NOT the defaults (5432/6379) — those collide with
 other local stacks on most developer machines. They are declared in
-`deploy/env/laptop.env`, which §4 loads; keep the two files and configuration.md §6
-in sync if you ever change them.
+`deploy/env/defaults.env` (`SPRING_DATASOURCE_URL`, `DATAPIPELINES_REDIS_PORT`), which §4
+loads; keep that file, this compose file and configuration.md §6 in sync if you change them.
 
 Verify:
 ```bash
@@ -103,14 +114,24 @@ Common issuer URIs:
 
 Two kinds of file, and the split matters: **settings are tracked in this repository, secrets are not** ([Environments §6](docs/environments.md#6-secrets)).
 
-The laptop's settings already exist and need no editing — `deploy/env/posture/development.env` (the posture) and `deploy/env/laptop.env` (the host ports §2 publishes, console logging, `DATAPIPELINES_ENV=local`). What you create is the one git-ignored file that holds credentials:
+The laptop's settings already exist and need no editing: `deploy/env/defaults.env` is the
+one tracked settings file, and it already carries the posture (`development`), the host
+ports §2 publishes, console logging and `DATAPIPELINES_ENV=local`. What you create is the
+one git-ignored file that holds credentials:
 
 ```bash
-cp deploy/env/secrets.env.example deploy/secrets.env
+./app.sh --scaffold            # generates deploy/secrets.env, mode 600, from the template
+```
+
+or by hand, which is the same file with the values left to you:
+
+```bash
+cp deploy/secrets.env.example deploy/secrets.env
 chmod 600 deploy/secrets.env
 ```
 
-Then fill in four lines. Everything else in the template is optional:
+The scaffold fills everything below in for you. By hand, four lines matter and the rest of
+the template is optional:
 
 ```bash
 # MUST be real base64 of >=32 random bytes; a placeholder here fails startup
@@ -127,11 +148,11 @@ DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD=dev-admin
 DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL=dev@example.com
 ```
 
-`deploy/env/laptop.env` already sets `SPRING_DATASOURCE_*`, `DATAPIPELINES_REDIS_*` and `DATAPIPELINES_AUTH_BASE_URL` for the infrastructure §2 started, so `deploy/secrets.env` only carries what must not be tracked. `deploy/env/example.env` is the full reference: every `DATAPIPELINES_*` variable this build binds, with the default it ships.
+`deploy/env/defaults.env` already points `SPRING_DATASOURCE_URL` and `DATAPIPELINES_REDIS_*` at the infrastructure §2 started, so `deploy/secrets.env` only carries what must not be tracked — the two passwords that stack uses, the app's own secrets, and this box's `DATAPIPELINES_AUTH_BASE_URL`. `deploy/env/defaults.env` is the full reference for everything else: every `DATAPIPELINES_*` variable this build binds, with the value it ships, and `deploy/secrets.env.example` names every one of them again, commented, so you can see what you may override without leaving the file you are editing.
 
 **OIDC secrets** are optional while local login is enabled (§3). For Google — the only provider the stock `application.yml` ships — add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to `deploy/secrets.env`. For Microsoft, uncomment the provider block (§3.2) first; for any other provider, mount your own yml with `SPRING_CONFIG_ADDITIONAL_LOCATION` ([Environments §3](docs/environments.md#3-the-variable-contract)).
 
-**The two variables** ([Environments](docs/environments.md)): a laptop is `DATAPIPELINES_ENV=local` — which `laptop.env` sets — and `local` is the one environment that gets its posture (`development`) for free. Every other environment name must say which posture it wants or the app refuses to start.
+**The two variables** ([Environments](docs/environments.md)): a laptop is `DATAPIPELINES_ENV=local` — which `defaults.env` sets, alongside `DATAPIPELINES_POSTURE=development` — and `local` is the one environment that gets its posture for free. Every other environment name must say which posture it wants or the app refuses to start.
 
 The provider list itself (names, issuer URIs, display names) is configured in `application.yml` — see [Auth spec §11.1](docs/auth.md#111-oidc-provider-configuration). Only secrets go in env vars.
 
@@ -185,10 +206,8 @@ Gradle-on-host development flow the IDE path also uses:
 # variable they assign; this is exactly what the bare-jar deployment does
 # (docs/environments.md §4 "Loaders").
 set -a
-. deploy/env/posture/development.env
+. deploy/env/defaults.env
 . deploy/secrets.env
-. deploy/env/laptop.env      # LAST: this machine's infrastructure beats the compose
-                             # stack's generated SPRING_DATASOURCE_PASSWORD
 set +a
 
 # Build (skip tests for speed during dev)
@@ -199,7 +218,7 @@ set +a
 ./gradlew :modules:app:bootRun
 ```
 
-Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, environment variables from the three files above.
+Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, environment variables from the two files above.
 
 The app starts on `http://localhost:8080`.
 
@@ -208,8 +227,8 @@ The app starts on `http://localhost:8080`.
 1. **Run → Edit Configurations → + → Application.**
 2. **Main class:** `co.datapipelines.DatapipelinesApplicationKt`
 3. **Module classpath:** the `app` Gradle module's `main` source set (in the module picker this reads as the app project's main source set)
-4. **Program arguments:** none. `DATAPIPELINES_POSTURE` (from `deploy/env/posture/development.env`) selects the Spring profile; setting `--spring.profiles.active` yourself to a different posture refuses startup.
-5. **Environment variables:** the *Environment variables* field has a file-picker icon on the right, and IntelliJ accepts several files — select `deploy/env/posture/development.env`, `deploy/secrets.env` and `deploy/env/laptop.env`, in that order — the laptop file LAST, because this machine's infrastructure must beat the compose stack's generated database password (later wins, same as the shell). IntelliJ exports them into the launched process. (Do not paste the secrets into the stored run config.)
+4. **Program arguments:** none. `DATAPIPELINES_POSTURE` (from `deploy/env/defaults.env`) selects the Spring profile; setting `--spring.profiles.active` yourself to a different posture refuses startup.
+5. **Environment variables:** the *Environment variables* field has a file-picker icon on the right, and IntelliJ accepts several files — select `deploy/env/defaults.env` and then `deploy/secrets.env`, in that order. Later wins, same as the shell. IntelliJ exports them into the launched process. (Do not paste the secrets into the stored run config.)
 6. **Working directory:** the project root (default).
 
 Debug works as usual — set a breakpoint and use the bug icon instead of run. Live reload is not configured; re-run after code changes.
@@ -476,7 +495,7 @@ stack it is four steps:
 
 ```bash
 # 1. a login that works, so the datasource passes save-time validation
-docker exec -e PGPASSWORD="$METADATA_DB_PASSWORD" <project>-postgres-1 \
+docker exec -e PGPASSWORD="$SPRING_DATASOURCE_PASSWORD" <project>-postgres-1 \
   psql -U datapipelines -d dp_sample_trips -c "
     CREATE ROLE demo_probe_ro LOGIN PASSWORD 'probe-initial-secret';
     GRANT CONNECT ON DATABASE dp_sample_trips TO demo_probe_ro;
@@ -731,7 +750,8 @@ datapipelines/
 │   ├── compose.yml             ← reference production compose
 │   ├── compose.local-build.yml ← override: build the image from this checkout
 │   ├── compose.laptop-infra.yml ← local dev infra only (Postgres + Redis)
-│   ├── env/                    ← TRACKED settings: posture/, demo.env, laptop.env, example.env
+│   ├── env/defaults.env        ← TRACKED settings: every non-secret variable, one file
+│   ├── secrets.env.example     ← TRACKED template: names every variable you may set
 │   └── secrets.env             ← git-ignored credentials (scaffolded by app.sh)
 ├── scripts/
 │   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
@@ -829,15 +849,16 @@ For someone with just Docker running — no OIDC client needed (local login, [au
 
 ```bash
 git clone <repo-url> datapipelines && cd datapipelines && \
-docker compose -f deploy/compose.laptop-infra.yml up -d && \
-cp deploy/env/secrets.env.example deploy/secrets.env && \
-nano deploy/secrets.env && \                   # the two openssl secrets + the local-login block (§4)
+./app.sh --scaffold && \
+nano deploy/secrets.env && \                   # your DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL (§4)
+docker compose -f deploy/compose.laptop-infra.yml \
+  --env-file deploy/env/defaults.env --env-file deploy/secrets.env up -d && \
 cd ../design-system-starter && npm install && npm run build && cd - && \
 ./scripts/sync-design-system.sh && \
-set -a && . deploy/env/posture/development.env && . deploy/secrets.env && . deploy/env/laptop.env && set +a && \
+set -a && . deploy/env/defaults.env && . deploy/secrets.env && set +a && \
 ./gradlew :modules:app:bootRun
 ```
 
-Then sign in at `http://localhost:8080` as `dev@example.com` / `dev-admin` (one-time — you set a new password on first login). To use an OIDC provider instead, put its credentials in `deploy/secrets.env` (§3).
+Then sign in at `http://localhost:8080` as the address you put in `DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL`, with the `DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD` the scaffold generated (one-time — you set a new password on first login). Edit the address BEFORE the first boot: the seed fires once, at row creation. To use an OIDC provider instead, put its credentials in `deploy/secrets.env` (§3).
 
 Then open `http://localhost:8080/login`.

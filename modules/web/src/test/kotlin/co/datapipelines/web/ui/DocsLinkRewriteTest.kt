@@ -96,7 +96,7 @@ class DocsLinkRewriteTest {
             "${DocsCatalog.GITHUB_BLOB_BASE}docs/SPEC-REVIEW-2026-08.md#217-type-systemmd"
         // Outside docs/ entirely → repo-root-relative GitHub URL.
         DocsCatalog.rewriteHref("../DEVELOPMENT.md", packaged) shouldBe "${DocsCatalog.GITHUB_BLOB_BASE}DEVELOPMENT.md"
-        DocsCatalog.rewriteHref("../deploy/env/example.env", packaged) shouldBe "${DocsCatalog.GITHUB_BLOB_BASE}deploy/env/example.env"
+        DocsCatalog.rewriteHref("../deploy/env/defaults.env", packaged) shouldBe "${DocsCatalog.GITHUB_BLOB_BASE}deploy/env/defaults.env"
         // Passthroughs: absolute URLs, in-page anchors, mailto.
         DocsCatalog.rewriteHref("https://example.com/x", packaged) shouldBe "https://example.com/x"
         DocsCatalog.rewriteHref("#local-anchor", packaged) shouldBe "#local-anchor"
