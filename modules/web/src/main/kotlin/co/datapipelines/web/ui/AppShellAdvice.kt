@@ -56,24 +56,20 @@ class AppShellAdvice(
     @ModelAttribute("crumbPage")
     fun crumbPage(request: HttpServletRequest): String? = AppNav.crumbFor(request.requestURI)?.second
 
-    /**
-     * Both badges in one attribute, so the template reads `navCounts.pipelines` /
-     * `navCounts.templates` and the request makes exactly one cache lookup. Two separate
-     * `@ModelAttribute` accessors would each call the cache — harmless, but it would make the
-     * cold path look like two reads to anyone tracing it.
-     */
-    /**
-     * The palette swatches in the avatar menu: every vendored theme that is not one of the
-     * three MODES the Appearance segment already offers. `VendoredThemes.names()` returns all
-     * nine stylesheet names (auto, dark, forest, healthcare, light, minimal, ocean,
-     * professional, saas); the six that remain here are the looks, and the three removed are
-     * the modes. Derived, never listed: a tenth theme synced from the design system appears in
-     * the menu by itself, and a removed one disappears — the failure the hard-coded fallback
-     * in [UserSettingsController.listAvailableThemes] was deliberately written to avoid.
-     */
+    // The palette swatches in the avatar menu: every vendored theme that is not one of the
+    // three MODES the Appearance segment already offers. VendoredThemes.names() returns all
+    // nine stylesheet names (auto, dark, forest, healthcare, light, minimal, ocean,
+    // professional, saas); the six that remain here are the looks, and the three removed are
+    // the modes. Derived, never listed: a tenth theme synced from the design system appears
+    // in the menu by itself, and a removed one disappears — the failure the hard-coded
+    // fallback in UserSettingsController.listAvailableThemes was deliberately written to avoid.
     @ModelAttribute("themePalettes")
     fun themePalettes(): List<String> = UserSettingsController.listAvailableThemes().filterNot { it in MODES }
 
+    // Both badges in ONE attribute, so the template reads navCounts.pipelines /
+    // navCounts.templates and the request makes exactly one cache lookup. Two separate
+    // @ModelAttribute accessors would each call the cache — harmless, but it would make the
+    // cold path look like two reads to anyone tracing it.
     @ModelAttribute("navCounts")
     fun navCounts(): NavCounts.Counts = navCounts.forWorkspace(principal()?.workspace?.id)
 

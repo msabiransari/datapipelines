@@ -167,7 +167,11 @@ class ApiConsoleController(
         """.trimIndent()
 
     private fun mcpUrl(): String {
-        val base = authProperties.baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+        val base =
+            authProperties.baseUrl
+                ?.trim()
+                ?.trimEnd('/')
+                ?.takeIf { it.isNotEmpty() }
         return (base ?: HOST_PLACEHOLDER) + ApiKeyCredential.MCP_PATH
     }
 

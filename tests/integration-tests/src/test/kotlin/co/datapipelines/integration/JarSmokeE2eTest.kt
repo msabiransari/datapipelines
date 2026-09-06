@@ -87,7 +87,9 @@ class JarSmokeE2eTest {
         val recent = get("/partials/recent-executions")
         recent.second shouldBe 200
         // The seeded execution is rendered — real content, not an error shell.
-        recent.first shouldContain "SUCCESS"
+        // 079 §E: the chip's TEXT is prose ("Success"); the enum rides on data-status, which
+        // is the machine-readable statement this assertion was always about.
+        recent.first shouldContain "data-status=\"SUCCESS\""
         recent.first shouldContain SEEDED_EXECUTION
         noneCarriesErrorMarkers("/", "/partials/dashboard-stats", "/partials/recent-executions")
     }

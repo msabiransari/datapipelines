@@ -47,7 +47,11 @@ class AppCssTokenAuditTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
 
     private fun read(path: String): String =
-        resolver.getResource("classpath:static/$path").inputStream.readBytes().decodeToString()
+        resolver
+            .getResource("classpath:static/$path")
+            .inputStream
+            .readBytes()
+            .decodeToString()
 
     private val appCss: String = read("css/app.css")
 
@@ -57,7 +61,11 @@ class AppCssTokenAuditTest {
 
     /** A theme stylesheet's own `--_accent-primary`, which is what its `--accent-primary` resolves to. */
     private fun themeAccent(theme: String): String? =
-        ACCENT.find(read("vendor/design-system/themes/$theme.css"))?.groupValues?.get(1)?.lowercase()
+        ACCENT
+            .find(read("vendor/design-system/themes/$theme.css"))
+            ?.groupValues
+            ?.get(1)
+            ?.lowercase()
 
     @Test
     fun `app css carries no literal colour outside the two declared exceptions`() {
@@ -94,10 +102,17 @@ class AppCssTokenAuditTest {
             swatches.mapNotNull { (theme, painted) ->
                 val declared = themeAccent(theme)
                 when {
-                    declared == null -> "$theme has a swatch but no vendored themes/$theme.css"
-                    declared != painted ->
+                    declared == null -> {
+                        "$theme has a swatch but no vendored themes/$theme.css"
+                    }
+
+                    declared != painted -> {
                         "swatch for $theme paints $painted but themes/$theme.css declares --_accent-primary: $declared"
-                    else -> null
+                    }
+
+                    else -> {
+                        null
+                    }
                 }
             }
         drifted shouldBe emptyList()

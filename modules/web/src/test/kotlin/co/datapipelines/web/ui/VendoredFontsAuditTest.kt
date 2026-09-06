@@ -71,8 +71,7 @@ class VendoredFontsAuditTest {
 
     private val declared: Map<String, String> = declaredHashes("inter") + declaredHashes("jetbrains-mono")
 
-    private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     @Test
     fun `the manifest declares both families and every file this round vendored`() {
@@ -98,7 +97,10 @@ class VendoredFontsAuditTest {
             declared.mapNotNull { (path, want) ->
                 val resource = resolver.getResource("classpath:static/$path")
                 when {
-                    !resource.exists() -> "$path is declared in the manifest but MISSING from the classpath"
+                    !resource.exists() -> {
+                        "$path is declared in the manifest but MISSING from the classpath"
+                    }
+
                     else -> {
                         val got = sha256(resource.inputStream.readBytes())
                         if (got == want) null else "$path HASH MISMATCH (manifest=$want actual=$got)"

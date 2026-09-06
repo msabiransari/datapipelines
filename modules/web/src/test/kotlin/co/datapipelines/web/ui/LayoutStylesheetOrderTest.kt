@@ -68,17 +68,23 @@ class LayoutStylesheetOrderTest {
         val base = html.indexOf("/vendor/design-system/base.css")
         val motion = html.indexOf("/vendor/design-system/motion.css")
         val primitives = html.indexOf("/vendor/design-system/primitives.css")
+        // 079: icons.css was vendored from the start and never linked, so `.ds-icon` sized
+        // nothing. Pinned here so it cannot fall out again silently — the failure mode is an
+        // unsized inline SVG, which looks like a layout bug rather than a missing stylesheet.
+        val icons = html.indexOf("/vendor/design-system/icons.css")
         val appCss = html.indexOf("/css/app.css")
         tokens shouldBeGreaterThan -1
         base shouldBeGreaterThan -1
         motion shouldBeGreaterThan -1
         primitives shouldBeGreaterThan -1
+        icons shouldBeGreaterThan -1
         appCss shouldBeGreaterThan -1
         tokens shouldBeLessThan base
         base shouldBeLessThan motion
         motion shouldBeLessThan primitives
         // app.css is LAST: its body-canvas and element-default rules win by order.
-        primitives shouldBeLessThan appCss
+        primitives shouldBeLessThan icons
+        icons shouldBeLessThan appCss
     }
 
     @Test

@@ -63,6 +63,30 @@ class AppShellBrowserTest : BrowserSuite() {
         // ClassCastException on every page that does NOT overflow, which is the pass case.
         (page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth") as Number).toLong()
 
+    /**
+     * The elements whose right edge is past the viewport. "The page overflows by 9px" is a
+     * fact you cannot act on; "DIV.app-grid does" is. Reported IN the failure message rather
+     * than dug out of a trace afterwards.
+     */
+    private fun culprits(page: Page): String =
+        page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('*'))
+              .filter(e => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+              .slice(0, 6)
+              .map(e => {
+                const id = n => n.tagName + (n.className && typeof n.className === 'string' && n.className.trim()
+                  ? '.' + n.className.trim().split(/\s+/).join('.') : '');
+                const chain = [];
+                for (let n = e; n && chain.length < 5; n = n.parentElement) chain.push(id(n));
+                const r = e.getBoundingClientRect();
+                return chain.join(' < ') + ' [' + Math.round(r.left) + '..' + Math.round(r.right) + ']'
+                  + ' text=' + JSON.stringify((e.textContent || '').trim().slice(0, 30));
+              })
+              .join(' | ')
+            """.trimIndent(),
+        ).toString()
+
     @Test
     fun `no app screen scrolls sideways at 1440 or 2560`() {
         startTrace()
@@ -75,7 +99,7 @@ class AppShellBrowserTest : BrowserSuite() {
                 page.navigate("$baseUrl$route")
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
                 val extra = overflow(page)
-                if (extra > 0) offenders += "$route at ${w}x$h overflows by ${extra}px"
+                if (extra > 0) offenders += "$route at ${w}x$h overflows by ${extra}px — ${culprits(page)}"
             }
         }
         offenders shouldBe emptyList()
@@ -163,7 +187,11 @@ class AppShellBrowserTest : BrowserSuite() {
 
         page.locator("#app-avatar").click()
         menu.waitFor()
-        page.locator("#app-main").click(com.microsoft.playwright.Locator.ClickOptions().setPosition(5.0, 5.0))
+        page.locator("#app-main").click(
+            com.microsoft.playwright.Locator
+                .ClickOptions()
+                .setPosition(5.0, 5.0),
+        )
         awaitHidden()
     }
 

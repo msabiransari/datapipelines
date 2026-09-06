@@ -1039,6 +1039,7 @@ body {
 
 .app-card-b {
   padding: var(--gap-md);
+  min-width: 0;
 }
 
 .app-card-note {
@@ -1066,6 +1067,12 @@ body {
 
 .app-grid-stack {
   display: grid;
+  /* minmax(0, 1fr), never a bare 1fr: a grid item's default `min-width: auto` lets its
+     content push the track WIDER than the track's share, and the MCP card's <pre> is
+     `white-space: pre`. AppShellBrowserTest caught exactly that — /api-console overflowed
+     the document by 9px at BOTH review widths. `overflow-x: auto` on the <pre> only helps
+     once something upstream is willing to be narrower than its content. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap-md);
   align-content: start;
 }
@@ -1082,6 +1089,12 @@ body {
 
 /* Tables inside a card have already got the card's border and radius; the
    076 boxed-table treatment would draw a second one inside the first. */
+.app-card-table {
+  /* The card clips; the table below scrolls inside it. Together these keep a long mono
+     path from widening the page — the failure the overflow assertion exists for. */
+  min-width: 0;
+}
+
 .app-card-table .ds-table {
   border: 0;
   border-radius: 0;

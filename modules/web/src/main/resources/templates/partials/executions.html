@@ -39,7 +39,10 @@
           </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>
-            <span class="app-chip"
+            <!-- The chip shows prose ("Success"); the ENUM rides on data-status, which is
+                 what a test or a script should read. Asserting on display text makes a copy
+                 change a test failure and a machine reader's problem. -->
+            <span class="app-chip" th:attr="data-status=${r.status.name()}"
                   th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
           </td>
           <td th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>

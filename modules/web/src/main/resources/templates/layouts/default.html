@@ -13,6 +13,14 @@
   <link th:href="@{/vendor/design-system/base.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/motion.css}" rel="stylesheet">
   <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
+  <!-- 079: icons.css has been vendored, hash-verified and listed in the manifest since the
+       design system arrived, and was never LINKED. It carries the `.ds-icon` sizing
+       utilities, so every `<svg class="ds-icon ds-icon-sm">` had NO width at all — an inline
+       SVG with a viewBox and no width is not 16px, it fills its line box. The shell's icons
+       exposed it: AppShellBrowserTest's overflow assertion caught the MCP card's note icon
+       taking the card's whole width and pushing its text 9px past the viewport at BOTH
+       review widths. Loaded after primitives.css and before app.css, like its siblings. -->
+  <link th:href="@{/vendor/design-system/icons.css}" rel="stylesheet">
 
   <!-- 079 §G: the two PRIMARY vendored faces (upright sans, regular mono) are
        preloaded so the swap lands on the first paint rather than after the
