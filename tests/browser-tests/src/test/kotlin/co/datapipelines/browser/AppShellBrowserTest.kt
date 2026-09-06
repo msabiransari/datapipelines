@@ -69,23 +69,24 @@ class AppShellBrowserTest : BrowserSuite() {
      * than dug out of a trace afterwards.
      */
     private fun culprits(page: Page): String =
-        page.evaluate(
-            """
-            () => Array.from(document.querySelectorAll('*'))
-              .filter(e => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
-              .slice(0, 6)
-              .map(e => {
-                const id = n => n.tagName + (n.className && typeof n.className === 'string' && n.className.trim()
-                  ? '.' + n.className.trim().split(/\s+/).join('.') : '');
-                const chain = [];
-                for (let n = e; n && chain.length < 5; n = n.parentElement) chain.push(id(n));
-                const r = e.getBoundingClientRect();
-                return chain.join(' < ') + ' [' + Math.round(r.left) + '..' + Math.round(r.right) + ']'
-                  + ' text=' + JSON.stringify((e.textContent || '').trim().slice(0, 30));
-              })
-              .join(' | ')
-            """.trimIndent(),
-        ).toString()
+        page
+            .evaluate(
+                """
+                () => Array.from(document.querySelectorAll('*'))
+                  .filter(e => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+                  .slice(0, 6)
+                  .map(e => {
+                    const id = n => n.tagName + (n.className && typeof n.className === 'string' && n.className.trim()
+                      ? '.' + n.className.trim().split(/\s+/).join('.') : '');
+                    const chain = [];
+                    for (let n = e; n && chain.length < 5; n = n.parentElement) chain.push(id(n));
+                    const r = e.getBoundingClientRect();
+                    return chain.join(' < ') + ' [' + Math.round(r.left) + '..' + Math.round(r.right) + ']'
+                      + ' text=' + JSON.stringify((e.textContent || '').trim().slice(0, 30));
+                  })
+                  .join(' | ')
+                """.trimIndent(),
+            ).toString()
 
     @Test
     fun `no app screen scrolls sideways at 1440 or 2560`() {
