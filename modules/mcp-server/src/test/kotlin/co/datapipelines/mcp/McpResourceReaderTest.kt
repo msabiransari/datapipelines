@@ -157,7 +157,7 @@ class McpResourceReaderTest {
                 createdBy = McpFixtures.USER,
             )
 
-        val contents = contents("datapipelines://templates/revenue.sql/versions/2")
+        val contents = contents("datapipelines://templates/test/revenue.sql/versions/2")
 
         assertAll(
             { contents.text() shouldBe "SELECT 2" },

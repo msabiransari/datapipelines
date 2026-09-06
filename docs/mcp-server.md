@@ -1094,6 +1094,8 @@ Returns the pipeline JSON body, content-type `application/json`.
 
 Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`.
 
+**`{id}` contains slashes.** A template id is a folder path ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and, since 077, always at least two segments — so the id is **every segment after `templates`**, not one. `datapipelines://templates/nyc/mobility/daily_by_zone.sql` is the latest version of `nyc/mobility/daily_by_zone.sql`. The `versions/{version}` suffix is recognised by the LAST two segments, never by position, so a folder named `versions` stays a folder: `…/templates/acme/versions/report.sql` is the template `acme/versions/report.sql`, and `…/templates/acme/versions/report.sql/versions/2` is its version 2. (Corrected in 077: the parser had required exactly two segments since 043, so every hierarchical id read as not-found.)
+
 #### 7.2.3 `datapipelines://datasources/{name}`
 
 Returns datasource metadata as JSON, with the password field redacted. Workspace-scoped like every datasource read (§2 principle 6): a name bound to another workspace resolves as not-found; `datapipelines://datasources` lists exactly the pinned workspace's visible set (bound + global).
