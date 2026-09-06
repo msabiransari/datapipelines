@@ -145,6 +145,47 @@ class LocalAdminSeederTest {
         lines.none { it.contains(SEED_PASSWORD) } shouldBe true
     }
 
+    /**
+     * 075 §G — the owner's stack, reproduced. Seed under address A; change the variable to B
+     * and restart. The seed is idempotent by design (it fires only when the configured email
+     * has no row), so B would otherwise be created as a SECOND admin while the login that
+     * works stays A — and `app.sh` printed A's file value at a stack whose database held B.
+     *
+     * The contract: one WARN naming BOTH addresses, and NOTHING written.
+     */
+    @Test
+    fun `a changed bootstrap-admin-email after seeding WARNs about the mismatch and writes nothing`() {
+        seeder(plaintext = SEED_PASSWORD).seedIfConfigured()
+        val seededId = users.findByEmail(ADMIN_EMAIL).shouldNotBeNull().id
+
+        val other = "someone.else@datapipelines.test"
+        val lines = capturingLogs { seeder(plaintext = SEED_PASSWORD, adminEmail = other).seedIfConfigured() }
+
+        val mismatch = lines.single { it.contains("event=auth.local.bootstrap_mismatch") }
+        mismatch.contains("configured=$other") shouldBe true
+        mismatch.contains("seeded=$ADMIN_EMAIL") shouldBe true
+
+        // Nothing written: no second admin, and the seeded account is untouched.
+        users.findByEmail(other).shouldBeNull()
+        users.findByEmail(ADMIN_EMAIL).shouldNotBeNull().id shouldBe seededId
+        auditEvents("auth.password.seeded") shouldBe 1
+    }
+
+    /**
+     * The falsification of the test above: when the configured address IS the seeded one,
+     * no mismatch line exists. Without this, a seeder that logged the mismatch on every boot
+     * would pass the test above and be useless.
+     */
+    @Test
+    fun `no mismatch line when the configured address is the seeded one`() {
+        seeder(plaintext = SEED_PASSWORD).seedIfConfigured()
+
+        val lines = capturingLogs { seeder(plaintext = SEED_PASSWORD).seedIfConfigured() }
+
+        lines.none { it.contains("event=auth.local.bootstrap_mismatch") } shouldBe true
+        lines.any { it.contains("event=auth.local.one_time_credential_pending") } shouldBe true
+    }
+
     private fun capturingLogs(block: () -> Unit): List<String> {
         val logger = LoggerFactory.getLogger(LocalAdminSeeder::class.java) as ch.qos.logback.classic.Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }

@@ -44,6 +44,26 @@ class UserRepository(
                 ::map,
             ).firstOrNull()
 
+    /**
+     * The account a PREVIOUS boot seeded the first admin credential onto (075 §G, auth.md
+     * §5A.2): the one row [UserService.provisionBootstrapActor] creates, found by its
+     * `provider` placeholder. Ordered by creation so a database that somehow holds two
+     * returns the original, and the mismatch message names the account that actually works.
+     *
+     * Why this query exists: seeding is idempotent BY DESIGN — it fires only when the
+     * configured `bootstrap-admin-email` has no row — so changing the variable later is
+     * carried by the container and never reaches the database. Without this read, the
+     * deployment silently runs a login nobody has been told about (the owner's stack, found
+     * 2026-09-05: the environment said one address, `users` held `demo-admin@demo.local`).
+     */
+    fun findSeededBootstrapActor(): User? =
+        jdbc
+            .query(
+                "SELECT * FROM users WHERE provider = :provider ORDER BY created_at LIMIT 1",
+                MapSqlParameterSource("provider", UserService.BOOTSTRAP_PROVIDER),
+                ::map,
+            ).firstOrNull()
+
     fun findById(id: UUID): User? =
         jdbc
             .query(
