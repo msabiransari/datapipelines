@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
+import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
@@ -143,7 +144,10 @@ class WorkspacesUiController(
             val principal = requireSessionPrincipal()
             val target = workspaceService.resolveSwitch(principal, name.trim())
             val user = userService.snapshot(principal.userId) ?: return "redirect:/workspaces?error=unknown_user"
-            response.addCookie(sessionCookie(jwtService.issue(user, target.name), authProperties))
+            // Re-minting keeps the session's login method: a switch must not turn a Google
+            // session into a password one (and back into the §5A.4 gate).
+            val jwt = jwtService.issue(user, target.name, principal.loginMethod ?: LoginMethod.PWD)
+            response.addCookie(sessionCookie(jwt, authProperties))
             // 033: the signed-in landing page moved to /dashboard (`/` is the public site).
             "redirect:/dashboard"
         } catch (_: AuthException) {

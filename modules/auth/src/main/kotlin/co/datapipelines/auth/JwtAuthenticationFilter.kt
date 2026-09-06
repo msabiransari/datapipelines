@@ -71,6 +71,7 @@ class JwtAuthenticationFilter(
                     displayName = claims["name"] as String,
                     scopes = scopes,
                     authMethod = AuthMethod.OIDC,
+                    loginMethod = LoginMethod.fromAmr(claims[JwtService.AMR_CLAIM] as String?),
                     keyId = null,
                     // The stamped claim (design §5.1) — unresolved at this point; the
                     // WorkspaceResolutionFilter membership-checks it into `workspace`.

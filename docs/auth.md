@@ -473,6 +473,8 @@ Every seeded (§5A.2) and admin-reset credential is one-time: `users.must_change
 - **API-key principals are not gated** — an API key is a separate credential the user created deliberately; the forced change is about the human proving control of the interactive account.
 - The flag is read through the same ~60s liveness cache (D13); every password mutation evicts it immediately.
 
+**Only a password-opened session is gated.** The session JWT carries an `amr` claim (`pwd` \| `oidc`, RFC 8176) saying which credential opened it, and `ForcedPasswordChangeInterceptor` applies the gate to `pwd` sessions only: a user whose row was seeded with a local one-time password but who signs in through an identity provider presented no password and is not asked to change one. A session token minted before the claim existed is treated as `pwd` until it expires. (2026-09-06: the owner's Google sign-in was bounced to the change screen by the seeded local credential.)
+
 On a successful change **through the gate** (the user's `must_change_password` was TRUE), the response carries `HX-Redirect: /dashboard` so the browser leaves the change screen; a voluntary change from Settings stays on the page with a toast (fixed 2026-09-05 — the forced flow used to leave the form on screen with a toast saying "you can continue"). The change itself (self-service, `POST /partials/account/password`) verifies the **current** password first — a hijacked session must not be able to rotate the credential — enforces the §5A.5 floor, clears `must_change_password`, and audits `auth.password.changed`.
 
 ### 5A.5 Enumeration resistance and the password policy

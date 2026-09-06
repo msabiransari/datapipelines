@@ -29,7 +29,10 @@ class ForcedPasswordChangeInterceptorTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(authMethod: AuthMethod = AuthMethod.OIDC) {
+    private fun authenticate(
+        authMethod: AuthMethod = AuthMethod.OIDC,
+        loginMethod: LoginMethod? = LoginMethod.PWD,
+    ) {
         val principal =
             AuthenticatedPrincipal(
                 userId = userId,
@@ -37,6 +40,7 @@ class ForcedPasswordChangeInterceptorTest {
                 displayName = "A",
                 scopes = setOf(Scope.READ),
                 authMethod = authMethod,
+                loginMethod = loginMethod,
                 workspace = null,
             )
         SecurityContextHolder.getContext().authentication =
@@ -102,6 +106,25 @@ class ForcedPasswordChangeInterceptorTest {
         response.status shouldBe 403
         val body = ObjectMapper().readValue(response.contentAsString, Map::class.java)
         (body["error"] as Map<*, *>)["code"] shouldBe "auth.password.change_required"
+    }
+
+    @Test
+    fun `a session an identity provider opened is NOT gated - no password was presented`() {
+        // The owner's Google sign-in was bounced to "reset your password" (2026-09-06): the
+        // row had been seeded with a local one-time password, and the gate read the flag
+        // for every session. The flag is about the local credential; `amr=oidc` passes.
+        every { userService.snapshot(userId) } returns mustChangeUser(true)
+        authenticate(loginMethod = LoginMethod.OIDC)
+
+        call("/dashboard").getHeader("x-allowed") shouldBe "true"
+    }
+
+    @Test
+    fun `a session token minted before the amr claim existed is gated - the safe side`() {
+        every { userService.snapshot(userId) } returns mustChangeUser(true)
+        authenticate(loginMethod = null)
+
+        call("/dashboard").status shouldBe 302
     }
 
     @Test

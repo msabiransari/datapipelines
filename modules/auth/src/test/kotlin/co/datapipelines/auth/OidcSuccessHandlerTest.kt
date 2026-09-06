@@ -65,7 +65,7 @@ class OidcSuccessHandlerTest {
     @Test
     fun `a verified login issues dp_session with the documented cookie attributes`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns user()
-        every { jwtService.issue(any()) } returns "the.jwt.token"
+        every { jwtService.issue(any(), any(), any()) } returns "the.jwt.token"
 
         val response = run(baseClaims(extra = mapOf("email_verified" to true)))
 
@@ -84,7 +84,7 @@ class OidcSuccessHandlerTest {
     @Test
     fun `an absent email_verified claim is treated as the provider vouching for the address`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns user()
-        every { jwtService.issue(any()) } returns "jwt"
+        every { jwtService.issue(any(), any(), any()) } returns "jwt"
 
         run(baseClaims()).getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldNotBeNull()
     }
@@ -109,7 +109,7 @@ class OidcSuccessHandlerTest {
     @Test
     fun `the email is lowercased before provisioning so provider case cannot fork a row`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns user()
-        every { jwtService.issue(any()) } returns "jwt"
+        every { jwtService.issue(any(), any(), any()) } returns "jwt"
 
         run(baseClaims(email = "Alice@Company.COM"))
 
@@ -145,6 +145,6 @@ class OidcSuccessHandlerTest {
         response.redirectedUrl shouldBe "/login?error=inactive"
         response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
         verify { auditLogger.log("auth.login.user_inactive", any(), any(), any(), any(), any()) }
-        verify(exactly = 0) { jwtService.issue(any()) }
+        verify(exactly = 0) { jwtService.issue(any(), any(), any()) }
     }
 }

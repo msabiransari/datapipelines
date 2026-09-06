@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.ClientAddressResolver
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LocalAuthService
+import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.sessionCookie
@@ -63,7 +64,7 @@ class LocalLoginController(
             is LocalAuthService.LocalLoginResult.Success -> {
                 // §4.2 step 4 (design §5.1/§7): identical to the OIDC success handler.
                 val activeWorkspace = workspaceService.workspaceForLogin(result.user, result.user.email)
-                response.addCookie(sessionCookie(jwtService.issue(result.user, activeWorkspace?.name), authProperties))
+                response.addCookie(sessionCookie(jwtService.issue(result.user, activeWorkspace?.name, LoginMethod.PWD), authProperties))
                 auditLogger.log(
                     event = "auth.login.success",
                     userId = result.user.id,

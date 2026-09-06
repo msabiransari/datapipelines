@@ -22,11 +22,16 @@ import org.springframework.web.servlet.HandlerInterceptor
  * not render.
  *
  * ## What it does to whom
- *  - **Session principals** (cookie-minted JWT, any login method): browsers get a
+ *  - **Session principals opened by the local password** (`amr=pwd`, or a pre-claim
+ *    token): browsers get a
  *    `302` to `/settings/password`; an htmx request gets `HX-Redirect` instead
  *    (a 302 would swap a full page into a fragment target); API and MCP paths
  *    get the `403 auth.password.change_required` envelope — a redirect is
  *    meaningless to a JSON client.
+ *  - **Sessions an identity provider opened** (`amr=oidc`) are NOT gated: no password
+ *    was presented, and the flag is about the one-time local credential — a user whose
+ *    row was seeded with a local password and who then signs in with Google must not be
+ *    asked to "reset" a password they never used (§5A.4).
  *  - **API-key principals** are NOT gated: the key is a separate credential the
  *    user created deliberately, and the forced change is about the human proving
  *    control of the interactive account (§5A.4).
@@ -49,6 +54,12 @@ class ForcedPasswordChangeInterceptor(
             principal != null &&
                 // session principal — API keys are a separate, deliberate credential (see KDoc)
                 principal.authMethod == AuthMethod.OIDC &&
+                // …opened by the LOCAL PASSWORD. A session an identity provider opened owes no
+                // password change: the flag is about the one-time local credential, and the
+                // owner's Google login was bounced to "reset your password" by exactly this
+                // (2026-09-06). A token minted before the `amr` claim existed is treated as a
+                // password session — it expires soon and the safe side is to gate.
+                principal.loginMethod != LoginMethod.OIDC &&
                 userService.snapshot(principal.userId)?.mustChangePassword == true
         if (!gated) return true
 

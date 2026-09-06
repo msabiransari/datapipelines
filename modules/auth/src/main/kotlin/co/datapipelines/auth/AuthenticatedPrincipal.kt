@@ -14,6 +14,25 @@ import java.util.UUID
 enum class AuthMethod { OIDC, API_KEY, PROMOTION }
 
 /**
+ * How a SESSION was established (RFC 8176 `amr` values): [PWD] by a local password, [OIDC]
+ * by an identity provider. Carried on the session JWT and on the principal so that policies
+ * about the local credential — the forced password change (auth.md §5A.4) — apply only to
+ * sessions that credential opened. Null on non-session principals (API key, promotion) and
+ * on session tokens minted before the claim existed, which the gate treats as [PWD].
+ */
+enum class LoginMethod(
+    val amr: String,
+) {
+    PWD("pwd"),
+    OIDC("oidc"),
+    ;
+
+    companion object {
+        fun fromAmr(value: String?): LoginMethod? = entries.firstOrNull { it.amr == value }
+    }
+}
+
+/**
  * The internal principal both auth paths resolve to (auth.md §3).
  *
  * [scopes] is the set of *granted* scopes; hierarchy expansion for enforcement is
@@ -46,6 +65,12 @@ data class AuthenticatedPrincipal(
      * interceptor, and a second database read between the two could see a different answer.
      */
     val keyKind: ApiKeyKind? = null,
+    /**
+     * See [LoginMethod]; null for API-key and promotion principals and for session tokens
+     * minted before the `amr` claim existed. LAST on purpose: positional constructor calls
+     * across the test suites must keep compiling.
+     */
+    val loginMethod: LoginMethod? = null,
 ) {
     /**
      * True when this principal's authority is endpoint bindings rather than scopes (§7.7).

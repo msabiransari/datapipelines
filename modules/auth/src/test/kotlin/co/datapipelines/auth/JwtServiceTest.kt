@@ -49,6 +49,15 @@ class JwtServiceTest {
     }
 
     @Test
+    fun `the amr claim says which credential opened the session, and defaults to pwd`() {
+        service.validate(service.issue(user(), loginMethod = LoginMethod.OIDC))[JwtService.AMR_CLAIM] shouldBe "oidc"
+        service.validate(service.issue(user(), loginMethod = LoginMethod.PWD))[JwtService.AMR_CLAIM] shouldBe "pwd"
+        service.validate(service.issue(user()))[JwtService.AMR_CLAIM] shouldBe "pwd"
+        LoginMethod.fromAmr("oidc") shouldBe LoginMethod.OIDC
+        LoginMethod.fromAmr(null) shouldBe null
+    }
+
+    @Test
     fun `admin user gets the admin scope at issue (D14)`() {
         val claims = service.validate(service.issue(user(isAdmin = true)))
         @Suppress("UNCHECKED_CAST")

@@ -72,6 +72,9 @@ class JwtService(
     fun issue(
         user: User,
         activeWorkspace: String? = null,
+        // Defaults to the GATED side: a caller that forgets to say how the session was
+        // opened gets a password session, never an ungated one.
+        loginMethod: LoginMethod = LoginMethod.PWD,
     ): String {
         val now = System.currentTimeMillis()
         return Jwts
@@ -81,6 +84,9 @@ class JwtService(
             .claim("name", user.displayName)
             .claim("scopes", scopesFor(user).map { it.wire })
             .apply { if (activeWorkspace != null) claim(ACTIVE_WORKSPACE_CLAIM, activeWorkspace) }
+            // RFC 8176 `amr`: which credential opened this session. The forced password
+            // change gate (§5A.4) reads it — a session Google opened owes no password change.
+            .claim(AMR_CLAIM, loginMethod.amr)
             .issuer(ISSUER)
             .issuedAt(Date(now))
             .expiration(Date(now + ttlMillis))
@@ -136,13 +142,16 @@ class JwtService(
             )
         }
 
-    private companion object {
-        const val ISSUER = "datapipelines"
-        const val PINNED_ALG = "HS256"
-        const val MIN_SECRET_BYTES = 32
-        const val HMAC_SHA256 = "HmacSHA256"
+    companion object {
+        private const val ISSUER = "datapipelines"
+        private const val PINNED_ALG = "HS256"
+        private const val MIN_SECRET_BYTES = 32
+        private const val HMAC_SHA256 = "HmacSHA256"
 
         /** The `active_workspace` claim (design §5.1, auth.md §6.1) — a workspace *name*. */
-        const val ACTIVE_WORKSPACE_CLAIM = "active_workspace"
+        private const val ACTIVE_WORKSPACE_CLAIM = "active_workspace"
+
+        /** RFC 8176 `amr` — which credential opened the session (see [LoginMethod]). Read by the filter. */
+        const val AMR_CLAIM = "amr"
     }
 }

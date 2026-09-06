@@ -89,7 +89,7 @@ class OidcSuccessHandler(
         // (auto-per-user only; the hook is a no-op in the other modes).
         val activeWorkspace = workspaceService.workspaceForLogin(user, email)
 
-        response.addCookie(sessionCookie(jwtService.issue(user, activeWorkspace?.name)))
+        response.addCookie(sessionCookie(jwtService.issue(user, activeWorkspace?.name, LoginMethod.OIDC)))
         userService.updateLastLogin(user.id)
         auditLogger.log(
             event = "auth.login.success",
