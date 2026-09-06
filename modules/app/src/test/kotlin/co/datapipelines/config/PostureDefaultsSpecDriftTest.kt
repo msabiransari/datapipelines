@@ -108,8 +108,11 @@ class PostureDefaultsSpecDriftTest {
         return dir
     }
 
-    private fun repoFile(relative: String): File =
-        File(repoRoot(), relative).also { check(it.isFile) { "missing $relative" } }
+    private fun repoFile(relative: String): File {
+        val file = File(repoRoot(), relative)
+        check(file.isFile) { "missing $relative" }
+        return file
+    }
 
     private companion object {
         /**
@@ -118,10 +121,11 @@ class PostureDefaultsSpecDriftTest {
          * The same list is `POSTURE_VARS` in scripts/compose-env-audit.sh, and the first
          * test fails if a profile yml and this list disagree.
          */
-        val POSTURE_KEYS = listOf(
-            "DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED",
-            "DATAPIPELINES_AUTH_COOKIE_SECURE",
-        )
+        val POSTURE_KEYS =
+            listOf(
+                "DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED",
+                "DATAPIPELINES_AUTH_COOKIE_SECURE",
+            )
 
         val PLACEHOLDER = Regex("""\$\{(DATAPIPELINES_[A-Z0-9_]+):([^}]*)\}""")
     }

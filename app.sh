@@ -51,20 +51,51 @@ DEFAULTS_ENV="deploy/env/defaults.env"
 
 die() { echo "app.sh: $*" >&2; exit 1; }
 
+# Read KEY=value from a dotenv file; empty when absent. The trailing `|| true`
+# is load-bearing under `set -euo pipefail`: grep exits 1 on a key absent from
+# an EXISTING file, and a bare `x=$(env_get …)` assignment then killed the whole
+# script with no message — only on machines where the key was missing, i.e.
+# exactly the clean-machine path (caught by the 2026-08-29 release rehearsal).
+env_get() { # file key
+  [[ -f $1 ]] || return 0
+  grep -E "^$2=" "$1" | head -1 | cut -d= -f2- || true
+}
+
+# What the two env files say a key is, later file winning — the same precedence every
+# loader applies. NOT the process environment: the callers below layer that on top
+# themselves, because a command-line flag has to beat both.
+from_files() { # key
+  local v value=""
+  for f in "$DEFAULTS_ENV" "$SECRETS_ENV"; do
+    v=$(env_get "$f" "$1")
+    [[ -n $v ]] && value="$v"
+  done
+  printf '%s' "$value"
+}
+
 # ---------------------------------------------------------------- arguments
 # --env / --posture / --demo are MODES, not subcommands: they change the compose
 # invocation for every verb, so they are stripped from the argument list here
 # rather than inside start(). Without the demo families the demo services are
 # invisible to compose: --status cannot show them, and --stop would leave this
 # project's demo MySQL running — stop() compensates for that explicitly (045 §C.1).
-DP_ENV="${DATAPIPELINES_ENV:-local}"
-DP_POSTURE="${DATAPIPELINES_POSTURE:-}"
-DP_DEMO="${DATAPIPELINES_DEMO:-}"
+# The three values, in the precedence a loader has to honour: the flag, then this
+# shell, then the env files (secrets.env over defaults.env). 081: reading only the
+# shell made this script blind to its own contract — `DATAPIPELINES_POSTURE=hardened`
+# in deploy/secrets.env with `--demo nyc` on the command line got a `development`
+# refusal check, started containers, and was refused by the APP a minute later. The
+# refusal has to arrive before a container does, which means app.sh must resolve the
+# posture the same way the app will.
+DP_ENV="${DATAPIPELINES_ENV:-$(from_files DATAPIPELINES_ENV)}"
+DP_ENV="${DP_ENV:-local}"
+DP_POSTURE="${DATAPIPELINES_POSTURE:-$(from_files DATAPIPELINES_POSTURE)}"
+DP_DEMO="${DATAPIPELINES_DEMO:-$(from_files DATAPIPELINES_DEMO)}"
+POSTURE_FROM_FLAG=0
 ARGS=()
 while (($#)); do
   case "$1" in
     --env) shift; [[ ${1:-} ]] || die "--env needs a value (your org's name for this deployment)"; DP_ENV="$1" ;;
-    --posture) shift; [[ ${1:-} ]] || die "--posture needs a value: development or hardened"; DP_POSTURE="$1" ;;
+    --posture) shift; [[ ${1:-} ]] || die "--posture needs a value: development or hardened"; DP_POSTURE="$1"; POSTURE_FROM_FLAG=1 ;;
     --demo) shift; [[ ${1:-} ]] || die "--demo needs a family list, e.g. --demo nyc or --demo nyc,trade"; DP_DEMO="$1" ;;
     --demo-nyc|--demo-trade)
       die "$1 is gone (075). Demo is a FLAG now, one variable for every loader:
@@ -110,9 +141,20 @@ if [[ -n $DEMO_FAMILIES ]]; then
       *) die "--demo: unknown sample-data family '$f'. The families are nyc and trade." ;;
     esac
   done
-  [[ $DP_POSTURE == hardened ]] && die "--demo is refused under the hardened posture: demo registers sample
+  if [[ $DP_POSTURE == hardened ]]; then
+    # Say WHERE the posture came from. Reading it out of deploy/secrets.env is the whole
+    # point of resolving it from the files, and "run it under --posture development" is
+    # useless advice to someone who never typed a posture.
+    posture_source="the default for DATAPIPELINES_ENV=local"
+    [[ -n $(env_get "$DEFAULTS_ENV" DATAPIPELINES_POSTURE) ]] && posture_source="$DEFAULTS_ENV"
+    [[ -n $(env_get "$SECRETS_ENV" DATAPIPELINES_POSTURE) ]] && posture_source="$SECRETS_ENV"
+    [[ -n ${DATAPIPELINES_POSTURE:-} ]] && posture_source="the DATAPIPELINES_POSTURE in this shell"
+    ((POSTURE_FROM_FLAG)) && posture_source="--posture on the command line"
+    die "--demo is refused under the hardened posture: demo registers sample
   datasources and seeds example content, which is out-of-the-box EVALUATION, not a
-  hardened deployment. Run it under --posture development (docs/environments.md)."
+  hardened deployment. The posture is 'hardened' because of $posture_source.
+  Run it under --posture development, or drop --demo (docs/environments.md)."
+  fi
 fi
 
 # ---------------------------------------------------------------- lane knobs
@@ -172,16 +214,6 @@ export DATAPIPELINES_POSTURE="$DP_POSTURE"
 export DATAPIPELINES_DEMO="$DEMO_FAMILIES"
 export SAMPLE_NYC_ON=$([[ $DEMO_NYC == 1 ]] && echo 1 || echo "")
 export SAMPLE_TRADE_ON=$([[ $DEMO_TRADE == 1 ]] && echo 1 || echo "")
-
-# Read KEY=value from a dotenv file; empty when absent. The trailing `|| true`
-# is load-bearing under `set -euo pipefail`: grep exits 1 on a key absent from
-# an EXISTING file, and a bare `x=$(env_get …)` assignment then killed the whole
-# script with no message — only on machines where the key was missing, i.e.
-# exactly the clean-machine path (caught by the 2026-08-29 release rehearsal).
-env_get() { # file key
-  [[ -f $1 ]] || return 0
-  grep -E "^$2=" "$1" | head -1 | cut -d= -f2- || true
-}
 
 # The EFFECTIVE value of a key across the env-file list, in compose's own precedence
 # (later file wins), with the process environment winning over all of them — which is
