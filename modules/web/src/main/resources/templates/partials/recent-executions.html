@@ -28,11 +28,16 @@
             <!-- 079 §E: the display name is prose, the machine path sits UNDER it in mono
                  (§3.3 — mono is for identifiers only). The path was previously only a
                  `title`, which is invisible on a touch screen and to anyone not hovering. -->
-            <span class="app-name" th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
-                  th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
-                  th:title="${p != null} ? ${p.name} : null">pipeline</span>
-            <span class="app-path" th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
-                  th:if="${p != null and p.displayName != null}" th:text="${p.name}">nyc/mobility/x</span>
+            <!-- th:with is precedence 500 and th:if is 300, so a `th:with` on the SAME
+                 element is not yet in scope when the condition is evaluated — the path line
+                 silently never rendered until a screenshot showed it missing. The binding
+                 goes on a wrapping th:block, where both children can see it. -->
+            <th:block th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}">
+              <span class="app-name"
+                    th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
+                    th:title="${p != null} ? ${p.name} : null">pipeline</span>
+              <span class="app-path" th:if="${p != null and p.displayName != null}" th:text="${p.name}">nyc/mobility/x</span>
+            </th:block>
           </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>

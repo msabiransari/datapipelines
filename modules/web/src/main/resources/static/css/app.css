@@ -115,6 +115,18 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
+/* `[hidden]` must WIN. The UA stylesheet's `[hidden] { display: none }` is a
+   user-agent rule, so ANY author class that sets `display` beats it — including
+   the design system's own `.ds-icon { display: inline-block }`. The first
+   screenshot pass caught it: the top bar's sun AND moon rendered together,
+   because `hidden` on a `.ds-icon` did nothing at all. This is the one place in
+   this file `!important` is correct — the whole point of the attribute is that
+   it outranks presentation, and every element hidden by an attribute in this app
+   (the avatar menu, the mode icons, the flash bins) depends on it. */
+[hidden] {
+  display: none !important;
+}
+
 /* The body canvas. base.css paints <html> with these tokens but leaves <body> to
    inherit; this rule paints the body itself, so the canvas survives any reset
    layered between the design system and this file (this file loads last, §3.4).
@@ -1019,10 +1031,18 @@ body {
 }
 
 /* A card whose body is a full-bleed table: the header keeps the padding, the
-   table runs to the card's edges and its own cell padding does the rest. */
+   table runs to the card's edges and its own cell padding does the rest.
+
+   `overflow-x: auto`, NOT `hidden`. The first screenshot pass of /api-console
+   showed the endpoints table's last column sliced off at the card's edge: the
+   table is wider than its grid column (a mono path plus a nowrap chip), and
+   `hidden` made that look like a design choice instead of a defect. Scrolling
+   inside the card keeps the content reachable AND keeps the document from
+   widening, which is what the overflow assertion is really asking for. */
 .app-card-table {
   padding: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .app-card-h {
@@ -1112,6 +1132,23 @@ body {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Identifiers in a table cell must be allowed to BREAK. A folder path or a
+   published route has no spaces, so without this a single cell sets the table's
+   minimum width and the whole table stops fitting its card — which is what
+   sliced the endpoints table's last column off its first screenshot. Breaking
+   an identifier mid-string is ugly; hiding a column is worse. */
+.app-card-table td .ds-mono,
+.app-card-table td .app-path {
+  overflow-wrap: anywhere;
+}
+
+/* A header may wrap inside a table that has to fit a card column; the vendored
+   `white-space: nowrap` is right for a full-width table and wrong here. */
+.app-card-table .ds-table th {
+  white-space: normal;
 }
 
 .app-name {

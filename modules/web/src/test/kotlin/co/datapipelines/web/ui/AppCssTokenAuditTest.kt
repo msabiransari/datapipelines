@@ -3,6 +3,8 @@ package co.datapipelines.web.ui
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 
@@ -116,6 +118,31 @@ class AppCssTokenAuditTest {
                 }
             }
         drifted shouldBe emptyList()
+    }
+
+    @Test
+    fun `the hidden attribute outranks the design system's display classes`() {
+        // A user-agent `[hidden] { display: none }` loses to ANY author class that sets
+        // display — including `.ds-icon { display: inline-block }`. The first screenshot pass
+        // of this round showed the top bar's sun and moon icons rendering TOGETHER for
+        // exactly that reason. Every attribute-hidden element in this app (the avatar menu,
+        // the mode icons, the flash bins) depends on this one rule.
+        appCss shouldContain "[hidden] {"
+        appCss shouldContain "display: none !important;"
+    }
+
+    @Test
+    fun `a table wider than its card scrolls inside it rather than being clipped`() {
+        // `overflow: hidden` on the table card sliced the endpoints table's last column off
+        // at the card's edge and made it look deliberate. Scrolling keeps the content
+        // reachable and still keeps the DOCUMENT from widening, which is what
+        // AppShellBrowserTest's overflow assertion actually asks for.
+        // Scoped to the .app-card-table RULE, not to the file: `overflow: hidden` is right in
+        // several other places here (the rail clips its labels when collapsed, the avatar
+        // clips its image), and a file-wide ban would be a guard that fails on correct code.
+        val rule = appCss.substringAfter(".app-card-table {").substringBefore("}")
+        rule shouldContain "overflow-x: auto;"
+        rule shouldNotContain "overflow: hidden;"
     }
 
     @Test

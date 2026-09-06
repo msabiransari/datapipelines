@@ -98,6 +98,13 @@ class DashboardPartialsRenderTest {
         html shouldContain "Stage trips"
         html shouldContain "title=\"nyc/mobility/stage_trips\""
         html shouldNotContain record.pipelineId.toString().substring(0, 8)
+        // 079 §E: the machine path also renders UNDER the display name — `title` alone is
+        // invisible on a touch screen and to anyone not hovering. This assertion is here
+        // because the first version of that markup put `th:with` and `th:if` on the SAME
+        // element: `th:if` is precedence 300 and `th:with` is 500, so the variable was not
+        // yet in scope, the condition was always false, and the line silently never rendered.
+        // A screenshot caught it; this is what stops it coming back.
+        html shouldContain "class=\"app-path\">nyc/mobility/stage_trips<"
     }
 
     /**
