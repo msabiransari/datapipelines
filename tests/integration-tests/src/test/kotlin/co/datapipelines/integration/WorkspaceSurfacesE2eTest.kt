@@ -379,7 +379,7 @@ class WorkspaceSurfacesE2eTest {
         ensureSeeded()
         val body =
             """
-            {"id": "dup_tpl", "dialect": "POSTGRES", "display_name": "Dup",
+            {"id": "test/dup_tpl", "dialect": "POSTGRES", "display_name": "Dup",
              "description": "T23", "imports": [], "body": "SELECT 1"}
             """.trimIndent()
         given()

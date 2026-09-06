@@ -749,12 +749,12 @@ class PromotionTwoDeploymentE2eTest {
         private const val LIB_TEMPLATE = "test/promo_e2e_lib.sql"
         private const val LEAF_TEMPLATE = "test/promo_e2e_leaf.sql"
         private const val ORPHAN_TEMPLATE = "test/promo_e2e_orphan.sql"
-        private const val CHILD = "promo_e2e_child"
-        private const val PARENT = "promo_e2e_parent"
-        private const val ORPHAN = "promo_e2e_orphan"
+        private const val CHILD = "test/promo_e2e_child"
+        private const val PARENT = "test/promo_e2e_parent"
+        private const val ORPHAN = "test/promo_e2e_orphan"
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
-        private const val TX_OK = "promo_e2e_tx_ok"
-        private const val TX_BAD = "promo_e2e_tx_bad"
+        private const val TX_OK = "test/promo_e2e_tx_ok"
+        private const val TX_BAD = "test/promo_e2e_tx_bad"
 
         private val httpClient: HttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()
 

@@ -278,7 +278,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"path": "/writes/things", "pipeline": "writes_things"}""")
+            .body("""{"path": "/writes/things", "pipeline": "test/writes_things"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -297,7 +297,7 @@ class PublishedEndpointE2eTest {
             // `/nyc/revenue/{anything}` would be refused as an undeclared path variable (400)
             // before it ever reached the conflict check. This one is a legal path that happens to
             // collide, which is exactly what `endpoint.path_conflict` is for.
-            .body("""{"path": "/nyc/revenue/manhattan", "pipeline": "revenue_by_borough"}""")
+            .body("""{"path": "/nyc/revenue/manhattan", "pipeline": "test/revenue_by_borough"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -312,7 +312,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"path": "/nyc/by/{ghost}", "pipeline": "revenue_by_borough"}""")
+            .body("""{"path": "/nyc/by/{ghost}", "pipeline": "test/revenue_by_borough"}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -396,10 +396,10 @@ class PublishedEndpointE2eTest {
             .getString("data.key")
 
     private fun publishEndpoints() {
-        publish("/nyc/revenue/{borough}", "revenue_by_borough")
-        publish("/trade/summary", "trade_summary")
+        publish("/nyc/revenue/{borough}", "test/revenue_by_borough")
+        publish("/trade/summary", "test/trade_summary")
         // timeout_seconds = 1 against a 3-second query: the 202 path, deterministically.
-        publishWithTimeout("/slow/thing", "slow_sleep", 1)
+        publishWithTimeout("/slow/thing", "test/slow_sleep", 1)
     }
 
     private fun publish(
@@ -483,7 +483,7 @@ class PublishedEndpointE2eTest {
     private fun createPipelines() {
         pipeline(
             """
-            {"schema_version": 1, "name": "revenue_by_borough", "display_name": "Revenue by borough",
+            {"schema_version": 1, "name": "test/revenue_by_borough", "display_name": "Revenue by borough",
              "description": "074 E2E.",
              "parameters": {"borough": {"type": "STRING", "required": true},
                             "start_date": {"type": "DATE", "required": false, "default": "2024-01-01"}},
@@ -494,7 +494,7 @@ class PublishedEndpointE2eTest {
         )
         pipeline(
             """
-            {"schema_version": 1, "name": "trade_summary", "display_name": "Trade summary",
+            {"schema_version": 1, "name": "test/trade_summary", "display_name": "Trade summary",
              "description": "074 E2E — a second published subtree.", "parameters": {},
              "nodes": [{"id": "summary", "description": "All rows", "type": "DQL",
                         "source": "ep-source", "template": {"id": "test/trade_summary.sql", "version": 1},
@@ -503,7 +503,7 @@ class PublishedEndpointE2eTest {
         )
         pipeline(
             """
-            {"schema_version": 1, "name": "slow_sleep", "display_name": "Slow sleep",
+            {"schema_version": 1, "name": "test/slow_sleep", "display_name": "Slow sleep",
              "description": "074 E2E — outlives a 1s endpoint timeout.", "parameters": {},
              "nodes": [{"id": "sleep", "description": "pg_sleep(3)", "type": "DQL",
                         "source": "ep-source", "template": {"id": "test/slow.sql", "version": 1},
@@ -512,7 +512,7 @@ class PublishedEndpointE2eTest {
         )
         pipeline(
             """
-            {"schema_version": 1, "name": "writes_things", "display_name": "Writes things",
+            {"schema_version": 1, "name": "test/writes_things", "display_name": "Writes things",
              "description": "074 E2E — the read-only rule's negative fixture.", "parameters": {},
              "nodes": [{"id": "insert_row", "description": "A write", "type": "DML",
                         "source": "ep-source", "template": {"id": "test/insert_row.sql", "version": 1},

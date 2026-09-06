@@ -73,12 +73,12 @@ class WorkspacesReadonlyE2eTest {
         flipReadonly(SAVE_DS, readonly = true)
 
         // Shape 1: DML node sourcing the readonly datasource.
-        postRefused("ro_save_dml", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql")))
+        postRefused("test/ro_save_dml", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql")))
         // Shape 2: DDL node sourcing it.
-        postRefused("ro_save_ddl", listOf(ddlNode("make_table", SAVE_DS, "test/ro_e2e_ddl1.sql")))
+        postRefused("test/ro_save_ddl", listOf(ddlNode("make_table", SAVE_DS, "test/ro_e2e_ddl1.sql")))
         // Shape 3: output.target "datasource" naming it — the write-back half, on a DQL node.
         postRefused(
-            "ro_save_output",
+            "test/ro_save_output",
             listOf(
                 mapOf(
                     "id" to "fetch_and_write",
@@ -138,7 +138,7 @@ class WorkspacesReadonlyE2eTest {
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .body(
                     mapper.writeValueAsString(
-                        pipelineBody("ro_save_dml_details", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql"))),
+                        pipelineBody("test/ro_save_dml_details", listOf(dmlNode("insert_rows", SAVE_DS, "test/ro_e2e_ins1.sql"))),
                     ),
                 ).`when`()
                 .post("/api/v1/pipelines")

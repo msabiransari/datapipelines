@@ -287,7 +287,7 @@ class PipelineCompositionE2eTest {
         createPipeline("test/comp_d4", "Composition Depth 4", listOf(pipelineNode("run_root", "test/comp_root", 1)))
         createPipeline("test/comp_d5", "Composition Depth 5", listOf(pipelineNode("run_d4", "test/comp_d4", 1)))
 
-        postPipeline("comp_d6", "Composition Depth 6", listOf(pipelineNode("run_d5", "test/comp_d5", 1)))
+        postPipeline("test/comp_d6", "Composition Depth 6", listOf(pipelineNode("run_d5", "test/comp_d5", 1)))
             .then()
             .statusCode(400)
             .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.composition_too_deep"))

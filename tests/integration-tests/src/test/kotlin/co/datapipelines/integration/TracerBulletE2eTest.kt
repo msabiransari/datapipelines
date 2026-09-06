@@ -151,7 +151,7 @@ class TracerBulletE2eTest {
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .body(
                     """
-                    {"schema_version": 1, "name": "active_users", "display_name": "Active Users",
+                    {"schema_version": 1, "name": "test/active_users", "display_name": "Active Users",
                      "description": "List all active users from local PG", "parameters": {},
                      "nodes": [{"id": "fetch_active_users", "description": "Fetch active users", "type": "DQL",
                                 "source": "pg-local", "template": {"id": "test/active_users.sql", "version": 1},

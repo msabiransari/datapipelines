@@ -191,7 +191,7 @@ class DatasourcePoolInvalidationE2eTest {
                 .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
                 .body(
                     """
-                    {"name": "mi2_marker_read", "nodes": [{
+                    {"name": "test/mi2_marker_read", "nodes": [{
                         "id": "read_marker", "description": "Read the marker table",
                         "type": "DQL", "source": "$DS",
                         "template": {"id": "$TEMPLATE_SQL", "version": 1},

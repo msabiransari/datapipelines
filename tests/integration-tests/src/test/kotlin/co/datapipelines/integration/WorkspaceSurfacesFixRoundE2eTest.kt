@@ -130,7 +130,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .contentType(ContentType.JSON)
                 .header(API_KEY_HEADER, bobKey)
                 .body(
-                    """{"schema_version":1,"name":"globex_report","display_name":"G","description":"",""" +
+                    """{"schema_version":1,"name":"test/globex_report","display_name":"G","description":"",""" +
                         """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"test/globex_tpl","version":1}}]}""",
                 ).`when`()
                 .post("/api/v1/pipelines")
@@ -149,7 +149,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .then()
                 .statusCode(409)
                 .body("error.code", Matchers.equalTo("datasource.in_use"))
-                .body("error.details.referencing_pipelines", Matchers.hasItem("globex_report"))
+                .body("error.details.referencing_pipelines", Matchers.hasItem("test/globex_report"))
         } finally {
             given()
                 .port(port)
