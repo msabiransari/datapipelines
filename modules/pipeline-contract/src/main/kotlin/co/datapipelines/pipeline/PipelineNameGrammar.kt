@@ -1,8 +1,15 @@
 package co.datapipelines.pipeline
 
 /**
- * The pipeline name grammar (pipeline-contract §3.2, template-hierarchy-design §14): one to
- * ten `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, total length
+ * §4.1's `segment` production, the one source both the path regex and the
+ * [PipelineNameGrammar.refusalReason] check are built from — a second literal here is exactly
+ * the drift `PipelineNameGrammarSpecDriftTest` exists to prevent, one level down.
+ */
+private const val SEGMENT = "[a-z0-9][a-z0-9_.-]{0,63}"
+
+/**
+ * The pipeline name grammar (pipeline-contract §3.2, template-hierarchy-design §14): **two**
+ * to ten `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, total length
  * ≤ [MAX_PIPELINE_PATH_CHARS].
  *
  * It is **character-for-character the template grammar** (§4.1). That is the whole design of
@@ -27,7 +34,12 @@ package co.datapipelines.pipeline
  * alphanumeric, which is what forbids `.` and `..` segments without a special-case list).
  * Measured, not reasoned about — see `PipelineNameGrammarTest.containment`.
  *
- * That narrowing needs **no migration and no deploy gate**, and the reason is a real
+ * 077 adds a second narrowing on exactly the same terms: §4.1 now requires a FOLDER, so a
+ * flat `active_users` is refused where it was accepted. `details.reason` separates the two
+ * kinds of refusal for a caller — [REASON_FOLDER_REQUIRED] when the only thing wrong is the
+ * missing folder, [REASON_GRAMMAR] otherwise (see [PipelineNameGrammar.refusalReason]).
+ *
+ * Neither narrowing needs **a migration or a deploy gate**, and the reason is a real
  * difference from templates rather than an optimistic reading of the same situation. A
  * template name is re-validated at RENDER time in two more places (§4.6: `parseKey` and the
  * import-prologue synthesis), so a stored name the grammar stops accepting breaks execution
@@ -44,8 +56,22 @@ package co.datapipelines.pipeline
  * an H2/Postgres identifier and a Freemarker-visible key; `/` has no meaning there and every
  * reason to be refused. `StructuralRulesTest` pins that separation with a `/`-bearing node id
  * and output table, both still rejected.
+ *
+ * The repetition below is `{1,9}` — at least one separator, so at least two segments.
  */
-internal val PIPELINE_PATH = Regex("^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){0,9}$")
+internal val PIPELINE_PATH = Regex("^$SEGMENT(/$SEGMENT){1,9}$")
+
+/** True when [name] is one legal §4.1 segment and nothing else — a flat, folderless name. */
+private val SINGLE_SEGMENT = Regex("^$SEGMENT$")
+
+/**
+ * §4.1's `path` production **minus its last segment** — a folder path, 1 to 9 segments.
+ *
+ * A browse request names a FOLDER, not an asset, so it cannot be checked against
+ * [PIPELINE_PATH]: since 077 that regex refuses `nyc`, which is exactly the prefix the tree UI
+ * and `pipelines_list` ask for one level below the root.
+ */
+private val PIPELINE_PREFIX = Regex("^$SEGMENT(/$SEGMENT){0,8}$")
 
 /** Total pipeline-name length cap (§3.2 — the template rule's 200, for the same reason: paths are longer). */
 internal const val MAX_PIPELINE_PATH_CHARS = 200
@@ -82,6 +108,45 @@ object PipelineNameGrammar {
 
     /** A human rendering of the rule, for a hint and for a refusal message. */
     const val DESCRIPTION: String =
-        "Lower-case path segments separated by `/` — each segment starts with a letter or digit " +
-            "and may contain letters, digits, `_`, `.` and `-`; at most 10 segments, 200 characters."
+        "A folder path: 2 to 10 lower-case segments separated by `/` — each segment starts with a letter or " +
+            "digit and may contain letters, digits, `_`, `.` and `-`; 64 characters per segment, 200 in total. " +
+            "A folder is required (`test/scratch`, not `scratch`)."
+
+    /** `details.reason` when a name is refused ONLY because it carries no folder (§4.1, 077). */
+    const val REASON_FOLDER_REQUIRED: String = "folder_required"
+
+    /** `details.reason` for every other §4.1 violation — a bad character, too many segments, too long. */
+    const val REASON_GRAMMAR: String = "grammar"
+
+    /**
+     * True when [prefix] is a legal FOLDER PATH — the thing a browse request names, which is
+     * not the same shape as a name (077).
+     *
+     * §4.1 requires a name to carry a folder, so a name is 2–10 segments. A prefix is the
+     * folder part alone: **1–9** segments. Checking a prefix against [matches] was correct
+     * while a name could be one segment and became a live defect the moment it could not —
+     * `prefix: "nyc"` is the first thing an agent or the tree UI asks for after listing the
+     * roots, and it would have answered an empty level for every root in the workspace.
+     *
+     * The bound is 9 rather than 10 for the same reason the name's lower bound is 2: whatever
+     * sits under the prefix needs a segment of its own.
+     */
+    fun matchesPrefix(prefix: String): Boolean = prefix.length <= MAX_PIPELINE_PATH_CHARS && PIPELINE_PREFIX.matches(prefix)
+
+    /**
+     * Why [name] was refused, as the `details.reason` of `pipeline.validation.name_invalid`.
+     *
+     * [REASON_FOLDER_REQUIRED] is reported only when adding a folder would actually fix the
+     * name — it is one legal segment, within the length cap, and simply has no `/`. `_helper`
+     * is [REASON_GRAMMAR], because `test/_helper` is illegal too and telling an agent to add a
+     * folder would send it round the loop a second time.
+     *
+     * Only meaningful for a name that [matches] rejects; a legal name has no reason.
+     */
+    fun refusalReason(name: String): String =
+        if (name.length <= MAX_PIPELINE_PATH_CHARS && SINGLE_SEGMENT.matches(name)) {
+            REASON_FOLDER_REQUIRED
+        } else {
+            REASON_GRAMMAR
+        }
 }

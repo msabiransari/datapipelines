@@ -96,7 +96,7 @@ class PipelinesListTool(
     /**
      * ONE level of the folder tree, in the same shape the explorer's partial renders from.
      *
-     * A prefix that is not a legal pipeline name cannot name a real folder, so it answers an
+     * A prefix that is not a legal FOLDER PATH cannot name a real folder, so it answers an
      * ordinary EMPTY level rather than an error — the same rule the templates browser settled
      * on. It is not a security boundary (the prefix is bound and LIKE-escaped in the
      * repository); it is what keeps an arbitrary-length string from becoming an
@@ -107,7 +107,7 @@ class PipelinesListTool(
         prefix: String?,
         limit: Int,
     ): Map<String, Any?> {
-        if (prefix != null && !PipelineNameGrammar.matches(prefix)) return emptyLevel(prefix)
+        if (prefix != null && !PipelineNameGrammar.matchesPrefix(prefix)) return emptyLevel(prefix)
         val level = repository.listFolder(workspaceId, prefix, offset = 0, limit = limit)
         return mapOf(
             "prefix" to prefix.orEmpty(),

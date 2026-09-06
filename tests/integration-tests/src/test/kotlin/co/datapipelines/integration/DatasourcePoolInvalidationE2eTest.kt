@@ -298,7 +298,7 @@ class DatasourcePoolInvalidationE2eTest {
 
         /** The one datasource both instances touch — the M3 scenario's name. */
         private const val DS = "mi2_shared"
-        private const val TEMPLATE_SQL = "mi2_read_marker.sql"
+        private const val TEMPLATE_SQL = "test/mi2_read_marker.sql"
 
         // Two distinguishable in-memory "customer databases": the marker value each returns is
         // the identity of the pool that served the execution.

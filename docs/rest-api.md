@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.3 (frozen contract — additive-only changes after this point)
+**Status:** v2.4 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-05
@@ -164,7 +164,7 @@ Content-Type: application/json
 
 {
   "schema_version": 1,
-  "name": "monthly_revenue",
+  "name": "acme/finance/monthly_revenue",
   "display_name": "Monthly Revenue",
   "description": "...",
   "parameters": {...},
@@ -176,7 +176,7 @@ Content-Type: application/json
       "id": "fetch_orders",
       "type": "DQL",
       "source": "pg-prod",
-      "template": {"id": "fetch_orders.sql", "version": 2},
+      "template": {"id": "acme/finance/fetch_orders.sql", "version": 2},
       "output": {"target": "tempdb", "table": "stg_orders"},
       "depends_on": []
     },
@@ -185,7 +185,7 @@ Content-Type: application/json
       "id": "final_report",
       "type": "DQL",
       "source": "tempdb",
-      "template": {"id": "final_report.sql", "version": 1},
+      "template": {"id": "acme/finance/final_report.sql", "version": 1},
       "output": {"target": "caller"},
       "depends_on": ["revenue_by_customer"]
     }
@@ -195,7 +195,7 @@ Content-Type: application/json
 
 Note: no `terminal_node_id` field. The result node is the (at most one) node resolving to `output.target: "caller"` — explicitly or by omitting `output`. See [Pipeline Contract §9](pipeline-contract.md#9-the-caller-node-result-node).
 
-**`name` is a folder path** (since 2026-09-05, 067): 1–10 `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total — the same grammar template ids take ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)). `finance/payments/daily_settlement` and `monthly_revenue` are both valid; the second is a one-segment path sitting at the tree root, which is why every pre-067 name is still accepted. Folders are virtual — there is no folder resource, no folder id and nothing to create — and a name is immutable, so the folder is chosen once, at creation. A malformed name is `400 pipeline.validation.name_invalid`.
+**`name` is a folder path** (since 2026-09-05, 067; a folder is mandatory since 077): **2–10** `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total — the same grammar template ids take ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference), [Template Hierarchy §14](template-hierarchy-design.md)). `finance/payments/daily_settlement` is valid; a bare `monthly_revenue` is not — the tree root holds folders only, and an experiment goes under `test/`. Folders are virtual — there is no folder resource, no folder id and nothing to create — and a name is immutable, so the folder is chosen once, at creation. A malformed name is `400 pipeline.validation.name_invalid`, whose `details.reason` is `folder_required` when a folder is the only thing missing and `grammar` otherwise.
 
 **This changes no route.** A pipeline is addressed by UUID everywhere (`/pipelines/{id}`), so the encoded-slash problem that forced templates' §8 dual addressing ([Template Hierarchy §9.6](template-hierarchy-design.md)) cannot arise here: no pipeline route carries a name in a path segment.
 
@@ -208,7 +208,7 @@ Response: `201 Created`
   "data": {
     "id": "pipeline-uuid",
     "version": 1,
-    "name": "monthly_revenue",
+    "name": "acme/finance/monthly_revenue",
     ...
   }
 }
@@ -774,7 +774,7 @@ POST /templates
 Content-Type: application/json
 
 {
-  "id": "fetch_orders.sql",         // optional; auto-generated if omitted
+  "id": "nyc/mobility/fetch_orders.sql",   // optional; auto-generated under test/ if omitted
   "type": "sql",                    // optional (default); "html" takes NO dialect (046)
   "dialect": "POSTGRES",
   "display_name": "Fetch Orders in Date Range",   // required (templates.md §3.2)
@@ -814,11 +814,11 @@ PUT /templates
 If-Match: <body_hash of the version this edit is based on>
 
 {
-  "id": "fetch_orders.sql",         // REQUIRED here — the §9.6 addressing form (the name never travels in the path)
+  "id": "acme/finance/fetch_orders.sql",   // REQUIRED here — the §9.6 addressing form (the name never travels in the path)
   "dialect": "POSTGRES",            // may differ from prior versions — a new version records its own dialect (existing pipelines pin a version, so they are unaffected)
   "display_name": "Fetch Orders in Date Range",   // required (templates.md §3.2)
   "description": "...",
-  "imports": [{"id": "lib_date_filters.sql", "version": 2, "alias": "dates"}],
+  "imports": [{"id": "acme/lib/date_filters.sql", "version": 2, "alias": "dates"}],
   "body": "..."
 }
 ```
@@ -842,7 +842,7 @@ POST /templates/release
 If-Match: <the draft's body_hash>
 
 {
-  "name": "fetch_orders.sql"
+  "name": "acme/finance/fetch_orders.sql"
 }
 ```
 
@@ -858,7 +858,7 @@ POST /templates/draft/discard
 If-Match: <the draft's body_hash>
 
 {
-  "name": "fetch_orders.sql"
+  "name": "acme/finance/fetch_orders.sql"
 }
 ```
 
@@ -887,7 +887,7 @@ Soft delete. Existing pipelines referencing any version continue to work (we nev
 POST /templates/render
 
 {
-  "name": "fetch_orders.sql",
+  "name": "acme/finance/fetch_orders.sql",
   "version": 1,
   "context": {
     "start_date": "2026-01-01",
@@ -906,7 +906,7 @@ Content-Type: application/json
 
 {
   "templates": [
-    {"id": "lib_aggregate.sql", "dialect": "POSTGRES", "body": "<#macro aggregate ...>...</#macro>"},
+    {"id": "acme/lib/aggregate.sql", "dialect": "POSTGRES", "body": "<#macro aggregate ...>...</#macro>"},
     ...
   ]
 }
@@ -1404,7 +1404,7 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
     "authoring_enabled": false,
     "workspace": "acme",
     "pipelines": [
-      { "name": "daily_revenue", "current_version": 3, "body_hash": "sha256-..." }
+      { "name": "acme/finance/daily_revenue", "current_version": 3, "body_hash": "sha256-..." }
     ],
     "templates": [
       { "name": "finance/revenue.sql", "current_version": 2, "body_hash": "sha256-..." }
@@ -1437,7 +1437,7 @@ Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-o
   "key_fingerprint": "sha256:1a2b3c4d5e6f",
   "workspace": "acme",
   "templates": [ { "id": "finance/revenue.sql", "version": 2, "body_hash": "...", "body": "...", "...": "..." } ],
-  "pipelines": [ { "id": "…uuid…", "version": 4, "body_hash": "...", "name": "daily_revenue", "nodes": [] } ]
+  "pipelines": [ { "id": "…uuid…", "version": 4, "body_hash": "...", "name": "acme/finance/daily_revenue", "nodes": [] } ]
 }
 ```
 
@@ -1617,3 +1617,4 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 | 2026-09-02 | v2.0 | 043 template addressing | **BREAKING — one addressing form (template-hierarchy-design §9.6).** §8's eight `/{id}` path-addressed template routes are REMOVED and replaced by name-in-query/name-in-body forms (`GET /templates?name=`, `GET /templates/versions?name=&version=`, `PUT /templates` with `id` in the body, `POST /templates/release` + `POST /templates/draft/discard` with `name` in the body, `DELETE /templates?name=`, `POST /templates/render` with `name`+`version` in the body). Measured reason: on the pinned Tomcat an encoded `%2F` in the path is refused `400` below routing and below the security chain, so a hierarchical name (`acme/finance/report`, legal since this round's §4.1 grammar) cannot travel in a path segment at all. `GET /templates` now answers two shapes on one route (single-resource + `404 template.not_found` with `name`, paged list without). Sanctioned break of the v1.4 freeze: the owner confirmed zero callers outside this repo (2026-09-01), so the promise was protecting a population of zero. Datasources and pipelines keep path addressing — their names cannot contain `/`. |
 | 2026-09-05 | v2.2 | 067 pipeline folders | Additive and route-free: §5.1 records that a pipeline `name` is now a **folder path** (the template grammar, [Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)) — every pre-067 name is still valid as a one-segment path, so no request shape changes and no client breaks. §5.7 records that `q` matches across full paths, and that folder BROWSING deliberately stays off REST: it is served by `GET /partials/pipelines?prefix=…` and by MCP `pipelines_list {prefix}`. **No route changes**, because a pipeline is UUID-addressed — the `%2F` problem that forced v2.0 for templates cannot arise here. |
 | 2026-09-05 | v2.3 | 074 published endpoints | New **§19**: a released, side-effect-free pipeline served as `GET /api/x/…`, answering the `data_ready` payload verbatim. One catch-all handler over a registry — never runtime route registration (R-EP1). Ambiguous paths are refused at publish (`endpoint.path_conflict`) rather than resolved by precedence, so at request time at most one pattern matches. Validation reports every defect at once and is strict about unknown query parameters. `202` on timeout with the execution still running (R-EP3), never `504`. §3.6's registry gains `DP-Result-Page-Rows` (R-EP4 — one contract, honoured by §6's execute too) and the `DP-Execution-Id` response header. Management is `/api/v1/endpoints`, addressed by `?path=` for the same measured reason §8's templates are. |
+| 2026-09-05 | v2.4 | 077 mandatory folders | §5.1: a pipeline `name` needs a **folder** — 2–10 segments, not 1–10 ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)). `POST /api/v1/pipelines` and `POST /api/v1/templates` answer `400` with the existing codes (`pipeline.validation.name_invalid`, `template.validation.id_invalid`) for a flat name, and `details.reason` now separates `folder_required` from `grammar`. **A narrowing, not an addition** — the one kind of change §11 forbids after the freeze — taken pre-release on the owner ruling of 2026-09-05: with no rename (Template Hierarchy §4.5), a root-level name created after the tag is permanent, and the root would accrete scratch with no way to tidy it. No route changes. |

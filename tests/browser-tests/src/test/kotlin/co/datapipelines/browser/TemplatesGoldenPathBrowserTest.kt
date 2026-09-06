@@ -9,6 +9,12 @@ import org.junit.jupiter.api.Test
  * through the modal (the SAME validator + repository as the REST surface), the leaf
  * appearing in the refreshed tree, and the two-pane selection contract (the versions
  * pane swaps into #template-detail while the tree stays untouched).
+ *
+ * 077 changed the shape of this path, not its meaning. A name carries a FOLDER now (§4.1),
+ * so the create posts `test/<leaf>` and the refreshed ROOT shows a **folder**, not a leaf —
+ * the leaf lives one level down and the test expands the folder to reach it, which is the
+ * journey a real user now takes. Both halves would have gone red silently otherwise: the
+ * create would 400 on the flat name, and the root would never grow a `tpl-leaf`.
  */
 class TemplatesGoldenPathBrowserTest : BrowserSuite() {
     private fun loginReadyUser(): LocalUser {
@@ -38,7 +44,10 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
     fun `create through the modal puts the template in the tree and selects it`() {
         startTrace()
         loginReadyUser()
-        val name = "browser_tpl_" + generatedPassword("t").take(6).lowercase()
+        // 077: a folder is mandatory. `test/` is the sanctioned scratch folder (§15.2), which
+        // is exactly what a browser fixture is.
+        val leaf = "browser_tpl_" + generatedPassword("t").take(6).lowercase()
+        val name = "test/$leaf"
 
         page.navigate("$baseUrl/templates")
         page.click("text=Create Template")
@@ -57,27 +66,46 @@ class TemplatesGoldenPathBrowserTest : BrowserSuite() {
             }
         create.status() shouldBe 200
 
-        // The OOB swap refreshes the tree: the leaf is on the page now.
-        page.waitForSelector("button.tpl-leaf")
-        page
-            .locator(
+        // The OOB swap refreshes the ROOT level, and since 077 that level holds FOLDERS ONLY:
+        // what appears is the `test` folder, never the leaf. Asserting the absence too, because
+        // "the leaf is not visible yet" is the actual change and a missing assertion here is
+        // how the old expectation would creep back.
+        page.waitForSelector("details.tpl-folder")
+        page.locator("#template-list-wrapper button.tpl-leaf").count() shouldBe 0
+        val folder =
+            page.locator(
+                "summary.tpl-summary",
+                com.microsoft.playwright.Page
+                    .LocatorOptions()
+                    .setHasText("test"),
+            )
+        folder.waitFor()
+
+        // Expanding the folder issues ONE request for ONE level (§9.1) — and THAT level has
+        // the leaf, labelled by its last segment with the full path on `title` (§9.4).
+        // A PREDICATE, not a glob: Playwright treats `?` as a wildcard in a URL glob, so
+        // "**/partials/templates?prefix=test**" does not reliably match the query string the
+        // fragment renders (`?prefix=test&dialect=&type=`).
+        page.waitForResponse(
+            { response -> response.url().contains("/partials/templates") && response.url().contains("prefix=test") },
+            { folder.click() },
+        )
+        val leafButton =
+            page.locator(
                 "button.tpl-leaf",
                 com.microsoft.playwright.Page
                     .LocatorOptions()
-                    .setHasText(name),
-            ).waitFor()
+                    .setHasText(leaf),
+            )
+        leafButton.waitFor()
+        leafButton.locator("span.tpl-label").getAttribute("title") shouldBe name
 
         // Selection swaps the versions pane into #template-detail — the two-pane contract.
-        page.waitForResponse("**/partials/templates/versions**") {
-            page
-                .locator(
-                    "button.tpl-leaf",
-                    com.microsoft.playwright.Page
-                        .LocatorOptions()
-                        .setHasText(name),
-                ).click()
-        }
+        page.waitForResponse(
+            { response -> response.url().contains("/partials/templates/versions") },
+            { leafButton.click() },
+        )
         page.waitForSelector("#template-detail")
-        page.locator("#template-detail").innerText() shouldContain name
+        page.locator("#template-detail").innerText() shouldContain leaf
     }
 }

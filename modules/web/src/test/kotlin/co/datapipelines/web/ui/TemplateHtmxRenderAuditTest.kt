@@ -276,7 +276,7 @@ class TemplateHtmxRenderAuditTest {
             "templates",
             listOf(
                 Template(
-                    id = "orders.sql",
+                    id = "test/orders.sql",
                     version = 1,
                     dialect = Dialect.POSTGRES,
                     displayName = "Orders",

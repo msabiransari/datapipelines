@@ -299,6 +299,71 @@ class TemplateAddressingE2eTest {
             .statusCode(404)
     }
 
+    @Test
+    @Order(4)
+    fun `077 - a folderless name is 400 on BOTH create routes, with reason folder_required`() {
+        // The rule §4.1 gained in 077, asserted where a client meets it: over HTTP, on the two
+        // POSTs that mint a name. The code is the EXISTING catalogued one — no new code was
+        // added — and what is new is `details.reason`, which is how an agent tells "you forgot
+        // the folder" from "you used a bad character" without parsing the message.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .body(
+                """
+                {"id": "scratch", "dialect": "POSTGRES", "display_name": "Scratch",
+                 "description": "A folderless template.", "imports": [], "body": "SELECT 1"}
+                """.trimIndent(),
+            ).`when`()
+            .post("/api/v1/templates")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("template.validation.id_invalid"))
+            .body("error.details.failures[0].details.reason", equalTo("folder_required"))
+
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .body(
+                """
+                {"schema_version": 1, "name": "scratch", "display_name": "Scratch",
+                 "description": "A folderless pipeline.", "parameters": {},
+                 "nodes": [{"id": "only", "type": "DQL", "source": "nowhere",
+                            "template": {"id": "test/scratch.sql", "version": 1}, "depends_on": []}]}
+                """.trimIndent(),
+            ).`when`()
+            .post("/api/v1/pipelines")
+            .then()
+            .statusCode(400)
+            // A `find` rather than an index: the body also carries whatever else this
+            // deliberately-thin payload trips (the datasource does not exist), and the
+            // assertion is about the NAME failure, not about validation ordering.
+            .body(
+                "error.details.failures.find { it.code == 'pipeline.validation.name_invalid' }.details.reason",
+                equalTo("folder_required"),
+            )
+
+        // …and the same name under a folder is NOT refused for its name. The template create
+        // is asserted end-to-end (201); the pipeline is only asserted to stop complaining about
+        // its NAME — it still fails on the unknown datasource, which is a different rule.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .body(
+                """
+                {"id": "test/scratch", "dialect": "POSTGRES", "display_name": "Scratch",
+                 "description": "The same template, under a folder.", "imports": [], "body": "SELECT 1"}
+                """.trimIndent(),
+            ).`when`()
+            .post("/api/v1/templates")
+            .then()
+            .statusCode(201)
+            .body("data.id", equalTo("test/scratch"))
+    }
+
     /** A generated `dpk_<id>.<secret>` key and its stored Argon2id hash (auth.md §7.1/§7.2). */
     private class SeededKey(
         val name: String,

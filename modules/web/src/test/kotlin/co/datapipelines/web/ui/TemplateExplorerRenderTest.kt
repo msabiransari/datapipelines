@@ -66,12 +66,7 @@ class TemplateExplorerRenderTest {
     @Test
     fun `the root level is a tree and a nested level is a group under its folder`() {
         val root = render("partials/template-tree-level") { fillLevel() }
-        val nested =
-            render("partials/template-tree-level") {
-                fillLevel()
-                setVariable("prefix", "acme/finance")
-                setVariable("levelId", TemplateBrowseModel.levelId("acme/finance"))
-            }
+        val nested = render("partials/template-tree-level") { fillNestedLevel() }
 
         root shouldContain "role=\"tree\""
         root shouldContain "aria-label=\"Templates\""
@@ -85,7 +80,8 @@ class TemplateExplorerRenderTest {
 
     @Test
     fun `a leaf SELECTS - its versions swap into the detail pane and nothing in the tree moves`() {
-        val html = render("partials/template-tree-level") { fillLevel() }
+        // A NESTED level: since 077 a leaf can only sit under a folder (§4.1).
+        val html = render("partials/template-tree-level") { fillNestedLevel() }
 
         // The selection swap: innerHTML into the detail pane. No outerHTML on a tree
         // element, no OOB, no second tree target — the pane's DOM cannot move.
@@ -95,10 +91,28 @@ class TemplateExplorerRenderTest {
         // Selection state is client-owned (aria-selected), seeded false server-side.
         html shouldContain "aria-selected=\"false\""
         // Enter opens the editor; the URL it navigates to is rendered on the row.
-        html shouldContain "data-editor-url=\"/templates/editor?name=legacy_flat.sql\""
+        html shouldContain "data-editor-url=\"/templates/editor?name=acme/finance/monthly_revenue.sql\""
         // A rapid keyboard sweep must not race stale detail loads into the pane: the LAST
         // selection replaces the in-flight one.
         html shouldContain "hx-sync=\"#template-detail:replace\""
+    }
+
+    @Test
+    fun `077 - the ROOT level renders folders only, never a leaf`() {
+        // §4.1 requires a folder, so nothing sits directly at the root and the fragment has no
+        // "leaf at the root" branch left to exercise. Asserted on the RENDERED level rather
+        // than on the model, because the branch that is gone lived in the markup: the label
+        // used to be `prefix.isEmpty() ? t.id : t.id.substring(...)`. `V12__folder_required.sql`
+        // is what makes this true of stored rows and not merely of this fixture.
+        val root = render("partials/template-tree-level") { fillLevel() }
+
+        root shouldNotContain "tpl-leaf"
+        root shouldNotContain "data-editor-url"
+        root shouldContain "tpl-folder"
+        // …and a NESTED level still renders its leaves, labelled by their last segment.
+        val nested = render("partials/template-tree-level") { fillNestedLevel() }
+        nested shouldContain "tpl-leaf"
+        nested shouldContain ">monthly_revenue.sql</span>"
     }
 
     @Test
@@ -155,6 +169,13 @@ class TemplateExplorerRenderTest {
 
     // ------------------------------------------------------------------ fixtures
 
+    /**
+     * The ROOT level: folders and nothing else (077, §4.1).
+     *
+     * It used to carry `template("legacy_flat.sql")` — a leaf sitting at the root, which the
+     * grammar now forbids and `TemplateBrowseModel` no longer even queries for. Every
+     * assertion about a LEAF therefore moved onto [fillNestedLevel].
+     */
     private fun WebContext.fillLevel() {
         setVariable("searching", false)
         setVariable("prefix", "")
@@ -166,14 +187,24 @@ class TemplateExplorerRenderTest {
             ),
         )
         setVariable("foldersTruncated", false)
-        setVariable("templates", listOf(template("legacy_flat.sql")))
+        setVariable("templates", emptyList<Template>())
         setVariable("drafts", emptyMap<String, TemplateVersionDetail>())
         setVariable("offset", 0)
         setVariable("hasMore", false)
-        setVariable("total", 1)
+        setVariable("total", 0)
         setVariable("selectedDialect", "")
         setVariable("selectedType", "")
         setVariable("scopes", setOf("ADMIN"))
+    }
+
+    /** A NESTED level — the only kind that has leaves now. */
+    private fun WebContext.fillNestedLevel() {
+        fillLevel()
+        setVariable("prefix", "acme/finance")
+        setVariable("levelId", TemplateBrowseModel.levelId("acme/finance"))
+        setVariable("folders", emptyList<TemplateFolderView>())
+        setVariable("templates", listOf(template("acme/finance/monthly_revenue.sql")))
+        setVariable("total", 1)
     }
 
     private fun WebContext.fillSearch() {

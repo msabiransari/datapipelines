@@ -39,6 +39,18 @@ data class PipelineFolderLevel(
     val total: Int,
     val hasMore: Boolean,
 ) {
+    /**
+     * This level with its leaves removed — the shape the ROOT level renders since 077.
+     *
+     * §4.1 requires a folder, so the root of the tree is a directory of folders and nothing
+     * else. Unlike templates, pipelines carry no deploy gate for the narrowing (§14.2: a
+     * pipeline name is validated at save only), so a pre-077 flat row can still exist; this
+     * drops it from the ROOT LEVEL's rendering, and only there. It stays reachable by search,
+     * by `pipelines_list`, and by its UUID URL. [total] and [hasMore] go with the leaves, so a
+     * level and its pager cannot disagree.
+     */
+    fun withoutLeaves(): PipelineFolderLevel = copy(pipelines = emptyList(), total = 0, hasMore = false)
+
     companion object {
         /** Leaves returned for one level when the caller states no page size. */
         const val DEFAULT_PAGE_LIMIT: Int = 25

@@ -129,7 +129,7 @@ object McpFixtures {
               "id": "fetch",
               "type": "DQL",
               "source": "$source",
-              "template": {"id": "revenue.sql", "version": 1},
+              "template": {"id": "test/revenue.sql", "version": 1},
               "depends_on": []
             }
           ]
@@ -162,7 +162,7 @@ object McpFixtures {
         )
 
     fun template(
-        id: String = "revenue.sql",
+        id: String = "test/revenue.sql",
         version: Int = 1,
         dialect: Dialect = Dialect.POSTGRES,
         isLibrary: Boolean = false,

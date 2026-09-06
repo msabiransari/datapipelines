@@ -37,7 +37,7 @@ class TemplateSpecExamplesTest {
         val validator = TemplateValidator(LibraryResolver { _ -> registry })
 
         validator
-            .validate(TemplateFixtures.draft(id = "lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE), workspaceId)
+            .validate(TemplateFixtures.draft(id = "test/lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE), workspaceId)
             .isValid
             .shouldBeTrue()
     }
@@ -46,12 +46,12 @@ class TemplateSpecExamplesTest {
     fun `the Appendix A template validates, resolves its closure, and renders the documented SQL`() {
         val registry =
             InMemoryTemplateRegistry(
-                listOf(TemplateFixtures.version("lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE)),
+                listOf(TemplateFixtures.version("test/lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE)),
             )
         val draft =
             TemplateFixtures.draft(
-                id = "monthly_revenue.sql",
-                imports = listOf(TemplateImport("lib_aggregate.sql", 1, "agg")),
+                id = "test/monthly_revenue.sql",
+                imports = listOf(TemplateImport("test/lib_aggregate.sql", 1, "agg")),
                 body = MONTHLY_REVENUE,
             )
 
@@ -59,14 +59,14 @@ class TemplateSpecExamplesTest {
 
         registry.put(
             TemplateFixtures.version(
-                "monthly_revenue.sql",
+                "test/monthly_revenue.sql",
                 version = 3,
                 imports = draft.imports,
                 body = draft.body,
             ),
         )
         val sql =
-            engine(registry).render(TemplateRef("monthly_revenue.sql", 3), mapOf("min_total" to BigDecimal("1000.00")))
+            engine(registry).render(TemplateRef("test/monthly_revenue.sql", 3), mapOf("min_total" to BigDecimal("1000.00")))
 
         sql shouldBe EXPECTED_SQL
     }
@@ -76,26 +76,26 @@ class TemplateSpecExamplesTest {
         // §4.4's normative table: BIGDECIMAL(p,s) renders as a "plain decimal string with declared
         // scale" — the guarantee Appendix A now relies on directly, having dropped `?c` at v1.3.
         // Kept as its own test so the property is pinned independently of the worked example.
-        val registry = InMemoryTemplateRegistry(listOf(TemplateFixtures.version("scale.sql", body = "\${min_total}")))
+        val registry = InMemoryTemplateRegistry(listOf(TemplateFixtures.version("test/scale.sql", body = "\${min_total}")))
 
-        engine(registry).render(TemplateRef("scale.sql", 1), mapOf("min_total" to BigDecimal("1000.00"))) shouldBe "1000.00"
+        engine(registry).render(TemplateRef("test/scale.sql", 1), mapOf("min_total" to BigDecimal("1000.00"))) shouldBe "1000.00"
     }
 
     @Test
     fun `two libraries may share a macro name because aliases namespace them`() {
         // templates.md §6.4: "Two libraries may share macro names as long as their aliases differ —
         // that is what namespacing is for." Asserted at render, where a collision would actually bite.
-        val pg = TemplateFixtures.version("lib_pg.sql", isLibrary = true, body = "<#macro quote v>\"\${v}\"</#macro>")
-        val my = TemplateFixtures.version("lib_my.sql", isLibrary = true, body = "<#macro quote v>`\${v}`</#macro>")
+        val pg = TemplateFixtures.version("test/lib_pg.sql", isLibrary = true, body = "<#macro quote v>\"\${v}\"</#macro>")
+        val my = TemplateFixtures.version("test/lib_my.sql", isLibrary = true, body = "<#macro quote v>`\${v}`</#macro>")
         val main =
             TemplateFixtures.version(
-                "both.sql",
-                imports = listOf(TemplateImport("lib_pg.sql", 1, "pg"), TemplateImport("lib_my.sql", 1, "my")),
+                "test/both.sql",
+                imports = listOf(TemplateImport("test/lib_pg.sql", 1, "pg"), TemplateImport("test/lib_my.sql", 1, "my")),
                 body = "<@pg.quote v=\"a\"/> <@my.quote v=\"a\"/>",
             )
         val registry = InMemoryTemplateRegistry(listOf(pg, my, main))
 
-        engine(registry).render(TemplateRef("both.sql", 1), emptyMap()) shouldBe "\"a\" `a`"
+        engine(registry).render(TemplateRef("test/both.sql", 1), emptyMap()) shouldBe "\"a\" `a`"
     }
 
     @Test
@@ -103,17 +103,17 @@ class TemplateSpecExamplesTest {
         // §6.4 pins imports to an exact {id, version}: lib@1 and lib@2 are different keys, so a
         // closure containing both is not a cycle. The cycle check keys on {id, version} for exactly
         // this reason, and this test is what stops it being "simplified" to an id-only check.
-        val v1 = TemplateFixtures.version("lib.sql", version = 1, isLibrary = true, body = "<#macro m>1</#macro>")
+        val v1 = TemplateFixtures.version("test/lib.sql", version = 1, isLibrary = true, body = "<#macro m>1</#macro>")
         val v2 =
             TemplateFixtures.version(
-                "lib.sql",
+                "test/lib.sql",
                 version = 2,
                 isLibrary = true,
-                imports = listOf(TemplateImport("lib.sql", 1, "older")),
+                imports = listOf(TemplateImport("test/lib.sql", 1, "older")),
                 body = "<#macro m><@older.m/>2</#macro>",
             )
         val registry = InMemoryTemplateRegistry(listOf(v1, v2))
-        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 2, "newer")))
+        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", 2, "newer")))
 
         TemplateValidator(LibraryResolver { _ -> registry }).validate(draft, workspaceId).isValid.shouldBeTrue()
     }

@@ -53,7 +53,7 @@ class NodeSqlResolverTest {
           },
           "nodes": [
             {"id": "fetch", "type": "DQL", "source": "sample-trips",
-             "template": {"id": "fetch.sql", "version": 1}, "depends_on": []},
+             "template": {"id": "test/fetch.sql", "version": 1}, "depends_on": []},
             {"id": "run_child", "type": "PIPELINE", "pipeline": {"name": "child_pipe", "version": 3}, "depends_on": []}
           ]
         }
@@ -69,12 +69,12 @@ class NodeSqlResolverTest {
         every { pipelines.findVersionBody(workspaceId, pipelineId, 1) } returns releasedBody
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { engines.engineFor(workspaceId) } returns engine
-        every { templates.lookupVersion(workspaceId, "fetch.sql", 1) } returns version("fetch.sql")
+        every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns version("test/fetch.sql")
     }
 
     @Test
     fun `E5 - absent version prefers the DRAFT over the released current`() {
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns "SELECT 1"
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
         val outcome = resolver.resolve(workspaceId, pipelineId, "fetch", null, null)
 
@@ -84,7 +84,7 @@ class NodeSqlResolverTest {
     @Test
     fun `E5 - with no draft the released current version resolves`() {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns null
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns "SELECT 1"
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
         val outcome = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", null, null)
 
@@ -95,7 +95,7 @@ class NodeSqlResolverTest {
     fun `E5 - an explicit version wins over the draft, and an unknown one is NoSuchElement`() {
         every { pipelines.findVersionDetail(workspaceId, pipelineId, 1) } returns released
         every { pipelines.findVersionDetail(workspaceId, pipelineId, 9) } returns null
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns "SELECT 1"
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
         val explicit = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", 1, null)
         (explicit as NodeSqlResolution.Rendered).version shouldBe released
@@ -105,7 +105,7 @@ class NodeSqlResolverTest {
 
     @Test
     fun `the rendered SQL carries both the name form and the positional bind translation`() {
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns
             "SELECT * FROM t WHERE d = :start_date AND n < :limit"
 
         val outcome =
@@ -130,7 +130,7 @@ class NodeSqlResolverTest {
 
     @Test
     fun `a rendered name the context does not declare fails loudly before anything executes`() {
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns
             "SELECT * FROM t WHERE d = :start_date AND x = :not_declared"
 
         val thrown =
@@ -149,7 +149,7 @@ class NodeSqlResolverTest {
 
     @Test
     fun `an unsupplied required parameter renders from the sample context and is labelled`() {
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } returns "SELECT 1"
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
         val outcome = resolver.resolve(workspaceId, pipelineId, "fetch", null, null) as NodeSqlResolution.Rendered
 
@@ -180,13 +180,13 @@ class NodeSqlResolverTest {
         child.childName shouldBe "child_pipe"
         child.childVersion shouldBe 3
 
-        every { templates.lookupVersion(workspaceId, "fetch.sql", 1) } returns null
+        every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns null
         resolver.resolve(workspaceId, pipelineId, "fetch", null, null)::class shouldBe
             NodeSqlResolution.TemplateMissing::class
 
-        every { templates.lookupVersion(workspaceId, "fetch.sql", 1) } returns version("fetch.sql")
-        every { engine.render(TemplateRef("fetch.sql", 1), any(), any()) } throws
-            TemplateRenderException("undefined variable: nope", TemplateRef("fetch.sql", 1))
+        every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns version("test/fetch.sql")
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } throws
+            TemplateRenderException("undefined variable: nope", TemplateRef("test/fetch.sql", 1))
         val failed = resolver.resolve(workspaceId, pipelineId, "fetch", null, null) as NodeSqlResolution.RenderFailed
         failed.message shouldContain "undefined variable"
     }

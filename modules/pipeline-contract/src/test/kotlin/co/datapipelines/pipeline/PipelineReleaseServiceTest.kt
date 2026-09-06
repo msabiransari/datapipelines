@@ -54,9 +54,9 @@ class PipelineReleaseServiceTest {
 
     /** A deserializable body pinning one template at v2 — what release re-validates. */
     private val draftBody =
-        """{"schema_version":1,"name":"monthly_revenue","display_name":"M","description":"d",""" +
+        """{"schema_version":1,"name":"test/monthly_revenue","display_name":"M","description":"d",""" +
             """"parameters":{},"settings":{"tempdb":{"engine":"H2"}},""" +
-            """"nodes":[{"id":"n1","type":"DQL","source":"pg","template":{"id":"t.sql","version":2},"depends_on":[]}]}"""
+            """"nodes":[{"id":"n1","type":"DQL","source":"pg","template":{"id":"test/t.sql","version":2},"depends_on":[]}]}"""
 
     private fun draftDetail(hash: String = "draft-hash") =
         PipelineVersionDetail(
@@ -102,12 +102,12 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.DRAFT
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.DRAFT
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "draft-hash", userId) }
 
         error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        error.details["template_id"] shouldBe "t.sql"
+        error.details["template_id"] shouldBe "test/t.sql"
         error.details["template_version"] shouldBe 2
         error.details["template_status"] shouldBe "DRAFT"
         verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
@@ -118,14 +118,14 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
         } returns
             PipelineRepository.Released(
                 co.datapipelines.pipeline.PipelineRecord(
                     id = pipelineId,
-                    name = "monthly_revenue",
+                    name = "test/monthly_revenue",
                     displayName = "M",
                     description = "d",
                     ownerId = userId,
@@ -148,7 +148,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail("current-hash")
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
-        every { templates.statusOf(workspaceId, "t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any()) } returns null
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "stale", userId) }

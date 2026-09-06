@@ -119,20 +119,20 @@ class TemplateValidatorTest {
 
     @Test
     fun `dangerous_construct rejects a literal import directive in a body (D12)`() {
-        validator().validate(TemplateFixtures.draft(body = "<#import \"x.sql@1\" as x>\nSELECT 1"), workspaceId).codes shouldContain
+        validator().validate(TemplateFixtures.draft(body = "<#import \"test/x.sql@1\" as x>\nSELECT 1"), workspaceId).codes shouldContain
             PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
     }
 
     @Test
     fun `duplicate_alias rejects two imports sharing an alias`() {
-        val a = TemplateFixtures.version("liba.sql", isLibrary = true, body = "<#macro m></#macro>")
-        val b = TemplateFixtures.version("libb.sql", isLibrary = true, body = "<#macro m></#macro>")
+        val a = TemplateFixtures.version("test/liba.sql", isLibrary = true, body = "<#macro m></#macro>")
+        val b = TemplateFixtures.version("test/libb.sql", isLibrary = true, body = "<#macro m></#macro>")
         val draft =
             TemplateFixtures.draft(
                 imports =
                     listOf(
-                        TemplateImport("liba.sql", 1, "shared"),
-                        TemplateImport("libb.sql", 1, "shared"),
+                        TemplateImport("test/liba.sql", 1, "shared"),
+                        TemplateImport("test/libb.sql", 1, "shared"),
                     ),
             )
         validator(a, b).validate(draft, workspaceId).codes shouldContain PipelineErrorCodes.Template.DUPLICATE_ALIAS
@@ -140,22 +140,22 @@ class TemplateValidatorTest {
 
     @Test
     fun `import_not_found rejects an import missing from the registry`() {
-        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("absent.sql", 7, "x")))
+        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/absent.sql", 7, "x")))
         validator().validate(draft, workspaceId).codes shouldContain PipelineErrorCodes.Template.IMPORT_NOT_FOUND
     }
 
     @Test
     fun `import_not_library rejects importing a non-library template`() {
-        val notLib = TemplateFixtures.version("regular.sql", isLibrary = false)
-        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("regular.sql", 1, "r")))
+        val notLib = TemplateFixtures.version("test/regular.sql", isLibrary = false)
+        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/regular.sql", 1, "r")))
         validator(notLib).validate(draft, workspaceId).codes shouldContain PipelineErrorCodes.Template.IMPORT_NOT_LIBRARY
     }
 
     @Test
     fun `import_cycle rejects a two-node cycle`() {
-        val a = TemplateFixtures.version("liba.sql", isLibrary = true, imports = listOf(TemplateImport("libb.sql", 1, "b")))
-        val b = TemplateFixtures.version("libb.sql", isLibrary = true, imports = listOf(TemplateImport("liba.sql", 1, "a")))
-        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("liba.sql", 1, "a")))
+        val a = TemplateFixtures.version("test/liba.sql", isLibrary = true, imports = listOf(TemplateImport("test/libb.sql", 1, "b")))
+        val b = TemplateFixtures.version("test/libb.sql", isLibrary = true, imports = listOf(TemplateImport("test/liba.sql", 1, "a")))
+        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/liba.sql", 1, "a")))
         validator(a, b).validate(draft, workspaceId).codes shouldContain PipelineErrorCodes.Template.IMPORT_CYCLE
     }
 
@@ -167,13 +167,13 @@ class TemplateValidatorTest {
         (1..depth)
             .map { n ->
                 TemplateFixtures.version(
-                    "lib$n.sql",
+                    "test/lib$n.sql",
                     isLibrary = true,
-                    imports = if (n == depth) emptyList() else listOf(TemplateImport("lib${n + 1}.sql", 1, "n")),
+                    imports = if (n == depth) emptyList() else listOf(TemplateImport("test/lib${n + 1}.sql", 1, "n")),
                 )
             }.toTypedArray()
 
-    private val chainRoot = TemplateFixtures.draft(imports = listOf(TemplateImport("lib1.sql", 1, "n")))
+    private val chainRoot = TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib1.sql", 1, "n")))
 
     @Test
     fun `a terminating chain exactly at the depth cap validates clean`() {
@@ -202,10 +202,10 @@ class TemplateValidatorTest {
     fun `a wide but shallow import DAG still validates`() {
         // The memoized walk must not turn "already seen" into "already rejected": ten libraries
         // sharing one dependency is a legal diamond, not a cycle.
-        val leaf = TemplateFixtures.version("leaf.sql", isLibrary = true, body = "<#macro m></#macro>")
+        val leaf = TemplateFixtures.version("test/leaf.sql", isLibrary = true, body = "<#macro m></#macro>")
         val mids =
             (1..10).map { n ->
-                TemplateFixtures.version("mid$n.sql", isLibrary = true, imports = listOf(TemplateImport("leaf.sql", 1, "l")))
+                TemplateFixtures.version("test/mid$n.sql", isLibrary = true, imports = listOf(TemplateImport("test/leaf.sql", 1, "l")))
             }
         val draft = TemplateFixtures.draft(imports = mids.mapIndexed { i, m -> TemplateImport(m.id, 1, "a$i") })
 
@@ -220,12 +220,12 @@ class TemplateValidatorTest {
         val libs =
             (1..LibraryResolver.MAX_IMPORT_DEPTH).map { k ->
                 TemplateFixtures.version(
-                    "fan$k.sql",
+                    "test/fan$k.sql",
                     isLibrary = true,
-                    imports = if (k == 1) emptyList() else (1..10).map { a -> TemplateImport("fan${k - 1}.sql", 1, "a$a") },
+                    imports = if (k == 1) emptyList() else (1..10).map { a -> TemplateImport("test/fan${k - 1}.sql", 1, "a$a") },
                 )
             }
-        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("fan${LibraryResolver.MAX_IMPORT_DEPTH}.sql", 1, "top")))
+        val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/fan${LibraryResolver.MAX_IMPORT_DEPTH}.sql", 1, "top")))
 
         lateinit var result: TemplateValidationResult
         val elapsed = measureTimeMillis { result = validator(*libs.toTypedArray()).validate(draft, workspaceId) }
@@ -252,17 +252,17 @@ class TemplateValidatorTest {
         val chainToX =
             (1..8).map { n ->
                 TemplateFixtures.version(
-                    "p$n.sql",
+                    "test/p$n.sql",
                     isLibrary = true,
-                    imports = listOf(if (n == 8) TemplateImport("x.sql", 1, "x") else TemplateImport("p${n + 1}.sql", 1, "n")),
+                    imports = listOf(if (n == 8) TemplateImport("test/x.sql", 1, "x") else TemplateImport("test/p${n + 1}.sql", 1, "n")),
                 )
             }
-        val x = TemplateFixtures.version("x.sql", isLibrary = true, imports = listOf(TemplateImport("y1.sql", 1, "y")))
-        val y1 = TemplateFixtures.version("y1.sql", isLibrary = true, imports = listOf(TemplateImport("y2.sql", 1, "y")))
-        val y2 = TemplateFixtures.version("y2.sql", isLibrary = true)
+        val x = TemplateFixtures.version("test/x.sql", isLibrary = true, imports = listOf(TemplateImport("test/y1.sql", 1, "y")))
+        val y1 = TemplateFixtures.version("test/y1.sql", isLibrary = true, imports = listOf(TemplateImport("test/y2.sql", 1, "y")))
+        val y2 = TemplateFixtures.version("test/y2.sql", isLibrary = true)
         val draft =
             TemplateFixtures.draft(
-                imports = listOf(TemplateImport("x.sql", 1, "shallow"), TemplateImport("p1.sql", 1, "deep")),
+                imports = listOf(TemplateImport("test/x.sql", 1, "shallow"), TemplateImport("test/p1.sql", 1, "deep")),
             )
 
         val result = validator(*chainToX.toTypedArray(), x, y1, y2).validate(draft, workspaceId)

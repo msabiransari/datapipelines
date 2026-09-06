@@ -87,7 +87,7 @@ class SubPipelineExecutionRunnerTest {
         """
         {
           "schema_version": 1,
-          "name": "monthly_revenue",
+          "name": "test/monthly_revenue",
           "display_name": "Monthly revenue",
           "description": "",
           "parameters": {
@@ -96,7 +96,7 @@ class SubPipelineExecutionRunnerTest {
           },
           "nodes": [
             {"id": "q", "description": "q", "type": "DQL", "source": "tempdb",
-             "template": {"id": "tq", "version": 1}, "output": {"target": "caller"}}
+             "template": {"id": "test/tq", "version": 1}, "output": {"target": "caller"}}
           ]
         }
         """.trimIndent()
@@ -104,7 +104,7 @@ class SubPipelineExecutionRunnerTest {
     private fun childRecord() =
         PipelineRecord(
             id = childRecordId,
-            name = "monthly_revenue",
+            name = "test/monthly_revenue",
             displayName = "Monthly revenue",
             description = "",
             ownerId = parentUserId,
@@ -115,7 +115,7 @@ class SubPipelineExecutionRunnerTest {
         )
 
     private fun stubRegistry() {
-        every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns childRecord()
+        every { pipelines.findByNameIncludingDeleted(any(), "test/monthly_revenue") } returns childRecord()
         every { pipelines.findVersionBody(any(), childRecordId, 4) } returns childBody
     }
 
@@ -132,7 +132,7 @@ class SubPipelineExecutionRunnerTest {
                 template = TemplateRef(),
                 output = output,
                 dependsOn = emptyList(),
-                pipeline = PipelineNodeRef("monthly_revenue", 4),
+                pipeline = PipelineNodeRef("test/monthly_revenue", 4),
                 parameters = parameters,
             ),
         )
@@ -395,7 +395,7 @@ class SubPipelineExecutionRunnerTest {
     @Test
     fun `a pinned reference that vanished from the registry fails as a child failure, not an NPE`() =
         runTest {
-            every { pipelines.findByNameIncludingDeleted(any(), "monthly_revenue") } returns null
+            every { pipelines.findByNameIncludingDeleted(any(), "test/monthly_revenue") } returns null
 
             val thrown =
                 shouldThrow<DatapipelinesException> {

@@ -58,9 +58,16 @@ class TemplateValidator(
                 TemplateValidationFailure(
                     code = PipelineErrorCodes.Template.ID_INVALID,
                     message =
-                        "Template id '${draft.id.truncateForError()}' must be a path of 1-10 '/'-separated segments, " +
-                            "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total.",
-                    details = mapOf("id" to draft.id.truncateForError()),
+                        "Template id '${draft.id.truncateForError()}' must be a path of 2-10 '/'-separated segments, " +
+                            "each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total — a folder is required " +
+                            "(test/scratch, not scratch).",
+                    // `reason` separates "you forgot the folder" from "you used a bad
+                    // character" without an agent parsing the message (§4.1, 077).
+                    details =
+                        mapOf(
+                            "id" to draft.id.truncateForError(),
+                            "reason" to TemplateNameGrammar.refusalReason(draft.id),
+                        ),
                 )
         }
 

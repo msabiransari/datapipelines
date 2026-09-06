@@ -196,7 +196,7 @@ class ReadOnlyPipelineRuleTest {
     private fun pipeline(vararg nodes: Node) =
         Pipeline(
             schemaVersion = Pipeline.SUPPORTED_SCHEMA_VERSION,
-            name = "fixture",
+            name = "test/fixture",
             displayName = "Fixture",
             description = "",
             settings = PipelineSettings(),
@@ -218,7 +218,7 @@ class ReadOnlyPipelineRuleTest {
         description = "",
         type = type,
         source = "pg",
-        template = TemplateRef("$id.sql", 1),
+        template = TemplateRef("test/$id.sql", 1),
         output = output,
         dependsOn = emptyList(),
     )

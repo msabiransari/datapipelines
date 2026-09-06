@@ -77,7 +77,7 @@ class CompositionRulesTest {
 
     @Test
     fun `a PIPELINE node carrying a template is pipeline_node_has_template`() {
-        val result = validatorWith(resolver(child())).validate(parent(template = TemplateRef("t.sql", 1)), workspaceId)
+        val result = validatorWith(resolver(child())).validate(parent(template = TemplateRef("test/t.sql", 1)), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_NODE_HAS_TEMPLATE)
     }
@@ -292,9 +292,9 @@ class CompositionRulesTest {
         )
 
     private companion object {
-        const val PARENT = "parent_pipeline"
-        const val CHILD = "monthly_revenue_component"
-        const val GRANDCHILD = "daily_revenue_component"
+        const val PARENT = "test/parent_pipeline"
+        const val CHILD = "test/monthly_revenue_component"
+        const val GRANDCHILD = "test/daily_revenue_component"
         const val CHILD_VERSION = 4
 
         /** 067: a child under a folder root — the shape the demo's `mobility_briefing` now uses. */

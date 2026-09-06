@@ -247,7 +247,7 @@ class EndpointPublishServiceTest {
         description = "",
         type = type,
         source = "pg",
-        template = TemplateRef("$id.sql", 1),
+        template = TemplateRef("test/$id.sql", 1),
         output = output,
         dependsOn = emptyList(),
     )
@@ -282,7 +282,7 @@ class EndpointPublishServiceTest {
         val WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
         val PIPELINE_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000e5")
-        const val PIPELINE_NAME = "revenue_by_borough"
+        const val PIPELINE_NAME = "nyc/mobility/revenue_by_borough"
         const val MAX_DEPTH = 5
     }
 }

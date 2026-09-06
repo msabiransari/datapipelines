@@ -280,15 +280,15 @@ class PipelineServiceIntegrationTest {
         // and its HTMX partial). One implementation, asserted once.
         // Distinct display names and descriptions, because the three columns are matched
         // separately and a shared fixture value would make the assertions untestable.
-        service.create(WORKSPACE_ID, body(named("monthly_revenue", "Monthly Revenue", "By customer")), owner)
-        service.create(WORKSPACE_ID, body(named("daily_churn", "Daily Churn", "Cancellations per day")), owner)
+        service.create(WORKSPACE_ID, body(named("test/monthly_revenue", "Monthly Revenue", "By customer")), owner)
+        service.create(WORKSPACE_ID, body(named("test/daily_churn", "Daily Churn", "Cancellations per day")), owner)
 
-        service.list(WORKSPACE_ID, query = "REVENUE").map { it.name } shouldContainExactly listOf("monthly_revenue")
+        service.list(WORKSPACE_ID, query = "REVENUE").map { it.name } shouldContainExactly listOf("test/monthly_revenue")
         withClue("display_name is matched too, case-insensitively") {
-            service.list(WORKSPACE_ID, query = "daily churn").map { it.name } shouldContainExactly listOf("daily_churn")
+            service.list(WORKSPACE_ID, query = "daily churn").map { it.name } shouldContainExactly listOf("test/daily_churn")
         }
         withClue("description is matched too") {
-            service.list(WORKSPACE_ID, query = "CANCELLATIONS").map { it.name } shouldContainExactly listOf("daily_churn")
+            service.list(WORKSPACE_ID, query = "CANCELLATIONS").map { it.name } shouldContainExactly listOf("test/daily_churn")
         }
         service.list(WORKSPACE_ID, query = "unrelated").shouldBeEmptyList()
         withClue("no query means no filtering") { service.list(WORKSPACE_ID).size shouldBe 2 }
@@ -297,15 +297,15 @@ class PipelineServiceIntegrationTest {
     @Test
     fun `the owner filter is pushed to SQL`() {
         val other = insertUser(email = "other@example.com", subject = "sub-2")
-        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "mine")), owner)
-        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "theirs")), other)
+        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/mine")), owner)
+        service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/theirs")), other)
 
-        service.list(WORKSPACE_ID, ownerId = other).map { it.name } shouldContainExactly listOf("theirs")
+        service.list(WORKSPACE_ID, ownerId = other).map { it.name } shouldContainExactly listOf("test/theirs")
     }
 
     @Test
     fun `page reports the truthful total and the draft badges of the rows it returned`() {
-        val ids = (1..PAGED_ROWS).map { service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "p_$it")), owner) }
+        val ids = (1..PAGED_ROWS).map { service.create(WORKSPACE_ID, body(Fixtures.pipeline(name = "test/p_$it")), owner) }
         service.update(
             WORKSPACE_ID,
             ids.first().record.id,
@@ -347,7 +347,7 @@ class PipelineServiceIntegrationTest {
         val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, record, record.currentVersion))
 
         executable.version shouldBe 1
-        executable.pipeline.name shouldBe "monthly_revenue"
+        executable.pipeline.name shouldBe "test/monthly_revenue"
         withClue("an unknown version resolves to null — the surface owns the 404") {
             service.findExecutable(WORKSPACE_ID, record, UNKNOWN_VERSION).shouldBeNull()
         }

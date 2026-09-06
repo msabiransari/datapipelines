@@ -46,12 +46,12 @@ class VersionBackfillMigrationTest {
 
         owner = insertUser()
         insertPreV6Pipeline("legacy_pipeline", """{"schema_version":1,"name":"legacy_pipeline"}""")
-        insertPreV6Pipeline("second_legacy", """{"schema_version":1,"name":"second_legacy"}""")
-        insertPreV6Pipeline("third_legacy", """{"schema_version":1,"name":"third_legacy"}""")
+        insertPreV6Pipeline("test/second_legacy", """{"schema_version":1,"name":"test/second_legacy"}""")
+        insertPreV6Pipeline("test/third_legacy", """{"schema_version":1,"name":"test/third_legacy"}""")
         // Owns the A2 proof's draft: that test LEAVES a version-2 DRAFT behind (the same
         // reason third_legacy exists — JUnit order is not fixed, and the RELEASED-rows test
         // below counts legacy_pipeline's versions unfiltered).
-        insertPreV6Pipeline("precondition_legacy", """{"schema_version":1,"name":"precondition_legacy"}""")
+        insertPreV6Pipeline("test/precondition_legacy", """{"schema_version":1,"name":"test/precondition_legacy"}""")
 
         // …and then V6, exactly as Flyway would apply it to a deployment holding those rows.
         val v6 = ShippedMigrations.paths().first { it.contains("V6__") }
@@ -82,7 +82,7 @@ class VersionBackfillMigrationTest {
 
     @Test
     fun `a pre-migration row passes its first precondition check - the A2 proof`() {
-        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "precondition_legacy"))
+        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/precondition_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
 
         // The hash the migration stored is the hash the runtime's own expression computes…
@@ -95,7 +95,7 @@ class VersionBackfillMigrationTest {
             repository.createDraft(
                 WORKSPACE_ID,
                 record.id,
-                serializer.write(Fixtures.pipeline(name = "precondition_legacy")),
+                serializer.write(Fixtures.pipeline(name = "test/precondition_legacy")),
                 detail.bodyHash,
                 owner,
             )
@@ -106,9 +106,9 @@ class VersionBackfillMigrationTest {
 
     @Test
     fun `the backfill hash survives a full lifecycle on a pre-migration row`() {
-        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "second_legacy"))
+        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/second_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
-        val body = Fixtures.pipeline(name = "second_legacy")
+        val body = Fixtures.pipeline(name = "test/second_legacy")
 
         val draftBody = serializer.write(body)
         val draft =
@@ -127,9 +127,10 @@ class VersionBackfillMigrationTest {
     fun `the one-draft index exists after migration - a second draft insert is refused`() {
         // Own pipeline: this test LEAVES a draft behind, and the A2 proof test must not
         // find one already present when it runs (JUnit order is not fixed).
-        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "third_legacy"))
+        val record = checkNotNull(repository.findByName(WORKSPACE_ID, "test/third_legacy"))
         val detail = checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, record.id))
-        repository.createDraft(WORKSPACE_ID, record.id, serializer.write(Fixtures.pipeline(name = "third_legacy")), detail.bodyHash, owner)
+        val body = serializer.write(Fixtures.pipeline(name = "test/third_legacy"))
+        repository.createDraft(WORKSPACE_ID, record.id, body, detail.bodyHash, owner)
 
         val thrown =
             shouldThrow<org.springframework.dao.DuplicateKeyException> {

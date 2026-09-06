@@ -272,7 +272,7 @@ class SampleDataExamplesContentTest {
             )
 
         /** The template the falsification poisons — referenced by a pipeline that declares the parameter. */
-        private const val POISONED_TEMPLATE_ID = "sample_trips_monthly.sql"
+        private const val POISONED_TEMPLATE_ID = "nyc/mobility/sample_trips_monthly.sql"
         private const val BIND_FORM = ":start_date"
 
         /** Escaped at the use site (a dollar in a Kotlin string literal): the interpolation form of start_date. */

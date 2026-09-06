@@ -75,11 +75,11 @@ class PipelinesExecuteNodeToolTest {
                 description = "",
                 type = nodeType,
                 source = source,
-                template = TemplateRef("fetch.sql", 1),
+                template = TemplateRef("test/fetch.sql", 1),
                 output = null,
                 dependsOn = emptyList(),
             ),
-        templateId = "fetch.sql",
+        templateId = "test/fetch.sql",
         templateVersion = 1,
         dialect = Dialect.POSTGRES,
         sql = sql,
@@ -189,7 +189,7 @@ class PipelinesExecuteNodeToolTest {
             tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
         }.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
 
-        resolverReturns(NodeSqlResolution.TemplateMissing(draft, "fetch.sql", 1))
+        resolverReturns(NodeSqlResolution.TemplateMissing(draft, "test/fetch.sql", 1))
         shouldThrow<DatapipelinesException> {
             tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
         }.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND

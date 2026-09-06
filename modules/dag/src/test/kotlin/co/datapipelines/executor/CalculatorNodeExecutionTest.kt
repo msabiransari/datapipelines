@@ -187,6 +187,11 @@ class CalculatorNodeExecutionTest {
     private fun text(value: String): JsonNode = JsonNodeFactory.instance.textNode(value)
 
     private companion object {
+        /**
+         * The NODE id, which `Fixtures.node` also uses as the node's template ref — and a
+         * node id is an identifier, never a path (§4.1 widened the NAME rule only). This
+         * module mocks `TemplateEngine`, so no grammar is consulted here; it is a map key.
+         */
         const val TEMPLATE_ID = "report"
 
         /** Fixed, never "today": a test whose expectation depends on the day it runs gets deleted. */

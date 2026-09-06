@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.19 (frozen contract — additive-only changes after this point)
+**Status:** v1.20 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-05
@@ -240,7 +240,7 @@ Returns: array of pipeline metadata objects. Datasource references are per-node 
   }
   ```
 
-  `folders` are the prefix's DIRECT sub-folders with their whole-subtree counts; `pipelines` are its direct children only. Never a subtree, never the whole list. `owner`, `datasource` and `q` are ignored while `prefix` is present — browse and search are different presentations. A prefix that is not a legal pipeline name answers an empty level, not an error.
+  `folders` are the prefix's DIRECT sub-folders with their whole-subtree counts; `pipelines` are its direct children only. Never a subtree, never the whole list. `owner`, `datasource` and `q` are ignored while `prefix` is present — browse and search are different presentations. A prefix is a FOLDER PATH — 1 to 9 segments, not the 2-to-10 a NAME takes since 077 — so `nyc` browses; one that is not a legal folder path answers an empty level, not an error.
 
 **When to use which:** `prefix` to discover structure ("what roots exist? what is under `finance`?"), `q` to find something by name across full paths. Start a naming decision with `prefix: ""`.
 
@@ -325,7 +325,7 @@ Create a new pipeline.
     "type": "object",
     "required": ["name", "display_name", "nodes"],
     "properties": {
-      "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){0,9}$", "description": "Machine name, and a FOLDER PATH: 1-10 lower-case '/'-separated segments (finance/payments/daily_settlement). The root segment says who owns it — list the existing roots with pipelines_list {prefix: ''} and reuse one; ASK before minting a new root. Keep a pipeline under the same prefix as the templates it uses. There is no rename: the name is the pipeline's identity, so choose the folder now."},
+      "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Machine name, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (finance/payments/daily_settlement). A FOLDER IS REQUIRED — a bare 'daily_settlement' is refused with pipeline.validation.name_invalid and details.reason='folder_required'; put experiments under test/. The root segment says who owns it — list the existing roots with pipelines_list {prefix: ''} and reuse one; ASK before minting a new root. Keep a pipeline under the same prefix as the templates it uses. There is no rename: the name is the pipeline's identity, so choose the folder now."},
       "display_name": {"type": "string"},
       "description": {"type": "string"},
       "parameters": {"type": "object", "description": "Declared pipeline parameters (name -> {type, required, default, description}). This is the ONLY parameter declaration point: the full parameter map, defaults applied, is the render context for every template the pipeline references."},
@@ -434,7 +434,7 @@ Create a new template.
     "type": "object",
     "required": ["display_name", "description", "body"],
     "properties": {
-      "id": {"type": "string", "description": "Optional; auto-generated if omitted. Pattern [a-z0-9_.-]+."},
+      "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (nyc/mobility/daily_by_zone.sql). A FOLDER IS REQUIRED — a bare 'daily_by_zone.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
       "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
       "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
@@ -611,7 +611,7 @@ Fetch metadata for a specific execution (no rows).
     "details": {"phase": "connect", "node_id": "stage_daily_trips"},
     "correlation_id": "1b0e6a52-…",
     "node": {"id": "stage_daily_trips", "type": "DQL", "datasource": "sample-trips", "dialect": "POSTGRES",
-             "template": "sample_trips_daily.sql", "template_version": 1},
+             "template": "nyc/mobility/sample_trips_daily.sql", "template_version": 1},
     "sql": "SELECT * FROM trips WHERE borough = :borough",
     "exception": {
       "class": "java.lang.RuntimeException", "message": "Failed to initialize pool",
@@ -1094,6 +1094,8 @@ Returns the pipeline JSON body, content-type `application/json`.
 
 Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`.
 
+**`{id}` contains slashes.** A template id is a folder path ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and, since 077, always at least two segments — so the id is **every segment after `templates`**, not one. `datapipelines://templates/nyc/mobility/daily_by_zone.sql` is the latest version of `nyc/mobility/daily_by_zone.sql`. The `versions/{version}` suffix is recognised by the LAST two segments, never by position, so a folder named `versions` stays a folder: `…/templates/acme/versions/report.sql` is the template `acme/versions/report.sql`, and `…/templates/acme/versions/report.sql/versions/2` is its version 2. (Corrected in 077: the parser had required exactly two segments since 043, so every hierarchical id read as not-found.)
+
 #### 7.2.3 `datapipelines://datasources/{name}`
 
 Returns datasource metadata as JSON, with the password field redacted. Workspace-scoped like every datasource read (§2 principle 6): a name bound to another workspace resolves as not-found; `datapipelines://datasources` lists exactly the pinned workspace's visible set (bound + global).
@@ -1384,3 +1386,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-02 | v1.16 | MCP audit (052) | New **§14 Audit** (normative, ruling R4): `mcp.tool.called` (every call, since the original build) registered + `mcp.tool.write` (NEW — exactly one per catalog-declared mutating call, node runs included, after the tool returns on success and failure; scope refusals excluded because the tool never ran). Emitted at the dispatcher, not per-tool. Mutating is a declared catalog-entry property guarded by `McpToolCatalogBindingTest`. Never SQL/row data/parameter values. §13 gains the mutating-call checklist line. Both events registered in Enums §15 the same commit (docs-audit check C). No tool surface change. |
 | 2026-09-05 | v1.18 | pipeline folders (067) | Additive arguments only — **no new tool names**, the surface stays 21. `pipelines_list` and `templates_list` each gain **`prefix`**: absent = the flat listing (unchanged); present (`""` = the root) = ONE level of the folder tree, returning `{prefix, folders[{path, segment, *_count}], pipelines|templates[], total, has_more}`. `q`/`owner`/`datasource` are ignored while browsing; an illegal prefix answers an empty level, not an error. This closes a real gap for templates, which have had path ids since 043 and no way to browse a folder over MCP (verified 2026-09-04). `pipelines_create`/`pipelines_update` `name` patterns widen to the path grammar — rendered from `PipelineNameGrammar.pattern` itself, so the schema and the server rule cannot drift — with a description telling the agent to list the roots first and ask before minting one. §6.2.1 and §6.2.6 document browse-vs-search. |
 | 2026-09-05 | v1.19 | published endpoints (074) | Tool surface 24 → **28**: `endpoints_create` / `endpoints_list` / `endpoints_get` / `endpoints_delete` (§6.2) — publish a released, side-effect-free pipeline as `GET /api/x/…` and bind endpoint-kind keys to it. `create`/`delete` are `author`, the reads `read` (auth.md §7.6). **An endpoint-kind key cannot reach `/mcp` at all** (refused at `McpAuthFilter`; `/mcp` is a servlet outside `ScopeInterceptor`'s reach — security pass). No `api_keys_create` tool: a credential must not transit an agent's transcript. |
+| 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |

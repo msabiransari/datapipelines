@@ -41,9 +41,9 @@ create.
 - `{"target": "datasource", "datasource": "...", "table": "...", "mode": "replace"|"append"}`
   — write-back to an external table (must exist, or be created by a preceding DDL node)
 
-**Template** — Freemarker SQL: `id` (e.g. `fetch_orders.sql`, or a path like
-`acme/finance/monthly_revenue` — 1–10 `/`-separated segments, each starting `[a-z0-9]`,
-≤ 64 chars per segment, ≤ 200 total), `dialect` (one of
+**Template** — Freemarker SQL: `id` — always a folder path, e.g.
+`nyc/mobility/daily_by_zone.sql` (2–10 `/`-separated segments, each starting `[a-z0-9]`,
+≤ 64 chars per segment, ≤ 200 total; a bare `fetch_orders.sql` is refused), `dialect` (one of
 `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`), `display_name`,
 `description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,
 `is_library`. **There is no params_schema field** — the variables a body may reference
@@ -87,10 +87,20 @@ dialect-specific; a node's template dialect must match what its `source` can exe
 Pipelines and templates share one naming grammar and one organising convention. The name IS
 the path; there is no folder object anywhere.
 
-**Grammar (both kinds).** 1–10 `/`-separated segments, each starting `[a-z0-9]` and
+**Grammar (both kinds).** 2–10 `/`-separated segments, each starting `[a-z0-9]` and
 continuing `[a-z0-9_.-]`, ≤ 64 chars per segment, ≤ 200 total. Lower-case only, no `@`, no
-backslash, no `.`/`..` segments, no leading/trailing/double slash. A single-segment name
-(`active_users`) is a valid path that sits at the root.
+backslash, no `.`/`..` segments, no leading/trailing/double slash.
+
+**A folder is REQUIRED.** `active_users` is refused; `test/active_users` is accepted. The
+refusal is `pipeline.validation.name_invalid` / `template.validation.id_invalid` with
+`details.reason: "folder_required"` — that is how you tell "you forgot the folder" from "you
+used a bad character" (`reason: "grammar"`). The root holds folders only, and there is no
+rename (§4.5), so a name minted at the root would be stuck there forever — which is the whole
+reason the rule exists.
+
+**`test/` is the scratch folder.** Experiments, spikes and throwaways go to `test/…` — never
+to a new root and never (it is impossible now) to the root itself. No folder is reserved and
+none is auto-created: a folder exists exactly when something is named under it.
 
 **Workspace = who may see and run. Root segment = who owns.** The workspace is the isolation
 boundary — membership decides who can read and execute. The root segment is an organising
@@ -102,6 +112,7 @@ claim, not a permission: putting a pipeline under `finance/` grants nobody anyth
   prefix query shows an area's work whichever kind you browse.
 - **Shared macros live under `<owner>/lib/`** (`nyc/lib/metrics.sql`), beside their owner,
   not at the root.
+- **Scratch lives under `test/`** (`test/scratch`, `test/od_matrix_spike`).
 
 **List the roots FIRST, and ask before minting a new one.** Before you create anything:
 
@@ -138,6 +149,8 @@ root, so you ask.
 - **Not a rename mechanism.** A name is the asset's identity — child references
   (`{name, version}`), pins, execution history and promotion all key on it. **Choose the
   folder at creation**; there is no move, for either kind.
+- **Not optional.** Every name has one. There is no root-level pipeline or template and no
+  way to create one.
 - **Not a schema dimension.** No folder column, no folder ids. A folder exists exactly as
   long as something is named under it, and disappears with the last thing in it.
 
@@ -291,7 +304,7 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
     "description": "Fetch active users",
     "type": "DQL",
     "source": "pg-local",
-    "template": {"id": "active_users.sql", "version": 1},
+    "template": {"id": "acme/reporting/active_users.sql", "version": 1},
     "depends_on": []
   }]
 }

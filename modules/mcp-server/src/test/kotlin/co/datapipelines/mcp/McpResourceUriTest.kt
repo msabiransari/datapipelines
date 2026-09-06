@@ -26,12 +26,12 @@ class McpResourceUriTest {
                     McpResourceUri.PipelineParameters("datapipelines://pipelines/$id/parameters", id)
             },
             {
-                McpResourceUri.parse("datapipelines://templates/revenue.sql") shouldBe
-                    McpResourceUri.TemplateLatest("datapipelines://templates/revenue.sql", "revenue.sql")
+                McpResourceUri.parse("datapipelines://templates/test/revenue.sql") shouldBe
+                    McpResourceUri.TemplateLatest("datapipelines://templates/test/revenue.sql", "test/revenue.sql")
             },
             {
-                McpResourceUri.parse("datapipelines://templates/revenue.sql/versions/2") shouldBe
-                    McpResourceUri.TemplateVersion("datapipelines://templates/revenue.sql/versions/2", "revenue.sql", 2)
+                McpResourceUri.parse("datapipelines://templates/test/revenue.sql/versions/2") shouldBe
+                    McpResourceUri.TemplateVersion("datapipelines://templates/test/revenue.sql/versions/2", "test/revenue.sql", 2)
             },
             { McpResourceUri.parse("datapipelines://datasources") shouldBe McpResourceUri.DatasourceList("datapipelines://datasources") },
             {
@@ -45,6 +45,49 @@ class McpResourceUriTest {
             {
                 McpResourceUri.parse("datapipelines://executions/$id/events") shouldBe
                     McpResourceUri.ExecutionEvents("datapipelines://executions/$id/events", id)
+            },
+        )
+    }
+
+    @Test
+    fun `077 - a template id with SLASHES parses, at every depth, with or without a version`() {
+        // The bug 077 surfaced: `templateUri` read the id as `segments[1]` and required exactly
+        // two segments, so EVERY hierarchical name — legal since 043, universal since 077 —
+        // parsed to null and the resource read answered "not found". Nobody noticed because
+        // every name anyone addressed this way happened to be flat.
+        assertAll(
+            {
+                McpResourceUri.parse("datapipelines://templates/nyc/mobility/daily_by_zone.sql") shouldBe
+                    McpResourceUri.TemplateLatest(
+                        "datapipelines://templates/nyc/mobility/daily_by_zone.sql",
+                        "nyc/mobility/daily_by_zone.sql",
+                    )
+            },
+            {
+                McpResourceUri.parse("datapipelines://templates/nyc/mobility/daily_by_zone.sql/versions/3") shouldBe
+                    McpResourceUri.TemplateVersion(
+                        "datapipelines://templates/nyc/mobility/daily_by_zone.sql/versions/3",
+                        "nyc/mobility/daily_by_zone.sql",
+                        3,
+                    )
+            },
+            // A folder legitimately named `versions` is a folder: only a TRAILING
+            // `versions/<integer>` is a version selector, which is why the suffix is matched
+            // from the end rather than at a fixed index.
+            {
+                McpResourceUri.parse("datapipelines://templates/acme/versions/report.sql") shouldBe
+                    McpResourceUri.TemplateLatest(
+                        "datapipelines://templates/acme/versions/report.sql",
+                        "acme/versions/report.sql",
+                    )
+            },
+            {
+                McpResourceUri.parse("datapipelines://templates/acme/versions/report.sql/versions/2") shouldBe
+                    McpResourceUri.TemplateVersion(
+                        "datapipelines://templates/acme/versions/report.sql/versions/2",
+                        "acme/versions/report.sql",
+                        2,
+                    )
             },
         )
     }

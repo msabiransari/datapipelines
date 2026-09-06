@@ -20,13 +20,13 @@ import java.io.IOException
  * be rendered at all would collapse.
  */
 class RegistryTemplateLoaderTest {
-    private val library = TemplateFixtures.version("lib.sql", isLibrary = true, body = "<#macro m>ok</#macro>")
+    private val library = TemplateFixtures.version("test/lib.sql", isLibrary = true, body = "<#macro m>ok</#macro>")
     private val registry = InMemoryTemplateRegistry(listOf(library))
     private val loader = RegistryTemplateLoader(registry)
 
     @Test
     fun `resolves an exact id@version key`() {
-        loader.findTemplateSource("lib.sql@1").shouldNotBeNull()
+        loader.findTemplateSource("test/lib.sql@1").shouldNotBeNull()
     }
 
     @Test
@@ -39,25 +39,25 @@ class RegistryTemplateLoaderTest {
     @Test
     fun `a version that is not an integer never reaches the registry`() {
         // A non-numeric version is rejected by parsing, not by lookup — so a name like
-        // "lib.sql@1 OR 1=1" cannot become a registry query at all.
-        loader.findTemplateSource("lib.sql@1x").shouldBeNull()
-        loader.findTemplateSource("lib.sql@-1").shouldBeNull()
+        // "test/lib.sql@1 OR 1=1" cannot become a registry query at all.
+        loader.findTemplateSource("test/lib.sql@1x").shouldBeNull()
+        loader.findTemplateSource("test/lib.sql@-1").shouldBeNull()
     }
 
     @Test
     fun `synthesizes the import prologue ahead of the stored body`() {
         val main =
             TemplateFixtures.version(
-                "main.sql",
-                imports = listOf(TemplateImport("lib.sql", 1, "d")),
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/lib.sql", 1, "d")),
                 body = "SELECT 1",
             )
-        val source = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main))).findTemplateSource("main.sql@1")
+        val source = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main))).findTemplateSource("test/main.sql@1")
         val text = readerText(source)
 
         // §4.4: the prologue emits root-based names so Freemarker's relative resolution can
         // never fire for a hierarchical importer.
-        text shouldStartWith "<#import \"/lib.sql@1\" as d>"
+        text shouldStartWith "<#import \"/test/lib.sql@1\" as d>"
         text shouldContain "SELECT 1"
     }
 
@@ -65,13 +65,13 @@ class RegistryTemplateLoaderTest {
     fun `fails closed rather than synthesizing an unsafe prologue`() {
         val main =
             TemplateFixtures.version(
-                "main.sql",
-                imports = listOf(TemplateImport("lib.sql", 1, "d>\${\"PWNED\"}<#assign z=1")),
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/lib.sql", 1, "d>\${\"PWNED\"}<#assign z=1")),
                 body = "SELECT 1",
             )
         val unsafeLoader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main)))
 
-        val thrown = shouldThrow<IOException> { unsafeLoader.findTemplateSource("main.sql@1") }
+        val thrown = shouldThrow<IOException> { unsafeLoader.findTemplateSource("test/main.sql@1") }
 
         withClue("the refusal must not echo the attacker's alias back into logs") {
             (thrown.message ?: "") shouldNotContain "PWNED"
@@ -83,15 +83,15 @@ class RegistryTemplateLoaderTest {
     private companion object {
         val NON_KEYS =
             listOf(
-                "lib.sql", // unversioned
+                "test/lib.sql", // unversioned
                 "@1", // no id
-                "lib.sql@", // no version
+                "test/lib.sql@", // no version
                 "/etc/passwd",
                 "../lib.sql@1",
                 "file:///etc/passwd",
                 "classpath:/lib.sql@1",
-                "lib.sql@1@2",
-                "lib.sql@999",
+                "test/lib.sql@1@2",
+                "test/lib.sql@999",
                 "",
             )
     }

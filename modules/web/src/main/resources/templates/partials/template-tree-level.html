@@ -35,11 +35,15 @@
      th:attr="hx-swap-oob=${oob}, role=${#strings.isEmpty(prefix)} ? null : 'group'">
 
   <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
-       child, because its folder was derived from that child (§3.1). -->
+       child, because its folder was derived from that child (§3.1). 077: a template name
+       carries a folder, so this says where to put one rather than implying a bare name is a
+       choice the form will accept. -->
   <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates yet</p>
-      <p class="ds-empty-description">Create your first template to get started.</p>
+      <p class="ds-empty-description">
+        Author one through your agent under a folder, e.g. <code>test/&hellip;</code>
+      </p>
     </div>
   </th:block>
 
@@ -86,9 +90,13 @@
               hx-sync="#template-detail:replace"
               hx-indicator="#template-detail-spinner">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
-             (§9.4's rule for every surface that shows a template name). -->
+             (§9.4's rule for every surface that shows a template name).
+
+             There is no "at the root" branch here any more (077): §4.1 requires a folder, so
+             a leaf always sits under a non-empty prefix and the substring is always the right
+             label. TemplateBrowseModel does not even query the root's leaves. -->
         <span class="tpl-label"
-              th:text="${#strings.isEmpty(prefix)} ? ${t.id} : ${t.id.substring(prefix.length() + 1)}"
+              th:text="${t.id.substring(prefix.length() + 1)}"
               th:title="${t.id}">monthly_revenue</span>
         <span class="ds-badge ds-badge-default" th:text="${t.type.wire}">sql</span>
         <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>

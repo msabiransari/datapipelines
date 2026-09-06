@@ -31,12 +31,12 @@ class TemplateWireShapeTest {
         val draft = TemplateDeserializer().readOrThrow(SPEC_JSON)
 
         draft.schemaVersion shouldBe 1
-        draft.id shouldBe "fetch_orders.sql"
+        draft.id shouldBe "test/fetch_orders.sql"
         draft.engine shouldBe "freemarker"
         draft.dialect shouldBe Dialect.POSTGRES
         draft.displayName shouldBe "Fetch Orders in Date Range"
         draft.isLibrary shouldBe false
-        draft.imports shouldContainExactly listOf(TemplateImport("lib_date_filters.sql", 1, "dates"))
+        draft.imports shouldContainExactly listOf(TemplateImport("test/lib_date_filters.sql", 1, "dates"))
     }
 
     private fun serializedKeys(): Set<String> =
@@ -158,14 +158,14 @@ class TemplateWireShapeTest {
             """
             {
               "schema_version": 1,
-              "id": "fetch_orders.sql",
+              "id": "test/fetch_orders.sql",
               "version": 2,
               "engine": "freemarker",
               "dialect": "POSTGRES",
               "display_name": "Fetch Orders in Date Range",
               "description": "Pulls orders between start_date and end_date (DATE), with an include_cancelled (BOOLEAN) switch.",
               "imports": [
-                {"id": "lib_date_filters.sql", "version": 1, "alias": "dates"}
+                {"id": "test/lib_date_filters.sql", "version": 1, "alias": "dates"}
               ],
               "body": "SELECT order_id FROM orders",
               "created_at": "2026-08-01T10:00:00Z",
@@ -178,12 +178,12 @@ class TemplateWireShapeTest {
 
         val TEMPLATE =
             Template(
-                id = "fetch_orders.sql",
+                id = "test/fetch_orders.sql",
                 version = 2,
                 dialect = Dialect.POSTGRES,
                 displayName = "Fetch Orders in Date Range",
                 description = "Pulls orders in a range.",
-                imports = listOf(TemplateImport("lib_date_filters.sql", 1, "dates")),
+                imports = listOf(TemplateImport("test/lib_date_filters.sql", 1, "dates")),
                 body = "SELECT 1",
                 isLibrary = false,
                 createdAt = Instant.parse("2026-08-01T10:00:00Z"),

@@ -61,18 +61,18 @@ class PipelineShapesE2eTest {
 
     private fun createDagTemplates() {
         createTemplate(
-            "dag_step_a.sql",
+            "test/dag_step_a.sql",
             "POSTGRES",
             "Step A",
             "SELECT id, email, name, created_at FROM users WHERE is_active = true ORDER BY created_at DESC",
         )
-        createTemplate("dag_step_b.sql", "H2", "Step B", "SELECT * FROM step_a")
-        createTemplate("dag_step_c.sql", "H2", "Step C", "SELECT * FROM step_b")
+        createTemplate("test/dag_step_b.sql", "H2", "Step B", "SELECT * FROM step_a")
+        createTemplate("test/dag_step_c.sql", "H2", "Step C", "SELECT * FROM step_b")
     }
 
     private fun createDagPipeline(): String =
         createPipeline(
-            "dag_chain",
+            "test/dag_chain",
             "DAG Chain",
             listOf(
                 mapOf(
@@ -80,7 +80,7 @@ class PipelineShapesE2eTest {
                     "description" to "Fetch from source",
                     "type" to "DQL",
                     "source" to "pg-local",
-                    "template" to mapOf("id" to "dag_step_a.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/dag_step_a.sql", "version" to 1),
                     "output" to mapOf("target" to "tempdb", "table" to "step_a"),
                     "depends_on" to emptyList<String>(),
                 ),
@@ -89,7 +89,7 @@ class PipelineShapesE2eTest {
                     "description" to "Read from step_a",
                     "type" to "DQL",
                     "source" to "tempdb",
-                    "template" to mapOf("id" to "dag_step_b.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/dag_step_b.sql", "version" to 1),
                     "output" to mapOf("target" to "tempdb", "table" to "step_b"),
                     "depends_on" to listOf("step_a"),
                 ),
@@ -98,7 +98,7 @@ class PipelineShapesE2eTest {
                     "description" to "Caller — read from step_b",
                     "type" to "DQL",
                     "source" to "tempdb",
-                    "template" to mapOf("id" to "dag_step_c.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/dag_step_c.sql", "version" to 1),
                     "output" to mapOf("target" to "caller"),
                     "depends_on" to listOf("step_b"),
                 ),
@@ -146,7 +146,7 @@ class PipelineShapesE2eTest {
         }
 
         createTemplate(
-            "wb_insert.sql",
+            "test/wb_insert.sql",
             "POSTGRES",
             "Writeback Insert",
             "INSERT INTO writeback_target (name, value) VALUES ('test', 42)",
@@ -154,7 +154,7 @@ class PipelineShapesE2eTest {
 
         val pipelineId =
             createPipeline(
-                "writeback",
+                "test/writeback",
                 "Writeback Pipeline",
                 listOf(
                     mapOf(
@@ -162,7 +162,7 @@ class PipelineShapesE2eTest {
                         "description" to "DML insert into writeback table",
                         "type" to "DML",
                         "source" to "pg-local",
-                        "template" to mapOf("id" to "wb_insert.sql", "version" to 1),
+                        "template" to mapOf("id" to "test/wb_insert.sql", "version" to 1),
                         "depends_on" to emptyList<String>(),
                     ),
                 ),
@@ -213,7 +213,7 @@ class PipelineShapesE2eTest {
         seedSourceUsers()
 
         createTemplate(
-            "cancel_slow.sql",
+            "test/cancel_slow.sql",
             "POSTGRES",
             "Slow Query",
             "SELECT id, email, name, created_at FROM users, pg_sleep($CANCEL_SLEEP_SECONDS)" +
@@ -222,7 +222,7 @@ class PipelineShapesE2eTest {
 
         val pipelineId =
             createPipeline(
-                "cancel_test",
+                "test/cancel_test",
                 "Cancel Test",
                 listOf(
                     mapOf(
@@ -230,7 +230,7 @@ class PipelineShapesE2eTest {
                         "description" to "Slow caller node",
                         "type" to "DQL",
                         "source" to "pg-local",
-                        "template" to mapOf("id" to "cancel_slow.sql", "version" to 1),
+                        "template" to mapOf("id" to "test/cancel_slow.sql", "version" to 1),
                         "output" to mapOf("target" to "caller"),
                         "depends_on" to emptyList<String>(),
                     ),
@@ -271,7 +271,7 @@ class PipelineShapesE2eTest {
         seedSourceUsers()
 
         createTemplate(
-            "scope_test.sql",
+            "test/scope_test.sql",
             "POSTGRES",
             "Scope Test Query",
             "SELECT id, email, name, created_at FROM users WHERE is_active = true ORDER BY created_at DESC",
@@ -279,7 +279,7 @@ class PipelineShapesE2eTest {
 
         val pipelineId =
             createPipeline(
-                "scope_test",
+                "test/scope_test",
                 "Scope Test Pipeline",
                 listOf(
                     mapOf(
@@ -287,7 +287,7 @@ class PipelineShapesE2eTest {
                         "description" to "Fetch active users",
                         "type" to "DQL",
                         "source" to "pg-local",
-                        "template" to mapOf("id" to "scope_test.sql", "version" to 1),
+                        "template" to mapOf("id" to "test/scope_test.sql", "version" to 1),
                         "output" to mapOf("target" to "caller"),
                         "depends_on" to emptyList<String>(),
                     ),

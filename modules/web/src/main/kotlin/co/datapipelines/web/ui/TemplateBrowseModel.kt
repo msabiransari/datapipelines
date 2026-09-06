@@ -46,6 +46,9 @@ class TemplateBrowseModel(
      * paged: they are a `GROUP BY` over one path segment, capped at
      * [TemplateRepository.MAX_PAGE_LIMIT] with an honest overflow flag rather than a silent
      * cut.
+     *
+     * **The ROOT level has no leaves at all** (§4.1, 077): a template name carries a folder,
+     * so nothing sits directly at the root and the leaf query is not issued there.
      */
     fun fillLevel(
         model: Model,
@@ -61,13 +64,23 @@ class TemplateBrowseModel(
         // path cannot name a real folder either, and letting an arbitrary-length string
         // through would turn a level request into an arbitrary-length pattern match. The
         // grammar it is checked against is the SERVER's own (§4.1), not a second copy.
-        if (!prefix.isNullOrEmpty() && !TemplateNameGrammar.matches(prefix)) {
+        if (!prefix.isNullOrEmpty() && !TemplateNameGrammar.matchesPrefix(prefix)) {
             return emptyLevel(model, prefix)
         }
         val folderProbe =
             templates.listChildFolders(workspaceId, prefix, dialect, type, limit = FOLDER_LIMIT + 1)
+        // THE ROOT HOLDS FOLDERS ONLY (§4.1, 077). A template name needs a folder, so the root
+        // level has no direct children to fetch — the query is skipped rather than run and
+        // discarded, and the fragment's "leaves at the root" branch is gone with it. The
+        // deploy gate `V12__folder_required.sql` is what makes this true of stored data too,
+        // so this is a structural consequence of the grammar, not a filter hiding rows.
+        val root = prefix.isNullOrEmpty()
         val leafProbe =
-            templates.listChildTemplates(workspaceId, prefix, dialect, type, offset = page, limit = PAGE_SIZE + 1)
+            if (root) {
+                emptyList()
+            } else {
+                templates.listChildTemplates(workspaceId, prefix, dialect, type, offset = page, limit = PAGE_SIZE + 1)
+            }
         val leaves = leafProbe.take(PAGE_SIZE)
         model.addAttribute("searching", false)
         model.addAttribute("prefix", prefix ?: "")
@@ -78,7 +91,7 @@ class TemplateBrowseModel(
         model.addAttribute("drafts", templates.findDrafts(workspaceId, leaves.map { it.id }))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", leafProbe.size > PAGE_SIZE)
-        model.addAttribute("total", templates.countChildTemplates(workspaceId, prefix, dialect, type))
+        model.addAttribute("total", if (root) 0 else templates.countChildTemplates(workspaceId, prefix, dialect, type))
         return LEVEL_VIEW
     }
 

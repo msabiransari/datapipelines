@@ -26,7 +26,7 @@ internal object Fixtures {
         id: String = "fetch_orders",
         type: NodeType = NodeType.DQL,
         source: String = "pg-prod",
-        template: TemplateRef = TemplateRef("fetch_orders.sql", 1),
+        template: TemplateRef = TemplateRef("test/fetch_orders.sql", 1),
         output: NodeOutput? = NodeOutput.Caller,
         dependsOn: List<String> = emptyList(),
     ): Node =
@@ -41,7 +41,7 @@ internal object Fixtures {
         )
 
     fun pipeline(
-        name: String = "monthly_revenue",
+        name: String = "test/monthly_revenue",
         nodes: List<Node> = listOf(node()),
         parameters: Map<String, Parameter> = emptyMap(),
         settings: PipelineSettings = PipelineSettings(),

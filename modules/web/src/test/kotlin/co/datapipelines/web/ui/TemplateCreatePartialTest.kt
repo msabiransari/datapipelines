@@ -152,8 +152,10 @@ class TemplateCreatePartialTest {
         val entity = response as ResponseEntity<*>
         entity.statusCode shouldBe HttpStatus.BAD_REQUEST
         entity.body.toString() shouldContain "Invalid template id."
-        // §9.5: the server's refusal is the one that counts, and it says what the rule is.
-        entity.body.toString() shouldContain "at most 10 segments"
+        // §9.5: the server's refusal is the one that counts, and it says what the rule is —
+        // including, since 077, that a folder is not optional.
+        entity.body.toString() shouldContain "2 to 10 lower-case segments"
+        entity.body.toString() shouldContain "A folder is required"
     }
 
     @Test

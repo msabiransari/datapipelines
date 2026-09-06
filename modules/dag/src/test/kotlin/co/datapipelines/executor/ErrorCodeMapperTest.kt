@@ -41,8 +41,8 @@ class ErrorCodeMapperTest {
     @Test
     fun `the template engine's own two codes survive the mapper`() {
         val notFound =
-            TemplateRenderException("gone", TemplateRef("t", 1), PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND)
-        val renderFailed = TemplateRenderException("undefined variable: x", TemplateRef("t", 1))
+            TemplateRenderException("gone", TemplateRef("test/t", 1), PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND)
+        val renderFailed = TemplateRenderException("undefined variable: x", TemplateRef("test/t", 1))
 
         ErrorCodeMapper.map(notFound, NodePhase.RENDER, "n").code shouldBe PipelineErrorCodes.Node.TEMPLATE_NOT_FOUND
         ErrorCodeMapper.map(renderFailed, NodePhase.RENDER, "n").code shouldBe PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED

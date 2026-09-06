@@ -114,7 +114,7 @@ class PipelineSerializerTest {
                 template = TemplateRef(),
                 output = NodeOutput.Tempdb("stg_revenue"),
                 dependsOn = emptyList(),
-                pipeline = PipelineNodeRef("monthly_revenue", 4),
+                pipeline = PipelineNodeRef("test/monthly_revenue", 4),
                 parameters =
                     mapOf(
                         "start_date" to Fixtures.json("\"\${start_date}\""),
@@ -129,7 +129,7 @@ class PipelineSerializerTest {
         // round trip that would pass just as happily if both ends agreed on the wrong spelling.
         val serialized = Fixtures.json(written).path("nodes").single()
         serialized.path("type").asText() shouldBe "PIPELINE"
-        serialized.path("pipeline").path("name").asText() shouldBe "monthly_revenue"
+        serialized.path("pipeline").path("name").asText() shouldBe "test/monthly_revenue"
         serialized.path("pipeline").path("version").asInt() shouldBe 4
         serialized.path("parameters").path("region").asText() shouldBe "EU"
         PipelineDeserializer().readOrThrow(written) shouldBe pipeline

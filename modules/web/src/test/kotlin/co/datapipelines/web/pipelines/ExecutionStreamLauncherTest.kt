@@ -122,7 +122,7 @@ class ExecutionStreamLauncherTest {
     private fun pipeline() =
         Pipeline(
             schemaVersion = 1,
-            name = "p",
+            name = "test/p",
             displayName = "P",
             description = "",
             settings = PipelineSettings(),

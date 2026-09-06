@@ -67,7 +67,7 @@ class PipelineCompositionE2eTest {
         seedH2()
         registerH2Datasource()
         createTemplate(
-            "comp_users.sql",
+            "test/comp_users.sql",
             "H2",
             "Composition Users",
             "SELECT id, email FROM comp_users ORDER BY id",
@@ -75,7 +75,7 @@ class PipelineCompositionE2eTest {
 
         // Pipeline A (child): one DQL caller node over the H2 datasource.
         createPipeline(
-            "comp_leaf",
+            "test/comp_leaf",
             "Composition Leaf",
             listOf(
                 mapOf(
@@ -83,7 +83,7 @@ class PipelineCompositionE2eTest {
                     "description" to "Fetch users from H2",
                     "type" to "DQL",
                     "source" to H2_DATASOURCE,
-                    "template" to mapOf("id" to "comp_users.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/comp_users.sql", "version" to 1),
                     "output" to mapOf("target" to "caller"),
                     "depends_on" to emptyList<String>(),
                 ),
@@ -93,9 +93,9 @@ class PipelineCompositionE2eTest {
         // Pipeline B (parent): one PIPELINE node pinning A by name+version, result to caller.
         val parentId =
             createPipeline(
-                "comp_parent",
+                "test/comp_parent",
                 "Composition Parent",
-                listOf(pipelineNode("run_leaf", "comp_leaf", 1)),
+                listOf(pipelineNode("run_leaf", "test/comp_leaf", 1)),
             )
 
         val correlationId = UUID.randomUUID().toString()
@@ -136,15 +136,15 @@ class PipelineCompositionE2eTest {
     fun `grandchild depth-3 chain succeeds with per-generation lineage`() {
         // comp_mid → comp_leaf (depth 2), comp_root → comp_mid (depth 3).
         createPipeline(
-            "comp_mid",
+            "test/comp_mid",
             "Composition Mid",
-            listOf(pipelineNode("run_leaf", "comp_leaf", 1)),
+            listOf(pipelineNode("run_leaf", "test/comp_leaf", 1)),
         )
         val rootId =
             createPipeline(
-                "comp_root",
+                "test/comp_root",
                 "Composition Root",
-                listOf(pipelineNode("run_mid", "comp_mid", 1)),
+                listOf(pipelineNode("run_mid", "test/comp_mid", 1)),
             )
 
         val events =
@@ -231,9 +231,9 @@ class PipelineCompositionE2eTest {
     @Test
     @Order(4)
     fun `a child killed by the parent's timeout ends terminal in pipeline_executions, not RUNNING`() {
-        createTemplate("comp_slow.sql", "H2", "Composition Slow", SLOW_H2_SQL)
+        createTemplate("test/comp_slow.sql", "H2", "Composition Slow", SLOW_H2_SQL)
         createPipeline(
-            "comp_slow_leaf",
+            "test/comp_slow_leaf",
             "Composition Slow Leaf",
             listOf(
                 mapOf(
@@ -241,7 +241,7 @@ class PipelineCompositionE2eTest {
                     "description" to "A query H2 really iterates, so the parent's deadline lands mid-flight",
                     "type" to "DQL",
                     "source" to H2_DATASOURCE,
-                    "template" to mapOf("id" to "comp_slow.sql", "version" to 1),
+                    "template" to mapOf("id" to "test/comp_slow.sql", "version" to 1),
                     "output" to mapOf("target" to "caller"),
                     "depends_on" to emptyList<String>(),
                 ),
@@ -249,9 +249,9 @@ class PipelineCompositionE2eTest {
         )
         val parentId =
             createPipeline(
-                "comp_slow_parent",
+                "test/comp_slow_parent",
                 "Composition Slow Parent",
-                listOf(pipelineNode("run_slow_leaf", "comp_slow_leaf", 1)),
+                listOf(pipelineNode("run_slow_leaf", "test/comp_slow_leaf", 1)),
             )
 
         val events =
@@ -284,10 +284,10 @@ class PipelineCompositionE2eTest {
     fun `a depth-6 chain is refused at save with composition_too_deep`() {
         // comp_root is depth 3; comp_d4 → depth 4, comp_d5 → depth 5 (the configured max),
         // comp_d6 → depth 6 must fail validation at save (§12.9, static reference-tree walk).
-        createPipeline("comp_d4", "Composition Depth 4", listOf(pipelineNode("run_root", "comp_root", 1)))
-        createPipeline("comp_d5", "Composition Depth 5", listOf(pipelineNode("run_d4", "comp_d4", 1)))
+        createPipeline("test/comp_d4", "Composition Depth 4", listOf(pipelineNode("run_root", "test/comp_root", 1)))
+        createPipeline("test/comp_d5", "Composition Depth 5", listOf(pipelineNode("run_d4", "test/comp_d4", 1)))
 
-        postPipeline("comp_d6", "Composition Depth 6", listOf(pipelineNode("run_d5", "comp_d5", 1)))
+        postPipeline("comp_d6", "Composition Depth 6", listOf(pipelineNode("run_d5", "test/comp_d5", 1)))
             .then()
             .statusCode(400)
             .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.composition_too_deep"))

@@ -53,8 +53,8 @@ class TypedTemplatesMigrationTest {
             mapOf("id" to ACTOR_ID),
         )
         // Two pre-V8 templates — one to observe the backfill, one to drive the no-op-PUT gate.
-        insertPreV8ReleasedTemplate("legacy_orders.sql", "SELECT 1")
-        insertPreV8ReleasedTemplate("pre_v8_report.sql", "SELECT 42 AS answer")
+        insertPreV8ReleasedTemplate("test/legacy_orders.sql", "SELECT 1")
+        insertPreV8ReleasedTemplate("test/pre_v8_report.sql", "SELECT 42 AS answer")
         // V8, applied once, exactly as Flyway would.
         jdbc.jdbcTemplate.execute(v8())
     }
@@ -103,19 +103,19 @@ class TypedTemplatesMigrationTest {
     @Test
     fun `a pre-V8 release still no-ops a byte-identical PUT after V8`() {
         val repository = TemplateRepository(jdbc)
-        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "pre_v8_report.sql"))
+        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "test/pre_v8_report.sql"))
         stored.type shouldBe co.datapipelines.pipeline.TemplateType.SQL
 
-        val identical = TemplateFixtures.draft(id = "pre_v8_report.sql", body = "SELECT 42 AS answer")
+        val identical = TemplateFixtures.draft(id = "test/pre_v8_report.sql", body = "SELECT 42 AS answer")
         val outcome =
-            repository.createDraft(WORKSPACE_ID, "pre_v8_report.sql", identical, stored.bodyHash, ACTOR_ID)
+            repository.createDraft(WORKSPACE_ID, "test/pre_v8_report.sql", identical, stored.bodyHash, ACTOR_ID)
 
         assertSoftly {
             // The no-op signal: the returned detail is the current RELEASED version, not a draft.
             outcome?.status shouldBe PipelineVersionStatus.RELEASED
             outcome?.version shouldBe stored.version
             // And no draft row was created — the failure mode §5.2 forbids.
-            draftCount("pre_v8_report.sql") shouldBe 0
+            draftCount("test/pre_v8_report.sql") shouldBe 0
         }
     }
 
@@ -123,16 +123,16 @@ class TypedTemplatesMigrationTest {
     @Test
     fun `a changed PUT still creates a draft after V8`() {
         val repository = TemplateRepository(jdbc)
-        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "legacy_orders.sql"))
-        val changed = TemplateFixtures.draft(id = "legacy_orders.sql", body = "SELECT 2")
+        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "test/legacy_orders.sql"))
+        val changed = TemplateFixtures.draft(id = "test/legacy_orders.sql", body = "SELECT 2")
         val outcome =
-            repository.createDraft(WORKSPACE_ID, "legacy_orders.sql", changed, stored.bodyHash, ACTOR_ID)
+            repository.createDraft(WORKSPACE_ID, "test/legacy_orders.sql", changed, stored.bodyHash, ACTOR_ID)
 
         outcome?.status shouldBe PipelineVersionStatus.DRAFT
-        draftCount("legacy_orders.sql") shouldBe 1
+        draftCount("test/legacy_orders.sql") shouldBe 1
         jdbc.update(
             "DELETE FROM template_versions v USING templates t" +
-                " WHERE t.id = v.template_id AND t.name = 'legacy_orders.sql' AND v.status = 'DRAFT'",
+                " WHERE t.id = v.template_id AND t.name = 'test/legacy_orders.sql' AND v.status = 'DRAFT'",
             emptyMap<String, Any>(),
         )
     }
@@ -142,19 +142,19 @@ class TypedTemplatesMigrationTest {
     fun `a PUT carrying a different type is refused with type_immutable`() {
         val repository = TemplateRepository(jdbc)
         val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
-        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "legacy_orders.sql"))
+        val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "test/legacy_orders.sql"))
         val offending =
             TemplateFixtures
-                .draft(id = "legacy_orders.sql", body = "SELECT 3")
+                .draft(id = "test/legacy_orders.sql", body = "SELECT 3")
                 .copy(type = co.datapipelines.pipeline.TemplateType.HTML)
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                service.write(WORKSPACE_ID, "legacy_orders.sql", offending, stored.bodyHash, ACTOR_ID)
+                service.write(WORKSPACE_ID, "test/legacy_orders.sql", offending, stored.bodyHash, ACTOR_ID)
             }
         thrown.code shouldBe PipelineErrorCodes.Template.TYPE_IMMUTABLE
         thrown.details["established_type"] shouldBe "sql"
-        draftCount("legacy_orders.sql") shouldBe 0
+        draftCount("test/legacy_orders.sql") shouldBe 0
     }
 
     // ---------------------------------------------------------------------------------------------

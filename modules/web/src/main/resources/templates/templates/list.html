@@ -106,6 +106,12 @@
           <input type="text" name="name" class="ds-input" style="width:100%"
                  placeholder="acme/finance/monthly_revenue" required
                  th:attr="pattern=${namePattern}, maxlength=${nameMaxLength}, title=${nameHint}">
+          <!-- 077: the folder is mandatory, and the `pattern` above already refuses a bare
+               name because it is the server's own grammar. This line is what tells someone
+               WHY the field went red before they have to read the full rule below it. -->
+          <p style="color:var(--text-muted);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">
+            folder/name &mdash; e.g. <code>test/scratch</code>
+          </p>
           <p style="color:var(--text-muted);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0"
              th:text="${nameHint}">grammar</p>
         </div>

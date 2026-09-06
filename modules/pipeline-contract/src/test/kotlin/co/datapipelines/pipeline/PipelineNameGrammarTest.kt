@@ -13,18 +13,20 @@ import java.util.UUID
  * The §3.2 pipeline name grammar (067) — the rule itself, its boundaries, what it deliberately
  * does NOT widen, and the containment claim the round rests on.
  *
- * The round's premise is "every legal old name is a legal one-segment new name, so no
- * migration and no abort gate". That premise is **measured here, not asserted**: the old rule
- * is a finite regex, so [`old-legal names are new-legal except for a leading underscore`]
- * enumerates its whole short-name space and reports the residual exactly. It is not empty —
- * `_helper` was legal and is not — and the test states the residual as a set rather than
- * pretending it away, because a containment proof that quietly rounds down is not a proof.
+ * **077 inverted 067's containment claim, and this file records the inversion.** 067's premise
+ * was "every legal old name is a legal one-segment new name, so no migration and no abort
+ * gate", measured over the old rule's whole short-name space. §4.1 now requires a FOLDER, so
+ * every one of those flat names is refused: the containment residual went from "the names
+ * starting `_`" to "all of them". The enumeration is kept and its assertion reversed rather
+ * than deleted — it is the same measurement, and it now proves the narrowing is total instead
+ * of proving it is small.
  *
- * Why the residual needs no gate is a property of the *call sites*, not of the regex, so it is
- * pinned as its own test below: a pipeline name is validated on SAVE only. Templates needed
- * §4.6's migration abort because their grammar is re-checked at RENDER time in two more
- * places; nothing on the pipeline execute path consults this regex, so a legacy `_scratch`
- * pipeline keeps listing, opening and executing.
+ * Why a total narrowing still needs no gate is a property of the *call sites*, not of the
+ * regex, so it is pinned as its own test below: a pipeline name is validated on SAVE only.
+ * Templates needed §4.6's migration abort (re-issued for 077 as `V12__folder_required.sql`)
+ * because their grammar is re-checked at RENDER time in two more places; nothing on the
+ * pipeline execute path consults this regex, so a legacy `active_users` pipeline keeps
+ * listing, opening and executing.
  */
 class PipelineNameGrammarTest {
     private val validator = Fixtures.validator()
@@ -34,49 +36,63 @@ class PipelineNameGrammarTest {
     private val preRoundIdentifier = Regex("^[a-z0-9_]{1,63}$")
 
     @Test
-    fun `old-legal names are new-legal except for a leading underscore`() {
+    fun `077 - NO old-legal name survives, because every one of them is folderless`() {
         // Exhaustive over the old rule's alphabet up to length 3: 36 + 36² + 36³ = 47_988
         // names, every one of them decided by both rules. Longer names cannot introduce a new
-        // failure shape — the old rule is a flat character class, so only the FIRST character
-        // and the LENGTH can differ in verdict, and both are covered here and below.
+        // verdict — the old rule is a flat character class with no `/` in it, so every name it
+        // admits is a single segment, and §4.1 refuses every single segment.
         val alphabet = ('a'..'z') + ('0'..'9') + '_'
         val shortNames =
             alphabet.map { "$it" } +
                 alphabet.flatMap { a -> alphabet.map { b -> "$a$b" } } +
                 alphabet.flatMap { a -> alphabet.flatMap { b -> alphabet.map { c -> "$a$b$c" } } }
+        val oldLegal = shortNames.filter { preRoundIdentifier.matches(it) }
 
-        val residual = shortNames.filter { preRoundIdentifier.matches(it) && !PipelineNameGrammar.matches(it) }
-
-        withClue("names the old rule allowed and the new grammar refuses") {
-            residual.all { it.startsWith("_") } shouldBe true
-            residual.size shouldBe alphabet.size * alphabet.size + alphabet.size + 1
+        withClue("067's containment residual, which 077 grew to the whole set") {
+            oldLegal.none { PipelineNameGrammar.matches(it) } shouldBe true
+            oldLegal.size shouldBe alphabet.size + alphabet.size * alphabet.size + alphabet.size * alphabet.size * alphabet.size
         }
-        // …and the length dimension: the old rule's longest name is 63 chars, well inside the
-        // new segment cap of 64, so no old name is refused for being too long.
-        withClue("the old rule's maximum length") {
-            PipelineNameGrammar.matches("a".repeat(63)) shouldBe true
-            PipelineNameGrammar.matches("9".repeat(63)) shouldBe true
+        // And the refusal DISCRIMINATES: a name that is otherwise a legal segment reports
+        // `folder_required` (adding a folder fixes it); a leading `_` reports `grammar`,
+        // because `test/_helper` is illegal too and a folder would not fix it.
+        withClue("reason") {
+            oldLegal.filterNot { it.startsWith("_") }.all {
+                PipelineNameGrammar.refusalReason(it) == PipelineNameGrammar.REASON_FOLDER_REQUIRED
+            } shouldBe true
+            oldLegal.filter { it.startsWith("_") }.all {
+                PipelineNameGrammar.refusalReason(it) == PipelineNameGrammar.REASON_GRAMMAR
+            } shouldBe true
+        }
+        // …and the length dimension is untouched: the old rule's longest name is 63 chars,
+        // inside the segment cap of 64, so nothing is refused for being too long — only for
+        // having no folder.
+        withClue("the old rule's maximum length, under a folder") {
+            PipelineNameGrammar.matches("test/" + "a".repeat(63)) shouldBe true
+            PipelineNameGrammar.matches("test/" + "9".repeat(63)) shouldBe true
         }
     }
 
     @Test
-    fun `the residual is refused at SAVE and nowhere else`() {
-        // The save path refuses it, with the catalogued code and the offending value named…
-        val failures = validator.validate(Fixtures.pipeline(name = "_scratch"), workspaceId).withCode(Validation.NAME_INVALID)
-        failures.single().details["value"] shouldBe "_scratch"
+    fun `a folderless name is refused at SAVE and nowhere else`() {
+        // The save path refuses it, with the catalogued code, the offending value named, and
+        // the reason that tells an agent a folder is what is missing…
+        val failures =
+            validator.validate(Fixtures.pipeline(name = "active_users"), workspaceId).withCode(Validation.NAME_INVALID)
+        failures.single().details["value"] shouldBe "active_users"
+        failures.single().details["reason"] shouldBe PipelineNameGrammar.REASON_FOLDER_REQUIRED
 
         // …and the RESOLVE path — the one an execution and a child reference take — does not
         // consult the grammar at all, so a stored legacy name still resolves. This is the whole
-        // reason 067 ships without the migration gate templates needed (§4.6): grep the
-        // production sources and this regex has exactly one save-time call site each in
-        // StructuralRules and CompositionRules, and none on the execute path.
-        val legacy = Fixtures.pipeline(name = "_scratch")
+        // reason 067 shipped, and 077 still ships, without the migration gate templates needed
+        // (§4.6): grep the production sources and this regex has exactly one save-time call
+        // site each in StructuralRules and CompositionRules, and none on the execute path.
+        val legacy = Fixtures.pipeline(name = "active_users")
         val resolver =
             PipelineResolver { _, name, version ->
-                if (name == "_scratch" && version == 1) ResolvedPipeline(legacy, false) else null
+                if (name == "active_users" && version == 1) ResolvedPipeline(legacy, false) else null
             }
 
-        resolver.resolve(workspaceId, "_scratch", 1)?.pipeline?.name shouldBe "_scratch"
+        resolver.resolve(workspaceId, "active_users", 1)?.pipeline?.name shouldBe "active_users"
     }
 
     @Test
@@ -85,13 +101,13 @@ class PipelineNameGrammarTest {
         val segment65 = "a".repeat(65)
 
         assertLegal(
-            "a",
-            "nyc",
+            "a/b",
+            "nyc/mobility",
             "nyc/mobility/revenue_by_borough",
             "trade/fx/imports_in_partner_currency",
-            "a.b-c_d",
+            "test/a.b-c_d",
             "9/9/9",
-            segment64,
+            "test/$segment64",
             (1..10).joinToString("/") { "s$it" },
             // Exactly 200 characters: 19 segments would exceed the segment cap, so the longest
             // legal path is a small number of long segments — 3 × 64 + 2 separators = 194, then
@@ -101,6 +117,12 @@ class PipelineNameGrammarTest {
 
         assertRefused(
             "",
+            // 077: one segment is not a path — a folder is mandatory, whatever the segment is.
+            "a",
+            "nyc",
+            "active_users",
+            segment64,
+            "test/$segment65",
             segment65,
             (1..11).joinToString("/") { "s$it" },
             // 201 characters — one past the cap, with every segment individually legal.
@@ -119,6 +141,27 @@ class PipelineNameGrammarTest {
             "at@sign",
             "nyc/mobility/",
         )
+    }
+
+    @Test
+    fun `077 - a browse PREFIX is a folder path, not a name - one segment is legal there`() {
+        // The defect this pins is one the round nearly shipped: three browse guards checked a
+        // PREFIX against the NAME rule, and 077 made the name rule refuse a single segment. So
+        // `prefix: "nyc"` — the first request after listing the roots — would have answered an
+        // empty level for every root in the workspace, in the UI tree and over MCP alike.
+        withClue("a root prefix must browse") {
+            PipelineNameGrammar.matchesPrefix("nyc") shouldBe true
+            PipelineNameGrammar.matches("nyc") shouldBe false
+        }
+        withClue("deeper prefixes, up to the folder ceiling of 9") {
+            PipelineNameGrammar.matchesPrefix("nyc/mobility") shouldBe true
+            PipelineNameGrammar.matchesPrefix((1..9).joinToString("/") { "s$it" }) shouldBe true
+            PipelineNameGrammar.matchesPrefix((1..10).joinToString("/") { "s$it" }) shouldBe false
+        }
+        withClue("a prefix is still a PATH — the shape rules do not relax") {
+            listOf("", "/nyc", "nyc/", "nyc//mobility", "nyc/../etc", "NYC", "has space", "_helper")
+                .forEach { PipelineNameGrammar.matchesPrefix(it) shouldBe false }
+        }
     }
 
     @Test

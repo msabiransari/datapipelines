@@ -140,24 +140,34 @@ sealed interface McpResourceUri {
             }
         }
 
+        /**
+         * `datapipelines://templates/{path}` and `…/{path}/versions/{n}`, where **`{path}` may
+         * contain slashes** — a template name has been a path since 043 and carries a folder
+         * since 077, so the id is every segment after `templates`, not `segments[1]`.
+         *
+         * That is the bug this shape had from 043 until 077 found it: a fixed
+         * `segments.size == 2` meant `datapipelines://templates/nyc/mobility/daily.sql` parsed
+         * to null and the resource read answered "not found" for every hierarchical name. It
+         * went unnoticed because the only names anyone addressed this way were flat; 077 makes
+         * every name a path, so it would have been the whole surface.
+         *
+         * The `versions/{n}` suffix is recognised by its LAST TWO segments, never by position:
+         * a folder legitimately named `versions` is then still just a folder, and only a
+         * trailing `versions/<integer>` is read as a version selector.
+         */
         private fun templateUri(
             uri: String,
             segments: List<String>,
         ): McpResourceUri? {
-            val id = segments.getOrNull(ID_INDEX)?.takeIf { it.isNotBlank() } ?: return null
-            return when {
-                segments.size == ENTITY_SEGMENTS -> {
-                    TemplateLatest(uri, id)
-                }
-
-                segments.size == VERSION_SEGMENTS && segments[SUB_INDEX] == VERSIONS -> {
-                    segments[VERSION_INDEX].toIntOrNull()?.let { TemplateVersion(uri, id, it) }
-                }
-
-                else -> {
-                    null
-                }
-            }
+            val rest = segments.drop(ID_INDEX)
+            val version =
+                rest
+                    .takeIf { it.size > ENTITY_SEGMENTS && it[it.size - ENTITY_SEGMENTS] == VERSIONS }
+                    ?.last()
+                    ?.toIntOrNull()
+            val idSegments = if (version != null) rest.dropLast(ENTITY_SEGMENTS) else rest
+            val id = idSegments.joinToString("/").takeIf { it.isNotBlank() } ?: return null
+            return if (version != null) TemplateVersion(uri, id, version) else TemplateLatest(uri, id)
         }
 
         private fun datasourceUri(

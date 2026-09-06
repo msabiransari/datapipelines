@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test
  *     interpolate unsafely, even for a row that somehow reached the database.
  */
 class ImportPrologueInjectionTest {
-    private val library = TemplateFixtures.version("lib.sql", isLibrary = true, body = "<#macro m>ok</#macro>")
+    private val library = TemplateFixtures.version("test/lib.sql", isLibrary = true, body = "<#macro m>ok</#macro>")
     private val engines = mutableListOf<TemplateEngine>()
 
     @AfterEach
@@ -49,7 +49,7 @@ class ImportPrologueInjectionTest {
         INJECTING_ALIASES.forEach { alias ->
             withClue("save must reject alias: $alias") {
                 validator()
-                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, alias))), workspaceId)
+                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", 1, alias))), workspaceId)
                     .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -70,7 +70,7 @@ class ImportPrologueInjectionTest {
         listOf(0, -1, Int.MIN_VALUE).forEach { version ->
             withClue("version must be rejected: $version") {
                 validator()
-                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", version, "d"))), workspaceId)
+                    .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", version, "d"))), workspaceId)
                     .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
             }
         }
@@ -81,7 +81,7 @@ class ImportPrologueInjectionTest {
         // §6.3's rule is `[a-zA-Z_][a-zA-Z0-9_]*`, unbounded. The character class carries the
         // security property; adding a length cap would reject aliases the contract permits.
         validator()
-            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "a".repeat(200)))), workspaceId)
+            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", 1, "a".repeat(200)))), workspaceId)
             .isValid
             .shouldBeTrue()
     }
@@ -124,7 +124,7 @@ class ImportPrologueInjectionTest {
     @Test
     fun `a plain alias still passes`() {
         validator()
-            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("lib.sql", 1, "dates_1"))), workspaceId)
+            .validate(TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", 1, "dates_1"))), workspaceId)
             .isValid
             .shouldBeTrue()
     }
@@ -135,11 +135,11 @@ class ImportPrologueInjectionTest {
         // the render must still refuse, because the prologue is source the scan never saw.
         val main =
             TemplateFixtures.version(
-                "main.sql",
-                imports = listOf(TemplateImport("lib.sql", 1, "d>\${\"PWNED\"}<#assign z=1")),
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/lib.sql", 1, "d>\${\"PWNED\"}<#assign z=1")),
                 body = "SELECT 1",
             )
-        val outcome = engineWith(main).execute(TemplateRef("main.sql", 1), emptyMap())
+        val outcome = engineWith(main).execute(TemplateRef("test/main.sql", 1), emptyMap())
 
         outcome.shouldBeInstanceOf<RenderOutcome.Failed>()
         withClue("the injected interpolation must never reach the rendered SQL") {

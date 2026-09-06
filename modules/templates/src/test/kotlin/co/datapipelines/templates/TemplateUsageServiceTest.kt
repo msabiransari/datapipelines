@@ -36,12 +36,12 @@ class TemplateUsageServiceTest {
 
     @Test
     fun `usedBy answers with per-node references and an honest distinct-pipeline count`() {
-        every { templates.existsId(workspaceId, "t.sql") } returns true
-        every { templates.findVersionStatus(workspaceId, "t.sql", 1) } returns PipelineVersionStatus.RELEASED
-        every { pipelines.findWorkingVersionTemplatePins(workspaceId, "t.sql", 1) } returns
+        every { templates.existsId(workspaceId, "test/t.sql") } returns true
+        every { templates.findVersionStatus(workspaceId, "test/t.sql", 1) } returns PipelineVersionStatus.RELEASED
+        every { pipelines.findWorkingVersionTemplatePins(workspaceId, "test/t.sql", 1) } returns
             listOf(pin("p1", "fetch"), pin("p1", "again"), pin("p2", "fetch"))
 
-        val used = service.usedBy(workspaceId, "t.sql", 1)
+        val used = service.usedBy(workspaceId, "test/t.sql", 1)
 
         used.references.map { it.pipelineName to it.nodeId } shouldBe
             listOf("p1" to "fetch", "p1" to "again", "p2" to "fetch")
@@ -55,22 +55,22 @@ class TemplateUsageServiceTest {
         idMiss.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
         idMiss.details.containsKey("version") shouldBe false
 
-        every { templates.existsId(workspaceId, "t.sql") } returns true
-        every { templates.findVersionStatus(workspaceId, "t.sql", 9) } returns null
-        val versionMiss = shouldThrow<DatapipelinesException> { service.usedBy(workspaceId, "t.sql", 9) }
+        every { templates.existsId(workspaceId, "test/t.sql") } returns true
+        every { templates.findVersionStatus(workspaceId, "test/t.sql", 9) } returns null
+        val versionMiss = shouldThrow<DatapipelinesException> { service.usedBy(workspaceId, "test/t.sql", 9) }
         versionMiss.code shouldBe PipelineErrorCodes.Template.NOT_FOUND
         versionMiss.details["version"] shouldBe 9
     }
 
     @Test
     fun `referencedAnywhere is the any-version scan - the delete guard's evidence`() {
-        every { pipelines.findAnyVersionTemplatePins(workspaceId, "t.sql") } returns
+        every { pipelines.findAnyVersionTemplatePins(workspaceId, "test/t.sql") } returns
             listOf(
                 pin("p1", "fetch", pipelineVersion = 7, pinned = 1),
                 pin("p3", "fetch", pipelineVersion = 2, status = PipelineVersionStatus.DRAFT, pinned = 2),
             )
 
-        service.referencedAnywhere(workspaceId, "t.sql").map { it.pipelineName to it.pinnedVersion } shouldBe
+        service.referencedAnywhere(workspaceId, "test/t.sql").map { it.pipelineName to it.pinnedVersion } shouldBe
             listOf("p1" to 1, "p3" to 2)
     }
 
@@ -79,17 +79,17 @@ class TemplateUsageServiceTest {
         val body =
             """
             {"nodes": [
-              {"id": "stale",   "template": {"id": "t.sql", "version": 1}},
-              {"id": "current", "template": {"id": "t.sql", "version": 3}},
-              {"id": "ahead",   "template": {"id": "t.sql", "version": 5}},
-              {"id": "gone",    "template": {"id": "deleted.sql", "version": 1}},
+              {"id": "stale",   "template": {"id": "test/t.sql", "version": 1}},
+              {"id": "current", "template": {"id": "test/t.sql", "version": 3}},
+              {"id": "ahead",   "template": {"id": "test/t.sql", "version": 5}},
+              {"id": "gone",    "template": {"id": "test/deleted.sql", "version": 1}},
               {"id": "child"}
             ]}
             """.trimIndent()
-        every { templates.findCurrentVersions(workspaceId, setOf("t.sql", "deleted.sql")) } returns mapOf("t.sql" to 3)
+        every { templates.findCurrentVersions(workspaceId, setOf("test/t.sql", "test/deleted.sql")) } returns mapOf("test/t.sql" to 3)
 
         service.upgradeAvailable(workspaceId, body) shouldBe
-            listOf(TemplateUsageService.UpgradeAvailable("stale", "t.sql", pinned = 1, latestReleased = 3))
+            listOf(TemplateUsageService.UpgradeAvailable("stale", "test/t.sql", pinned = 1, latestReleased = 3))
     }
 
     @Test

@@ -5,10 +5,28 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateImport
+import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.modelcontextprotocol.spec.McpSchema
+
+/**
+ * §6.2.8 — the `id` argument's description, and the reason its `pattern` is
+ * [TemplateNameGrammar.pattern] rather than a literal.
+ *
+ * Until 077 this schema advertised the **pre-043 flat rule** `[a-z0-9_.-]+` in prose and
+ * carried no `pattern` at all — three grammar changes stale, and the only tool surface that
+ * did not read the validator's own value the way `pipelines_create` has since 067 (audit
+ * T129, 2026-09-05). Reading the grammar object is what makes a future change land here by
+ * construction instead of by memory.
+ */
+private const val ID_ARG_DESC =
+    "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments " +
+        "(nyc/mobility/daily_by_zone.sql). A FOLDER IS REQUIRED — a bare 'daily_by_zone.sql' is refused with " +
+        "template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and " +
+        "shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. " +
+        "Optional; auto-generated if omitted. There is no rename, so choose the folder now."
 
 /** §6.2.8 — the `description` field's own description, kept off the schema line for length. */
 private const val DESCRIPTION_FIELD_DESC =
@@ -122,7 +140,7 @@ class TemplatesCreateTool(
               "type": "object",
               "required": ["display_name", "description", "body"],
               "properties": {
-                "id": {"type": "string", "description": "Optional; auto-generated if omitted. Pattern [a-z0-9_.-]+."},
+                "id": {"type": "string", "pattern": "${TemplateNameGrammar.pattern}", "description": "$ID_ARG_DESC"},
                 "engine": {
                   "type": "string", "enum": ["freemarker"], "default": "freemarker",
                   "description": "Template engine. v1 supports freemarker only."

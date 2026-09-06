@@ -47,7 +47,8 @@
       <p class="ds-empty-title">No pipelines yet</p>
       <p class="ds-empty-description">
         Pipelines are authored through the MCP server — ask your agent to create one. Give it a
-        folder path like <code>nyc/mobility/revenue_by_borough</code>; the folders appear here
+        folder path like <code>nyc/mobility/revenue_by_borough</code> — a folder is required,
+        and <code>test/&hellip;</code> is the place for experiments; the folders appear here
         on their own.
       </p>
     </div>
@@ -92,9 +93,14 @@
               hx-sync="#pipeline-detail:replace"
               hx-indicator="#pipeline-detail-spinner">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
-             (§9.4's rule for every surface that shows a path-shaped name). -->
+             (§9.4's rule for every surface that shows a path-shaped name).
+
+             There is no "at the root" branch here any more (077): §4.1 requires a folder, so
+             a leaf always sits under a non-empty prefix. PipelineBrowseModel drops the root
+             level's leaves outright, which is what makes that true of a pre-077 flat row too
+             — it stays reachable by search and by its UUID URL. -->
         <span class="tpl-label"
-              th:text="${#strings.isEmpty(prefix)} ? ${p.name} : ${p.name.substring(prefix.length() + 1)}"
+              th:text="${p.name.substring(prefix.length() + 1)}"
               th:title="${p.name}">revenue_by_borough</span>
         <span class="ds-badge ds-badge-default" th:text="${'v' + p.currentVersion}">v1</span>
         <!-- versioning §7: unreleased edits stay visible in the list. The pane keeps the badge

@@ -62,7 +62,7 @@ object Fixtures {
     ): Pipeline =
         Pipeline(
             schemaVersion = Pipeline.SUPPORTED_SCHEMA_VERSION,
-            name = "test_pipeline",
+            name = "test/test_pipeline",
             displayName = "Test pipeline",
             description = "fixture",
             settings = settings,

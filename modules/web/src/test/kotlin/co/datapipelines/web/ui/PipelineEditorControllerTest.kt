@@ -71,14 +71,14 @@ class PipelineEditorControllerTest {
               "id": "extract_users",
               "type": "DQL",
               "source": "prod_db",
-              "template": {"id": "select_all", "version": 1},
+              "template": {"id": "test/select_all", "version": 1},
               "depends_on": []
             },
             {
               "id": "transform_users",
               "type": "DQL",
               "source": "tempdb",
-              "template": {"id": "transform", "version": 1},
+              "template": {"id": "test/transform", "version": 1},
               "depends_on": ["extract_users"]
             }
           ]

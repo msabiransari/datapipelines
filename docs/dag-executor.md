@@ -571,7 +571,7 @@ The template engine (see [Templates spec](templates.md)) renders the template bo
 
 ```kotlin
 val sql: String = templateEngine.render(
-    ref = TemplateRef("fetch_orders.sql", 2),
+    ref = TemplateRef("acme/finance/fetch_orders.sql", 2),
     context = mapOf(
         "start_date" to LocalDate.of(2026, 1, 1),
         "end_date" to LocalDate.of(2026, 1, 31)

@@ -86,7 +86,7 @@ class McpResourceCatalogTest {
         page.resources.map { it.uri() } shouldContainExactly
             listOf(
                 "datapipelines://pipelines/${McpFixtures.PIPELINE_ID}",
-                "datapipelines://templates/revenue.sql",
+                "datapipelines://templates/test/revenue.sql",
                 "datapipelines://datasources",
                 "datapipelines://datasources/pg-prod",
                 "datapipelines://executions/${McpFixtures.EXECUTION_ID}",
