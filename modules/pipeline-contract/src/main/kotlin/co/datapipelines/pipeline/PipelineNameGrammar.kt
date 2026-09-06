@@ -1,6 +1,13 @@
 package co.datapipelines.pipeline
 
 /**
+ * §4.1's `segment` production, the one source both the path regex and the
+ * [PipelineNameGrammar.refusalReason] check are built from — a second literal here is exactly
+ * the drift `PipelineNameGrammarSpecDriftTest` exists to prevent, one level down.
+ */
+private const val SEGMENT = "[a-z0-9][a-z0-9_.-]{0,63}"
+
+/**
  * The pipeline name grammar (pipeline-contract §3.2, template-hierarchy-design §14): **two**
  * to ten `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, total length
  * ≤ [MAX_PIPELINE_PATH_CHARS].
@@ -49,17 +56,8 @@ package co.datapipelines.pipeline
  * an H2/Postgres identifier and a Freemarker-visible key; `/` has no meaning there and every
  * reason to be refused. `StructuralRulesTest` pins that separation with a `/`-bearing node id
  * and output table, both still rejected.
- */
-/**
- * §4.1's `segment` production, the one source both the path regex and the
- * [PipelineNameGrammar.refusalReason] check are built from — a second literal here is exactly
- * the drift `PipelineNameGrammarSpecDriftTest` exists to prevent, one level down.
- */
-private const val SEGMENT = "[a-z0-9][a-z0-9_.-]{0,63}"
-
-/**
- * §4.1's `path` production. The repetition is `{1,9}` — at least one separator, so at least
- * two segments: **a folder is mandatory** (077).
+ *
+ * The repetition below is `{1,9}` — at least one separator, so at least two segments.
  */
 internal val PIPELINE_PATH = Regex("^$SEGMENT(/$SEGMENT){1,9}$")
 

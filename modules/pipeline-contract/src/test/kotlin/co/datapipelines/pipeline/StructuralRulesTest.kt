@@ -90,20 +90,35 @@ class StructuralRulesTest {
         // exhaustive rule-by-rule coverage lives in PipelineNameGrammarTest; what this pins is
         // that StructuralRules is the call site that enforces it.
         listOf(
-            "Monthly_Revenue", "monthly revenue", "", "nyc//mobility", "/nyc", "nyc/", "nyc/../etc", "_helper",
+            "Monthly_Revenue",
+            "monthly revenue",
+            "",
+            "nyc//mobility",
+            "/nyc",
+            "nyc/",
+            "nyc/../etc",
+            "_helper",
             // 077: one segment is not a path, however well-formed the segment is.
-            "a", "monthly_revenue_2026", "monthly-revenue", "a".repeat(64),
+            "a",
+            "monthly_revenue_2026",
+            "monthly-revenue",
+            "a".repeat(64),
         ).forEach { name ->
             withClue(name) {
                 validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldContain Validation.NAME_INVALID
             }
         }
-        listOf("a/b", "test/monthly_revenue_2026", "test/monthly-revenue", "test/" + "a".repeat(64), "nyc/mobility/revenue_by_borough")
-            .forEach { name ->
-                withClue(name) {
-                    validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldNotContain Validation.NAME_INVALID
-                }
+        listOf(
+            "a/b",
+            "test/monthly_revenue_2026",
+            "test/monthly-revenue",
+            "test/" + "a".repeat(64),
+            "nyc/mobility/revenue_by_borough",
+        ).forEach { name ->
+            withClue(name) {
+                validator.validate(Fixtures.pipeline(name = name), workspaceId).codes shouldNotContain Validation.NAME_INVALID
             }
+        }
     }
 
     @Test

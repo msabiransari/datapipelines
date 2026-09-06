@@ -354,7 +354,13 @@ class TemplateRepositoryIntegrationTest {
         // the stored per-version value is what is read back.
         repository.create(workspaceId, draft(id = "test/shift.sql", dialect = Dialect.POSTGRES), actor)
 
-        val v2 = repository.appendReleasedVersion(workspaceId, "test/shift.sql", draft(id = "test/shift.sql", dialect = Dialect.MYSQL), actor)
+        val v2 =
+            repository.appendReleasedVersion(
+                workspaceId,
+                "test/shift.sql",
+                draft(id = "test/shift.sql", dialect = Dialect.MYSQL),
+                actor,
+            )
 
         v2.shouldNotBeNull()
         v2.dialect shouldBe Dialect.MYSQL
@@ -486,7 +492,8 @@ class TemplateRepositoryIntegrationTest {
                 repository.createDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 2"), released.bodyHash, actor),
             )
 
-        val reverted = checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
+        val reverted =
+            checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 1"), draft.bodyHash, actor))
 
         reverted.status shouldBe PipelineVersionStatus.DRAFT
         checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).version shouldBe draft.version
@@ -507,7 +514,8 @@ class TemplateRepositoryIntegrationTest {
                 ),
             )
 
-        val second = checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor))
+        val second =
+            checkNotNull(repository.writeDraft(workspaceId, "test/fetch_orders.sql", draft(body = "SELECT 3"), first.bodyHash, actor))
 
         second.version shouldBe 2
         checkNotNull(repository.findVersion(workspaceId, "test/fetch_orders.sql", 2)).body shouldBe "SELECT 3"
@@ -650,7 +658,9 @@ class TemplateRepositoryIntegrationTest {
         refused.code shouldBe PipelineErrorCodes.Template.AUTHORING_DISABLED
         refused.details["config_key"] shouldBe co.datapipelines.pipeline.AuthoringGuard.CONFIG_KEY
 
-        checkNotNull(repository.importTemplateVersion(workspaceId, draft(id = "test/promoted.sql"), 4, "hash-4", java.time.Instant.EPOCH, actor))
+        checkNotNull(
+            repository.importTemplateVersion(workspaceId, draft(id = "test/promoted.sql"), 4, "hash-4", java.time.Instant.EPOCH, actor),
+        )
         checkNotNull(
             repository.insertReleasedVersion(
                 workspaceId,
@@ -728,7 +738,15 @@ class TemplateRepositoryIntegrationTest {
         stored.bodyHash shouldBe repository.computeBodyHash("freemarker", "POSTGRES", false, "[]", "SELECT 1")
 
         // The first precondition check against this pre-migration row succeeds.
-        checkNotNull(repository.createDraft(workspaceId, "test/legacy.sql", draft(id = "test/legacy.sql", body = "SELECT 2"), stored.bodyHash, actor))
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                "test/legacy.sql",
+                draft(id = "test/legacy.sql", body = "SELECT 2"),
+                stored.bodyHash,
+                actor,
+            ),
+        )
     }
 
     @Test

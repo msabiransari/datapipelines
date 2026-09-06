@@ -61,8 +61,10 @@ class RepositoryTemplateRegistryTest {
 
     @Test
     fun `each version of one id is its own cache entry`() {
-        every { repository.lookupVersion(any(), "test/lib.sql", 1) } returns TemplateFixtures.version("test/lib.sql", version = 1, body = "v1")
-        every { repository.lookupVersion(any(), "test/lib.sql", 2) } returns TemplateFixtures.version("test/lib.sql", version = 2, body = "v2")
+        every { repository.lookupVersion(any(), "test/lib.sql", 1) } returns
+            TemplateFixtures.version("test/lib.sql", version = 1, body = "v1")
+        every { repository.lookupVersion(any(), "test/lib.sql", 2) } returns
+            TemplateFixtures.version("test/lib.sql", version = 2, body = "v2")
         val registry = RepositoryTemplateRegistry(repository, cacheSize = 10, workspaceId = workspaceId)
 
         registry.lookup("test/lib.sql", 1)?.body shouldBe "v1"
