@@ -182,6 +182,7 @@ class McpFolderRequiredTest {
             workspaceId: UUID,
             ref: TemplateRef,
             declared: Set<String>,
+            guarded: Set<String>,
         ): List<String> = emptyList()
 
         override fun boundParameters(

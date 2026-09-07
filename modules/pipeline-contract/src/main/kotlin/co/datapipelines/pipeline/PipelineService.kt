@@ -294,6 +294,32 @@ open class PipelineService(
         return page.copy(drafts = pipelines.findDrafts(workspaceId, page.items.map { it.id }))
     }
 
+    /**
+     * **One level** of the pipeline tree under [prefix] — the 067 browse presentation
+     * (`pipelines_list {prefix}`, mirrored on REST): [prefix]'s direct sub-folders with their
+     * subtree counts and its direct pipeline leaves, never a subtree
+     * (template-hierarchy-design §9.2).
+     *
+     * A blank [prefix] is the ROOT — present-but-empty means "the tree's top level", a
+     * different request from an absent prefix (the flat listing). A prefix that is not a legal
+     * folder path answers an ordinary EMPTY level rather than an error — the rule
+     * `pipelines_list` and the explorer partial already settled on; an illegal prefix cannot
+     * name a real folder, so it never reaches the database. `owner`/`datasource`/`q` do not
+     * apply here: browse and search are different presentations.
+     */
+    open fun browseLevel(
+        workspaceId: UUID,
+        prefix: String?,
+        offset: Int = 0,
+        limit: Int = PipelineFolderLevel.DEFAULT_PAGE_LIMIT,
+    ): PipelineFolderLevel {
+        val normalized = prefix?.takeIf { it.isNotBlank() }
+        if (normalized != null && !PipelineNameGrammar.matchesPrefix(normalized)) {
+            return PipelineFolderLevel(emptyList(), foldersTruncated = false, emptyList(), total = 0, hasMore = false)
+        }
+        return pipelines.listFolder(workspaceId, normalized, offset, limit)
+    }
+
     /** The DRAFT detail of each of [pipelineIds] that has one — the list screens' badge (§7). */
     open fun findDrafts(
         workspaceId: UUID,

@@ -293,6 +293,222 @@ class PipelineCompositionE2eTest {
             .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.composition_too_deep"))
     }
 
+    // -------------------------------------------- 078 A5-composition: parent calculator → child input
+
+    /**
+     * The fixture family for the mapping legs: a child whose DQL node filters a SECOND H2
+     * datasource by `:run_fiscal_quarter` — a value its own CALCULATOR node computes from
+     * `$current_date` with a `01-01` fiscal start, unless a caller (here: the parent's mapping)
+     * supplies the key.
+     */
+    private fun seedQuarterFamily(): String {
+        seedH2Second()
+        registerH2Datasource(H2_DATASOURCE_2, H2_JDBC_URL_2)
+        createTemplate(
+            "test/comp_quarter_rows.sql",
+            "H2",
+            "Composition Quarter Rows",
+            "SELECT id, label FROM comp_quarters WHERE quarter = :run_fiscal_quarter ORDER BY id",
+        )
+        return createPipeline(
+            "test/comp_quarter_child",
+            "Composition Quarter Child",
+            listOf(
+                calculatorNode("fq", "run_fiscal_quarter", "01-01"),
+                mapOf(
+                    "id" to "fetch_quarter",
+                    "description" to "Rows of the run quarter, from the SECOND datasource",
+                    "type" to "DQL",
+                    "source" to H2_DATASOURCE_2,
+                    "template" to mapOf("id" to "test/comp_quarter_rows.sql", "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to listOf("fq"),
+                ),
+            ),
+        )
+    }
+
+    private fun calculatorNode(
+        id: String,
+        contextKey: String,
+        fiscalStart: String,
+    ): Map<String, Any?> =
+        mapOf(
+            "id" to id,
+            "description" to "Fiscal quarter of the run date, $fiscalStart start",
+            "type" to "CALCULATOR",
+            "kind" to "fiscal_quarter",
+            "inputs" to mapOf("date" to "\$current_date", "fiscal_start" to fiscalStart),
+            "context_key" to contextKey,
+            "depends_on" to emptyList<String>(),
+        )
+
+    /**
+     * 078 A5-composition, legs (a) and (b): the parent's calculator output is mapped EXPLICITLY
+     * onto the child's calculator `context_key`, so the child's node is skipped and the child's
+     * SQL binds the supplied value — and the child runs on a DIFFERENT datasource than the
+     * parent's own SQL node (the spec's cross-source leg): the parent reads `h2-comp`, the
+     * child `h2-comp-2`.
+     *
+     * The fiscal starts make the two computations disagree (2026-09: quarter 1 on a 07-01
+     * start, 3 on a 01-01 start), so the rows prove WHOSE value the child bound.
+     */
+    @Test
+    @Order(5)
+    fun `a parent calculator output mapped into the child skips the child's node and binds the supplied value`() {
+        seedQuarterFamily()
+
+        val parentId =
+            createPipeline(
+                "test/comp_quarter_parent",
+                "Composition Quarter Parent",
+                listOf(
+                    calculatorNode("parent_q", "parent_quarter", "07-01"),
+                    // The parent's own SQL node reads the FIRST datasource — the child below
+                    // reads the second (the B4 cross-source leg).
+                    mapOf(
+                        "id" to "parent_users",
+                        "description" to "Parent-side read of h2-comp",
+                        "type" to "DQL",
+                        "source" to H2_DATASOURCE,
+                        "template" to mapOf("id" to "test/comp_users.sql", "version" to 1),
+                        "output" to mapOf("target" to "tempdb", "table" to "stg_comp_users"),
+                        "depends_on" to emptyList<String>(),
+                    ),
+                    mapOf(
+                        "id" to "run_child",
+                        "description" to "Invoke test/comp_quarter_child v1 with the parent's quarter",
+                        "type" to "PIPELINE",
+                        "pipeline" to mapOf("name" to "test/comp_quarter_child", "version" to 1),
+                        "parameters" to mapOf("run_fiscal_quarter" to "\${parent_quarter}"),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to listOf("parent_q"),
+                    ),
+                ),
+            )
+
+        val events =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+            }
+        events.last().first shouldBe "data_ready"
+        val parentExecutionId = events.last().second["execution_id"].asText()
+
+        // (a) the child consumed the SUPPLIED value: the quarter-1 rows, computed by the
+        // parent's calculator — not the 3 the child's own node would have computed.
+        assertQuarterRows(parentExecutionId, QUARTER_ONE_ROWS)
+
+        // The parent execution's stats carry its calculator AND its own ds1 DQL node.
+        val parentStats = nodeStats(parentExecutionId)
+        parentStats.map { it["node_id"].asText() }.toSet() shouldBe setOf("parent_q", "parent_users", "run_child")
+
+        // The child's calculator was SKIPPED: provided_by "caller", the supplied value reported.
+        val childExecutionId =
+            queryExecutions(
+                "SELECT execution_id::text FROM pipeline_executions WHERE parent_execution_id = '$parentExecutionId'",
+            ) { it.getString(1) }.single()
+        val childStats = nodeStats(childExecutionId)
+        val skipped = childStats.single { it["node_id"].asText() == "fq" }
+        skipped["status"].asText() shouldBe "SUCCESS"
+        skipped["provided_by"].asText() shouldBe "caller"
+        skipped["context_value"].asText() shouldBe "1"
+        childStats.single { it["node_id"].asText() == "fetch_quarter" }["rows_out"].asLong() shouldBe
+            QUARTER_ONE_ROWS.size.toLong()
+    }
+
+    /** Leg (c): the SAME child, run standalone with no mapping, computes the value itself. */
+    @Test
+    @Order(6)
+    fun `the child run standalone computes the quarter itself`() {
+        val events =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(childPipelineId(), UUID.randomUUID().toString())
+            }
+        events.last().first shouldBe "data_ready"
+        val executionId = events.last().second["execution_id"].asText()
+
+        // 2026-09 on a 01-01 fiscal start is quarter 3 — the child's own computation.
+        assertQuarterRows(executionId, QUARTER_THREE_ROWS)
+        val computed = nodeStats(executionId).single { it["node_id"].asText() == "fq" }
+        computed["provided_by"] shouldBe null
+        computed["context_value"].asText() shouldBe "3"
+    }
+
+    /**
+     * Leg (d), the NO AUTO-PASSTHROUGH pin (owner ruling 2026-09-05: hidden coupling): the
+     * parent's calculator key is spelled EXACTLY like the child's, and nothing is mapped — the
+     * child's node RUNS and computes its own value. Only explicit mappings cross the boundary.
+     */
+    @Test
+    @Order(7)
+    fun `an identically named parent calculator key is not implicitly passed to the child`() {
+        val parentId =
+            createPipeline(
+                "test/comp_echo_parent",
+                "Composition Echo Parent",
+                listOf(
+                    // Same context_key spelling as the child's `fq` — deliberately.
+                    calculatorNode("parent_q", "run_fiscal_quarter", "07-01"),
+                    mapOf(
+                        "id" to "run_child",
+                        "description" to "Invoke test/comp_quarter_child v1 mapping NOTHING",
+                        "type" to "PIPELINE",
+                        "pipeline" to mapOf("name" to "test/comp_quarter_child", "version" to 1),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to listOf("parent_q"),
+                    ),
+                ),
+            )
+
+        val events =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+            }
+        events.last().first shouldBe "data_ready"
+        val parentExecutionId = events.last().second["execution_id"].asText()
+
+        // The child computed its OWN quarter (3 on its 01-01 start) — the parent's identically
+        // named value (1) never crossed, mapping or no shared spelling.
+        assertQuarterRows(parentExecutionId, QUARTER_THREE_ROWS)
+        val childExecutionId =
+            queryExecutions(
+                "SELECT execution_id::text FROM pipeline_executions WHERE parent_execution_id = '$parentExecutionId'",
+            ) { it.getString(1) }.single()
+        val ran = nodeStats(childExecutionId).single { it["node_id"].asText() == "fq" }
+        ran["provided_by"] shouldBe null
+        ran["context_value"].asText() shouldBe "3"
+    }
+
+    /** The quarter child's id, looked up by name through the metadata DB (created in Order 5). */
+    private fun childPipelineId(): String =
+        queryExecutions("SELECT id::text FROM pipelines WHERE name = 'test/comp_quarter_child'") { it.getString(1) }.single()
+
+    /** `node_stats_json` of one execution, parsed. */
+    private fun nodeStats(executionId: String): List<JsonNode> =
+        queryExecutions(
+            "SELECT node_stats_json::text FROM pipeline_executions WHERE execution_id = '$executionId'",
+        ) { rs -> mapper.readTree(rs.getString(1)).toList() }.single()
+
+    /** The execution's result rows equal [expected] `(id, label)` pairs, in `id` order. */
+    private fun assertQuarterRows(
+        executionId: String,
+        expected: List<Pair<Int, String>>,
+    ) {
+        val resultResponse =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .`when`()
+                .get("/api/v1/executions/$executionId/result")
+                .then()
+                .statusCode(200)
+                .extract()
+        resultResponse.jsonPath().getLong("data.total_rows") shouldBe expected.size.toLong()
+        val rows: List<List<Any?>> = resultResponse.jsonPath().get("data.rows")
+        rows.map { (it[0] as Number).toInt() } shouldContainExactly expected.map { it.first }
+        rows.map { it[1] } shouldContainExactly expected.map { it.second }
+    }
+
     // ------------------------------------------------------------ helpers
 
     private fun pipelineNode(
@@ -419,15 +635,18 @@ class PipelineCompositionE2eTest {
         }
     }
 
-    private fun registerH2Datasource() {
+    private fun registerH2Datasource(
+        name: String = H2_DATASOURCE,
+        jdbcUrl: String = H2_JDBC_URL,
+    ) {
         given()
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .body(
                 """
-                {"name": "$H2_DATASOURCE", "display_name": "Composition H2", "dialect": "H2",
-                 "jdbc_url": "$H2_JDBC_URL", "username": "$H2_USER", "password": "$H2_PASSWORD"}
+                {"name": "$name", "display_name": "Composition H2", "dialect": "H2",
+                 "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD"}
                 """.trimIndent(),
             ).`when`()
             .post("/api/v1/datasources")
@@ -532,6 +751,23 @@ class PipelineCompositionE2eTest {
         }
     }
 
+    /** The SECOND H2 database (078 A5-composition's cross-source leg): the quarter-tagged rows. */
+    private fun seedH2Second() {
+        DriverManager.getConnection(H2_JDBC_URL_2, H2_USER, H2_PASSWORD).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "CREATE TABLE comp_quarters (id INT PRIMARY KEY, label VARCHAR(255) NOT NULL, quarter INT NOT NULL)",
+                )
+                QUARTER_ONE_ROWS.forEach { (id, label) ->
+                    statement.execute("INSERT INTO comp_quarters (id, label, quarter) VALUES ($id, '$label', 1)")
+                }
+                QUARTER_THREE_ROWS.forEach { (id, label) ->
+                    statement.execute("INSERT INTO comp_quarters (id, label, quarter) VALUES ($id, '$label', 3)")
+                }
+            }
+        }
+    }
+
     private fun seedAuthRows() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { statement ->
@@ -566,6 +802,14 @@ class PipelineCompositionE2eTest {
         private const val H2_JDBC_URL = "jdbc:h2:mem:compdb;DB_CLOSE_DELAY=-1"
         private const val H2_USER = "sa"
         private const val H2_PASSWORD = "sa"
+
+        /** 078 A5-composition's cross-source leg: the child's datasource, a second database. */
+        private const val H2_DATASOURCE_2 = "h2-comp-2"
+        private const val H2_JDBC_URL_2 = "jdbc:h2:mem:compdb2;DB_CLOSE_DELAY=-1"
+
+        /** `comp_quarters` rows by quarter, in `id` order — the two computations disagree by design. */
+        private val QUARTER_ONE_ROWS = listOf(1 to "q1-alpha", 2 to "q1-beta")
+        private val QUARTER_THREE_ROWS = listOf(3 to "q3-gamma")
 
         /**
          * The execution deadline for this app context, lowered so the parent-timeout scenario is a

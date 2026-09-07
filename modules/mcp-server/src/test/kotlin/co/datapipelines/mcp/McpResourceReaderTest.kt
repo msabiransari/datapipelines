@@ -10,6 +10,8 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -20,7 +22,9 @@ import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 
 class McpResourceReaderTest {
     private val pipelines = mockk<PipelineRepository>()
@@ -192,5 +196,48 @@ class McpResourceReaderTest {
         every { templates.findLatest(any(), "nope") } returns null
 
         shouldThrow<McpError> { reader.read(McpResourceUri.template("nope"), ctx) }
+    }
+
+    @Test
+    fun `every advertised template uri parses and reads - listed is never unreadable`() {
+        // A2 / 077: a template id is a PATH (mandatory folder since 077), so the catalog's
+        // advertised URIs carry slashes — including the trap shape, a folder named `versions`.
+        // The pre-077 parser answered every one of these with not-found. Paging the catalog
+        // and reading back each URI through the production parser is what keeps "listed"
+        // and "readable" from drifting apart again.
+        val advertised =
+            listOf(
+                McpFixtures.template(id = "nyc/mobility/daily_by_zone.sql"),
+                McpFixtures.template(id = "acme/versions/report.sql"),
+                McpFixtures.template(id = "a/b/c/d/e/deep.sql"),
+            )
+        advertised.forEach { template -> every { templates.findLatest(any(), template.id) } returns template }
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns advertised
+        every { pipelines.findAll(any(), null) } returns emptyList()
+        every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
+        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+
+        val catalog =
+            McpResourceCatalog(
+                pipelines,
+                templates,
+                datasources,
+                executions,
+                Clock.fixed(Instant.parse("2026-08-09T12:00:00Z"), ZoneOffset.UTC),
+            )
+        val templateUris =
+            catalog
+                .list(ctx, null)
+                .resources
+                .map { it.uri() }
+                .filter { it.startsWith("datapipelines://templates/") }
+
+        templateUris.size shouldBe advertised.size
+        templateUris.forEach { uri ->
+            withClue(uri) {
+                McpResourceUri.parse(uri).shouldNotBeNull()
+                contents(uri).text() shouldBe "SELECT 1"
+            }
+        }
     }
 }

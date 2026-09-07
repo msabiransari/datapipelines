@@ -25,8 +25,13 @@ internal object ReferenceRules {
         // §0.2's tiers, as the save-time render sees them: org config and the platform keys are
         // deployment constants, so a template binding `:org_currency_symbol` or `:current_date`
         // validates without the pipeline declaring anything — and a declared parameter of the
-        // same name still wins, because it is applied last (tier 3 over tiers 1-2).
-        val sampleContext = ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters).sampleContext()
+        // same name still wins, because it is applied last (tier 3 over tiers 1-2). Calculator
+        // output keys come LAST (078 A1): tier 5 wins over everything at run, and a key that
+        // collided with a declared parameter is already a §12.10 refusal, so the order can
+        // never mask a legitimate failure.
+        val calculatorKeys = pipeline.calculatorOutputs()
+        val sampleContext =
+            ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters, calculatorKeys).sampleContext()
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.CALCULATOR) {
                 // 072 §4.10: a CALCULATOR node has no `source`, no `template` and no `output`, so
@@ -44,7 +49,7 @@ internal object ReferenceRules {
             }
             val sourceDialect = checkSource(index, node, datasources, pipeline, into)
             checkOutputDatasource(index, node, datasources, into)
-            checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, into)
+            checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, calculatorKeys.keys, into)
         }
     }
 
@@ -140,6 +145,7 @@ internal object ReferenceRules {
         }
     }
 
+    @Suppress("LongParameterList") // the §12.6 checks share one parameter pack — splitting it would obscure, not clarify
     private fun checkTemplate(
         index: Int,
         node: Node,
@@ -147,6 +153,7 @@ internal object ReferenceRules {
         templates: TemplateDryRenderer,
         workspaceId: java.util.UUID,
         sampleContext: Map<String, Any?>,
+        guarded: Set<String>,
         into: FailureCollector,
     ) {
         val path = "nodes[$index].template"
@@ -191,7 +198,7 @@ internal object ReferenceRules {
                 }
                 checkDialect(path, node, lookup.dialect, sourceDialect, into)
                 dryRender(path, node, templates, workspaceId, sampleContext, into)
-                checkInterpolatedParameters(path, node, templates, workspaceId, sampleContext, into)
+                checkInterpolatedParameters(path, node, templates, workspaceId, sampleContext, guarded, into)
             }
         }
     }
@@ -222,6 +229,11 @@ internal object ReferenceRules {
      * `${}` puts a caller-supplied value into the SQL string; the bind form `:name` is the only
      * value path the round admits. The message names both forms so an author fixes it without
      * reading a spec (042 B3).
+     *
+     * 078 A1: [guarded] carries the pipeline's CALCULATOR output keys, which the scan also
+     * refuses in a conditional's test (`<#if x??>`) — a derived value gating SQL structure is
+     * the same hole one directive earlier. The refusal is the same code and message shape as
+     * for a declared parameter.
      */
     private fun checkInterpolatedParameters(
         path: String,
@@ -229,9 +241,10 @@ internal object ReferenceRules {
         templates: TemplateDryRenderer,
         workspaceId: java.util.UUID,
         sampleContext: Map<String, Any?>,
+        guarded: Set<String>,
         into: FailureCollector,
     ) {
-        templates.interpolatedParameters(workspaceId, node.template, sampleContext.keys).forEach { name ->
+        templates.interpolatedParameters(workspaceId, node.template, sampleContext.keys, guarded).forEach { name ->
             into.add(
                 PipelineErrorCodes.Template.PARAMETER_INTERPOLATED,
                 path,

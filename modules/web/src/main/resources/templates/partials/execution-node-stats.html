@@ -19,9 +19,11 @@
           <!-- CALCULATOR nodes only (NodeStats §4.10): the Context key the node wrote and
                the value it wrote, mono because it is an identifier + value, and the one
                place a wrong-quarter debug session looks. Every other node type gets the
-               em-dash; the keys are NON_NULL-included, so they are absent, not null. -->
+               em-dash; the keys are NON_NULL-included, so they are absent, not null.
+               078 A5: a key the CALLER supplied skips the node, and the row says "(provided)";
+               otherwise a supplied 7 and a computed 7 are indistinguishable here. -->
           <td class="num"
-              th:text="${n.has('context_key')} ? ${n.get('context_key').asText() + ' → ' + (n.has('context_value') ? n.get('context_value').asText() : '')} : '—'">ctx</td>
+              th:text="${n.has('context_key')} ? ${n.get('context_key').asText() + ' → ' + (n.has('context_value') ? n.get('context_value').asText() : '') + (n.has('provided_by') ? ' (provided)' : '')} : '—'">ctx</td>
         </tr>
       </th:block>
     </tbody>

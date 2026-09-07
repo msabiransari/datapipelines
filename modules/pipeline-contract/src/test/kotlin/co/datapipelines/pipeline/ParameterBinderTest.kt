@@ -140,4 +140,108 @@ class ParameterBinderTest {
         result.shouldBeInstanceOf<ParameterBindingResult.Bound>()
         return result.context
     }
+
+    // ---- 078 A5: a calculator context_key is an implicit optional execute input ----
+
+    private val calculatorBinder =
+        ParameterBinder(
+            parameters,
+            calculatorOutputs = mapOf("run_quarter" to LogicalType.INTEGER, "derived" to null),
+        )
+
+    @Test
+    fun `a supplied calculator key is coerced by the kind's output type, like a parameter`() {
+        val result =
+            calculatorBinder.bind(
+                mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "run_quarter" to Fixtures.json("4")),
+            )
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Bound>()
+        result.context.asMap()["run_quarter"] shouldBe 4
+    }
+
+    @Test
+    fun `a wrong-typed calculator key is refused with invalid_parameter_type on the parameter path`() {
+        val result =
+            calculatorBinder.bind(
+                mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "run_quarter" to Fixtures.json("\"four\"")),
+            )
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+        val failure = result.failures.single()
+        failure.code shouldBe PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+        failure.path shouldBe "parameters.run_quarter"
+        failure.details["declared_type"] shouldBe "INTEGER"
+    }
+
+    @Test
+    fun `an ANY-typed calculator key accepts any JSON scalar`() {
+        val context =
+            bindCalculators("start_date" to "\"2026-08-01\"", "derived" to "20260801")
+
+        context["derived"] shouldBe BigDecimal("20260801")
+        bindCalculators("start_date" to "\"2026-08-01\"", "derived" to "\"text\"")["derived"] shouldBe "text"
+        bindCalculators("start_date" to "\"2026-08-01\"", "derived" to "true")["derived"] shouldBe true
+    }
+
+    @Test
+    fun `an ANY-typed calculator key refuses a container with the same code`() {
+        val result =
+            calculatorBinder.bind(
+                mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "derived" to Fixtures.json("""{"a":1}""")),
+            )
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+        result.failures.single().code shouldBe PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+        result.failures.single().path shouldBe "parameters.derived"
+    }
+
+    @Test
+    fun `an unsupplied calculator key puts nothing in the bound map`() {
+        // These are not §7.2 declared parameters: the key enters the Context from the caller
+        // when supplied, or from the node when it runs — never from the binder's optional-null
+        // rule, which would make "the caller supplied null" indistinguishable from "nobody did".
+        val context = bindCalculators("start_date" to "\"2026-08-01\"")
+
+        ("run_quarter" in context.asMap()) shouldBe false
+        ("derived" in context.asMap()) shouldBe false
+    }
+
+    @Test
+    fun `an explicit JSON null on a calculator key reads as unsupplied`() {
+        val context = bindCalculators("start_date" to "\"2026-08-01\"", "run_quarter" to "null")
+
+        ("run_quarter" in context.asMap()) shouldBe false
+    }
+
+    @Test
+    fun `a declared parameter wins its own name over a calculator key`() {
+        // The collision itself is refused at save by CalculatorRules (§12.10); the binder's job
+        // is only to never let the calculator tier overwrite what the parameter tier bound.
+        val colliding =
+            ParameterBinder(
+                mapOf("run_quarter" to Parameter(LogicalType.STRING)),
+                calculatorOutputs = mapOf("run_quarter" to LogicalType.INTEGER),
+            )
+
+        val result = colliding.bind(mapOf("run_quarter" to Fixtures.json("\"4\"")))
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Bound>()
+        result.context.asMap()["run_quarter"] shouldBe "4"
+    }
+
+    @Test
+    fun `the sample context covers calculator outputs by output type, STRING for ANY`() {
+        val sample = calculatorBinder.sampleContext()
+
+        sample["run_quarter"] shouldBe 1
+        sample["derived"] shouldBe "sample"
+        sample.values.none { it == null } shouldBe true
+    }
+
+    private fun bindCalculators(vararg inputs: Pair<String, String>): ExecutionContext {
+        val result = calculatorBinder.bind(inputs.associate { (k, v) -> k to Fixtures.json(v) })
+        result.shouldBeInstanceOf<ParameterBindingResult.Bound>()
+        return result.context
+    }
 }

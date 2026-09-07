@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.10 (revised — see Change Log)
+**Status:** v1.12 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 ---
 
@@ -252,7 +252,7 @@ Note: no `output` block. DML's side effect IS the output.
 | `source` | string | yes, except PIPELINE and CALCULATOR | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
 | `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
 | `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
-| `parameters` | object | no | Child parameter bindings on a `PIPELINE` node: each value is a typed literal in the child parameter's §6.3 wire encoding, or `"${parent_param}"` naming a parent parameter of the identical type. See §4.9. |
+| `parameters` | object | no | Child input bindings on a `PIPELINE` node: each key names a child declared parameter or a child calculator `context_key`; each value is a typed literal in the target's §6.3 wire encoding, or `"${ref}"` resolving against the parent's Context tiers (a parent parameter, a parent calculator `context_key`, an org/platform key) at the identical type. See §4.9. |
 | `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
 | `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
 | `context_key` | string | CALCULATOR nodes only | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
@@ -296,7 +296,7 @@ Field rules:
 
 - `pipeline` — required: `{name, version}`. `name` per §3.2's path grammar (a child may live under any folder); `version` a positive integer pinning an existing, immutable pipeline version. Self-reference (`name` = the containing pipeline's own name) is invalid. There is no "latest".
 - `source` and `template` — **forbidden** (mirrors "output forbidden on DML/DDL"): the node runs a pipeline, not SQL.
-- `parameters` — optional map filling the child's declared parameters. Each value is either a typed literal obeying the child parameter's §6.3 wire encoding, or the string form `"${parent_param}"` referencing one of the parent's declared parameters of the identical type. No expressions, no concatenation — a value is a literal or a reference, nothing in between (v1).
+- `parameters` — optional map filling the child's inputs: each key names a child **declared parameter** or one of the pinned child's **CALCULATOR `context_key`s** (078 A5-composition — supplying the key skips the child's node exactly as a direct execute-time supply does, §4.10; child calculator keys are optional, never required, so `pipeline_parameter_unmapped` still reads declared parameters only). Each value is either a typed literal obeying the target's §6.3 wire encoding, or the string form `"${ref}"` resolving against the PARENT's Context tiers: a parent declared parameter, a parent CALCULATOR `context_key` (typed by its kind's output), or an org/platform key (org always STRING, platform per §0.2's canonical types) — at the identical type. An ANY-output key on either side skips the type check: the value is typed only by the run. No expressions, no concatenation — a value is a literal or a reference, nothing in between (v1). **No auto-passthrough:** a parent and child calculator key spelled the same are NOT implicitly mapped — the mapping is always an explicit entry here, or the child's node computes its own value.
 - `output` — standard §4.7 block, permitted only when the pinned child has a caller node. Zero-caller child ⇒ `output` must be absent; the node is side-effect-only and downstream `depends_on` gives ordering.
 - `depends_on` — unchanged.
 
@@ -329,6 +329,8 @@ Field rules:
 - `depends_on` — unchanged, and load-bearing in a way it is not elsewhere: **sequencing is topology**. A reference to another node's `context_key`, and a SQL node binding `:that_key`, are valid only from a node that depends on the producer, directly or transitively (§12.10 `calculator_input_unordered`). Array order means nothing.
 
 At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
+
+**The `context_key` is also an implicit optional execute input** (078, owner ruling 2026-09-05). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` beside `context_key`/`context_value` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input.
 
 ## 5. Settings
 
@@ -445,14 +447,16 @@ them spell a key the same way. Lowest precedence first:
 | 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
 | 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
 | 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
-| 4 | **execute-time inputs** | declared parameters only (§6.3) | the caller's `parameters` object |
+| 4 | **execute-time inputs** | declared parameters (§6.3), and each `CALCULATOR` node's `context_key` as an implicit **optional** input (§4.10 — supplied → the node is skipped; unsupplied → the node runs) | the caller's `parameters` object |
 | 5 | **calculator outputs** | each `CALCULATOR` node's `context_key` (§4.10) | the node, at its DAG position |
 
 A calculator output may shadow an org or platform key; it may **never** shadow a declared
 parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
-(§12.10). Org and platform keys are deployment constants, so the save-time dry render knows them:
-a template binding `:org_currency_symbol` validates without the pipeline declaring anything.
-None of them is a secret.
+(§12.10). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
+value for a *different* key — but a key the caller supplied skips its node (§4.10), so the two
+never contest the same key in one run. Org and platform keys are deployment constants, so the
+save-time dry render knows them: a template binding `:org_currency_symbol` validates without the
+pipeline declaring anything. None of them is a secret.
 
 ### 7.3 What's NOT in the Context
 
@@ -741,7 +745,11 @@ refused with `template.validation.parameter_interpolated` (§13.9, HTTP 400) —
 parameters are values and bind as `:name` (Templates §4.5); the message names both forms. The
 scan is AST-based (Templates §4.2 reasoning), honours macro-parameter and loop-variable
 shadowing, and no spelling hides a live interpolation from it (pinned against Freemarker
-2.3.34).
+2.3.34). The declared set is the pipeline's `parameters` block **including every calculator
+output key** (078 A1): a CALCULATOR node's `context_key` joins the set typed by its kind's
+output type, and is refused in one more position a plain parameter is not — a conditional's
+test (`<#if x??>`, `<#elseif x>`) — because a derived value gating SQL structure is the same
+hole as an interpolated one, one directive earlier.
 
 ### 12.7 Parameter validations
 
@@ -774,8 +782,8 @@ The PIPELINE-node rules (§4.9). Everything here is computed against the pinned 
 | `pipeline.validation.pipeline_node_has_source` | PIPELINE node has no `source` |
 | `pipeline.validation.pipeline_node_has_template` | PIPELINE node has no `template` |
 | `pipeline.validation.pipeline_parameter_unmapped` | Every required-without-default child parameter is supplied |
-| `pipeline.validation.pipeline_parameter_unknown` | Every supplied key exists in the child's `parameters` |
-| `pipeline.validation.pipeline_parameter_type_mismatch` | Literals obey the child parameter's wire encoding; `${ref}` targets a parent parameter of a compatible type |
+| `pipeline.validation.pipeline_parameter_unknown` | Every supplied key exists in the child's `parameters` or names one of its CALCULATOR `context_key`s |
+| `pipeline.validation.pipeline_parameter_type_mismatch` | Literals obey the child target's wire encoding; `${ref}` resolves against the parent's Context tiers — a parent parameter, a parent calculator `context_key`, an org/platform key — to a value of the identical type (an ANY-output key on either side skips the check, typed only by the run) |
 | `pipeline.validation.pipeline_output_on_sideeffect_child` | `output` absent when the pinned child has zero caller nodes |
 | `pipeline.validation.composition_too_deep` | Static reference-tree depth ≤ configured max (`datapipelines.pipelines.max-composition-depth`, default 5). Computed iteratively, never recursively in graph depth — §12.2's crash-safety rule applies here too. |
 
@@ -791,7 +799,7 @@ The `CALCULATOR`-node rules (§4.10, calculators design §0.3). Every one of the
 | `pipeline.validation.calculator_unknown` | `kind` names a kind in the registry ([Calculators §2](calculators.md)) |
 | `pipeline.validation.calculator_input_missing` | Every input the kind declares `required` is present |
 | `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's `context_key` |
-| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding; a `LIST` input takes a JSON array |
+| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding, and a `$reference` whose type the body decides (org/platform key, declared parameter, another calculator's output) must match it as well; a `LIST` input takes a JSON array |
 | `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's `context_key` — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Sequencing is topology, never array order |
 | `pipeline.validation.calculator_output_collision` | `context_key` collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's `context_key` — one writer per key per pipeline |
 | `pipeline.validation.calculator_output_name_invalid` | `context_key` matches §6.1's `[a-z_][a-z0-9_]*` |
@@ -822,7 +830,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 |---|---|---|
 | `pipeline.execution.not_found` | 404 | Pipeline id or version not found |
 | `pipeline.execution.parameter_required` | 400 | Required parameter missing from execution request |
-| `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type |
+| `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type — also a calculator `context_key` supplied at execute time that fails coercion against its kind's output type (§4.10; an ANY-output key accepts any JSON scalar, a container is refused with this same code) |
 | `pipeline.execution.aborted` | 500 | Execution aborted unexpectedly (executor error) |
 | `pipeline.execution.timeout` | 504 | Execution exceeded timeout |
 | `pipeline.execution.concurrency_limit` | 429 | Too many concurrent executions for this user |
@@ -932,7 +940,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
-| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The message names the parameter and shows the `:name` form |
+| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The declared set includes every calculator output key (078 A1), which is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) too. The message names the parameter and shows the `:name` form |
 | `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 | `template.in_use` | 409 | Template delete refused while any pipeline version pins any version of the template (040: the any-version reverse scan; `details.referencing_pipelines` names who blocks, `details.references` carries pipeline/node/pipeline-version/pinned-version rows). Deleting is otherwise soft and existing pins keep resolving — the refusal makes "who still uses this?" unmissable, it does not change delete semantics |
@@ -1269,6 +1277,9 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-06 | v1.12 | 078 composition mapping | The parent→child mapping half of the calculator input ruling (v1.11): a PIPELINE node's `parameters` may now map onto a child CALCULATOR `context_key` as well as a declared parameter (supplied → the child's node is skipped, §4.10's rule composed), and a `"${ref}"` value resolves against all three parent Context tiers — a declared parameter, a parent calculator `context_key` (typed by its kind's output), an org/platform key (org STRING, platform canonical) — type-checked against the target with the unchanged codes, messages naming the tiers; an ANY-output key on either side skips the check (typed only by the run, A6's convention). **No auto-passthrough:** identically spelled parent/child calculator keys are not implicitly mapped — only explicit entries cross. The read surfaces list calculator keys under `parameters` as `{"type", "required": false, "derived": true}` (`"ANY"` for ANY-output kinds), derived on read, never stored. Additive per §15.2. |
+| 2026-09-06 | v1.11 | 078 calculator input ruling | A calculator `context_key` is an implicit **optional execute input** (owner ruling 2026-09-05): supplied in the execute request's `parameters` object → the node is skipped and the supplied value (coerced against the kind's output type; an ANY-output key takes any JSON scalar, refusal = `pipeline.execution.invalid_parameter_type`, §13.3) is what downstream nodes bind, marked `provided_by: "caller"` on the node's stats; unsupplied (JSON `null` included) → the node runs and computes it. §7.2's tier 4 widened accordingly (org < platform < parameters < execute-time inputs — now including calculator keys < calculator outputs). The parent→child mapping half of the ruling — a parent maps a calculator key into a child execution explicitly — ships as its own row with the composition change. Additive per §15.2. |
+| 2026-09-06 | v1.10 | 078 contract gaps | §12.6's interpolation refusal set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type): `${calc_key}` now fails save with `template.validation.parameter_interpolated` instead of the dry render's wrong code, the `${calc_key!}` shape no longer slips past the scan, and a calculator key is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) as well — a derived value gating SQL structure is the same hole. Additive per §15.2. |
 | 2026-09-02 | v1.9 | 040 template used-by | §13.9 gains `template.in_use` (409) — template delete refused while any pipeline version pins any version of the template; the refusal carries the reverse scan's rows (pipeline, node, pipeline version, pinned version). Additive per §15.2. |
 | 2026-09-02 | v1.8 | 046 typed templates | §12.6 gains `pipeline.validation.template_type_mismatch` — a DQL/DML/DDL node referencing a `type='html'` template is refused at pipeline save (template-hierarchy-design §7). §13.9 gains `template.validation.type_invalid` (unknown `type` wire value), `template.validation.dialect_not_allowed` (a `dialect` present on an `html` template) and `template.validation.type_immutable` (a payload attempting to change a template's type). Additive per §15.2. |
 | 2026-09-01 | v1.7 | 037 agent data visibility | §13.4 gains `pipeline.node.not_found` (404) and `pipeline.node.standalone_execution_refused` (400) — the refusals of the `pipelines_execute_node` node-run debug query (MCP §6.2.20): an unknown node id, a `tempdb` source (staging exists only inside a full execution), or a PIPELINE node (it runs a child pipeline, not SQL). Node runs are agent debug queries, not executions — no history rows, no SSE, no idempotency (ratified, 037 §A). Additive per §15.2. |

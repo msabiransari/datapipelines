@@ -222,6 +222,8 @@ internal class StubTemplates(
     private val renders: Map<String, DryRenderOutcome> = emptyMap(),
     /** Per-template id, the declared names the stub reports as interpolated (042 B2). */
     private val interpolated: Map<String, Set<String>> = emptyMap(),
+    /** Per-template id, the guarded names the stub reports as conditioning a `<#if>` test (078 A1). */
+    private val conditioned: Map<String, Set<String>> = emptyMap(),
     /** Per-template id, the `:name` binds the stub reports the body carrying (072, §12.10). */
     private val bound: Map<String, List<String>> = emptyMap(),
 ) : TemplateDryRenderer {
@@ -246,7 +248,13 @@ internal class StubTemplates(
         workspaceId: UUID,
         ref: TemplateRef,
         declared: Set<String>,
-    ): List<String> = interpolated[ref.id]?.filter(declared::contains)?.toList() ?: emptyList()
+        guarded: Set<String>,
+    ): List<String> =
+        // Interpolated names need only match `declared`: ReferenceRules passes calculator
+        // output keys inside BOTH sets, so declared-only filtering emulates the real scan
+        // faithfully — and keeps a reverted declared-set line visible as a red test (078 A1).
+        (interpolated[ref.id]?.filter(declared::contains) ?: emptyList()) +
+            (conditioned[ref.id]?.filter(guarded::contains) ?: emptyList())
 
     override fun boundParameters(
         workspaceId: UUID,

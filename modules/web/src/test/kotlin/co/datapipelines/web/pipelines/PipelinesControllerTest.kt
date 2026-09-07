@@ -7,6 +7,8 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.PipelineDraftService
+import co.datapipelines.pipeline.PipelineFolder
+import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
@@ -16,9 +18,11 @@ import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
@@ -178,6 +182,45 @@ class PipelinesControllerTest {
         data.has("draft") shouldBe false
     }
 
+    /**
+     * 078 A5-composition: a calculator `context_key` is an implicit optional execute input, so
+     * the detail endpoint lists it under `parameters` — typed by the kind's output (`ANY` for
+     * an ANY-output kind), `required: false`, marked `derived: true`. Derived on read, never
+     * stored; declared parameters carry no flag.
+     */
+    @Test
+    fun `get lists calculator context keys under parameters as derived optional inputs`() {
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns releasedDetail
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns
+            """
+            {"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue","description":"d",
+             "parameters":{"region":{"type":"STRING","required":true}},
+             "settings":{"tempdb":{"engine":"H2"}},
+             "nodes":[
+               {"id":"fq","description":"fq","type":"CALCULATOR","kind":"fiscal_quarter",
+                "inputs":{"date":"${'$'}current_date","fiscal_start":"01-01"},
+                "context_key":"run_fiscal_quarter","depends_on":[]},
+               {"id":"cq","description":"cq","type":"CALCULATOR","kind":"coalesce",
+                "inputs":{"values":["a","b"]},"context_key":"anything","depends_on":["fq"]},
+               {"id":"fetch","description":"fetch","type":"DQL","source":"pg-prod",
+                "template":{"id":"test/revenue.sql","version":1},"depends_on":["cq"]}
+             ]}
+            """.trimIndent()
+
+        val parameters = controller.get(pipelineId).data.get("parameters")
+
+        val quarter = parameters.get("run_fiscal_quarter")
+        quarter.get("type").asText() shouldBe "INTEGER"
+        quarter.get("required").asBoolean() shouldBe false
+        quarter.get("derived").asBoolean() shouldBe true
+        parameters.get("anything").get("type").asText() shouldBe "ANY"
+        parameters.get("region").get("type").asText() shouldBe "STRING"
+        parameters.get("region").has("derived") shouldBe false
+    }
+
     @Test
     fun `update requires the If-Match precondition header`() {
         authenticate()
@@ -280,6 +323,64 @@ class PipelinesControllerTest {
         val last = controller.list(owner = null, datasource = null, q = null, offset = 4, limit = 2).data
         last.items.size shouldBe 1
         last.pagination.hasMore shouldBe false
+    }
+
+    // The `prefix` browse presentation — the REST mirror of `pipelines_list {prefix}` (067),
+    // whose cases in PipelineReadToolsTest these mirror.
+
+    @Test
+    fun `browse returns ONE level - folders with counts and the level's own leaves`() {
+        authenticate()
+        // `?prefix=` (empty) is the ROOT: present-but-empty, a different request from an
+        // absent prefix (the flat listing).
+        every { repository.listFolder(workspaceId, null, 0, 50) } returns
+            PipelineFolderLevel(
+                folders = listOf(PipelineFolder("nyc", "nyc", 6), PipelineFolder("trade", "trade", 3)),
+                foldersTruncated = false,
+                pipelines = listOf(record),
+                total = 1,
+                hasMore = false,
+            )
+
+        val data = controller.browse(prefix = "", offset = null, limit = null).data
+
+        data["prefix"] shouldBe ""
+        (data["folders"] as List<*>).map { (it as Map<*, *>)["path"] } shouldContainExactly listOf("nyc", "trade")
+        (data["folders"] as List<*>).map { (it as Map<*, *>)["pipeline_count"] } shouldContainExactly listOf(6, 3)
+        (data["pipelines"] as List<*>).map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("monthly_revenue")
+        data["total"] shouldBe 1
+        data["has_more"] shouldBe false
+        // The flat listing is NOT consulted for a browse — one level per request, and browse
+        // and search are different presentations.
+        verify(exactly = 0) { repository.findAll(any(), any()) }
+    }
+
+    @Test
+    fun `browse asks for exactly the named level`() {
+        authenticate()
+        every { repository.listFolder(workspaceId, "nyc/mobility", 0, 50) } returns
+            PipelineFolderLevel(emptyList(), false, listOf(record), 1, false)
+
+        val data = controller.browse(prefix = "nyc/mobility", offset = null, limit = null).data
+
+        data["prefix"] shouldBe "nyc/mobility"
+        (data["folders"] as List<*>).size shouldBe 0
+        (data["pipelines"] as List<*>).map { (it as Map<*, *>)["name"] } shouldContainExactly listOf("monthly_revenue")
+        verify(exactly = 1) { repository.listFolder(workspaceId, "nyc/mobility", 0, 50) }
+    }
+
+    @Test
+    fun `browse with an illegal prefix answers an empty level and never reaches the database`() {
+        authenticate()
+
+        val data = controller.browse(prefix = "nyc/../etc", offset = null, limit = null).data
+
+        data["prefix"] shouldBe "nyc/../etc"
+        (data["folders"] as List<*>).size shouldBe 0
+        (data["pipelines"] as List<*>).size shouldBe 0
+        data["total"] shouldBe 0
+        data["has_more"] shouldBe false
+        verify(exactly = 0) { repository.listFolder(any(), any(), any(), any()) }
     }
 
     @Test

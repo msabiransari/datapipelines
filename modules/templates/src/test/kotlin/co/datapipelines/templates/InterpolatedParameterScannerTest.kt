@@ -138,4 +138,55 @@ class InterpolatedParameterScannerTest {
     fun `reports are in first-use order`() {
         scan("SELECT \${b}, \${a}, \${b}", setOf("a", "b")) shouldBe listOf("b", "a")
     }
+
+    // ---- 078 A1: the guarded set (CALCULATOR output keys) — refused in conditionals too ----
+
+    private fun scanGuarded(
+        body: String,
+        guarded: Set<String>,
+    ): List<String> = InterpolatedParameterScanner.scan(body, emptySet(), guarded)
+
+    @Test
+    fun `a bare interpolation of a guarded name is reported`() {
+        scanGuarded("SELECT * FROM t WHERE q = \${run_fiscal_quarter}", setOf("run_fiscal_quarter")) shouldBe
+            listOf("run_fiscal_quarter")
+    }
+
+    @Test
+    fun `an interpolation with the default operator of a guarded name is reported`() {
+        // `${x!}` is the shape that PASSED save before A1: the dry render tolerates the missing
+        // variable behind the default, so only the scan can refuse it.
+        scanGuarded("SELECT \${run_fiscal_quarter!}", setOf("run_fiscal_quarter")) shouldBe listOf("run_fiscal_quarter")
+    }
+
+    @Test
+    fun `an if test on a guarded name is reported`() {
+        scanGuarded("<#if run_fiscal_quarter??>SELECT 1</#if>", setOf("run_fiscal_quarter")) shouldBe
+            listOf("run_fiscal_quarter")
+    }
+
+    @Test
+    fun `an elseif test on a guarded name is reported`() {
+        scanGuarded("<#if a>SELECT 1<#elseif run_fiscal_quarter??>SELECT 2</#if>", setOf("run_fiscal_quarter")) shouldBe
+            listOf("run_fiscal_quarter")
+    }
+
+    @Test
+    fun `an if test on a declared-only name stays legal - 042 B1 is not re-litigated`() {
+        InterpolatedParameterScanner.scan("<#if customer_id??>SELECT 1</#if>", setOf("customer_id"), emptySet()) shouldBe
+            emptyList()
+    }
+
+    @Test
+    fun `a macro parameter shadows a guarded name inside the macro body`() {
+        scanGuarded(
+            "<#macro m run_fiscal_quarter><#if run_fiscal_quarter??>\${run_fiscal_quarter}</#if></#macro>",
+            setOf("run_fiscal_quarter"),
+        ) shouldBe emptyList()
+    }
+
+    @Test
+    fun `a guarded name in an unparseable condition reports nothing - the syntax check owns that failure`() {
+        scanGuarded("<#if run_fiscal_quarter>SELECT ${'$'}{</#if>", setOf("run_fiscal_quarter")) shouldBe emptyList()
+    }
 }

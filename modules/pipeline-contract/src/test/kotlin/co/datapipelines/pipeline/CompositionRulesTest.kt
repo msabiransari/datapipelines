@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -138,6 +139,156 @@ class CompositionRulesTest {
             .failures shouldContainExactly emptyList()
     }
 
+    // ------------------------------------------------ 078 A5-composition: the three parent tiers
+
+    @Test
+    fun `a reference to a parent calculator output of the identical type passes`() {
+        val child = child(parameters = mapOf("quarter" to Parameter(LogicalType.INTEGER, required = true)))
+        val supplied = mapOf("quarter" to Fixtures.json("\"\${run_fiscal_quarter}\""))
+
+        validatorWith(resolver(child))
+            .validate(parent(parameters = supplied, parentNodes = listOf(Fixtures.calculatorNode())), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a type mismatch against a parent calculator output names that tier`() {
+        val child = child(parameters = mapOf("label" to Parameter(LogicalType.STRING, required = true)))
+        val supplied = mapOf("label" to Fixtures.json("\"\${run_fiscal_quarter}\""))
+
+        val result =
+            validatorWith(resolver(child))
+                .validate(parent(parameters = supplied, parentNodes = listOf(Fixtures.calculatorNode())), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single()
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+        failure.message shouldContain "parent calculator output 'run_fiscal_quarter'"
+        failure.message shouldContain "child parameter 'label'"
+    }
+
+    @Test
+    fun `a reference to an org key resolves as STRING`() {
+        // org_currency_name is STRING (§0.2): it maps onto the child's STRING parameter…
+        val supplied = mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "region" to Fixtures.json("\"\${org_currency_name}\""))
+
+        validatorWith(resolver(child()))
+            .validate(parent(parameters = supplied), workspaceId)
+            .failures shouldContainExactly emptyList()
+
+        // …but not onto a DATE one, and the message names the tier.
+        val mismatched =
+            validatorWith(resolver(child()))
+                .validate(parent(parameters = mapOf("start_date" to Fixtures.json("\"\${org_currency_name}\""))), workspaceId)
+
+        mismatched.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+        mismatched.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single().message shouldContain
+            "org key 'org_currency_name'"
+    }
+
+    @Test
+    fun `a reference to a platform key resolves with its canonical type`() {
+        // current_date is DATE (ContextKeys.PLATFORM_TYPES): it maps onto the child's DATE parameter…
+        val supplied = mapOf("start_date" to Fixtures.json("\"\${current_date}\""))
+
+        validatorWith(resolver(child()))
+            .validate(parent(parameters = supplied), workspaceId)
+            .failures shouldContainExactly emptyList()
+
+        // …while execution_id is STRING, and the message names the tier.
+        val mismatched =
+            validatorWith(resolver(child()))
+                .validate(parent(parameters = mapOf("start_date" to Fixtures.json("\"\${execution_id}\""))), workspaceId)
+
+        mismatched.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+        mismatched.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single().message shouldContain
+            "platform key 'execution_id'"
+    }
+
+    @Test
+    fun `an ANY-output parent calculator key maps onto any typed target without a type check`() {
+        // coalesce outputs ANY — typed only by the run — so the save-time check skips (A6's convention).
+        val supplied = mapOf("start_date" to Fixtures.json("\"\${anything}\""))
+        val anyNode =
+            Fixtures.calculatorNode(
+                id = "cq",
+                kind = "coalesce",
+                inputs = mapOf("values" to Fixtures.literals("2026-08-01", "2026-09-01")),
+                contextKey = "anything",
+            )
+
+        validatorWith(resolver(child()))
+            .validate(parent(parameters = supplied, parentNodes = listOf(anyNode)), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    // ------------------------------------------------ 078 A5-composition: the child calculator-key tier
+
+    @Test
+    fun `a supplied key that is only a child calculator context_key is not pipeline_parameter_unknown`() {
+        val supplied = mapOf("child_quarter" to Fixtures.json("4"))
+
+        validatorWith(resolver(childWithCalculator()))
+            .validate(parent(parameters = supplied), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a reference mapped onto a child calculator key of the identical type passes`() {
+        val supplied = mapOf("child_quarter" to Fixtures.json("\"\${run_fiscal_quarter}\""))
+
+        validatorWith(resolver(childWithCalculator()))
+            .validate(parent(parameters = supplied, parentNodes = listOf(Fixtures.calculatorNode())), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a type mismatch against a child calculator key names both tiers`() {
+        val supplied = mapOf("child_quarter" to Fixtures.json("\"\${org_currency_name}\""))
+
+        val result =
+            validatorWith(resolver(childWithCalculator()))
+                .validate(parent(parameters = supplied), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single()
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+        failure.message shouldContain "org key 'org_currency_name'"
+        failure.message shouldContain "child calculator output 'child_quarter'"
+    }
+
+    @Test
+    fun `a literal mapped onto an ANY-output child calculator key takes any scalar`() {
+        val anyChild =
+            Fixtures.pipeline(
+                name = CHILD,
+                nodes =
+                    listOf(
+                        Fixtures.calculatorNode(
+                            id = "cq",
+                            kind = "coalesce",
+                            inputs = mapOf("values" to Fixtures.literals("a", "b")),
+                            contextKey = "child_any",
+                        ),
+                        Fixtures.node(output = NodeOutput.Caller),
+                    ),
+            )
+        val supplied = mapOf("child_any" to Fixtures.json("4"))
+
+        validatorWith(resolver(anyChild))
+            .validate(parent(parameters = supplied), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    /** A child whose only input is the calculator `context_key` `child_quarter` (INTEGER output). */
+    private fun childWithCalculator(): Pipeline =
+        Fixtures.pipeline(
+            name = CHILD,
+            nodes =
+                listOf(
+                    Fixtures.calculatorNode(id = "cq", contextKey = "child_quarter"),
+                    Fixtures.node(output = NodeOutput.Caller),
+                ),
+        )
+
     @Test
     fun `an output block on a zero-caller child is pipeline_output_on_sideeffect_child`() {
         val result =
@@ -265,11 +416,12 @@ class CompositionRulesTest {
         source: String = "",
         template: TemplateRef = TemplateRef(),
         parentParameters: Map<String, Parameter> = emptyMap(),
+        parentNodes: List<Node> = emptyList(),
     ): Pipeline =
         Fixtures.pipeline(
             name = PARENT,
             parameters = parentParameters,
-            nodes = listOf(pipelineNode(ref, parameters, output, source, template)),
+            nodes = parentNodes + pipelineNode(ref, parameters, output, source, template),
         )
 
     private fun pipelineNode(

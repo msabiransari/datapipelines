@@ -3,6 +3,7 @@ package co.datapipelines.templates
 import freemarker.core.Macro
 import freemarker.core._CoreAPI
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -149,5 +150,31 @@ class FreemarkerAstDriftTest {
         _CoreAPI.addThreadInterruptedChecks(template)
 
         withClue("post-processing must leave a usable tree") { template.rootTreeNode.shouldNotBeNull() }
+    }
+
+    @Test
+    fun `if and conditional block node class names still name the conditional nodes`() {
+        // The 078 A1 guarded scan matches these two names to find a conditional's test. A jar
+        // bump that renames either would silently re-open the `<#if calc_key??>` hole.
+        val root = parse("<#if a??>x<#elseif b??>y<#else>z</#if>").rootTreeNode
+        val types = mutableListOf<String>()
+        FreemarkerAst.visitExcludingComments(root) { types += FreemarkerAst.typeOf(it) }
+
+        types shouldContain FreemarkerAst.IF_BLOCK
+        types shouldContain FreemarkerAst.CONDITIONAL_BLOCK
+    }
+
+    @Test
+    fun `a conditional block's description prints its condition and not its children`() {
+        // The guarded scan reads the condition off the element that owns it — the same property
+        // the `?eval` pin above establishes for `#if`, re-derived here for the branch node.
+        val root = parse("<#if run_fiscal_quarter??>CHILD-TEXT</#if>").rootTreeNode
+        val branches = mutableListOf<String>()
+        FreemarkerAst.visitExcludingComments(root) { element ->
+            if (FreemarkerAst.typeOf(element) == FreemarkerAst.CONDITIONAL_BLOCK) branches += FreemarkerAst.ownText(element)
+        }
+
+        branches.single() shouldContain "run_fiscal_quarter"
+        branches.single() shouldNotContain "CHILD-TEXT"
     }
 }

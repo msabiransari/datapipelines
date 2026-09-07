@@ -62,9 +62,10 @@ class TemplateDryRendererImpl(
         workspaceId: java.util.UUID,
         ref: TemplateRef,
         declared: Set<String>,
+        guarded: Set<String>,
     ): List<String> {
         val version = engines.registryFor(workspaceId).lookup(ref.id, ref.version) ?: return emptyList()
-        return InterpolatedParameterScanner.scan(version.body, declared)
+        return InterpolatedParameterScanner.scan(version.body, declared, guarded)
     }
 
     override fun boundParameters(

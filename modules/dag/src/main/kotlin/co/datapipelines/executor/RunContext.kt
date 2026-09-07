@@ -39,6 +39,14 @@ import java.util.UUID
  */
 class RunContext private constructor(
     initial: Map<String, Any?>,
+    /**
+     * The calculator `context_key`s the CALLER supplied at execute time (078 A5, owner ruling
+     * 2026-09-05): a supplied key means the node that would compute it is SKIPPED — the value
+     * is already here, bound and coerced by `ParameterBinder`. [NodeRunner] reads this set to
+     * decide, and stamps `provided_by: "caller"` on the skipped node's stats. Empty for a
+     * Context built over already-resolved values ([of]).
+     */
+    val callerSupplied: Set<String> = emptySet(),
 ) : Map<String, Any?> {
     private val lock = Any()
     private val store = LinkedHashMap<String, Any?>(initial)
@@ -93,9 +101,16 @@ class RunContext private constructor(
             startedAt: Instant,
         ): RunContext {
             val zone = ContextKeys.zoneOf(org)
-            val bound = ParameterBinder(pipeline.parameters).bindOrThrow(inputs).asMap()
+            // 078 A5: the pipeline's calculator output keys bind as implicit OPTIONAL inputs —
+            // supplied → the value enters the Context from the caller and the node is skipped;
+            // unsupplied → the binder puts nothing in, and the node runs and writes the key.
+            val calculatorOutputs = pipeline.calculatorOutputs()
+            val bound = ParameterBinder(pipeline.parameters, calculatorOutputs).bindOrThrow(inputs).asMap()
             return RunContext(
                 org.values + ContextKeys.platformValues(executionId, startedAt, zone) + bound,
+                // A calculator key is in the bound map only when the caller supplied it (the
+                // binder drops explicit nulls), so the intersection IS the caller-supplied set.
+                callerSupplied = bound.keys.intersect(calculatorOutputs.keys),
             )
         }
 

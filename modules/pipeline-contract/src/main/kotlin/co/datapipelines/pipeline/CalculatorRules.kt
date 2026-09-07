@@ -4,6 +4,7 @@ import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.calculators.CalculatorKind
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.util.UUID
 
@@ -22,6 +23,15 @@ import java.util.UUID
  * reader's value depends on which node the scheduler reached first, which is not a bug that shows
  * up in testing: with four parallel slots and two nodes, it is right most of the time. The
  * refusal is `calculator_input_unordered`, and the fix an author makes is one array entry.
+ *
+ * ## Typing reaches through `$references`, not just literals
+ *
+ * A reference whose type the body decides is checked against the input's declared type exactly as
+ * a literal is: platform keys from [ContextKeys.PLATFORM_TYPES], org keys always STRING (§0.2), a
+ * declared parameter its own type, another calculator's `context_key` the writer kind's output.
+ * Either side may be unknowable — an `ANY` input (coalesce, if_null, map) takes everything, and
+ * an `ANY`-output writer's value is typed only by the run — and then the check skips rather than
+ * guesses. Without this, `$current_timestamp` into a DATE input passed save and failed at 3am.
  */
 internal object CalculatorRules {
     @Suppress("LongParameterList")
@@ -265,7 +275,7 @@ internal object CalculatorRules {
         elements.forEach { element ->
             val reference = referenceIn(element)
             if (reference != null) {
-                checkReference(path, node, reference, deploymentKeys, pipeline, keyToWriter, ancestors, into)
+                checkReference(path, node, kind, input, reference, deploymentKeys, pipeline, keyToWriter, ancestors, into)
             } else {
                 checkLiteral(path, node, kind, input, element, into)
             }
@@ -276,6 +286,8 @@ internal object CalculatorRules {
     private fun checkReference(
         path: String,
         node: Node,
+        kind: CalculatorKind,
+        input: CalculatorInput,
         reference: String,
         deploymentKeys: Set<String>,
         pipeline: Pipeline,
@@ -283,26 +295,81 @@ internal object CalculatorRules {
         ancestors: Ancestry,
         into: FailureCollector,
     ) {
-        if (reference in deploymentKeys || reference in pipeline.parameters) return
-        val writer = keyToWriter[reference]
-        when {
-            writer == null -> {
-                into.add(
-                    Validation.CALCULATOR_INPUT_UNKNOWN,
-                    path,
-                    "Reference '\$$reference' names no Context key: it is not an org or platform key, not a " +
-                        "declared parameter, and no node writes it.",
-                    mapOf(
-                        "node" to node.id.truncateForError(),
-                        "reason" to "reference",
-                        "reference" to reference.truncateForError(),
-                    ),
-                )
+        // The reference's canonical type when the tier owning the key pins one: platform keys
+        // from ContextKeys.PLATFORM_TYPES, every org value STRING on purpose (§0.2), a declared
+        // parameter its own type. The deployment tiers are read FIRST because they already win
+        // the existence check below without a depends_on edge — a calculator shadowing an org or
+        // platform key (§0.2 tier 5) is typed by the key it shadows, consistently.
+        val declaredType =
+            when {
+                reference in ContextKeys.PLATFORM_TYPES -> ContextKeys.PLATFORM_TYPES.getValue(reference)
+                reference in deploymentKeys -> LogicalType.STRING
+                else -> pipeline.parameters[reference]?.type
             }
+        if (declaredType == null) {
+            val writer = keyToWriter[reference]
+            when {
+                writer == null -> {
+                    into.add(
+                        Validation.CALCULATOR_INPUT_UNKNOWN,
+                        path,
+                        "Reference '\$$reference' names no Context key: it is not an org or platform key, not a " +
+                            "declared parameter, and no node writes it.",
+                        mapOf(
+                            "node" to node.id.truncateForError(),
+                            "reason" to "reference",
+                            "reference" to reference.truncateForError(),
+                        ),
+                    )
+                    return
+                }
 
-            writer != node.id && !ancestors.reaches(node.id, writer) -> {
-                unordered(path, node, reference, writer, into)
+                writer != node.id && !ancestors.reaches(node.id, writer) -> {
+                    unordered(path, node, reference, writer, into)
+                    return
+                }
             }
+        }
+        checkReferenceType(path, node, kind, input, reference, declaredType, pipeline, keyToWriter, into)
+    }
+
+    /**
+     * The save-time type check for a `$reference`, the counterpart of [checkLiteral] for a value
+     * the body does not carry inline. Both sides must be knowable: an `ANY` input (null
+     * [CalculatorInput.type]) takes everything, and an `ANY`-output writer (null
+     * [CalculatorKind.output]) is typed only by the run — either one skips the check rather than
+     * guesses. A bare `"$ref"` for a LIST input resolves to one value at run, so it types against
+     * the element type, which is what [CalculatorInput.type] holds either way.
+     */
+    @Suppress("LongParameterList")
+    private fun checkReferenceType(
+        path: String,
+        node: Node,
+        kind: CalculatorKind,
+        input: CalculatorInput,
+        reference: String,
+        declaredType: LogicalType?,
+        pipeline: Pipeline,
+        keyToWriter: Map<String, String>,
+        into: FailureCollector,
+    ) {
+        val inputType = input.type ?: return
+        val referenceType =
+            declaredType
+                ?: keyToWriter[reference]
+                    ?.let { writer -> pipeline.nodes.firstOrNull { it.id == writer }?.kind }
+                    ?.let { CalculatorRegistry.find(it)?.output }
+                ?: return
+        if (referenceType != inputType) {
+            typeMismatch(
+                path,
+                node,
+                kind,
+                input,
+                "a ${inputType.wire} value; '\$$reference' resolves to ${referenceType.wire}",
+                into,
+                reference = reference,
+            )
         }
     }
 
@@ -356,16 +423,19 @@ internal object CalculatorRules {
         input: CalculatorInput,
         expected: String,
         into: FailureCollector,
+        reference: String? = null,
     ) = into.add(
         Validation.CALCULATOR_INPUT_TYPE_MISMATCH,
         path,
         "Kind '${kind.kind}' input '${input.name}' takes $expected.",
-        mapOf(
-            "node" to node.id.truncateForError(),
-            "kind" to kind.kind,
-            "input" to input.name,
-            "declared_type" to (input.type?.wire ?: CalculatorInput.ANY_TYPE),
-        ),
+        buildMap {
+            put("node", node.id.truncateForError())
+            put("kind", kind.kind)
+            put("input", input.name)
+            put("declared_type", input.type?.wire ?: CalculatorInput.ANY_TYPE)
+            // Set only for the `$reference` shape — the key whose resolved type contradicted the input.
+            if (reference != null) put("reference", reference.truncateForError())
+        },
     )
 
     // ---- the SQL side of the same ordering rule ----

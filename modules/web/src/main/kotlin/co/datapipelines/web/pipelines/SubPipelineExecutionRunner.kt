@@ -36,15 +36,21 @@ import co.datapipelines.staging.StagingFactory
 import co.datapipelines.staging.StagingMemoryLimitException
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.NullNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import org.slf4j.LoggerFactory
+import java.math.BigDecimal
+import java.math.BigInteger
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.util.UUID
 
 /**
@@ -345,30 +351,145 @@ class SubPipelineExecutionRunner(
 
     /**
      * Node `parameters` become the child request's parameters: literals pass through untouched;
-     * the `${parent_param}` form (§12.9's exact reference shape — a value is a literal or this,
-     * nothing in between) resolves against the parent's BOUND runtime parameters and is
-     * re-encoded to the child parameter's §6.3 wire form.
+     * the `${ref}` form (§12.9's exact reference shape — a value is a literal or this, nothing
+     * in between) resolves against the parent's LIVE Context — any tier: a bound parameter, a
+     * calculator output written upstream, an org or platform key — and is re-encoded to the
+     * child target's §6.3 wire form.
+     *
+     * The target is a child declared parameter OR one of the pinned child's CALCULATOR
+     * `context_key`s (078 A5-composition): supplying the key skips the child's node exactly as
+     * a direct execute-time supply does. An ANY-output target takes the referenced value as any
+     * JSON scalar ([encodeScalar]). Nothing else crosses: only the keys the node explicitly
+     * maps are passed — a parent and child calculator key spelled the same are NOT forwarded
+     * (owner ruling 2026-09-05: hidden coupling), and [ExecuteRequest.parameters] is built from
+     * `node.parameters` alone.
      */
     private fun resolveParameters(
         node: ExecutableNode,
         child: Pipeline,
         ctx: NodeExecutionContext,
-    ): Map<String, JsonNode> =
-        node.parameters.orEmpty().mapValues { (key, value) ->
+    ): Map<String, JsonNode> {
+        val childCalculatorKeys = child.calculatorOutputs()
+        return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)
                     ?: return@mapValues value
-            val declared =
-                child.parameters[key]
-                    ?: throw childFailure(
+            val targetType = targetType(node, child, key, childCalculatorKeys)
+            val resolved = ctx.values[reference.groupValues[1]]
+            if (targetType == null) {
+                encodeScalar(node, key, resolved)
+            } else {
+                try {
+                    ParameterWireEncoder.encode(targetType, resolved)
+                } catch (
+                    @Suppress("TooGenericExceptionCaught", "SwallowedException") e: ClassCastException,
+                ) {
+                    // Save-time skips the check when an ANY-output parent key is mapped onto a
+                    // typed target (typed only by the run) — so a value of the wrong runtime
+                    // shape reaches this cast. Report the mapping, not a bare CCE.
+                    throw childFailure(
                         node,
                         childExecutionId = null,
                         message =
-                            "Node '${node.id}' supplies parameter '$key', which the pinned child pipeline " +
-                                "does not declare; save-time validation should have rejected this (§12.9).",
+                            "Node '${node.id}' maps '\${${reference.groupValues[1]}}' onto child input '$key' " +
+                                "(${targetType.wire}), but the referenced Context value is a " +
+                                (resolved?.javaClass?.simpleName ?: "null") +
+                                ", which does not read as ${targetType.wire}; an ANY-output reference is " +
+                                "typed only by the run.",
                         cause = null,
                     )
-            ParameterWireEncoder.encode(declared.type, ctx.values[reference.groupValues[1]])
+                }
+            }
+        }
+    }
+
+    /**
+     * The target's wire type: the child parameter's, or the child calculator key's kind output
+     * — null for an ANY-output kind, which takes any scalar. An unknown key is unreachable per
+     * §12.9; the guard fails with the catalogued code rather than an NPE, as [requireRef] does.
+     */
+    private fun targetType(
+        node: ExecutableNode,
+        child: Pipeline,
+        key: String,
+        childCalculatorKeys: Map<String, LogicalType?>,
+    ): LogicalType? {
+        child.parameters[key]?.let { return it.type }
+        if (key in childCalculatorKeys) return childCalculatorKeys.getValue(key)
+        throw childFailure(
+            node,
+            childExecutionId = null,
+            message =
+                "Node '${node.id}' supplies parameter '$key', which the pinned child pipeline " +
+                    "neither declares nor computes as a calculator context_key; save-time validation " +
+                    "should have rejected this (§12.9).",
+            cause = null,
+        )
+    }
+
+    /**
+     * The §6.3 reading of a bound Context value whose target declares no type (an ANY-output
+     * child calculator key — 078 A5-composition). The child's binder reads an ANY-output key
+     * through `CalculatorInputResolver.natural` — String, Boolean, BigDecimal for every number —
+     * so every bound scalar is encoded by its own type's wire form and re-read canonically.
+     */
+    private fun encodeScalar(
+        node: ExecutableNode,
+        key: String,
+        value: Any?,
+    ): JsonNode =
+        when (value) {
+            null -> {
+                NullNode.instance
+            }
+
+            is Int -> {
+                ParameterWireEncoder.encode(LogicalType.INTEGER, value)
+            }
+
+            is BigInteger -> {
+                ParameterWireEncoder.encode(LogicalType.BIGINTEGER, value)
+            }
+
+            is BigDecimal -> {
+                ParameterWireEncoder.encode(LogicalType.DECIMAL, value)
+            }
+
+            is Boolean -> {
+                ParameterWireEncoder.encode(LogicalType.BOOLEAN, value)
+            }
+
+            is String -> {
+                ParameterWireEncoder.encode(LogicalType.STRING, value)
+            }
+
+            is ByteArray -> {
+                ParameterWireEncoder.encode(LogicalType.BINARY, value)
+            }
+
+            is LocalDate -> {
+                ParameterWireEncoder.encode(LogicalType.DATE, value)
+            }
+
+            is LocalTime -> {
+                ParameterWireEncoder.encode(LogicalType.TIME, value)
+            }
+
+            is Instant -> {
+                ParameterWireEncoder.encode(LogicalType.TIMESTAMP, value)
+            }
+
+            else -> {
+                throw childFailure(
+                    node,
+                    childExecutionId = null,
+                    message =
+                        "Node '${node.id}' maps a Context value of type ${value.javaClass.simpleName} onto " +
+                            "child calculator input '$key', which takes any JSON scalar; this value has no " +
+                            "canonical reading.",
+                    cause = null,
+                )
+            }
         }
 
     /**

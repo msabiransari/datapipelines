@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
@@ -20,9 +21,23 @@ import java.time.LocalTime
  * Context as "all declared pipeline parameters", so an undeclared extra simply never enters
  * it, and §13 has no code for one. (Ignoring is also what keeps a client that upgrades
  * before the pipeline does from breaking.)
+ *
+ * ## Calculator output keys (078 A5, owner ruling 2026-09-05)
+ *
+ * [calculatorOutputs] carries the pipeline's CALCULATOR `context_key`s, typed by the kind's
+ * output (`null` = an ANY-output kind — coalesce, if_null, map). Each is an implicit
+ * **optional** input: supplied, it is coerced exactly like a parameter — the same
+ * [ParameterCoercion], the same `invalid_parameter_type` code and `parameters.<name>` path —
+ * and enters the Context from the caller; unsupplied, it puts NOTHING in the bound map (these
+ * are not §7.2 declared parameters), and the node runs and writes the key itself. An ANY-typed
+ * key accepts any JSON scalar, read the way [CalculatorInputResolver] reads an ANY input; a
+ * container is refused with the same code — §13 has no other code for a bad execute input.
+ * A key that collides with a declared parameter binds as the parameter (the collision itself
+ * is §12.10's save-time refusal, `CalculatorRules`' job — never the binder's).
  */
 class ParameterBinder(
     private val parameters: Map<String, Parameter>,
+    private val calculatorOutputs: Map<String, LogicalType?> = emptyMap(),
 ) {
     /** Binds [inputs] — the `parameters` object of an execute request — into a Context. */
     fun bind(inputs: Map<String, JsonNode>): ParameterBindingResult {
@@ -33,7 +48,7 @@ class ParameterBinder(
             val supplied = inputs[name]?.takeUnless { it.isNull }
             val value = supplied ?: parameter.default?.takeUnless { it.isNull }
             when {
-                value != null -> coerceInto(name, parameter, value, bound, failures)
+                value != null -> coerceInto(name, parameter.type, value, bound, failures)
 
                 parameter.required -> failures += requiredMissing(name)
 
@@ -42,6 +57,15 @@ class ParameterBinder(
                 // render failure on an undefined variable (§7.4).
                 else -> bound[name] = null
             }
+        }
+        // The calculator tier AFTER the parameter one: a supplied calculator key is optional in
+        // both directions (unsupplied → nothing; an explicit JSON null reads as unsupplied,
+        // exactly as it does for a declared parameter), and a name the pipeline also declares
+        // as a parameter is the parameter's — the collision refusal lives at save time.
+        calculatorOutputs.forEach { (name, outputType) ->
+            if (name in parameters) return@forEach
+            val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
+            coerceCalculatorInto(name, outputType, supplied, bound, failures)
         }
         return if (failures.isEmpty()) {
             ParameterBindingResult.Bound(ExecutionContext(bound))
@@ -76,31 +100,69 @@ class ParameterBinder(
                 ?.let { ParameterCoercion.coerce(parameter.type, it) }
                 ?.let { (it as? ParameterCoercion.Outcome.Coerced)?.value }
                 ?: sampleValue(parameter.type)
-        }
+        } +
+            // Calculator output keys sample by the kind's output type, STRING for an ANY-output
+            // kind: the dry render needs a value of *some* defined type, never a particular one.
+            // A name the pipeline also declares as a parameter keeps the parameter's sample —
+            // the collision is §12.10's save-time refusal, and the parameter wins its own name.
+            calculatorOutputs
+                .filterKeys { it !in parameters }
+                .mapValues { (_, outputType) -> sampleValue(outputType ?: LogicalType.STRING) }
 
     private fun coerceInto(
         name: String,
-        parameter: Parameter,
+        type: LogicalType,
         value: JsonNode,
         bound: MutableMap<String, Any?>,
         failures: MutableList<ValidationFailure>,
     ) {
-        when (val outcome = ParameterCoercion.coerce(parameter.type, value)) {
+        when (val outcome = ParameterCoercion.coerce(type, value)) {
             is ParameterCoercion.Outcome.Coerced -> {
                 bound[name] = outcome.value
             }
 
             is ParameterCoercion.Outcome.Rejected -> {
-                failures +=
-                    validationFailure(
-                        code = PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                        path = "parameters.${name.truncateForError()}",
-                        message = "Parameter '${name.truncateForError()}': ${outcome.reason}.",
-                        details = mapOf("parameter" to name.truncateForError(), "declared_type" to parameter.type.wire),
-                    )
+                failures += invalidType(name, type.wire, outcome.reason)
             }
         }
     }
+
+    /**
+     * The calculator-key twin of [coerceInto] (078 A5). A typed output coerces through the same
+     * [ParameterCoercion] and reports the same code, path and details as a parameter failure —
+     * to the caller there is no second kind of execute input. An ANY output takes any JSON
+     * scalar ([CalculatorInputResolver.natural]); a container has no canonical reading and is
+     * refused with the same code rather than a new one.
+     */
+    private fun coerceCalculatorInto(
+        name: String,
+        outputType: LogicalType?,
+        value: JsonNode,
+        bound: MutableMap<String, Any?>,
+        failures: MutableList<ValidationFailure>,
+    ) {
+        if (outputType == null) {
+            val scalar = CalculatorInputResolver.natural(value)
+            if (scalar == null) {
+                failures += invalidType(name, CalculatorInput.ANY_TYPE, "a JSON ${value.nodeType} has no canonical reading")
+            } else {
+                bound[name] = scalar
+            }
+            return
+        }
+        coerceInto(name, outputType, value, bound, failures)
+    }
+
+    private fun invalidType(
+        name: String,
+        declaredType: String,
+        reason: String,
+    ) = validationFailure(
+        code = PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+        path = "parameters.${name.truncateForError()}",
+        message = "Parameter '${name.truncateForError()}': $reason.",
+        details = mapOf("parameter" to name.truncateForError(), "declared_type" to declaredType),
+    )
 
     private fun requiredMissing(name: String) =
         validationFailure(
@@ -110,10 +172,13 @@ class ParameterBinder(
             details = mapOf("parameter" to name.truncateForError()),
         )
 
-    private companion object {
+    internal companion object {
         /**
          * One representative value per canonical type. Fixed, never random: a dry render that
          * passes on Tuesday and fails on Wednesday is worse than one that never ran.
+         *
+         * Internal, not private: §12.6's declared set includes CALCULATOR output keys (078 A1),
+         * and those sample by the kind's output type through this same table.
          */
         fun sampleValue(type: LogicalType): Any =
             when (type) {

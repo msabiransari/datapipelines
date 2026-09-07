@@ -21,7 +21,9 @@ import freemarker.core.TemplateElement
  * to be written into the output. Deliberately NOT reported:
  *
  *  - `<#if customer_id>` and friends — a directive *test* gates structure, it writes no value
- *    into the SQL, and 042 B1 leaves structure to the author;
+ *    into the SQL, and 042 B1 leaves structure to the author. The one exception is [scan]'s
+ *    `guarded` set (078 A1): a CALCULATOR output key is refused there too, because a derived
+ *    value gating SQL structure is the interpolation hole one directive earlier;
  *  - `` `${"customer_id"}` `` — hmm, this one IS reported: the parser cannot tell a string
  *    literal from a variable at the description level, so a literal equal to a declared name
  *    is the accepted rare false positive (refuse, don't miss — the same direction §4.2 takes);
@@ -46,48 +48,78 @@ import freemarker.core.TemplateElement
  */
 @Suppress("DEPRECATION") // freemarker.core.TemplateElement — see FreemarkerAst
 internal object InterpolatedParameterScanner {
-    /** Every [declared] name the body references inside a `${}` interpolation, in first-use order. */
+    /**
+     * Every [declared] name the body references inside a `${}` interpolation, in first-use order.
+     *
+     * [guarded] names are refused in one more position: a conditional's test (`<#if x??>`,
+     * `<#elseif x>`). A declared parameter in a directive *test* stays legal (042 B1 — the test
+     * gates structure, it writes no value), but a CALCULATOR output key is a *derived* value —
+     * one that can originate from a caller STRING through `coalesce`/`if_null` — and gating SQL
+     * structure on it is the same hole as interpolating it, one directive earlier (078 A1).
+     * Guarded names are therefore reported from BOTH positions; [declared]-only names only from
+     * interpolations.
+     */
     fun scan(
         body: String,
         declared: Set<String>,
+        guarded: Set<String> = emptySet(),
     ): List<String> {
-        if (declared.isEmpty()) return emptyList()
+        if (declared.isEmpty() && guarded.isEmpty()) return emptyList()
         val parsed = TemplateBodyParser.parse(body) as? BodyParse.Parsed ?: return emptyList()
         val found = LinkedHashSet<String>()
-        walk(parsed.template.rootTreeNode, declared, emptySet(), found)
+        walk(parsed.template.rootTreeNode, declared, guarded, emptySet(), found)
         return found.toList()
     }
 
     private fun walk(
         element: TemplateElement?,
         declared: Set<String>,
+        guarded: Set<String>,
         shadowed: Set<String>,
         found: MutableSet<String>,
     ) {
         if (element == null) return
-        val type = FreemarkerAst.typeOf(element)
-        when (type) {
+        when (FreemarkerAst.typeOf(element)) {
             FreemarkerAst.DOLLAR_VARIABLE -> {
-                val text = FreemarkerAst.ownText(element)
-                declared.forEach { name ->
-                    if (name !in shadowed && isReferencedIn(text, name)) found += name
-                }
+                reportMatches(FreemarkerAst.ownText(element), declared + guarded, shadowed, found)
                 return // the interpolation's expression subtree is not template elements
             }
 
+            FreemarkerAst.IF_BLOCK, FreemarkerAst.CONDITIONAL_BLOCK -> {
+                // The branch's own text prints its condition (`#if x??`, `#elseif x`); children
+                // are walked normally below, so nested conditionals report for themselves.
+                reportMatches(FreemarkerAst.ownText(element), guarded, shadowed, found)
+            }
+
             FreemarkerAst.MACRO -> {
-                val inner = shadowed + macroParameters(FreemarkerAst.ownText(element))
-                FreemarkerAst.childrenOf(element).forEach { walk(it, declared, inner, found) }
+                walkChildren(element, declared, guarded, shadowed + macroParameters(FreemarkerAst.ownText(element)), found)
                 return
             }
 
             FreemarkerAst.ITERATOR_BLOCK -> {
-                val inner = shadowed + loopVariableOf(FreemarkerAst.ownText(element))
-                FreemarkerAst.childrenOf(element).forEach { walk(it, declared, inner, found) }
+                walkChildren(element, declared, guarded, shadowed + loopVariableOf(FreemarkerAst.ownText(element)), found)
                 return
             }
         }
-        FreemarkerAst.childrenOf(element).forEach { walk(it, declared, shadowed, found) }
+        walkChildren(element, declared, guarded, shadowed, found)
+    }
+
+    private fun walkChildren(
+        element: TemplateElement,
+        declared: Set<String>,
+        guarded: Set<String>,
+        shadowed: Set<String>,
+        found: MutableSet<String>,
+    ) = FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, shadowed, found) }
+
+    /** Every [names] entry used as a variable in [expression] and not shadowed here. */
+    private fun reportMatches(
+        expression: String,
+        names: Set<String>,
+        shadowed: Set<String>,
+        found: MutableSet<String>,
+    ) = names.forEach { name ->
+        if (name !in shadowed && isReferencedIn(expression, name)) found += name
     }
 
     /**

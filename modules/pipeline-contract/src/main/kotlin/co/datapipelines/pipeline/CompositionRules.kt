@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 
 /**
@@ -42,10 +43,11 @@ internal object CompositionRules {
         pipelines: PipelineResolver,
         maxDepth: Int,
         workspaceId: java.util.UUID,
+        org: OrgContext,
         into: FailureCollector,
     ) {
         pipeline.nodes.forEachIndexed { index, node ->
-            if (node.type == NodeType.PIPELINE) checkNode(pipeline, index, node, pipelines, workspaceId, into)
+            if (node.type == NodeType.PIPELINE) checkNode(pipeline, index, node, pipelines, workspaceId, org, into)
         }
         checkDepth(pipeline, pipelines, maxDepth, workspaceId, into)
     }
@@ -56,6 +58,7 @@ internal object CompositionRules {
         node: Node,
         pipelines: PipelineResolver,
         workspaceId: java.util.UUID,
+        org: OrgContext,
         into: FailureCollector,
     ) {
         checkNodeShape(index, node, into)
@@ -103,7 +106,7 @@ internal object CompositionRules {
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )
         }
-        checkParameters(pipeline, index, node, resolved.pipeline, into)
+        checkParameters(pipeline, index, node, resolved.pipeline, org, into)
         checkOutput(index, node, resolved.pipeline, into)
     }
 
@@ -172,22 +175,32 @@ internal object CompositionRules {
     }
 
     /**
-     * §12.9's parameter-mapping rules against the child's declared `parameters`.
+     * §12.9's parameter-mapping rules against the child's declared `parameters` **and** its
+     * calculator output keys (078 A5-composition, owner ruling 2026-09-05).
      *
-     * A supplied value is either a typed literal obeying the child parameter's §6.3 wire
-     * encoding — checked by [ParameterCoercion], the same code path §12.7's
-     * `default_type_mismatch` and execution-time coercion use — or the string form
-     * `${parent_param}` naming one of the PARENT's declared parameters of the identical
-     * declared type. No expressions, no concatenation (design §3, v1).
+     * A supplied key names either a child declared parameter or one of the pinned child's
+     * CALCULATOR `context_key`s (`calculatorOutputs()` — a key supplied this way skips the
+     * child's node exactly as a direct execute-time supply does). Anything else is
+     * `pipeline_parameter_unknown`. A child calculator key is OPTIONAL, never required, so
+     * `pipeline_parameter_unmapped` keeps reading only declared parameters.
+     *
+     * A supplied value is either a typed literal obeying the target's §6.3 wire encoding —
+     * checked by [ParameterCoercion], the same code path §12.7's `default_type_mismatch` and
+     * execution-time coercion use — or the string form `${ref}` resolving against the PARENT's
+     * Context tiers ([checkValue]). No expressions, no concatenation (design §3, v1), and NO
+     * AUTO-PASSTHROUGH: a parent and child calculator key spelled the same are not implicitly
+     * mapped — the mapping is always this explicit entry, or the child's node computes its own.
      */
     private fun checkParameters(
         pipeline: Pipeline,
         index: Int,
         node: Node,
         child: Pipeline,
+        org: OrgContext,
         into: FailureCollector,
     ) {
         val supplied = node.parameters.orEmpty()
+        val childCalculatorKeys = child.calculatorOutputs()
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys
@@ -203,42 +216,130 @@ internal object CompositionRules {
             }
         supplied.forEach { (key, value) ->
             val declared = child.parameters[key]
-            if (declared == null) {
-                into.add(
-                    Validation.PIPELINE_PARAMETER_UNKNOWN,
-                    "nodes[$index].parameters.${key.truncateForError()}",
-                    "Node '${node.id.truncateForError()}' supplies '${key.truncateForError()}', " +
-                        "which the child pipeline does not declare.",
-                    mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError()),
-                )
-            } else {
-                checkValue(pipeline, index, node, key, value, declared, into)
+            when {
+                declared != null -> {
+                    checkValue(pipeline, index, node, key, value, Target.parameter(declared.type), org, into)
+                }
+
+                key in childCalculatorKeys -> {
+                    checkValue(
+                        pipeline,
+                        index,
+                        node,
+                        key,
+                        value,
+                        Target.calculatorOutput(childCalculatorKeys.getValue(key)),
+                        org,
+                        into,
+                    )
+                }
+
+                else -> {
+                    into.add(
+                        Validation.PIPELINE_PARAMETER_UNKNOWN,
+                        "nodes[$index].parameters.${key.truncateForError()}",
+                        "Node '${node.id.truncateForError()}' supplies '${key.truncateForError()}', " +
+                            "which the child pipeline neither declares as a parameter nor computes as a " +
+                            "calculator context_key.",
+                        mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError()),
+                    )
+                }
             }
         }
     }
 
+    /**
+     * The mapping target on the child side: a declared parameter or a CALCULATOR `context_key`
+     * (078 A5-composition). [type] is null for an ANY-output kind — the value is typed only by
+     * the run, so the save-time check skips rather than guesses (the A6 convention).
+     */
+    private class Target private constructor(
+        val type: LogicalType?,
+        val description: String,
+    ) {
+        companion object {
+            fun parameter(type: LogicalType): Target = Target(type, "child parameter")
+
+            fun calculatorOutput(type: LogicalType?): Target = Target(type, "child calculator output")
+        }
+    }
+
+    /**
+     * The `${ref}` resolution against the PARENT's Context tiers (078 A5-composition), in
+     * [Pipeline]'s precedence: a declared parameter, then a CALCULATOR `context_key` (type via
+     * `calculatorOutputs()`), then the deployment tiers — a platform key typed by
+     * [ContextKeys.PLATFORM_TYPES], an org key always STRING (§0.2). A parameter/calculator-key
+     * collision is §12.10's refusal, so the order between the first two can never mask one; a
+     * declared parameter shadows an org key at run (tier 3 over tier 1), as it does here.
+     *
+     * [type] is null when the tier pins none — an ANY-output parent calculator key, typed only
+     * by the run — and the type check then skips rather than guesses (the A6 convention).
+     */
+    private class ParentTier private constructor(
+        val type: LogicalType?,
+        val description: String,
+    ) {
+        companion object {
+            fun resolve(
+                name: String,
+                pipeline: Pipeline,
+                calculatorOutputs: Map<String, LogicalType?>,
+                org: OrgContext,
+            ): ParentTier? =
+                when {
+                    name in pipeline.parameters -> {
+                        ParentTier(pipeline.parameters.getValue(name).type, "parent parameter '$name'")
+                    }
+
+                    name in calculatorOutputs -> {
+                        ParentTier(calculatorOutputs.getValue(name), "parent calculator output '$name'")
+                    }
+
+                    name in ContextKeys.PLATFORM_TYPES -> {
+                        ParentTier(ContextKeys.PLATFORM_TYPES.getValue(name), "platform key '$name'")
+                    }
+
+                    name in org.keys -> {
+                        ParentTier(LogicalType.STRING, "org key '$name'")
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+        }
+    }
+
+    @Suppress("LongParameterList")
     private fun checkValue(
         pipeline: Pipeline,
         index: Int,
         node: Node,
         key: String,
         value: JsonNode,
-        declared: Parameter,
+        target: Target,
+        org: OrgContext,
         into: FailureCollector,
     ) {
         val reference = value.takeIf { it.isTextual }?.asText()?.let { PARAMETER_REFERENCE.matchEntire(it) }
         val path = "nodes[$index].parameters.${key.truncateForError()}"
         if (reference != null) {
             val parentName = reference.groupValues[1]
-            val parent = pipeline.parameters[parentName]
-            if (parent == null || parent.type != declared.type) {
+            val tier = ParentTier.resolve(parentName, pipeline, pipeline.calculatorOutputs(), org)
+            if (mismatched(tier, target)) {
                 into.add(
                     Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
                     path,
-                    "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto child parameter " +
-                        "'${key.truncateForError()}' (${declared.type.wire}), but the parent " +
-                        (parent?.let { "declares it as ${it.type.wire}" } ?: "declares no such parameter") +
-                        "; a reference must name a parent parameter of the identical type.",
+                    "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
+                        "'${key.truncateForError()}'" +
+                        (target.type?.let { " (${it.wire})" } ?: " (ANY)") +
+                        ", but " +
+                        (
+                            tier?.let { "${it.description} is ${it.type?.wire}" }
+                                ?: "'\${$parentName}' names no parent parameter, parent calculator output, " +
+                                "or org/platform key"
+                        ) +
+                        "; a reference must resolve to a value of the identical type.",
                     mapOf(
                         "node" to node.id.truncateForError(),
                         "parameter" to key.truncateForError(),
@@ -248,15 +349,33 @@ internal object CompositionRules {
             }
             return
         }
-        val outcome = ParameterCoercion.coerce(declared.type, value)
+        // A literal against an ANY-output child target takes any JSON scalar — the same reading
+        // the execute-time binder gives an ANY-output key (078 A5).
+        val targetType = target.type ?: return
+        val outcome = ParameterCoercion.coerce(targetType, value)
         if (outcome is ParameterCoercion.Outcome.Rejected) {
             into.add(
                 Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
                 path,
-                "Value for child parameter '${key.truncateForError()}' does not match its declared type: ${outcome.reason}.",
-                mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError(), "type" to declared.type.wire),
+                "Value for ${target.description} '${key.truncateForError()}' does not match its declared type: ${outcome.reason}.",
+                mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError(), "type" to targetType.wire),
             )
         }
+    }
+
+    /**
+     * Whether the reference is a failure: unresolved, or resolved to a tier whose type disagrees
+     * with the target's. Either side unknowable — an ANY-output parent key or an ANY-output
+     * child target — SKIPS the check: the value is typed only by the run (078 A6's convention).
+     */
+    private fun mismatched(
+        tier: ParentTier?,
+        target: Target,
+    ): Boolean {
+        if (tier == null) return true
+        val tierType = tier.type ?: return false
+        val targetType = target.type ?: return false
+        return tierType != targetType
     }
 
     /**
@@ -339,6 +458,6 @@ internal object CompositionRules {
         return deepest
     }
 
-    /** §12.9 — the whole `${parent_param}` reference form; a value is a literal or this, nothing in between. */
+    /** §12.9 — the whole `${ref}` reference form; a value is a literal or this, nothing in between. */
     private val PARAMETER_REFERENCE = Regex("^\\$\\{([a-z_][a-z0-9_]*)\\}$")
 }

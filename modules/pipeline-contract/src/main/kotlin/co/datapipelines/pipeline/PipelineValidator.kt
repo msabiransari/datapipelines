@@ -63,7 +63,7 @@ class PipelineValidator(
         ReferenceRules.check(pipeline, datasources, templates, workspaceId, orgContext, collector)
         ParameterRules.check(pipeline, collector)
         SettingsRules.check(pipeline, collector)
-        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, collector)
+        CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector)
         return collector.toResult()
     }

@@ -49,13 +49,19 @@ interface TemplateDryRenderer {
      * as a SQL parameter; interpolation is for structure only. Every name returned here fails
      * validation with `template.validation.parameter_interpolated`.
      *
-     * Empty when the body interpolates none of [declared] — including when the reference
-     * resolves to no stored version, which [lookup] reports with its own outcome.
+     * [guarded] names (078 A1 — the pipeline's CALCULATOR output keys) are additionally reported
+     * from a conditional's test (`<#if x??>`, `<#elseif x>`): a derived value gating SQL
+     * structure is the same hole as an interpolated one, one directive earlier.
+     *
+     * Empty when the body interpolates none of [declared] and conditions on none of [guarded] —
+     * including when the reference resolves to no stored version, which [lookup] reports with
+     * its own outcome.
      */
     fun interpolatedParameters(
         workspaceId: UUID,
         ref: TemplateRef,
         declared: Set<String>,
+        guarded: Set<String> = emptySet(),
     ): List<String>
 
     /**

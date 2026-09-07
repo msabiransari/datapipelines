@@ -229,7 +229,12 @@ released content and quietly discards it. The response states which `version` an
 it returned, carries that version's `body_hash` (the precondition token for the next
 write), `current_version` (the latest RELEASED version — the execute-default pointer,
 unmoved), and a `draft` pointer — `{version, body_hash, updated_by, updated_at}` — when a
-draft exists.
+draft exists. Since 078 the body's `parameters` also lists the pipeline's **derived execute
+inputs** — one entry per CALCULATOR node's `context_key`,
+`{"type": <kind output wire type, or "ANY">, "required": false, "derived": true}` — because a
+calculator key is an implicit optional input of the execute endpoint (pipeline-contract
+§4.10: supply it and the node is skipped). Declared parameters carry no `derived` flag;
+derived on read, never stored.
 
 ### 5.3 Get pipeline (specific version)
 
@@ -323,8 +328,7 @@ Filters:
 - `owner` — limit to pipelines owned by user.
 - `datasource` — limit to pipelines using this datasource name.
 - `q` — full-text search on name, display_name, description. Since names are paths, `q` matches across the **full path**: `q=finance/pay` finds `finance/payments/daily_settlement`.
-
-**Browsing one folder level is not on this endpoint** (067). Folder browsing — a prefix's direct sub-folders with their counts, plus its direct children — is served by the UI fragment `GET /partials/pipelines?prefix=…` and by the MCP `pipelines_list {prefix}` argument ([MCP §6.2.1](mcp-server.md)). Adding `prefix` here is additive per §15.2 and deferred: no REST client has asked for a tree, and the two surfaces that render one already have it.
+- `prefix` — browse ONE level of the folder tree instead of listing flat (067; same contract as `pipelines_list {prefix}`, [MCP §6.2.1](mcp-server.md)). Present-but-empty (`?prefix=`) is the ROOT. The `data` payload becomes `{prefix, folders, pipelines, total, has_more}`: `folders` lists the prefix's direct sub-folders as `{path, segment, pipeline_count}` (subtree counts), `pipelines` its direct leaves as the same metadata rows as the flat list, `total`/`has_more` page the leaves via `offset`/`limit`. An unknown or illegal prefix answers an EMPTY level with `200` — never a `400`, never a query error. `owner`/`datasource`/`q` are ignored while `prefix` is present: browse and search are different presentations.
 
 ### 5.8 Import pipeline
 
@@ -761,11 +765,11 @@ path segment.** Since v2.0 a name may contain `/` (`acme/finance/monthly_revenue
 encoded `%2F` in the path is refused `400` by the container below routing and below the
 security chain (measured on the pinned Tomcat — no handler can reach past it). Every route in
 this section therefore carries the name as a **query parameter or a body field**; the pre-v2.0
-`/{id}` path forms are removed, not kept alongside. `GET /templates` answers **two shapes on
-one route**, chosen by the presence of `name`: the single-resource envelope with
-`404 template.not_found` when `name` is present (§8.2), and the paged list envelope when it is
-not (§8.5) — an exact-match filter returning an empty list would make "no such template"
-indistinguishable from "empty result", so the miss keeps its code.
+`/{id}` path forms are removed, not kept alongside. `GET /templates` answers **three shapes on
+one route**: the single-resource envelope with `404 template.not_found` when `name` is present
+(§8.2), one tree level (folders with counts + leaves) when `prefix` is present (§8.5), and the
+paged list envelope when neither is (§8.5) — an exact-match filter returning an empty list
+would make "no such template" indistinguishable from "empty result", so the miss keeps its code.
 
 ### 8.1 Create template
 
@@ -871,7 +875,13 @@ version number always returns to the pool. Response: `204 No Content`.
 GET /templates?dialect={dialect}&type={sql|html}&q={search}&offset=0&limit=50
 ```
 
-The second shape on this route: answers only when `name` is ABSENT (§8's addressing note). The `type` filter (046) is optional; an unknown value is refused `400 pipeline.execution.invalid_parameter_type` naming the supported values.
+The second shape on this route: answers only when `name` AND `prefix` are both ABSENT (§8's addressing note). The `type` filter (046) is optional; an unknown value is refused `400 pipeline.execution.invalid_parameter_type` naming the supported values.
+
+```
+GET /templates?prefix={folder}&dialect={dialect}&type={sql|html}&offset=0&limit=50
+```
+
+The third shape: answers when `name` is absent and `prefix` is PRESENT — browse ONE level of the template tree (067; same contract as `templates_list {prefix}`, [MCP §6.2.6](mcp-server.md)). Present-but-empty (`?prefix=`) is the ROOT. The `data` payload becomes `{prefix, folders, templates, total, has_more}`: `folders` lists the prefix's direct sub-folders as `{path, segment, template_count}` (subtree counts), `templates` its direct leaves as the same rows as the flat list, `total`/`has_more` page the leaves via `offset`/`limit`. `dialect`/`type` narrow both halves, so a folder whose whole subtree is filtered out is absent rather than empty; `q` is ignored while `prefix` is present (browse and search are different presentations). An unknown or illegal prefix answers an EMPTY level with `200` — never a `400`, never a query error.
 
 ### 8.6 Delete template
 

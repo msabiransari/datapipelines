@@ -8,7 +8,9 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraftService
+import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateJson
+import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
@@ -46,9 +48,10 @@ import org.springframework.web.bind.annotation.RestController
  * no handler can reach past it. Every route here therefore carries the name as a query
  * parameter or a body field; the old `/{id}` forms are removed, not kept alongside (one
  * addressing form — the owner's ruling recorded in §9.6). `GET /api/v1/templates` answers
- * TWO shapes on one route, chosen by the presence of `name`: the single-resource envelope
- * with `404 template.not_found` when `name` is present, and the paged list envelope when it
- * is not. Preserving `template.not_found` is deliberate: an exact-match filter returning an
+ * THREE shapes on one route: the single-resource envelope with `404 template.not_found` when
+ * `name` is present, one tree level (folders with counts + leaves) when `prefix` is present
+ * (067's browse presentation), and the paged list envelope when neither is. Preserving
+ * `template.not_found` is deliberate: an exact-match filter returning an
  * empty list would make "no such template" indistinguishable from "empty result".
  *
  * Save-time validation is **parse-only** (templates.md §7.1) and runs on every write:
@@ -97,7 +100,7 @@ class TemplatesController(
      * response carries the returned version's `status`/`body_hash` (on the [Template]
      * projection since V6) and the `draft` pointer when one exists.
      *
-     * One of the two shapes on `GET /api/v1/templates` (§9.6): this one answers when `name`
+     * One of the three shapes on `GET /api/v1/templates` (§9.6): this one answers when `name`
      * is present, with `404 template.not_found` on a miss — never an empty list.
      */
     @GetMapping(params = ["name"])
@@ -138,9 +141,10 @@ class TemplatesController(
 
     /**
      * §8.5 — the listing; the repository paginates in SQL, `total` is the honest lower bound.
-     * The second shape on `GET /api/v1/templates` (§9.6): answers when `name` is ABSENT.
+     * One of the two list shapes on `GET /api/v1/templates` (§9.6): answers when `name` AND
+     * `prefix` are both ABSENT.
      */
-    @GetMapping(params = ["!name"])
+    @GetMapping(params = ["!name", "!prefix"])
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         @RequestParam(required = false) dialect: String?,
@@ -158,6 +162,52 @@ class TemplatesController(
             templates.list(workspaceId, dialect = filter, type = typeFilter, q = q, offset = page, limit = size + 1)
         val items = raw.take(size)
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
+    }
+
+    /**
+     * §8.5 — ONE level of the template tree, the REST mirror of `templates_list {prefix}`
+     * (067): [prefix]'s direct sub-folders with their subtree counts and its direct template
+     * leaves, never a subtree. The other list shape on this route: answers when `name` is
+     * absent and `prefix` is PRESENT — `?prefix=` (empty) is the ROOT, a different request
+     * from an absent `prefix` (the flat listing above). `dialect`/`type` narrow both halves,
+     * exactly as on the flat list, so a folder whose whole subtree is filtered out is absent
+     * rather than empty (§9.1); `q` does not apply — browse and search are different
+     * presentations (template-hierarchy-design §9.2). An unknown or illegal prefix answers an
+     * ordinary EMPTY level with 200 — never a 400, never a query error — the rule
+     * `templates_list` and [TemplateBrowseModel][co.datapipelines.web.ui.TemplateBrowseModel]
+     * already settled on.
+     */
+    @GetMapping(params = ["!name", "prefix"])
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    fun browse(
+        @RequestParam prefix: String,
+        @RequestParam(required = false) dialect: String?,
+        @RequestParam(required = false) type: String?,
+        @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) limit: Int?,
+    ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val page = Pagination.clampOffset(offset)
+        val size = Pagination.clampLimit(limit)
+        // Blank-is-root, exactly as the MCP tool's `string("prefix")` normalizes it: present
+        // but empty names the tree's top level, not "no prefix".
+        val normalized = prefix.takeIf { it.isNotBlank() }
+        if (normalized != null && !TemplateNameGrammar.matchesPrefix(normalized)) {
+            return ApiResponse.of(levelPayload(prefix, emptyList(), emptyList(), total = 0, hasMore = false))
+        }
+        val filter = dialect?.let { parseDialect(it) }
+        val typeFilter = type?.let { parseType(it) }
+        val folders = templates.listChildFolders(workspaceId, normalized, filter, typeFilter, limit = TemplateRepository.MAX_PAGE_LIMIT)
+        val probe = templates.listChildTemplates(workspaceId, normalized, filter, typeFilter, offset = page, limit = size + 1)
+        return ApiResponse.of(
+            levelPayload(
+                normalized.orEmpty(),
+                folders,
+                probe.take(size),
+                total = templates.countChildTemplates(workspaceId, normalized, filter, typeFilter),
+                hasMore = probe.size > size,
+            ),
+        )
     }
 
     /**
@@ -388,6 +438,28 @@ class TemplatesController(
         }
         return node
     }
+
+    /**
+     * One level of the template tree, in the same shape `templates_list {prefix}` answers:
+     * the level's sub-folders with their subtree counts, its direct leaves as the same
+     * [Template] rows the flat list returns, the leaves' truthful total and the page probe's
+     * `has_more`. [prefix] is echoed as requested — the raw value for an illegal prefix, the
+     * normalized one (root = `""`) otherwise, exactly the MCP tool's echo rule.
+     */
+    private fun levelPayload(
+        prefix: String,
+        folders: List<TemplateFolder>,
+        leaves: List<Template>,
+        total: Int,
+        hasMore: Boolean,
+    ): Map<String, Any?> =
+        mapOf(
+            "prefix" to prefix,
+            "folders" to folders.map { mapOf("path" to it.path, "segment" to it.segment, "template_count" to it.templateCount) },
+            "templates" to leaves,
+            "total" to total,
+            "has_more" to hasMore,
+        )
 
     private fun parseDialect(raw: String): Dialect =
         runCatching { Dialect.fromWire(raw.trim().uppercase()) }.getOrNull()

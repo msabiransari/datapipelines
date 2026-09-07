@@ -90,6 +90,19 @@ never secrets.
 - Purity (D3) unchanged: kinds read the Context and their inputs only. Variadic inputs (C1)
   use a JSON array.
 
+> **ADDENDUM — Amended 2026-09-05, owner ruling:** a calculator `context_key` is an implicit
+> **optional input**. Supplied in the execute request's `parameters` object → the node is
+> **skipped** (it does not evaluate; the supplied value, coerced against the kind's output type
+> with the same `invalid_parameter_type` refusal a declared parameter gets, is what downstream
+> nodes bind, and the node's stats carry `provided_by: "caller"`); unsupplied → the node runs
+> and computes it. An explicit JSON `null` reads as **unsupplied**. §0.2's precedence widens
+> accordingly: org config < platform keys < pipeline `parameters` < execute-time inputs
+> (**now including caller-supplied calculator keys** — tier 4 is no longer "declared parameters
+> only") < calculator outputs. A calculator that RUNS still wins over everything below tier 5.
+> Parent→child mapping is always **explicit** — a parent maps a value into a child execution's
+> calculator key by name; nothing is inherited implicitly. (The mapping half lands with the
+> composition change; this addendum's input + skip half shipped 2026-09-06, 078 A5.)
+
 ### 0.4 The catalog — context kinds only (≈20), `modules/calculators`
 
 A new module with **no** dependency on `datasources`, `dag` or `web` (C12; purity by build

@@ -203,12 +203,17 @@ object PipelineErrorCodes {
         /** §12.9 — every required-without-default child parameter is supplied. */
         const val PIPELINE_PARAMETER_UNMAPPED = "pipeline.validation.pipeline_parameter_unmapped"
 
-        /** §12.9 — every supplied parameter key exists in the child's `parameters`. */
+        /**
+         * §12.9 — every supplied key exists in the child's `parameters` or names one of its
+         * CALCULATOR `context_key`s (078 A5-composition: a supplied key skips the child's node).
+         */
         const val PIPELINE_PARAMETER_UNKNOWN = "pipeline.validation.pipeline_parameter_unknown"
 
         /**
-         * §12.9 — a literal obeys the child parameter's §6.3 wire encoding; a `${ref}` names a
-         * parent parameter of the identical declared type.
+         * §12.9 — a literal obeys the child target's §6.3 wire encoding; a `${ref}` resolves
+         * against the parent's Context tiers (a declared parameter, a parent calculator
+         * `context_key`, an org/platform key) to a value of the identical type. An ANY-output
+         * key on either side skips the check — typed only by the run.
          */
         const val PIPELINE_PARAMETER_TYPE_MISMATCH = "pipeline.validation.pipeline_parameter_type_mismatch"
 

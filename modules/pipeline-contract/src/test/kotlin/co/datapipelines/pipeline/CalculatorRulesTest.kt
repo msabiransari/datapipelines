@@ -5,6 +5,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -235,6 +236,179 @@ class CalculatorRulesTest {
         array.failures.shouldBeEmpty()
     }
 
+    // ---- reference typing: a `$reference` is type-checked like a literal ----
+
+    @Test
+    fun `a platform key of the wrong type feeding a typed input is refused at save`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("current_timestamp")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["declared_type"] shouldBe "DATE"
+        failure.details["reference"] shouldBe "current_timestamp"
+        failure.message shouldContain "\$current_timestamp"
+    }
+
+    @Test
+    fun `an org key of the wrong type feeding a typed input is refused - org values are STRING`() {
+        // `org_fiscal_start_date` is an `MM-DD` STRING on purpose (§0.2): quarter_of_year's `date`
+        // input wants a DATE, and the run would be the first to notice.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("org_fiscal_start_date")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["declared_type"] shouldBe "DATE"
+        failure.details["reference"] shouldBe "org_fiscal_start_date"
+    }
+
+    @Test
+    fun `a declared parameter of the wrong type feeding a typed input is refused at save`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    parameters = mapOf("as_of" to Parameter(LogicalType.TIMESTAMP)),
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("as_of")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single().details["reference"] shouldBe "as_of"
+    }
+
+    @Test
+    fun `another calculator's output of the wrong type is refused even when the ordering is right`() {
+        // fiscal_quarter outputs INTEGER; quarter_of_year's `date` input takes DATE. The depends_on
+        // edge is present, so before reference typing this body saved and failed at run.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(id = "fiscal_q"),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_fiscal_quarter")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("fiscal_q"),
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["reference"] shouldBe "run_fiscal_quarter"
+        failure.message shouldContain "INTEGER"
+    }
+
+    @Test
+    fun `correctly-typed references pass for every tier - parameter, platform and calculator output`() {
+        // period_start outputs DATE, so its key can feed quarter_of_year's DATE input through the
+        // edge; the DATE parameter feeding period_start's own `date` input is the same happy path
+        // the suite's first test pins for the platform and org tiers.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    parameters = mapOf("as_of" to Parameter(LogicalType.DATE)),
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                id = "period",
+                                kind = "period_start",
+                                inputs = mapOf("date" to Fixtures.ref("as_of"), "unit" to Fixtures.literal("month")),
+                                contextKey = "run_period_start",
+                            ),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_period_start")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("period"),
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
+    @Test
+    fun `an ANY-typed input takes a reference of any type - the kind does not look at the value`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "if_null",
+                                inputs =
+                                    mapOf("value" to Fixtures.ref("current_timestamp"), "default" to Fixtures.literal("fallback")),
+                                contextKey = "run_value",
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a reference to an ANY-output calculator feeding a typed input is accepted - unknowable at save`() {
+        // if_null's output type is null (ANY): what `$run_date` holds is the run's answer, so the
+        // save-time check skips rather than guesses.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                id = "fallback",
+                                kind = "if_null",
+                                inputs = mapOf("value" to Fixtures.ref("current_date"), "default" to Fixtures.ref("current_date")),
+                                contextKey = "run_date",
+                            ),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_date")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("fallback"),
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
     // ---- ordering: the rule with two sides ----
 
     @Test
@@ -246,8 +420,8 @@ class CalculatorRulesTest {
                         Fixtures.calculatorNode(id = "fiscal_q"),
                         Fixtures.calculatorNode(
                             id = "label",
-                            kind = "date_format",
-                            inputs = mapOf("date" to Fixtures.ref("current_date"), "format" to Fixtures.ref("run_fiscal_quarter")),
+                            kind = "add_days",
+                            inputs = mapOf("date" to Fixtures.ref("current_date"), "days" to Fixtures.ref("run_fiscal_quarter")),
                             contextKey = "run_label",
                             dependsOn = dependsOn,
                         ),
@@ -275,9 +449,9 @@ class CalculatorRulesTest {
                             Fixtures.node("middle", dependsOn = listOf("fiscal_q"), output = null),
                             Fixtures.calculatorNode(
                                 id = "label",
-                                kind = "date_format",
+                                kind = "add_days",
                                 inputs =
-                                    mapOf("date" to Fixtures.ref("current_date"), "format" to Fixtures.ref("run_fiscal_quarter")),
+                                    mapOf("date" to Fixtures.ref("current_date"), "days" to Fixtures.ref("run_fiscal_quarter")),
                                 contextKey = "run_label",
                                 dependsOn = listOf("middle"),
                             ),
@@ -400,4 +574,75 @@ class CalculatorRulesTest {
         val extended = OrgContext.ofValues(OrgContext.DEFAULTS.values + ("org_region" to "EU"))
         validate(body, orgContext = extended).failures.shouldBeEmpty()
     }
+
+    // ---- 078 A1: a calculator output key is in §12.6's declared set ----
+
+    @Test
+    fun `a template interpolating a calculator output key is refused exactly like a declared parameter`() {
+        // Before A1 the declared set was org + platform + parameters, so the scan never saw a
+        // calculator key: the bare shape failed with the WRONG code (template_render_failed) and
+        // the `${x!}` shape passed save and interpolated a derived value at run.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(),
+                            Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                        ),
+                ),
+                templates = StubTemplates(interpolated = mapOf(SQL_TEMPLATE to setOf("run_fiscal_quarter"))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+        val failure = result.withCode(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED).single()
+        failure.details["parameter"] shouldBe "run_fiscal_quarter"
+        failure.details["bind_form"] shouldBe ":run_fiscal_quarter"
+        failure.message shouldContain "\${run_fiscal_quarter}"
+        failure.message shouldContain ":run_fiscal_quarter"
+    }
+
+    @Test
+    fun `a calculator output key gating a template conditional is refused at save`() {
+        // `<#if run_fiscal_quarter??>` writes no value, but it gates SQL STRUCTURE on a derived
+        // value — the interpolation hole one directive earlier. A declared parameter in the
+        // same position stays legal (042 B1); the calculator key is refused with the same code.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(),
+                            Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                        ),
+                ),
+                templates = StubTemplates(conditioned = mapOf(SQL_TEMPLATE to setOf("run_fiscal_quarter"))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+    }
+
+    @Test
+    fun `the dry render's context carries every calculator output key typed by the kind's output`() {
+        // fiscal_quarter's output is INTEGER, so the sample is 1 — the same table §7.4's
+        // parameter samples come from. This is the line A1's falsification reverts: without it
+        // the key never reaches the declared set and the two refusals above go silent.
+        val templates = StubTemplates()
+        validate(
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.calculatorNode(),
+                        Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                    ),
+            ),
+            templates = templates,
+        )
+
+        templates.renderedContexts.getValue(SQL_TEMPLATE)["run_fiscal_quarter"] shouldBe 1
+    }
+
+    // `:run_fiscal_quarter` as a bind stays valid — pinned by the suite's first test
+    // ("a well-formed calculator feeding a SQL node that depends on it is valid"), which stubs
+    // exactly that bind and expects a clean save. The A1 set tightens `${}` and `<#if>` only.
 }

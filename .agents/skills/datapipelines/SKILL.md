@@ -218,6 +218,16 @@ its `node_stats` entry, and `parameters` carries the fully resolved Context — 
 calculator outputs included. That is where you look when a computed number is not what you
 expected.
 
+**Overriding a calculator.** Every calculator `context_key` is also an implicit OPTIONAL input
+of `pipelines_execute` — `pipelines_get` lists these under `parameters` with `"derived": true`.
+Supply the key and the node is **skipped**: the supplied value is what downstream nodes bind,
+and the node's `executions_get.node_stats[]` entry shows `provided_by: "caller"`. Omit it and
+the node computes from the Context exactly as before. The value is typed by the kind's output,
+so a backfill passes the right JSON type: a pipeline whose `fiscal_quarter` calculator derives
+the run quarter from `$current_date` can be re-run for an old quarter with
+`"run_fiscal_quarter": 4` — a JSON **number** (the kind outputs INTEGER), never `"2025-Q4"`,
+which fails coercion with `pipeline.execution.invalid_parameter_type`.
+
 ## Connecting
 
 - **Which host?** The user's own deployment — this product is self-hosted, so there is no
