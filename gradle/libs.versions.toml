@@ -93,6 +93,19 @@ jackson = "2.21.5"
 # RETIRE when the Spring Boot BOM imports netty-bom >= 4.1.136.Final.
 netty = "4.1.136.Final"
 
+# tomcat — GHSA-9xv2-5v5q-p794 (CVE-2026-65905), GHSA-gcx9-497g-6cp6 (CVE-2026-65182),
+# GHSA-h3x4-894j-xpx5 (CVE-2026-68525) — all three CRITICAL. Advisory API, verified
+# 2026-09-06:
+#   vulnerable = ">= 10.1.0-M1, < 10.1.58"   first_patched_version = "10.1.58"
+# The Spring Boot 3.5.16 BOM pins tomcat-embed-* 10.1.55 — vulnerable; 3.5.16 is the
+# latest 3.5 release on Maven Central (no 3.5.17 yet, verified the same day).
+# Pinned to 10.1.59: Maven Central's 10.1 line goes 10.1.57 → 10.1.59 (10.1.58 was
+# never published), so 10.1.59 is the smallest available step on the BOM's own line.
+# Tomcat ships no BOM, so the three embed artifacts are held together by dependency
+# CONSTRAINTS in CommonConventionsPlugin (core / el / websocket must move as one).
+# RETIRE when the Spring Boot BOM reaches tomcat >= 10.1.58.
+tomcat = "10.1.59"
+
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
 duckdb-jdbc = "1.5.5.1"
 # commonmark: renders docs/*.md in-product at /docs (033). Latest stable on Maven
@@ -159,6 +172,10 @@ jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-d
 # CommonConventionsPlugin, after jackson-bom. Rationale + retirement condition
 # are in the `netty` entry under [versions] (GHSA-558v-64gr-wgg4).
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
+# SECURITY OVERRIDE — the three tomcat-embed artifacts, applied as constraints (GHSA-9xv2-5v5q-p794 et al.)
+tomcat-embed-core = { module = "org.apache.tomcat.embed:tomcat-embed-core", version.ref = "tomcat" }
+tomcat-embed-el = { module = "org.apache.tomcat.embed:tomcat-embed-el", version.ref = "tomcat" }
+tomcat-embed-websocket = { module = "org.apache.tomcat.embed:tomcat-embed-websocket", version.ref = "tomcat" }
 
 # --- Flyway — `app` module ONLY (module-structure §3.1 rule 2) ---------------
 # BOM-managed (11.7.2). Since Flyway 10 the Postgres support is a separate

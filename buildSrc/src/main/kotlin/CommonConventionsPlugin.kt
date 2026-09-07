@@ -118,6 +118,20 @@ class CommonConventionsPlugin : Plugin<Project> {
             add("implementation", platform(lib("netty-bom")))
             add("testImplementation", platform(lib("netty-bom")))
 
+            // SECURITY OVERRIDE (2026-09-06, GHSA-9xv2-5v5q-p794 / GHSA-gcx9-497g-6cp6 /
+            // GHSA-h3x4-894j-xpx5 — three CRITICALs in tomcat-embed-core < 10.1.58): Tomcat
+            // ships no BOM, so the three embed artifacts the web starter pulls in are held
+            // at one version by constraints — a constraint raises a transitive version the
+            // way a BOM would, without adding a direct dependency. Retirement condition is
+            // documented on the `tomcat` entry in libs.versions.toml.
+            for (artifact in listOf("tomcat-embed-core", "tomcat-embed-el", "tomcat-embed-websocket")) {
+                for (configuration in listOf("implementation", "testImplementation")) {
+                    constraints.add(configuration, lib(artifact)) {
+                        because("GHSA-9xv2-5v5q-p794 / GHSA-gcx9-497g-6cp6 / GHSA-h3x4-894j-xpx5: tomcat-embed < 10.1.58")
+                    }
+                }
+            }
+
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))
