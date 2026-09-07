@@ -1,7 +1,9 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 
 /**
  * Identifier validation and quoting for the SQL this module generates — the write-back INSERT
@@ -72,8 +74,44 @@ internal object SqlIdentifiers {
         return name
     }
 
-    /** Double-quotes [identifier], doubling any embedded quote. Applied after validation, not instead. */
+    /**
+     * Double-quotes [identifier], doubling any embedded quote. Applied after validation, not
+     * instead.
+     *
+     * **This overload is for the TEMPDB statements only** (§6.4.1's `CREATE TABLE … AS`), whose
+     * target is the staging engine — H2 or DuckDB, both `IdentifierQuoteStyle.DOUBLE_QUOTE`. Any
+     * statement aimed at a CUSTOMER database goes through [quote]`(identifier, dialect)`.
+     */
     fun quote(identifier: String): String = "\"${identifier.replace("\"", "\"\"")}\""
+
+    /**
+     * Quotes [identifier] in **[dialect]'s** vocabulary — the write-back path's quoting
+     * (§6.4.3), routed to `DialectAdapter.quoteIdentifier`.
+     *
+     * ## The defect this closes (2026-09-07 contract audit §c)
+     *
+     * Write-back identifiers were quoted `"…"` unconditionally, on every dialect. That is the SQL
+     * standard, and MySQL does not follow it unless the server's `sql_mode` includes
+     * `ANSI_QUOTES` — which the adapter cannot know and which is NOT in MySQL's default mode. So
+     * `INSERT INTO "orders" ("order") VALUES (?)` against a MySQL target is a syntax error: the
+     * server reads `"orders"` as a string LITERAL, not an identifier. The failure is invisible
+     * until a write-back to MySQL has a table or column needing quoting at all — which is exactly
+     * a reserved word like `order`, `key` or `rank`, the case quoting exists for. MSSQL's
+     * `[…]` brackets are the same story with a different spelling.
+     *
+     * The vocabulary is not this module's to know: `datasources` already declares it per dialect
+     * ([IdentifierQuoteStyle][co.datapipelines.datasources.IdentifierQuoteStyle]) and pins each
+     * adapter against its pinned driver's `DatabaseMetaData.getIdentifierQuoteString()`. Routing
+     * here rather than re-deriving is what keeps the two from drifting; the `dag` module already
+     * depends on `datasources` (module-structure §5.6).
+     *
+     * H2 and Postgres are unchanged — their style IS the doubled `"`, so the emitted SQL is
+     * byte-identical to what this module produced before.
+     */
+    fun quote(
+        identifier: String,
+        dialect: Dialect,
+    ): String = DialectAdapters.forDialect(dialect).quoteIdentifier(identifier)
 
     private fun invalidColumnName(
         ordinal: Int,
