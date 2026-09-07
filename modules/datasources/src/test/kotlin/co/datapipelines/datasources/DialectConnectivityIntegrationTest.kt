@@ -39,7 +39,7 @@ class DialectConnectivityIntegrationTest {
                     dialect = Dialect.POSTGRES,
                     jdbcUrl = postgres.jdbcUrl,
                     username = postgres.username,
-                    password = postgres.password,
+                    secret = postgres.password,
                 ),
             integerQuery = "SELECT CAST(1 AS INTEGER) AS n",
         )
@@ -55,7 +55,7 @@ class DialectConnectivityIntegrationTest {
                     dialect = Dialect.MYSQL,
                     jdbcUrl = mysql.jdbcUrl,
                     username = mysql.username,
-                    password = mysql.password,
+                    secret = mysql.password,
                     properties = DatasourceProperties(jdbc = mapOf("sslMode" to "DISABLED")),
                 ),
             integerQuery = "SELECT CAST(1 AS SIGNED) AS n",
@@ -96,7 +96,7 @@ class DialectConnectivityIntegrationTest {
                 dialect = Dialect.MYSQL,
                 jdbcUrl = mysql.jdbcUrl,
                 username = mysql.username,
-                password = mysql.password,
+                secret = mysql.password,
                 properties = DatasourceProperties(jdbc = mapOf("sslMode" to "DISABLED")),
             )
         val registry = mockk<DatasourceRegistry>()

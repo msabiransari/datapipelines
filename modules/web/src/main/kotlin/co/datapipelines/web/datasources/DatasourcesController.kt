@@ -243,8 +243,20 @@ class DatasourcesController(
             put("description", description)
             put("dialect", dialect.wire)
             put("jdbc_url", jdbcUrl)
+            // Top-level `username` stays (§12.1 frozen shape) and is now NULL for the kinds that
+            // have none — a private key, a service-account blob, or no credential at all.
             put("username", username)
-            put("password_set", true)
+            // §3.4 additive: WHAT the stored credential is. The secret itself is never here and
+            // never will be; `credential.kind` is the fact a client needs to render a form, and
+            // `password_set` is derived from it (V13 makes kind='none' ⟺ no stored ciphertext).
+            put(
+                "credential",
+                buildMap {
+                    put("kind", credentialKind.wire)
+                    username?.let { put("username", it) }
+                },
+            )
+            put("password_set", credentialSet)
             put("query_timeout_seconds", queryTimeoutSeconds)
             // The envelope convention: absent (not null) when the allowlist is empty — which
             // is also today's default behavior for every pre-existing datasource.

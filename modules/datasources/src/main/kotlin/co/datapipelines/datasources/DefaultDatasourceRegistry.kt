@@ -118,13 +118,18 @@ class DefaultDatasourceRegistry(
      * The dry-run path — validates exactly what [save] would persist: the NORMALIZED form
      * (R5 F6; save validates the normalized copy, so a validate() that checked the raw
      * caller-supplied input could disagree with save's verdict on the same entity — the
-     * asymmetry a dry-run endpoint would surface).
+     * asymmetry a dry-run endpoint would surface). Same reason it reads the STORED KIND (087):
+     * §3.4's kind-change rule is checked against the row, so a dry run that did not read it
+     * would report VALID for an update `save` is about to refuse.
      */
-    override fun validate(datasource: Datasource): ValidationResult =
-        validator.validate(
+    override fun validate(datasource: Datasource): ValidationResult {
+        val existing = repository.findByName(datasource.name)
+        return validator.validate(
             datasource.copy(introspectionIncludeSchemas = Datasource.normalizeIncludeSchemas(datasource.introspectionIncludeSchemas)),
-            isCreate = !repository.exists(datasource.name),
+            isCreate = existing == null,
+            storedKind = existing?.credentialKind,
         )
+    }
 
     /**
      * §3.3: the allowlist's lowercase normalization happens HERE — the single write-path
@@ -142,14 +147,30 @@ class DefaultDatasourceRegistry(
             datasource.copy(
                 introspectionIncludeSchemas = Datasource.normalizeIncludeSchemas(datasource.introspectionIncludeSchemas),
             )
-        val isCreate = !repository.exists(toPersist.name)
-        validator.validate(toPersist, isCreate).orThrow()
+        // ONE read of the live row, answering two questions: is this a create, and what kind does
+        // the row currently hold. §3.4's rule that a kind CHANGE needs a secret can only be
+        // checked against what is already there, and the previous `exists()` probe answered only
+        // the first — so this replaces it rather than joining it.
+        val existing = repository.findByName(toPersist.name)
+        val isCreate = existing == null
+        validator.validate(toPersist, isCreate, existing?.credentialKind).orThrow()
         cache.invalidate(toPersist.name)
         return if (isCreate) {
-            val password = requireNotNull(toPersist.password) { "password required on create" }
-            repository.create(toPersist, encryptor.encrypt(password, toPersist.name), actor).toDatasource()
+            // CredentialKind.NONE stores NULL — there is nothing to encrypt, and V13's CHECK
+            // makes that the only legal blob for it. Every other kind is required by the
+            // validator that just ran, so the requireNotNull is a defect assertion, not a rule.
+            val encrypted =
+                if (toPersist.credentialKind == CredentialKind.NONE) {
+                    null
+                } else {
+                    encryptor.encrypt(
+                        requireNotNull(toPersist.secret) { "credential secret required on create" },
+                        toPersist.name,
+                    )
+                }
+            repository.create(toPersist, encrypted, actor).toDatasource()
         } else {
-            val encrypted = toPersist.password?.let { encryptor.encrypt(it, toPersist.name) }
+            val encrypted = toPersist.secret?.let { encryptor.encrypt(it, toPersist.name) }
             val row =
                 repository.update(toPersist, encrypted)
                     ?: error("datasource '${toPersist.name}' vanished during update")
@@ -214,7 +235,7 @@ class DefaultDatasourceRegistry(
      */
     override fun testConnection(name: String): TestResult? {
         val row = repository.findByName(name) ?: return null
-        val datasource = row.toDatasource(encryptor.decrypt(row.passwordEncrypted, row.name))
+        val datasource = row.toDatasource(decryptOrNull(row))
         audit(DatasourceAuditEvents.CONNECTION_TEST, name, DatasourceAuditEvent.SYSTEM_ACTOR)
         return probe(datasource).also { record(name, it) }
     }
@@ -260,7 +281,9 @@ class DefaultDatasourceRegistry(
      */
     private fun decryptStored(row: DatasourceRow): String? =
         try {
-            encryptor.decrypt(row.passwordEncrypted, row.name)
+            // A NONE row has no ciphertext at all — a different fact from "unreadable", but the
+            // caller's next move is the same: rule 3 has nothing to reconcile either way.
+            row.credentialEncrypted?.let { encryptor.decrypt(it, row.name) }
         } catch (e: CredentialDecryptionException) {
             log.debug("bootstrap credential for {} could not be decrypted", row.name, e)
             null
@@ -324,8 +347,17 @@ class DefaultDatasourceRegistry(
 
     private fun loadWithCredential(name: String): Datasource {
         val row = requireNotNull(repository.findByName(name)) { "datasource '$name' not found for pool build" }
-        return row.toDatasource(encryptor.decrypt(row.passwordEncrypted, row.name))
+        return row.toDatasource(decryptOrNull(row))
     }
+
+    /**
+     * The row's plaintext credential, or null when it has none ([CredentialKind.NONE], V13).
+     *
+     * The null is the CREDENTIAL, not a failure: `buildHikariConfig` sets no username and no
+     * password for that kind, and the DS-SEC-10 "never build a pool on a silently-empty
+     * credential" guard applies to every other kind unchanged.
+     */
+    private fun decryptOrNull(row: DatasourceRow): String? = row.credentialEncrypted?.let { encryptor.decrypt(it, row.name) }
 
     private fun audit(
         event: String,
@@ -384,7 +416,7 @@ class DefaultDatasourceRegistry(
     ) = TestResult(
         connected = false,
         testedAt = Instant.now(),
-        error = rootMessage(e)?.scrubbedForError(datasource.password),
+        error = rootMessage(e)?.scrubbedForError(datasource.secret),
         errorClass = e.javaClass.name,
     )
 

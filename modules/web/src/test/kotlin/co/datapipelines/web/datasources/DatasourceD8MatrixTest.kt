@@ -55,7 +55,7 @@ class DatasourceD8MatrixTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://db:5432/app",
             username = "readonly",
-            password = null,
+            secret = null,
             workspaceId = workspaceId,
             workspaceName = "acme",
         )

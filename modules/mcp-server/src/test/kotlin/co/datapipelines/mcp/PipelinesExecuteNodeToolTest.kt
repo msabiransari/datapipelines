@@ -60,7 +60,7 @@ class PipelinesExecuteNodeToolTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://x/y",
             username = "u",
-            password = null,
+            secret = null,
         )
 
     private fun rendered(

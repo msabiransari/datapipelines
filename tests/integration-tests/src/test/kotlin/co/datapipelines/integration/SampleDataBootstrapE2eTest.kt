@@ -85,7 +85,7 @@ class SampleDataBootstrapE2eTest {
 
         // The `${'$'}{BOOTSTRAP_E2E_PASSWORD}` placeholder resolved against the process environment
         // and the resolved value was encrypted on the way in — the plaintext is not on disk.
-        val hex = scalar<String>("SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = '$BOOT_RO'")
+        val hex = scalar<String>("SELECT encode(credential_encrypted, 'hex') FROM datasources WHERE name = '$BOOT_RO'")
         hex.contains(PASSWORD.toByteArray().joinToString("") { "%02x".format(it) }) shouldBe false
     }
 
@@ -350,7 +350,7 @@ class SampleDataBootstrapE2eTest {
     /** Every column a re-registration could disturb. */
     private fun datasourceSnapshot(): List<Map<String, Any?>> =
         rows(
-            "SELECT name, display_name, dialect, jdbc_url, username, encode(password_encrypted, 'hex') AS pw," +
+            "SELECT name, display_name, dialect, jdbc_url, username, encode(credential_encrypted, 'hex') AS pw," +
                 " properties_json::text AS props, is_readonly, is_deleted, workspace_id, created_by, created_at, updated_at" +
                 " FROM datasources ORDER BY name",
         )

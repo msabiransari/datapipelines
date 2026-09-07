@@ -12,9 +12,16 @@ package co.datapipelines.datasources
  * would assert a fact nobody reported.
  */
 
-/** The §7A table descriptor (`datasources_get_tables`'s element shape). */
+/**
+ * The §7A table descriptor (`datasources_get_tables`'s element shape).
+ *
+ * `namespace` (087) is the ordered container path; `schema` is its last segment, kept for one
+ * release so a pre-087 client keeps reading the field it knows. Both are always present — this is
+ * an ADDITIVE change, and a client that reads `schema` sees exactly what it saw before.
+ */
 fun TableInfo.toWireMap(): Map<String, Any?> =
     buildMap {
+        put("namespace", namespace)
         put("schema", schema)
         put("name", name)
         put("type", type)
@@ -45,9 +52,21 @@ fun TablesPage.toWireMap(): Map<String, Any?> =
         "truncated" to truncated,
     )
 
-/** The §7A schemas listing (`datasources_get_schemas` / `GET .../schemas`). */
+/**
+ * The §7A schemas listing (`datasources_get_schemas` / `GET .../schemas`).
+ *
+ * Two projections of one list, on purpose (087). `schemas` is the pre-087 array of bare labels —
+ * unchanged, still first, still what a client that has not been updated reads. `entries` is the
+ * same rows as `{namespace, label}`, which is the only form that survives two same-named schemas
+ * in different catalogs: `["sales", "sales"]` is not a listing anyone can act on, and
+ * `[{namespace:["a1","sales"]}, {namespace:["a2","sales"]}]` is.
+ *
+ * Parallel arrays were the alternative and are rejected: index-aligned lists drift the first time
+ * anyone filters one of them.
+ */
 fun SchemasPage.toWireMap(): Map<String, Any?> =
     mapOf(
         "schemas" to schemas,
+        "entries" to entries.map { mapOf("namespace" to it.namespace, "label" to it.label) },
         "truncated" to truncated,
     )

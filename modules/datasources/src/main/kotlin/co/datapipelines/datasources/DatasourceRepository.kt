@@ -16,11 +16,15 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
- * A persisted `datasources` row (metadata-db §4.10). Carries the **encrypted** password bytes
+ * A persisted `datasources` row (metadata-db §4.10). Carries the **encrypted** credential bytes
  * — [DatasourceRegistry] decrypts them only at pool build (§7.4), and no read path ever
  * surfaces them. `properties_json` is materialized back into [DatasourceProperties].
  *
- * `LongParameterList` is suppressed because the `datasources` table has 18 columns and this
+ * [credentialEncrypted] is NULL exactly when [credentialKind] is [CredentialKind.NONE] (V13's
+ * `chk_datasource_credential_present`): there is no credential, which is a different fact from
+ * "we did not load it".
+ *
+ * `LongParameterList` is suppressed because the `datasources` table has 20 columns and this
  * object is its 1:1 row projection. Grouping them into sub-objects to satisfy the threshold
  * would put a shape in the code that does not exist in the schema, and the `RowMapper` would
  * then have to translate twice. The rule targets wide *behavioural* constructors; a table row
@@ -33,8 +37,11 @@ class DatasourceRow(
     val description: String?,
     val dialect: Dialect,
     val jdbcUrl: String,
-    val username: String,
-    val passwordEncrypted: ByteArray,
+    val username: String?,
+    /** §3.4 (V13): what [credentialEncrypted] holds. `password` for every pre-087 row. */
+    val credentialKind: CredentialKind,
+    /** The kind-agnostic encrypted blob (§7.1), or null for [CredentialKind.NONE]. */
+    val credentialEncrypted: ByteArray?,
     val properties: DatasourceProperties,
     val queryTimeoutSeconds: Int?,
     val introspectionIncludeSchemas: List<String>,
@@ -55,7 +62,7 @@ class DatasourceRow(
     val createdBy: UUID,
 ) {
     /**
-     * Projects to a [Datasource]; [password] is the decrypted plaintext, or null for reads.
+     * Projects to a [Datasource]; [secret] is the decrypted plaintext, or null for reads.
      *
      * **Normalize-on-read (050/R3, datasources.md §3.3):** every [RefusedPropertyKeys.SERVER_MANAGED]
      * key is stripped from `properties.hikari` HERE — the single boundary behind GET, PUT
@@ -65,7 +72,7 @@ class DatasourceRow(
      * becomes inert everywhere at one point. Matching lowercases the candidate, exactly as
      * §5.6's refusal does — case is not a smuggling path here either.
      */
-    fun toDatasource(password: String? = null): Datasource =
+    fun toDatasource(secret: String? = null): Datasource =
         Datasource(
             name = name,
             displayName = displayName,
@@ -73,7 +80,8 @@ class DatasourceRow(
             dialect = dialect,
             jdbcUrl = jdbcUrl,
             username = username,
-            password = password,
+            credentialKind = credentialKind,
+            secret = secret,
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties.copy(hikari = properties.hikari.filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }),
             introspectionIncludeSchemas = introspectionIncludeSchemas,
@@ -195,23 +203,25 @@ class DatasourceRepository(
     /** Inserts a new datasource, returning the stored row. Maps a PK collision to duplicate_name. */
     fun create(
         datasource: Datasource,
-        passwordEncrypted: ByteArray,
+        credentialEncrypted: ByteArray?,
         createdBy: UUID,
     ): DatasourceRow =
         mappingDuplicateName(datasource.name) {
-            jdbc.query(INSERT_SQL, insertParams(datasource, passwordEncrypted, createdBy), mapper()).single()
+            jdbc.query(INSERT_SQL, insertParams(datasource, credentialEncrypted, createdBy), mapper()).single()
         }
 
     /**
      * Updates a live datasource in place, returning the stored row, or null when no live row has
-     * this name. `name` is never updated (immutable, §11.1). When [passwordEncrypted] is null the
-     * existing credential is kept (PUT with no password); otherwise it is replaced. `is_readonly`
+     * this name. `name` is never updated (immutable, §11.1). When [credentialEncrypted] is null
+     * the existing credential is KEPT (a PUT that omits it) — except for
+     * [CredentialKind.NONE], where null is the credential and the column is cleared, which is
+     * why the branch reads the KIND and not just the argument. `is_readonly`
      * and `workspace_id` update to the entity's values — the D8-gated flag writes cross the
      * registry save boundary, which is what makes a flip reach the pool (see INSERT_SQL's note).
      */
     fun update(
         datasource: Datasource,
-        passwordEncrypted: ByteArray?,
+        credentialEncrypted: ByteArray?,
     ): DatasourceRow? {
         val params =
             MapSqlParameterSource()
@@ -221,13 +231,16 @@ class DatasourceRepository(
                 .addValue("dialect", datasource.dialect.wire)
                 .addValue("jdbcUrl", datasource.jdbcUrl)
                 .addValue("username", datasource.username)
+                .addValue("credentialKind", datasource.credentialKind.wire)
                 .addValue("propertiesJson", propertiesJson(datasource.properties))
                 .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
                 .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
                 .addValue("isReadonly", datasource.isReadonly)
                 .addValue("workspaceId", datasource.workspaceId)
-                .addValue("passwordEncrypted", passwordEncrypted)
-        val sql = if (passwordEncrypted == null) UPDATE_KEEP_PASSWORD_SQL else UPDATE_WITH_PASSWORD_SQL
+                .addValue("credentialEncrypted", credentialEncrypted)
+        // NONE writes its NULL; every other kind keeps the stored blob when the caller sent none.
+        val writesCredential = credentialEncrypted != null || datasource.credentialKind == CredentialKind.NONE
+        val sql = if (writesCredential) UPDATE_WITH_CREDENTIAL_SQL else UPDATE_KEEP_CREDENTIAL_SQL
         return jdbc.query(sql, params, mapper()).singleOrNull()
     }
 
@@ -275,15 +288,15 @@ class DatasourceRepository(
      */
     fun updateCredential(
         name: String,
-        passwordEncrypted: ByteArray,
+        credentialEncrypted: ByteArray,
     ): Boolean =
         jdbc.update(
             """
             UPDATE datasources
-               SET password_encrypted = :passwordEncrypted, updated_at = NOW()
+               SET credential_encrypted = :credentialEncrypted, updated_at = NOW()
              WHERE name = :name AND is_deleted = FALSE
             """.trimIndent(),
-            MapSqlParameterSource().addValue("name", name).addValue("passwordEncrypted", passwordEncrypted),
+            MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
         ) > 0
 
     /** Soft-deletes [name]; false when nothing live existed. The row (and its name) survive. */
@@ -295,7 +308,7 @@ class DatasourceRepository(
 
     private fun insertParams(
         datasource: Datasource,
-        passwordEncrypted: ByteArray,
+        credentialEncrypted: ByteArray?,
         createdBy: UUID,
     ) = MapSqlParameterSource()
         .addValue("name", datasource.name)
@@ -304,7 +317,8 @@ class DatasourceRepository(
         .addValue("dialect", datasource.dialect.wire)
         .addValue("jdbcUrl", datasource.jdbcUrl)
         .addValue("username", datasource.username)
-        .addValue("passwordEncrypted", passwordEncrypted)
+        .addValue("credentialKind", datasource.credentialKind.wire)
+        .addValue("credentialEncrypted", credentialEncrypted)
         .addValue("propertiesJson", propertiesJson(datasource.properties))
         .addValue("queryTimeoutSeconds", datasource.queryTimeoutSeconds)
         .addValue("introspectionIncludeSchemas", includeSchemasJson(datasource))
@@ -325,6 +339,7 @@ class DatasourceRepository(
             buildMap<String, Map<String, Any?>> {
                 if (properties.hikari.isNotEmpty()) put("hikari", properties.hikari)
                 if (properties.jdbc.isNotEmpty()) put("jdbc", properties.jdbc)
+                if (properties.dialect.isNotEmpty()) put("dialect", properties.dialect)
             }
         return objectMapper.writeValueAsString(namespaces)
     }
@@ -338,7 +353,8 @@ class DatasourceRepository(
                 dialect = Dialect.fromWire(rs.getString("dialect")),
                 jdbcUrl = rs.getString("jdbc_url"),
                 username = rs.getString("username"),
-                passwordEncrypted = rs.getBytes("password_encrypted"),
+                credentialKind = CredentialKind.fromWire(rs.getString("credential_kind")),
+                credentialEncrypted = rs.getBytes("credential_encrypted"),
                 properties = readProperties(rs.getString("properties_json")),
                 queryTimeoutSeconds = rs.getObject("query_timeout_seconds") as? Int,
                 introspectionIncludeSchemas = readIncludeSchemas(rs.getString("introspection_include_schemas_json")),
@@ -414,7 +430,8 @@ class DatasourceRepository(
         const val NAME_CONSTRAINT = "datasources_pkey"
 
         const val COLUMNS =
-            "d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted, " +
+            "d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, " +
+                "d.credential_kind, d.credential_encrypted, " +
                 "d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json, " +
                 "d.is_readonly, d.workspace_id, w.name AS workspace_name, " +
                 "d.last_test_at, d.last_test_ok, d.last_test_message, " +
@@ -440,19 +457,21 @@ class DatasourceRepository(
             """
             WITH inserted AS (
                 INSERT INTO datasources
-                    (name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                    (name, display_name, description, dialect, jdbc_url, username,
+                     credential_kind, credential_encrypted,
                      properties_json, query_timeout_seconds, introspection_include_schemas_json,
                      is_readonly, workspace_id, created_by)
                 VALUES
-                    (:name, :displayName, :description, :dialect, :jdbcUrl, :username, :passwordEncrypted,
+                    (:name, :displayName, :description, :dialect, :jdbcUrl, :username,
+                     :credentialKind, :credentialEncrypted,
                      CAST(:propertiesJson AS jsonb), :queryTimeoutSeconds,
                      CAST(:introspectionIncludeSchemas AS jsonb), :isReadonly, :workspaceId, :createdBy)
-                RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                RETURNING name, display_name, description, dialect, jdbc_url, username, credential_kind, credential_encrypted,
                     properties_json, query_timeout_seconds, introspection_include_schemas_json,
                     is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
                     is_deleted, created_at, updated_at, created_by
             )
-            SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
+            SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.credential_kind, d.credential_encrypted,
                    d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
                    d.is_readonly, d.workspace_id, w.name AS workspace_name,
                    d.last_test_at, d.last_test_ok, d.last_test_message,
@@ -460,8 +479,8 @@ class DatasourceRepository(
               FROM inserted d LEFT JOIN workspaces w ON w.id = d.workspace_id
             """.trimIndent()
 
-        val UPDATE_WITH_PASSWORD_SQL = updateSql(includePassword = true)
-        val UPDATE_KEEP_PASSWORD_SQL = updateSql(includePassword = false)
+        val UPDATE_WITH_CREDENTIAL_SQL = updateSql(includeCredential = true)
+        val UPDATE_KEEP_CREDENTIAL_SQL = updateSql(includeCredential = false)
 
         /**
          * The UPDATE is a data-modifying CTE for the same reason as [INSERT_SQL]: Postgres
@@ -469,8 +488,9 @@ class DatasourceRepository(
          * the stored row carries `workspace_name` exactly like every other read. (Postgres
          * also rejects `UPDATE datasources d` aliases — the alias lives on the CTE.)
          */
-        private fun updateSql(includePassword: Boolean): String {
-            val passwordClause = if (includePassword) "password_encrypted = :passwordEncrypted,\n                       " else ""
+        private fun updateSql(includeCredential: Boolean): String {
+            val credentialClause =
+                if (includeCredential) "credential_encrypted = :credentialEncrypted,\n                       " else ""
             return """
                 WITH updated AS (
                     UPDATE datasources
@@ -479,19 +499,20 @@ class DatasourceRepository(
                            dialect = :dialect,
                            jdbc_url = :jdbcUrl,
                            username = :username,
-                           ${passwordClause}properties_json = CAST(:propertiesJson AS jsonb),
+                           credential_kind = :credentialKind,
+                           ${credentialClause}properties_json = CAST(:propertiesJson AS jsonb),
                            query_timeout_seconds = :queryTimeoutSeconds,
                            introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
                            is_readonly = :isReadonly,
                            workspace_id = :workspaceId,
                            updated_at = NOW()
                      WHERE name = :name AND is_deleted = FALSE
-                    RETURNING name, display_name, description, dialect, jdbc_url, username, password_encrypted,
+                    RETURNING name, display_name, description, dialect, jdbc_url, username, credential_kind, credential_encrypted,
                         properties_json, query_timeout_seconds, introspection_include_schemas_json,
                         is_readonly, workspace_id, last_test_at, last_test_ok, last_test_message,
                         is_deleted, created_at, updated_at, created_by
                 )
-                SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.password_encrypted,
+                SELECT d.name, d.display_name, d.description, d.dialect, d.jdbc_url, d.username, d.credential_kind, d.credential_encrypted,
                        d.properties_json, d.query_timeout_seconds, d.introspection_include_schemas_json,
                        d.is_readonly, d.workspace_id, w.name AS workspace_name,
                        d.last_test_at, d.last_test_ok, d.last_test_message,

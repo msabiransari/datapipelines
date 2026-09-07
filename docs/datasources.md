@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v1.9 (frozen contract — additive-only changes after this point)
+**Status:** v2.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-08-09
@@ -47,8 +47,11 @@ This spec defines:
   "description": "Primary OLTP database.",
   "dialect": "POSTGRES",
   "jdbc_url": "jdbc:postgresql://pg-prod.internal:5432/app_db",
-  "username": "datapipelines_app",
-  "password": "...",                       // write-only; never returned in GET
+  "credential": {                          // §3.4 — WHAT the credential is
+    "kind": "password",                    // password | token | private_key | service_account_json | none
+    "username": "datapipelines_app",
+    "secret": "..."                        // write-only; never returned in GET
+  },
   "query_timeout_seconds": 60,
   "global": false,                         // OPTIONAL (workspaces D8) — admin-only; true = shared
                                            // infrastructure (workspace_id NULL)
@@ -75,12 +78,15 @@ This spec defines:
 }
 ```
 
+The **legacy credential pair** — top-level `"username"` and `"password"` — is still accepted and means `credential: {kind: "password", username, secret}`. It is frozen in v1 (§12.1): every client, bootstrap file and example written before the `credential` block keeps working. A payload carrying BOTH is refused (`datasource.validation.properties_invalid`) rather than resolved by precedence — the two can disagree and there is no defensible winner.
+
 `properties` has exactly two reserved namespaces — `hikari` (pool properties, applied verbatim to `HikariConfig`) and `jdbc` (driver connection properties). Both are optional, both default to `{}`, and neither is allowlisted by this spec. See §5.
 
 ### 3.2 JSON structure (response — `GET /api/v1/datasources/{name}`)
 
 Identical to request, except:
-- `password` is **never** returned. Replaced with `password_set: true | false`.
+- The credential **secret** is **never** returned — neither as `password` nor as `credential.secret`. The response carries `credential: {kind, username?}` and `password_set: true | false`, which is DERIVED from the kind: V13's `chk_datasource_credential_present` makes `credential_kind = 'none'` and "no stored ciphertext" the same fact, so `password_set` is `false` exactly for `kind: "none"`.
+- Top-level `username` is still returned (frozen shape) and is `null` for the kinds that have none.
 - `jdbc_url` is included (operators need it for debugging).
 - `workspace` (string, additive — workspaces design §9): the bound workspace's NAME, `null` = global.
 - `readonly` (boolean, additive): the §5.7 flag, machine-readable.
@@ -98,8 +104,9 @@ Identical to request, except:
 | `description` | string | **optional** | Long-form description. Absent or empty is legal; nothing in the system requires it. |
 | `dialect` | string (enum) | yes | A `Dialect` value — authority is [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) ([Enums §5](enums.md#5-dialect--supported-source-database-dialects)). Determines the JDBC driver, type mapper, and SQL behavior. |
 | `jdbc_url` | string | yes | JDBC URL for the dialect. |
-| `username` | string | yes | DB username. |
-| `password` | string | yes on write, never returned | DB password. |
+| `credential` | object | yes on create (or the legacy pair) | `{kind, username?, secret?}` — see §3.4. |
+| `username` | string | legacy / derived | DB username. Required only for `credential.kind: password`; `null` for the kinds that have none. Accepted at top level as the legacy shape, returned at top level always. |
+| `password` | string | legacy, never returned | The legacy spelling of `credential.secret`, meaning `kind: password`. |
 | `query_timeout_seconds` | integer | optional | `Statement.setQueryTimeout` for every node executing against this datasource. When set, it **overrides** `datapipelines.executor.node-query-timeout-seconds` — see §5.5. |
 | `introspection_include_schemas` | array of strings | optional | §7A escape hatch for the dialect's system-schema exclusion: a schema named here is exempt from the exclusion in **all three** introspection operations. Exact names over the **legal-identifier alphabet of the supported dialects** — letters, digits, `_`, `$`, `#` (`_` is an ordinary name character, not SQL-LIKE's wildcard here; an entry outside the alphabet is rejected at save with `datasource.validation.properties_invalid`, because wildcards, quoted identifiers, and qualified `db.schema` names can never match a real schema as exact entries) — and normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the **registry's save boundary** (the single place every write path crosses) and again on read, so a row whose allowlist landed by restore or a manual JSONB edit cannot sit silently inert AND what a GET projects always survives an unmodified PUT round-trip; absent/empty = the exclusion floors apply unchanged. See §7A. |
 | `properties` | object | optional | Two namespaced passthrough maps: `properties.hikari.*` and `properties.jdbc.*`. See §5. |
@@ -123,6 +130,35 @@ read (`DatasourceRow.toDatasource`, the one boundary behind GET, PUT-revalidatio
 so a row written outside the API cannot fail an unmodified GET→PUT round-trip with 400 nor flip
 the real pool flag at build time. Normalize at both boundaries; the same rule, twice.
 
+### 3.4 Credential kinds
+
+**A credential travels ONLY in `credential`** — never in `jdbc_url`, never in `properties.*`. `credential.secret` is encrypted at rest (§7.1); `jdbc_url` and `properties_json` are stored plaintext and returned to `read`-scope principals (§3.2). §5.6 refuses credential-bearing keys in both of those carriers, in both directions. There is no third carrier and no exception.
+
+`credential.kind` says WHAT the stored secret is. It decides which fields may be present, and the **adapter** — not the caller — decides where the driver wants it (§4.2 `applyCredential`). A caller says "this is a token"; it never says "put it in the password slot", because that is a fact about a pinned driver.
+
+| `kind` | `username` | `secret` | What it is |
+|---|---|---|---|
+| `password` | **required** | required on create | A database login. The pre-087 shape, and still the default when a payload names no kind. |
+| `token` | optional | required on create | A bearer or personal access token. Placed in the password slot by every shipped adapter (AWS RDS IAM auth, Azure AD auth, and Snowflake's PAT all read it there); a driver that spells it differently overrides `applyCredential` — Databricks wants the literal `UID=token` with the PAT in `PWD`. |
+| `private_key` | must be absent | required on create | A PEM private key (Snowflake key-pair auth). Any passphrase is that dialect's own typed field, never a second credential. |
+| `service_account_json` | must be absent | required on create | One service-account JSON document (BigQuery). |
+| `none` | must be absent | must be absent | Nothing is stored: an IAM role or instance profile supplies the authority, the OS does, or the datasource is an embedded FILE database with no authentication — which is what the demo's SQLite and DuckDB entries always were, previously wearing a dummy password because the contract had no way to say so (§8A.1). |
+
+Values are catalogued in [Enums §5A](enums.md#5a-credentialkind--what-a-datasources-stored-credential-is).
+
+**Which kinds a dialect accepts is a property of its pinned DRIVER**, declared by the adapter (`DialectAdapter.supportedCredentialKinds`) and enforced at save: a kind outside the set is refused with `datasource.validation.properties_invalid` naming what the dialect does accept. Fail-closed, because the alternative is a stored row whose kind the pool build silently ignores.
+
+| Dialect | Accepted kinds | Why |
+|---|---|---|
+| `POSTGRES`, `MYSQL`, `MSSQL`, `ORACLE` | `password`, `token` | A login, or a bearer token in the password slot (RDS IAM, Azure AD). |
+| `H2`, `SQLITE`, `DUCKDB` | `none`, `password` | Embedded engines: H2 may have a login, SQLite and DuckDB have none. `password` stays accepted because every pre-V13 row carries it. |
+
+`private_key` and `service_account_json` are in **no** shipped dialect's set. They are catalogued for the reference targets — Snowflake key-pair auth, BigQuery service accounts — and are refused by every adapter that exists today. Adding the dialect adds the kind to its set; nothing else about the contract, the column, the wire or the encryption changes, which is the point of the seam.
+
+**On update, a kind CHANGE requires a secret.** An update that omits the secret keeps the stored one (§11) — but only while the kind is the same. Changing the kind without supplying a new secret would relabel the stored one as something it is not, and `none` → any other kind would leave `credential_encrypted` NULL against V13's `chk_datasource_credential_present`, turning a refusal the caller can act on into a constraint violation they cannot. Refused with `datasource.validation.password_missing`. Moving TO `none` is the exception and needs nothing: it clears the column.
+
+**Storage is kind-agnostic** (§7.2): whatever the secret is, it is one blob under the same versioned AES-GCM envelope with the datasource name as AAD. Key rotation (§7.3) does not care what the plaintext means, so a new kind needs no crypto work at all.
+
 ---
 
 ## 4. Supported Dialects
@@ -140,6 +176,7 @@ The `Dialect` value set is owned by [Type System §5](type-system.md#5-source-to
 | `H2` | `com.h2database:h2` | MPL 2.0 / EPL 1.0 | Clean license, ships in core (also used for staging). |
 | `DUCKDB` | `org.duckdb:duckdb_jdbc` | MIT | Clean license, ships in core. |
 | `SQLITE` | `org.xerial:sqlite-jdbc` | Apache 2.0 (with SQLite public-domain bundled) | Clean license, ships in core. |
+| `LAKE` | `org.duckdb:duckdb_jdbc` | MIT | Object storage read in place — Parquet and Iceberg on S3 — with DuckDB as the engine. **The same driver as `DUCKDB`, a different §5.6 posture**: the embedded adapter locks `enable_external_access = false` and a lake cannot read S3 with that lock on, so the two are separate dialects rather than one dialect with a mode — a mode would make the refusal set a function of row data, which §5.6's enum-total lookup exists to prevent. Its typed configuration is `properties.dialect.*` (§12.1) and its connect-time setup is §4.2A. |
 
 ### 4.2 Dialect adapter interface
 
@@ -150,10 +187,47 @@ interface DialectAdapter {
     val defaultProperties: Map<String, String>          // driver-level defaults; overridable by properties.jdbc.*
     val typeMapper: IngressTypeMapper                   // JDBC types → canonical types
     val refusedPropertyKeys: Set<String>                // dialect additions to the §5.6 refusal set (may add, never shrink)
+    val supportedCredentialKinds: Set<CredentialKind>   // §3.4 — what this dialect's pinned driver can authenticate with
+    fun applyCredential(config: HikariConfig, datasource: Datasource, secret: String?)  // §3.4 — kind → driver slot
     fun validateJdbcUrl(url: String): ValidationResult  // dialect-specific URL validation (§6.1)
     fun buildHikariConfig(datasource: Datasource): HikariConfig   // entity fields + defaults + properties.* (§5)
 }
 ```
+
+#### Namespace shapes
+
+`namespaceShape` replaces the boolean `schemaArrivesInCatalog`, which could express exactly two shapes — "MySQL" and "everyone else" — and therefore could not describe any of the connectors on the roadmap.
+
+```kotlin
+data class NamespaceShape(
+    val labels: List<String>,               // the engine's own words, OUTERMOST first; size = depth
+    val levels: Int,                        // how many of them a caller can browse and filter on
+    val innermostArrivesInCatalog: Boolean, // the former schemaArrivesInCatalog (Connector/J)
+)
+```
+
+`labels` is not decoration: an agent told to pass `catalog.schema` on Databricks and `project.dataset` on BigQuery writes correct SQL; one told to pass "the schema" guesses. `levels` is often smaller than the depth — Postgres and H2 are `[database, schema]` but a connection can only ever see the database its URL named, so exactly one level is browsable.
+
+| Dialect | `labels` | `levels` | Notes |
+|---|---|---|---|
+| `POSTGRES`, `H2`, `MSSQL` | `[database, schema]` | 1 | The database is fixed by the JDBC URL. H2's catalog argument IS honoured by the pinned driver (a wrong catalog matches nothing — probed 2026-09-07 against h2 2.3.232); pgjdbc ignores it. Raising MSSQL to 2 needs a probe of mssql-jdbc's cross-database `getTables`, which round 087 did not run. |
+| `MYSQL` | `[schema]` | 1 | Arrives in the JDBC **catalog** (Connector/J's default): `innermostArrivesInCatalog = true`. |
+| `ORACLE` | `[schema]` | 1 | No catalogs at all — `getCatalogs()` is empty. |
+| `SQLITE` | `[]` | 0 | No namespace dimension whatsoever (the former `introspectionSchemaless`, now `NamespaceShape.isFlat`). |
+| `DUCKDB` | `[catalog, schema]` | 1 | DuckDB has real catalogs, but this adapter's `enable_external_access = false` lock makes `ATTACH` impossible (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: *"file system operations are disabled by configuration"*), so an embedded datasource has exactly one user catalog. |
+
+**Reference shapes — the contract, not an implementation.** These are the four connectors this seam was designed against; none of them ships today, and each is one `NamespaceShape` away:
+
+| Reference target | `labels` | `levels` | Source (read 2026-09-07) |
+|---|---|---|---|
+| Snowflake | `[database, schema]` | 2 | `jdbc:snowflake://…/?warehouse=…&db=…&schema=…` — the URL names both. |
+| Databricks (Unity Catalog) | `[catalog, schema]` | 2 | docs.databricks.com: assets "follow a three-level namespace (`catalog.schema.object`)"; the JDBC driver's `ConnCatalog`/`ConnSchema` set the connection default for both. |
+| BigQuery | `[project, dataset]` | 2 | Google's BigQuery JDBC driver takes `ProjectId` in the URL; datasets are the inner level. |
+| A lake over S3 (DuckDB, `ATTACH`ed catalogs) | `[catalog, schema]` | 2 | Verified 2026-09-07 against duckdb_jdbc 1.5.5.1 — see §7A. |
+
+Every one of them is TWO browsable levels, which is what the wire, the filters and the introspector now carry.
+
+`applyCredential` is the ONE place a credential KIND becomes a driver slot. The default covers every shipped dialect: `none` sets neither field (an embedded file database has no login, and Hikari must not be handed a placeholder), and every other supported kind goes into the standard `username`/`password` pair. A dialect whose driver spells a kind differently overrides it, and the caller never learns the difference.
 
 `buildHikariConfig` is the single place the two passthrough maps are applied, so the save-time test pool build (§5.4) and the runtime pool build (§5.2) cannot diverge.
 
@@ -165,6 +239,33 @@ Each dialect has an implementation:
 - `H2DialectAdapter`
 - `DuckdbDialectAdapter`
 - `SqliteDialectAdapter`
+
+### 4.2A Connect-time setup and typed dialect configuration
+
+Two seams, added in 087 for the same reason: a warehouse or lake connector needs the engine put into a state before any query runs, and that state is CONFIGURATION, not SQL somebody types.
+
+**`connectionInit(datasource): List<String>`** — statements HikariCP runs on every new connection in the pool, via `connectionInitSql`. That property existed and was unreferenced; it is now the seam. The list is joined with `;` into Hikari's single slot, so the sequence stays inside the config the save-time test pool build (§5.4) checks.
+
+Two rules make it safe:
+
+1. **Generated from typed fields, never from operator or author text.** On an embedded engine this SQL runs inside the app's own process; a free-text connect hook would re-open the §5.6 `INIT` / `session_init_sql_file` surface under a friendlier name.
+2. **`connectionInitSql` is server-managed** (§5.6, DS-SEC-22). It was reachable through `properties.hikari` before 087 — arbitrary connect-time SQL, in-process on DuckDB and SQLite — and nobody had set it, which is luck rather than containment. It is now refused in both carriers and derived by the adapter.
+
+**`properties.dialect.*`** — a third reserved namespace beside `hikari` and `jdbc` (§12.1's frozen shape, amended additively). Unlike those two it is **typed and adapter-validated**: `DialectAdapter.validateDialectProperties` refuses unknown keys and bad values key by key, and the DEFAULT implementation refuses the whole namespace. A dialect gains `dialect.*` keys by declaring them, never by an adapter forgetting to look — silently ignoring an unrecognized key would let a typo look like a working setting, which is the failure this namespace exists to avoid.
+
+Reference uses, none of them implemented: Snowflake `dialect.warehouse` / `dialect.role`, Databricks `dialect.http_path` / `dialect.catalog`, and the shipped lake adapter's `dialect.catalog.kind` / `catalog.ref` / `region` / `endpoint` / `url_style` / `attach`.
+
+**The `LAKE` adapter's setup**, in the order it runs:
+
+| Step | Emitted when | What |
+|---|---|---|
+| `INSTALL`/`LOAD` | `dialect.catalog.kind` is declared | `httpfs` + `aws`, plus `iceberg` for the Iceberg kinds (`glue`, `s3_tables`, `rest`). |
+| `CREATE OR REPLACE SECRET dp_lake` | `dialect.catalog.kind` is declared | `TYPE s3` with `PROVIDER credential_chain` for `credential.kind: none` (the IAM chain), or `KEY_ID`/`SECRET` from the stored credential for `kind: password`. Plus `REGION` / `ENDPOINT` / `URL_STYLE` when declared. |
+| `ATTACH … (READ_ONLY)` | `dialect.attach` names `alias=location` pairs | Read-only is not configurable: a lake datasource is a READ connector. |
+
+A lake with **no** `catalog.kind` — data on a mounted volume, an NFS export, files a sidecar syncs — emits neither extensions nor a secret. That conditional is not a convenience: `INSTALL httpfs` needs egress to DuckDB's extension repository, and emitting it for a datasource that never touches the network would turn an air-gapped deployment's working configuration into a connect failure.
+
+**What 087 proved, and what it did not.** The local path is proven end to end against a real pool (a LAKE datasource ATTACHing two DuckDB files opens, runs its `connectionInit`, and reports both catalogs — while the same datasource on the `DUCKDB` adapter cannot, because the lock forbids it). The S3 path is asserted at the level of the SQL the adapter generates, not against a bucket: a real S3 needs cloud credentials, and whether `duckdb_jdbc` can `INSTALL`/`LOAD` the three extensions from the app's container — or whether they should be bundled into the image — is spike work the lake connector owns.
 
 ### 4.3 Type mapper integration
 
@@ -289,7 +390,11 @@ The authoritative enumeration is the module's per-dialect refusal sets, pinned b
 | DUCKDB | the session-init-SQL-file option family of the pinned driver (connect-time fetch-and-run SQL) |
 | ORACLE | reviewed set of the pinned ojdbc when built with `-Poracle` (class-loading and file-path properties at minimum) |
 
-Under `properties.hikari`, `exceptionOverrideClassName` joins the server-managed refusal set (arbitrary class instantiation). `readOnly` joins it too (workspaces design §6 layer 2b): the flag is the entity's — the server derives `HikariConfig.isReadOnly` from `is_readonly` — so operator passthrough must not flip it EITHER way on ANY datasource (`datasource.validation.properties_invalid` for `true` on a writable datasource and for `false` on a readonly one alike; silently hardening a writable one would be as much a lie as silently un-hardening a readonly one, and a properties-derived flag is a second source of truth the executor never sees). The refusal sets are part of every dialect adapter's contract — an adapter without a reviewed set is a defect, and the validation path must fail **closed** (an unknown or non-conforming adapter yields no exemption from refusal, never an empty set).
+**The credential-carrier rule (087), stated once:** a credential travels ONLY in `credential` (§3.4) — never in `jdbc_url`, never in `properties.*`. `credential.secret` is encrypted at rest (§7.1); `jdbc_url` and `properties_json` are stored plaintext and returned to `read`-scope principals (§3.2). There is no third carrier and no exception.
+
+The suffix predicate below covers `…password`, `…passwd`, `…pwd`, `…secret` and `…clientkey`, which is narrow on purpose — a legitimate property cannot end in one of those. Narrowness has a cost the 2026-09-07 contract audit found: it misses every secret whose name ends in a bare `key` or `token`, and both spellings are real in the drivers of the connectors on the roadmap. Verified against the vendors' current documentation, read 2026-09-07: BigQuery's `OAuthPvtKey` is "the service account key … a raw JSON keyfile object or a path", and `OAuthAccessToken`/`OAuthRefreshToken` are the pre-generated-token credentials; Databricks's OAuth token-passthrough flow is `Auth_AccessToken=<token>`. **Those names are ENUMERATED** (`RefusedPropertyKeys.SECRET_VALUED_KEYS`) rather than fixed by widening the suffix list, because `key`/`token` as suffixes would refuse future properties that merely end in those words and destroy the predicate's justification. The rule that follows: **before a dialect ships, every driver property whose value is credential material and whose name escapes the suffixes is added to that set.** The names are cross-dialect, so the guard exists before the dialect does and nobody has to remember.
+
+Under `properties.hikari`, `exceptionOverrideClassName` joins the server-managed refusal set (arbitrary class instantiation). `connectionInitSql` joins it too (DS-SEC-22, 087): HikariCP runs it on every new connection, so it is connect-time SQL — the same §5.6 category as H2's `INIT` and DuckDB's `session_init_sql_file`, and it executes IN THIS PROCESS on the embedded engines. It is additionally server-DERIVED since 087 (§4.2A), so an operator passthrough would also silently replace the adapter's own setup. `readOnly` joins it too (workspaces design §6 layer 2b): the flag is the entity's — the server derives `HikariConfig.isReadOnly` from `is_readonly` — so operator passthrough must not flip it EITHER way on ANY datasource (`datasource.validation.properties_invalid` for `true` on a writable datasource and for `false` on a readonly one alike; silently hardening a writable one would be as much a lie as silently un-hardening a readonly one, and a properties-derived flag is a second source of truth the executor never sees). The refusal sets are part of every dialect adapter's contract — an adapter without a reviewed set is a defect, and the validation path must fail **closed** (an unknown or non-conforming adapter yields no exemption from refusal, never an empty set).
 
 **Embedded in-process dialects harden at the adapter, not just the refusal set (normative).** DuckDB and SQLite run **inside the server JVM**, so author-authored SQL against such a datasource executes in-process — a loaded native extension is arbitrary code in the server, not in a remote database. The refusal set governs `properties.jdbc`/`jdbc_url` keys, but DuckDB **autoloads** known/community extensions with no property involvement at all (`allow_community_extensions` and `autoload_known_extensions` default `true`). Therefore `DuckdbDialectAdapter.defaultProperties` sets, at connect (exact set verified against the pinned driver): `allow_unsigned_extensions=false`, `allow_community_extensions=false`, `autoload_known_extensions=false`, `autoinstall_known_extensions=false`, `enable_external_access=false`. The **load-bearing lock is `enable_external_access=false`**: it is non-overridable by session SQL (a `SET … = true` from author SQL fails — "cannot enable external access while database is running"), and with the filesystem and network off, no `INSTALL`/`LOAD`/`ATTACH`/`read_csv`/`COPY` path is reachable regardless of the autoload toggles. (Verified: `autoload_known_extensions`/`autoinstall_known_extensions` remain settable at runtime, but are **inert** — every actual load path is closed by the external-access lock; a `LOAD json` succeeds only because that extension is statically linked into the pinned jar, not fetched.) These five keys are **additionally refused in `properties.jdbc` / `jdbc_url`** (the DUCKDB entry of the §5.6 refusal set) — because `properties.jdbc` is applied *after* `defaultProperties` (§4.2), an operator could otherwise set `enable_external_access=true` and re-open the RCE surface; for an in-process engine that operator foot-gun is refused, not merely defaulted. `SqliteDialectAdapter.defaultProperties` sets, at connect: `enable_load_extension=false` (explicit hardening; already the driver default) and `limit_attached=0`. The **load-bearing lock is `limit_attached=0`**: this sets `SQLITE_LIMIT_ATTACHED` via the xerial driver's `sqlite3_limit()` call, which runs before author SQL and prevents any `ATTACH DATABASE` — a filesystem-access primitive that would let an attacker open and query any file on the server filesystem. Both keys are **additionally refused in `properties.jdbc` / `jdbc_url`** (the SQLITE entry of the §5.6 refusal set) so an operator cannot set `limit_attached=10` and re-open the surface. This is the datasource analogue of Staging §9.5's de-privileging: an in-process engine must not give author SQL — or an operator's `properties.jdbc` — a code-execution or filesystem-access primitive.
 
@@ -484,7 +589,8 @@ The semantics this spec depends on, which the DDL must satisfy:
 
 - `name` is the **primary key** (`TEXT`), constrained to 63 characters and to the identifier regex of §9 via `CHECK` — pipelines reference datasources by this value, so it is also the immutability anchor (§11.1).
 - `description` is **optional** (nullable / no `NOT NULL` requirement) — matching §3.3.
-- `password_encrypted` is `BYTEA` — AES-256-GCM output per §7.1 (`version ‖ nonce ‖ ciphertext ‖ tag`), never plaintext, never returned by any endpoint. Rows written before the version byte existed were prefixed with `0x01` by a one-off migration; the application accepts ONLY versioned blobs and never guesses the old layout.
+- `credential_encrypted` (V13; `password_encrypted` before it) is `BYTEA` — AES-256-GCM output per §7.1 (`version ‖ nonce ‖ ciphertext ‖ tag`), never plaintext, never returned by any endpoint. Rows written before the version byte existed were prefixed with `0x01` by a one-off migration; the application accepts ONLY versioned blobs and never guesses the old layout. **NULLABLE since V13**, and null exactly when `credential_kind = 'none'` — the blob itself is kind-agnostic (§3.4), so a token, a PEM and a service-account document are sealed exactly as a password is.
+- `credential_kind` is `TEXT NOT NULL DEFAULT 'password'` with a `CHECK` over the [Enums §5A](enums.md#5a-credentialkind--what-a-datasources-stored-credential-is) set (V13, §3.4); `username` is nullable, and two further CHECKs pin the §3.4 field rules at the column.
 - `properties_json` is `JSONB` and holds the §5 object verbatim (`{"hikari": {...}, "jdbc": {...}}`), defaulting to `{}`.
 - `dialect` is `TEXT` with a `CHECK` constraint enumerating the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect values — a database-level guard duplicating the §9 application check on purpose.
 - `created_at` / `updated_at` are `TIMESTAMPTZ` (UTC); `updated_at` is set by the application in every UPDATE.
@@ -514,9 +620,9 @@ The version byte (§7.1) makes rotation **lazy-safe**: there is no big-bang re-e
 5. Retire version 1 only when no row still carries it. That is one query, and it is the only thing that answers the question:
 
    ```sql
-   SELECT get_byte(password_encrypted, 0) AS key_version, count(*)
+   SELECT get_byte(credential_encrypted, 0) AS key_version, count(*)
    FROM datasources
-   WHERE password_encrypted IS NOT NULL
+   WHERE credential_encrypted IS NOT NULL
    GROUP BY 1 ORDER BY 1;
    ```
 
@@ -559,25 +665,33 @@ Three read operations, all served by the module's `SchemaIntrospector` through t
 
 | Operation | Returns | Notes |
 |---|---|---|
-| Schemas | `{"schemas": ["name", ...], "truncated": bool}` | The flow's entry point: the driver-reported schema names as a plain list, engine system schemas excluded. On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads `getCatalogs()`/TABLE_CAT — the same [DialectAdapter.schemaArrivesInCatalog] routing the other operations use; `getSchemas()` there reports a single blank schema. **An empty list is a valid result**, not an error: a schemaless dialect (SQLite, single-db DuckDB) has no schemas to list. `getSchemas()` carries no remarks, so none are returned. Capped at **2000 schemas** (`truncated: true` when the cap dropped any) — the listing walks `getCatalogs()`/`getSchemas()` under the pooled lease, and on MySQL catalog routing that is every database the server grants, so the walk and the payload are bounded like the tables listing. |
-| Tables | `{"tables": [{schema, name, type, remarks?}], "truncated": bool}` | Tables and views; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored comment (JDBC REMARKS), omitted when the driver/database has none. Optional schema filter; without one the listing **spans schemas** — pass each table's reported `schema` to the columns operation. A listing cannot merge (every row carries its own schema), so there is deliberately **no unknown-current-schema guard here** — the guard, and its cannot-merge rationale, belong to the columns operation alone. Capped at **2000 tables**; `truncated: true` when the cap dropped some. Nothing bundles columns into this listing — it stays lightweight so more tables fit in one response; columns are read per table. |
-| Columns (one table) | `[{name, type, precision?, scale?, nullable?, source_type, warnings, remarks?}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name; `warnings` carries the mapper's warning messages (§8.2/§10.5), empty when the mapping was clean; `remarks` is the engine-stored column comment (JDBC REMARKS), omitted when there is none. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. System-schema rows are excluded. Without a schema filter the read defaults to the connection's **current schema** (routed per dialect like an explicit filter — see below), so same-named tables in different schemas cannot merge their columns; a datasource that reports **no current schema** (or the JDBC blank sentinel, which means "objects without a catalog/schema", not a schema named `""`) cannot honor that default, and the unfiltered read it would fall back to is exactly the merge the contract forbids — such a read **fails** with the catalogued `pipeline.execution.parameter_required` (the caller lists schemas and passes one explicitly; the schemas operation keeps its unfiltered-minus-system listing, which is how the caller recovers). The schemaless dialects (SQLite: no JDBC schema dimension at all, so same-named tables cannot exist in different schemas) are the deliberate exception and keep the unqualified read. |
+| Schemas | `{"schemas": ["label", ...], "entries": [{namespace: [...], label}], "truncated": bool}` | The flow's entry point: the driver-reported namespaces, engine system schemas excluded. `entries` (087) is the shape to read — `namespace` is the ordered path a caller passes back as a filter, `label` its last segment; `schemas` repeats the labels for pre-087 clients and is kept for one release. Two entries can share a label and differ only by their outer segment, which is exactly what the array form exists for. On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads `getCatalogs()`/TABLE_CAT — the `innermostArrivesInCatalog` routing the other operations use; `getSchemas()` there reports a single blank schema. For every other dialect it reads `getSchemas()`, whose TABLE_CATALOG column is what makes two same-named schemas in different catalogs two DIFFERENT entries. **An empty list is a valid result**, not an error: a schemaless dialect (SQLite, single-db DuckDB) has no schemas to list. `getSchemas()` carries no remarks, so none are returned. Capped at **2000 schemas** (`truncated: true` when the cap dropped any) — the listing walks `getCatalogs()`/`getSchemas()` under the pooled lease, and on MySQL catalog routing that is every database the server grants, so the walk and the payload are bounded like the tables listing. |
+| Tables | `{"tables": [{namespace: [...], schema, name, type, remarks?}], "truncated": bool}` | Tables and views; `namespace` (087) is the containing path outermost-first and `schema` is its last segment, kept for one release so a pre-087 client reads what it always read; `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored comment (JDBC REMARKS), omitted when the driver/database has none. Optional namespace filter (see below); without one the listing **spans namespaces** — pass each table's reported `namespace` to the columns operation. A listing cannot merge (every row carries its own schema), so there is deliberately **no unknown-current-schema guard here** — the guard, and its cannot-merge rationale, belong to the columns operation alone. Capped at **2000 tables**; `truncated: true` when the cap dropped some. Nothing bundles columns into this listing — it stays lightweight so more tables fit in one response; columns are read per table. |
+| Columns (one table) | `[{name, type, precision?, scale?, nullable?, source_type, warnings, remarks?}]` | `type` is the canonical Type System type, mapped through the dialect's ingress type mapper ([Type System §5](type-system.md#5-source-to-canonical-mapping-tables)); `source_type` is the driver's own type name; `warnings` carries the mapper's warning messages (§8.2/§10.5), empty when the mapping was clean; `remarks` is the engine-stored column comment (JDBC REMARKS), omitted when there is none. Pass the table name exactly as the tables operation returned it — JDBC metadata name matching is case-sensitive. System-schema rows are excluded. Without a namespace filter the read defaults to the connection's **current namespace** — its current catalog AND schema, routed per dialect like an explicit filter — so same-named tables in different schemas, or in different catalogs, cannot merge their columns; a datasource that reports **no current schema** (or the JDBC blank sentinel, which means "objects without a catalog/schema", not a schema named `""`) cannot honor that default, and the unfiltered read it would fall back to is exactly the merge the contract forbids — such a read **fails** with the catalogued `pipeline.execution.parameter_required` (the caller lists schemas and passes one explicitly; the schemas operation keeps its unfiltered-minus-system listing, which is how the caller recovers). The flat dialects (SQLite: no namespace dimension at all, so same-named tables cannot exist in different schemas) are the deliberate exception and keep the unqualified read. |
 
 The table-type vocabulary and the system-schema exclusion are **per-dialect properties on the `DialectAdapter`** (next to the type mapper): every dialect that has an `information_schema` excludes it (case-insensitive); Postgres additionally lists `PARTITIONED TABLE`, `MATERIALIZED VIEW` and `FOREIGN TABLE`, and excludes `pg_catalog` as well. System catalogs that report under the dedicated JDBC types (`SYSTEM TABLE`, `SYSTEM VIEW`) are kept out by the type vocabulary itself — but that mechanism has holes: some engines report their system schemas under the plain types (MySQL's Connector/J reports `sys`, `performance_schema` and `mysql` as ordinary TABLE/VIEW rows), which is why the per-dialect schema lists carry more: MySQL excludes `mysql`, `performance_schema`, `sys`; Oracle excludes `SYS`, `SYSTEM`, `OUTLN`, `XDB`, `CTXSYS`, `MDSYS`, `ORDSYS`, `DBSNMP`, `WMSYS`, `AUDSYS`, `OLAPSYS`, `XS$NULL` and `APEX_*` (a prefix entry — Oracle versions its APEX schemas, e.g. `APEX_240100`); SQL Server excludes `sys` alongside `INFORMATION_SCHEMA`, plus the built-in fixed-role/special schemas every SQL Server database carries (`db_owner`, `db_accessadmin`, `db_securityadmin`, `db_ddladmin`, `db_backupoperator`, `db_datareader`, `db_datawriter`, `db_denydatareader`, `db_denydatawriter`, `guest` — `dbo` is deliberately NOT excluded: it is the database's default user schema); DuckDB, being Postgres-lineage, excludes `pg_catalog` beside `information_schema`. The MSSQL and DuckDB lists are floors, deliberately known-incomplete exactly like Oracle's — no arm64 containers exist for either dialect (pre-existing), so both are unit-verified against mocked metadata rather than container-verified. **These lists are a floor, explicitly known-incomplete** — they name the schemas the pinned drivers verifiably report as plain user rows, not every schema an engine ships; extending them is additive.
 
-**The floors can over-exclude, and `introspection_include_schemas` is the escape hatch.** A prefix entry cannot tell the engine's schemas from a customer's own: any Oracle schema starting `APEX_` — including a team's own `APEX_REPORTING` reporting schema — is invisible to all three operations, with no warning, and the authoring agent is then told the data does not exist. A datasource registered with `introspection_include_schemas: ["apex_reporting"]` (§3.3) exempts exactly that name from the exclusion in all three operations — every other floor entry, including the rest of the `apex_*` family, stays hidden. Exact names only, over the legal-identifier alphabet of the supported dialects — letters, digits, `_`, `$`, `#`, lowercase (the prefix language belongs to the floors; a pattern, quoted identifier, or qualified `db.schema` entry would look like it exempts a family while exempting nothing, so anything outside the alphabet is rejected at save, while `_` is an ordinary name character exempting the exactly-named schema); normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the registry's save boundary (every write path crosses it) and again at the repository's read boundary (restore and manual JSONB edits bypass save, and an unnormalized entry silently exempts nothing); matching case-insensitive like the exclusion itself; absent/empty = today's behavior.
+**The floors can over-exclude, and `introspection_include_schemas` is the escape hatch.** A prefix entry cannot tell the engine's schemas from a customer's own: any Oracle schema starting `APEX_` — including a team's own `APEX_REPORTING` reporting schema — is invisible to all three operations, with no warning, and the authoring agent is then told the data does not exist. A datasource registered with `introspection_include_schemas: ["apex_reporting"]` (§3.3) exempts exactly that name from the exclusion in all three operations — every other floor entry, including the rest of the `apex_*` family, stays hidden. Exact names — or dotted NAMESPACES (087: `a1.sales` exempts one catalog's `sales` while leaving the other's excluded, which a bare name cannot express) — over the legal-identifier alphabet of the supported dialects: letters, digits, `_`, `$`, `#`, lowercase, in one or more dot-separated non-empty segments (the prefix language belongs to the floors; a pattern or quoted identifier would look like it exempts a family while exempting nothing, so anything outside the alphabet is rejected at save, while `_` is an ordinary name character exempting the exactly-named schema). A single segment matches the schema level on every dialect, so every entry stored before 087 keeps working; normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the registry's save boundary (every write path crosses it) and again at the repository's read boundary (restore and manual JSONB edits bypass save, and an unnormalized entry silently exempts nothing); matching case-insensitive like the exclusion itself; absent/empty = today's behavior.
 
-Identifier routing is a dialect property too ([DialectAdapter.schemaArrivesInCatalog]): on Connector/J defaults the database arrives in the JDBC **catalog** (TABLE_CAT) and TABLE_SCHEM is null, so for MySQL the schema filter routes to the catalog argument of `getTables`/`getColumns` and TABLE_CAT is read as the schema — otherwise a filter selects nothing and every table reports a null schema.
+**Namespace filters (087).** All three operations speak the dialect's `NamespaceShape` (§4.2), not "a schema".
+
+- REST takes `?namespace=a1&namespace=sales` (repeated) or `?namespace=a1.sales` (dotted shorthand); MCP takes `"namespace": ["a1", "sales"]`. The pre-087 `schema` parameter keeps working forever (§12.1) and accepts the dotted form too, so an agent can pass back exactly what a listing gave it. `namespace` wins when both are present.
+- Routing: a catalog-routing dialect takes its single level in the JDBC **catalog** argument and leaves the pattern null (Connector/J's default — otherwise a filter selects nothing and every table reports a null schema). Every other dialect takes the innermost segment in `schemaPattern` and the **next-outer segment in the catalog argument**. That last part is what 087 fixed: the catalog argument was a hard-coded `null` on all three operations, which is correct only while a connection has exactly one catalog.
+- A filter DEEPER than the dialect's namespace matches nothing and returns an empty result — it cannot name a real place, and silently dropping its extra segments would answer a different question.
+
+**The merge this fixed was measured, not inferred.** Verified 2026-09-07 against duckdb_jdbc 1.5.5.1 with two `ATTACH`ed database files, each holding a `sales.orders`: the schemas listing reported two indistinguishable `sales` rows, and `getColumns(null, "sales", "orders", "%")` returned **both tables' columns as one table's** (`id, one_col, id, two_col`). The same read qualified by catalog returns each table's own columns. An authoring agent handed the merged list writes SQL against columns that do not exist in the table it named.
 
 Rules:
 
 - **Scope: `author`** on every surface (REST and MCP), matching the [§8.1](#81-post-apiv1datasourcesnametest) connection-test precedent — introspection opens a live connection against a production datasource, and its stated consumer (authoring agents) holds `author` ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)).
 - **Read-only by construction**: only `DatabaseMetaData` calls, no statements.
-- **`table` and `schema` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`. The escape applies only to the true pattern arguments (`schemaPattern`, `tableNamePattern`); the JDBC **catalog argument is a literal** ("must match the catalog name as it is stored") and is never escaped — an escaped catalog would match nothing for a MySQL database whose stored name carries `_`/`%`.
-- **An unknown table or schema filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
+- **`table`, `schema` and `namespace` filters are exact-match identifiers, not LIKE patterns** — `_` and `%` in a name are escaped with the driver's `getSearchStringEscape()`, so a filter for `order_items` cannot match a sibling table like `order1items`. The escape applies only to the true pattern arguments (`schemaPattern`, `tableNamePattern`); the JDBC **catalog argument is a literal** ("must match the catalog name as it is stored") and is never escaped — an escaped catalog would match nothing for a MySQL database whose stored name carries `_`/`%`.
+- **An unknown table, schema or namespace filter is not an error** — it matches nothing and returns an empty list (the house filter philosophy; see `datasources_list`'s dialect filter in [MCP §6.2.10](mcp-server.md#6210-datasources_list)).
 - **An unknown datasource name is `datasource.not_found`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)).
 - **A connection failure during introspection is `pipeline.execution.datasource_unreachable`** ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource); HTTP 502 on REST, an `isError` envelope on MCP) — a customer database being down is not a server error: no raw 500, no `-32603`, logged at WARN without a stack. The translation happens at the introspector's lease boundary and covers **both** failure families: the `SQLException` of a refused/timed-out lease or a connection that died mid-read, and the RuntimeException family of pool construction (`PoolInitializationException` at first lease on a down database, a missing driver class, a property rejected at parse time). Post-lease the SQLException translation narrows to the **connection family only** — SQLState class 08 (checked on the exception itself and along its `cause`/`nextException` chains, because some drivers carry the state only on a wrapped exception), the JDBC connection-exception subclasses, `SQLRecoverableException`, `SQLTimeoutException`, and the per-driver connection-loss knowledge: SQLite's result codes (`BUSY`, `IOERR`, `CANTOPEN`, `NOTADB` — the vendored driver reports `SQLiteException` with a null SQLState, so the state-based branches cannot see it; classification is by primary code, never a blanket "null SQLState means down"), h2's closed-connection codes (`90007` closed object, `90098`/`90121` closed database — h2 carries the code as BOTH SQLState string and vendor code, outside the SQL-standard class range), and the DuckDB/SQLite JDBC-layer closed-connection lifecycle messages (both drivers report a closed connection as a plain `SQLException` with null state and code 0 — the message is the only discriminator, and the exact message + exact plain class keeps native errors out). Any other `SQLException` from a **metadata read walk** is a defect in this module or a driver bug and propagates as-is rather than being masked as "database unreachable". The **current-schema read** inside columns() is classified at the same place with the same family: feature-unsupported (the typed exception or SQLState `0A000`) reads as "driver reports none"; connection loss is the 502 path above; anything left (a non-connection failure of the read itself — pgjdbc's `getSchema()` executes `select current_schema()` on the server, so a statement cancel `57014` or permission error lands here) is the catalogued `pipeline.execution.parameter_required` with the driver exception attached as cause — never a raw rethrow to either surface. Driver text never reaches the wire (the caller can run the §8.1 connection test for the scrubbed failure detail).
 - Credentials are never part of any introspection payload — the operations read schema metadata only.
+
+`quoteIdentifier` has a second consumer since 087: the executor's **write-back** identifiers ([DAG Executor §6.4.3](dag-executor.md#643-outputtarget-datasource--write-back)) route through it instead of quoting `"…"` unconditionally — the SQL standard's spelling, which MySQL rejects without `ANSI_QUOTES` and MSSQL spells with brackets.
 
 Surfaces: REST `GET /api/v1/datasources/{name}/schemas`, `/tables`, `/tables/{table}/columns` ([REST API §9.7](rest-api.md#97-schema-introspection)); MCP `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` ([MCP §6.2.16–18](mcp-server.md#6216-datasources_get_schemas)).
 
@@ -671,6 +785,12 @@ The `POST /api/v1/datasources` field vocabulary of §3.1, plus two flags. Unknow
 startup refusal, not a silent skip — a mistyped `jdbc_ur` would otherwise register a datasource
 with no URL that fails at first query.
 
+The credential follows §3.4: a `credential: {kind, username?, secret?}` block, or the legacy
+top-level `username`/`password` pair which means `kind: password` and keeps every pre-087 file
+working. Declaring BOTH is a startup refusal rather than a precedence rule — they can disagree, and
+no silent winner is defensible. Declaring NEITHER is a refusal too, naming both shapes: that is the
+shape of a file whose `password:` key was mistyped, and it must not quietly become "no credential".
+
 ```yaml
 # /etc/datapipelines/bootstrap-datasources.yml
 datasources:
@@ -678,23 +798,28 @@ datasources:
     display_name: "NYC Taxi Trips (sample)"      # optional; defaults to `name`
     dialect: POSTGRES
     jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
-    username: dp_demo_ro
-    password: ${SAMPLE_PG_PASSWORD}
+    credential:                                  # §3.4
+      kind: password
+      username: dp_demo_ro
+      secret: ${SAMPLE_PG_PASSWORD}
     readonly: true                               # writes `is_readonly` (§5.7)
     global: true                                 # required, and must be true in v1
   - name: sample-reference
     dialect: SQLITE
     jdbc_url: jdbc:sqlite:/srv/sample/nyc_reference.db
-    # SQLite is a file: no server, no login, and the xerial driver ignores both
-    # values entirely. They are NON-EMPTY anyway because §9's
-    # `datasource.validation.password_missing` rejects a null-or-empty password on
-    # create, and bootstrap registration runs the full §9 validation with no
-    # startup shortcut (§8A.3) — an empty password here fail-fasts startup with
-    # "A password is required on create." (boot-verified, T38; an earlier revision
-    # of this example showed `username: "" / password: ""` and could not register).
-    # Not a credential: nothing authenticates with it.
-    username: "sqlite"
-    password: "sqlite-file-datasource-has-no-authentication"
+    # SQLite is a FILE: no server, no login, and the xerial driver ignores a
+    # username and password entirely. Until 087 this entry carried
+    #     username: "sqlite"
+    #     password: "sqlite-file-datasource-has-no-authentication"
+    # not because anything used them but because the contract had no way to say
+    # "there is no credential": §9's `datasource.validation.password_missing`
+    # rejects a null-or-empty password on create, and bootstrap registration runs
+    # the full §9 validation with no startup shortcut (§8A.3) — an empty password
+    # fail-fasted startup with "A password is required on create." (boot-verified,
+    # T38). `credential.kind: none` (§3.4) is that way, and V13 stores it as a NULL
+    # `credential_encrypted`.
+    credential:
+      kind: none
     properties:
       jdbc:
         open_mode: "1"                           # xerial read-only open mode — see §8A.4
@@ -814,8 +939,8 @@ Every rule below runs on **create and update**, before the row is written (§2 p
 | `datasource.validation.dialect_invalid` | `dialect` is a value of the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set |
 | `datasource.validation.jdbc_url_malformed` | URL parses, matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`), and carries no server-managed, refused (§5.6), or credential key in its query/property segment |
 | `datasource.validation.jdbc_url_scheme_invalid` | URL begins with `jdbc:{dialect}:` |
-| `datasource.validation.password_missing` | `password` required on create |
-| `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `exceptionOverrideClassName`, …) is present under `hikari`, no refused key (§5.6) or server-managed/credential key is present under `jdbc`, and `properties` contains no namespace other than `hikari` / `jdbc`; and `introspection_include_schemas`, when present, lists exact schema names over the legal-identifier alphabet of the supported dialects — letters, digits, `_`, `$`, `#`, lowercase (entries outside the alphabet are rejected; §3.3). The offending key and the underlying Hikari/driver message are returned in `details`. |
+| `datasource.validation.password_missing` | The credential SECRET is required on create, for every `credential.kind` but `none` — and on an UPDATE that changes the kind, since keeping the stored secret would relabel it (§3.4). The code keeps its pre-087 spelling — the catalog ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)) is the authority for concrete codes and this rule did not gain one; its meaning is widened, not moved. |
+| `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `exceptionOverrideClassName`, …) is present under `hikari`, no refused key (§5.6) or server-managed/credential key is present under `jdbc`, and `properties` contains no namespace other than `hikari` / `jdbc`; and `introspection_include_schemas`, when present, lists exact schema names over the legal-identifier alphabet of the supported dialects — letters, digits, `_`, `$`, `#`, lowercase (entries outside the alphabet are rejected; §3.3). Also the §3.4 credential-shape rules: `credential.kind` is one this dialect's driver accepts, `username` is present exactly when the kind allows it, and `secret` is absent for `kind: none`; and a payload carrying both `credential` and the legacy `username`/`password` pair. The offending field and the underlying Hikari/driver message are returned in `details`. |
 | `datasource.validation.query_timeout_invalid` | `query_timeout_seconds`, when present, is an integer ≥ 1 |
 | `datasource.validation.duplicate_name` | Create with a name that already exists. `name` is the PRIMARY KEY ([Metadata DB §4.10](metadata-db.md#410-datasources)), so uniqueness is GLOBAL including soft-deleted rows — a deleted datasource's name is not reusable until hard-deleted (corrected 2026-08-08: pipelines reference datasources by name, so silent reuse would repoint history; consistent with pipeline `duplicate_name`). No reactivate-on-recreate path in v1. |
 | `datasource.driver_not_loaded` | The JDBC driver class for `dialect` is on the classpath (§10.3) |
@@ -904,9 +1029,10 @@ Wire contracts (envelopes, status codes, examples) live in [REST API §9](rest-a
 
 ### 12.1 Frozen in v1
 
-- Datasource entity JSON shape, including the two `properties` namespaces (`hikari`, `jdbc`).
+- Datasource entity JSON shape, including the `properties` namespaces. **Amended additively in 087**: `hikari` and `jdbc` are unchanged and stay passthrough; a third reserved namespace `dialect` joins them, TYPED and adapter-validated rather than passthrough (§4.2A). The amendment is additive in both directions — a payload with no `dialect` block behaves exactly as before, and a `dialect` block on a dialect that declares no keys is refused rather than silently ignored, so nothing that used to work stops working and nothing that used to be rejected starts being accepted.
+- The legacy top-level `username`/`password` credential pair, which means `credential.kind: password` (§3.4). Additive means additive: the `credential` block joined it, it did not replace it.
 - `name` immutability and its role as the pipeline-facing reference.
-- The 7 supported dialects and their identifiers.
+- The supported dialects and their identifiers (8 as of 087 — `LAKE` joined non-breakingly under §12.2's "new dialects added non-breakingly").
 - The separation of pipeline-name from connection-details.
 - The encryption-at-rest requirement, and the single required key source (fail-fast).
 - Save-time validation including the test pool build.
@@ -958,7 +1084,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 - **Datasource groups / failover**: pair primary + replica, fail over on connection failure.
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
-- **OAuth / IAM auth for cloud databases**: Snowflake, BigQuery (when those dialects are added).
+- **`private_key` / `service_account_json` credential kinds reaching a real dialect.** The kinds are catalogued and refused by every shipped adapter (§3.4); Snowflake key-pair auth and BigQuery service accounts are what will declare them.
 
 ---
 
@@ -998,3 +1124,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-08-28 | v2.15 | sample data, slice A | **§8A new:** bootstrap registration — the `datapipelines.bootstrap.datasources-file` mechanism (§8A.1 file shape incl. the required-and-true `global` flag and `readonly`, §8A.2 `${ENV_VAR}` resolution against the process environment, §8A.3 create-if-absent / never-update / full-§9-validation-per-entry / fail-fast, §8A.4 the xerial `open_mode: "1"` read-only key verified against pinned 3.49.1.0). `is_readonly` is now written on INSERT (from the entity, which the REST bind still never sets — flag writes over the API remain deferred to the surfaces slice); UPDATE still never touches it |
 | 2026-09-02 | v2.16 | 020 fix-cycle (044) — the backstop goes fail-closed | §5.7: the executor backstop's **null semantics made normative** — no live row refuses as `pipeline.node.datasource_not_found` (the D10 soft-delete channel), a metadata-DB failure during the live read refuses as `pipeline.execution.aborted` naming the METADATA database (never the healthy target), both replacing 020's "null = no signal" fail-open. **Layer 1 reads live** (`getVisibleLive`/`getLive`, past the §6.3 cache — 020 F4's both-directions stale-save window closed); **layer 2's read is flag-only** (`isReadonlyLive`, one indexed `SELECT is_readonly` — no ciphertext, no properties parse; 020 F7) and a readonly write-back target is refused at CONNECT, before the source query (020 F9); **layer 3's pool-staleness window documented** (no TTL; row-level flips leave the pre-flip pool — M3's within-one-JVM twin, fix deferred to M3's owner decision; 020 F5). §6.1: the interface sketch gains the three live reads; `getLive`/`isReadonlyLive` are abstract (020 F6 — a cached default was the hole). §6.1's registry KDoc wiring example corrected to the `describe`/`DatasourceFacts` SAM (020 F10 — the old `dialectOf` example no longer compiled, verified). |
 | 2026-09-03 | v2.17 | 061 — datasource credentials and references | **§8A.3 gains rule 3** (T84): a bootstrap entry whose FILE credential differs from the STORED one is reconciled by connection-testing both — stored-works keeps the row byte-untouched (rule 1 intact), stored-fails-and-file-works replaces the credential ALONE with a WARN, neither-works and undecryptable both leave the row and log ERROR naming the env key / the encryption key, and a soft-deleted row is never touched. Startup never fails on it. **New §8.1B** (T84): the last connection test's outcome is stored (`last_test_at`/`last_test_ok`/`last_test_message`, V9) and surfaced as the additive `last_test` field (§3.2) and a datasources-screen column — because listing never connects, and on 2026-09-02 the screen said "fine" while every execution failed at CONNECT. That write touches the three columns only and does NOT move `updated_at` (the one documented exception to metadata-db §2), which is what keeps rule 1's byte-untouched guarantee checkable. **§6.2 rewritten** (T79): the delete guard reads the ANY-VERSION reference scan, not the current-version one — a released v1 pinning a datasource that v2 dropped is a live reference (immutable, executable by explicit version) and used to be invisible, so the delete succeeded and v1's next execution failed at connect; the 409 now carries the referencing nodes with their pipeline versions, the way `template.in_use` does. |
+| 2026-09-07 | v2.18 | 087 connector seams | **New §3.4 credential kinds** — `credential: {kind, username?, secret?}` with `kind ∈ password \| token \| private_key \| service_account_json \| none`; the legacy top-level `username`/`password` pair stays accepted and means `kind: password` (§12.1), and a payload carrying both is refused. Which kinds a dialect accepts is its adapter's declaration (`supportedCredentialKinds`), enforced fail-closed; `private_key`/`service_account_json` are catalogued for the reference targets and refused by every shipped adapter. §3.1/§3.2/§3.3 updated; `password_set` is now DERIVED from the kind (V13's CHECK makes `kind = 'none'` ⟺ no stored ciphertext); §8A.1's dummy SQLite password is gone. **§4.2 gains `NamespaceShape`** (`labels`, `levels`, `innermostArrivesInCatalog`) replacing the boolean `schemaArrivesInCatalog`, with the four reference targets' shapes written in as the contract; §7A's listings and filters speak NAMESPACES — `entries: [{namespace, label}]` beside the legacy `schemas`, `namespace` beside `schema` on every table row and filter, dotted `introspection_include_schemas` entries. The catalog argument reaching `getTables`/`getColumns` closes a MEASURED merge (two ATTACHed DuckDB catalogs' same-named schemas listed as one, and an unqualified `getColumns` returned both tables' columns). **New §4.2A**: `connectionInit` wired to HikariCP's previously-unreferenced `connectionInitSql`, and a third reserved `properties` namespace `dialect.*` — TYPED and adapter-validated, refused wholesale by default. `connectionInitSql` joins the §5.6 server-managed set (DS-SEC-22); §5.6 also gains named secret-valued keys the suffix predicate cannot catch (`OAuthPvtKey`, `Auth_AccessToken`, …) and the one-line credential-carrier rule. **New `LAKE` dialect** (§4.1): object storage read in place, DuckDB underneath, without the embedded adapter's `enable_external_access` lock — a distinct dialect, not a mode, because a mode would make the §5.6 refusal set a function of row data. §7B: write-back identifiers quote in the TARGET dialect's vocabulary. |

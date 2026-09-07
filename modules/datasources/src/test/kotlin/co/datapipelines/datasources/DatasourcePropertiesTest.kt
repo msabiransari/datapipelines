@@ -78,15 +78,15 @@ class DatasourcePropertiesTest {
     fun `Datasource toString never prints the password`() {
         // DS-SEC-11: the generated data-class toString prints every property, and a Datasource
         // reaches an exception message, a debug log or an IDE watch by accident far more often
-        // than by design. `password_set` mirrors the §3.2 response shape instead.
-        val rendered = Fixtures.h2(password = "hunter2-the-secret").toString()
+        // than by design. `secret_present` mirrors the §3.2 `password_set` response shape instead.
+        val rendered = Fixtures.h2(secret = "hunter2-the-secret").toString()
 
         rendered shouldNotContain "hunter2-the-secret"
-        rendered shouldContain "password_set=true"
+        rendered shouldContain "secret_present=true"
         // Still useful for debugging: which datasource, which dialect, which target.
         rendered shouldContain "name=test_h2"
         rendered shouldContain "jdbcUrl=jdbc:h2:mem:test_h2"
 
-        Fixtures.h2(password = null).toString() shouldContain "password_set=false"
+        Fixtures.h2(secret = null).toString() shouldContain "secret_present=false"
     }
 }

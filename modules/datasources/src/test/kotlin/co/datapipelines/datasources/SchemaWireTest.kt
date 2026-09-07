@@ -16,9 +16,10 @@ import org.junit.jupiter.api.assertAll
 class SchemaWireTest {
     @Test
     fun `table descriptor is snake_case`() {
-        val wire = TableInfo("public", "orders", "TABLE").toWireMap()
+        val wire = TableInfo(listOf("public"), "orders", "TABLE").toWireMap()
 
-        wire shouldBe mapOf("schema" to "public", "name" to "orders", "type" to "TABLE")
+        // ADDITIVE (087): `namespace` joins `schema`, which stays and is its last segment.
+        wire shouldBe mapOf("namespace" to listOf("public"), "schema" to "public", "name" to "orders", "type" to "TABLE")
     }
 
     @Test
@@ -27,14 +28,21 @@ class SchemaWireTest {
         // The envelope convention (omitted is not null) keeps a driver that reports no
         // comments from asserting a fact nobody reported.
         assertAll(
-            { TableInfo("public", "orders", "TABLE", remarks = "customer orders").toWireMap()["remarks"] shouldBe "customer orders" },
-            { TableInfo("public", "orders", "TABLE").toWireMap().containsKey("remarks") shouldBe false },
+            {
+                TableInfo(
+                    listOf("public"),
+                    "orders",
+                    "TABLE",
+                    remarks = "customer orders",
+                ).toWireMap()["remarks"] shouldBe "customer orders"
+            },
+            { TableInfo(listOf("public"), "orders", "TABLE").toWireMap().containsKey("remarks") shouldBe false },
         )
     }
 
     @Test
     fun `tables page wraps the descriptors with the truncation flag`() {
-        val wire = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true).toWireMap()
+        val wire = TablesPage(listOf(TableInfo(listOf("public"), "orders", "TABLE")), truncated = true).toWireMap()
 
         assertAll(
             { wire["truncated"] shouldBe true },
@@ -48,10 +56,18 @@ class SchemaWireTest {
         // the listing is partial, not exhaustive.
         assertAll(
             {
-                SchemasPage(listOf("public", "sales"), truncated = false).toWireMap() shouldBe
-                    mapOf("schemas" to listOf("public", "sales"), "truncated" to false)
+                SchemasPage.ofLabels(listOf("public", "sales"), truncated = false).toWireMap() shouldBe
+                    mapOf(
+                        "schemas" to listOf("public", "sales"),
+                        "entries" to
+                            listOf(
+                                mapOf("namespace" to listOf("public"), "label" to "public"),
+                                mapOf("namespace" to listOf("sales"), "label" to "sales"),
+                            ),
+                        "truncated" to false,
+                    )
             },
-            { SchemasPage(emptyList(), truncated = true).toWireMap()["truncated"] shouldBe true },
+            { SchemasPage.ofLabels(emptyList(), truncated = true).toWireMap()["truncated"] shouldBe true },
         )
     }
 
@@ -103,6 +119,49 @@ class SchemaWireTest {
                 ColumnInfo(ColumnSchema("id", LogicalType.INTEGER, nullable = false), "int4", emptyList())
                     .toWireMap()
                     .containsKey("remarks") shouldBe false
+            },
+        )
+    }
+
+    @Test
+    fun `a THREE-level namespace round-trips the wire - the reference shapes' depth`() {
+        // 087's contract claim, pinned: the payloads carry an ordered path of ARBITRARY depth,
+        // not "a catalog and a schema". No shipped dialect is three deep — the JDBC metadata API
+        // has exactly two qualifier slots, so routing uses the innermost two — but the WIRE must
+        // already carry what a deeper engine reports, or the day one lands the shape changes
+        // under every client.
+        val deep = listOf("prod", "analytics", "sales")
+        val table = TableInfo(deep, "orders", "TABLE").toWireMap()
+        val page = SchemasPage(listOf(SchemaEntry(deep, "sales")), truncated = false).toWireMap()
+
+        assertAll(
+            { table["namespace"] shouldBe deep },
+            // The derived field is the LAST segment — the schema — not the last-but-one: the
+            // namespace is the CONTAINER path and the table's own name is `name`.
+            { table["schema"] shouldBe "sales" },
+            { (page["entries"] as List<*>).single() shouldBe mapOf("namespace" to deep, "label" to "sales") },
+            { page["schemas"] shouldBe listOf("sales") },
+        )
+    }
+
+    @Test
+    fun `two same-named schemas in different catalogs are two entries, and the legacy array cannot tell them apart`() {
+        val page =
+            SchemasPage(
+                listOf(SchemaEntry(listOf("a1", "sales"), "sales"), SchemaEntry(listOf("a2", "sales"), "sales")),
+                truncated = false,
+            ).toWireMap()
+
+        assertAll(
+            // The legacy projection is exactly the ambiguity 087 exists to end — asserted, not
+            // hidden, so the reason `entries` was added stays visible in the suite.
+            { page["schemas"] shouldBe listOf("sales", "sales") },
+            {
+                page["entries"] shouldBe
+                    listOf(
+                        mapOf("namespace" to listOf("a1", "sales"), "label" to "sales"),
+                        mapOf("namespace" to listOf("a2", "sales"), "label" to "sales"),
+                    )
             },
         )
     }

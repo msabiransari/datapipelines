@@ -21,9 +21,9 @@ import io.modelcontextprotocol.spec.McpSchema
  * the boundary is the tool's schema, its argument-to-body assembly and its result shape, exactly
  * as `PipelineToolPayloads` does for the pipeline write tools.
  *
- * ## The password caveat is a documented trade-off, not a bug
+ * ## The credential caveat is a documented trade-off, not a bug
  *
- * A password passed through an agent transits the agent's context, its transcript, and whatever
+ * A secret passed through an agent transits the agent's context, its transcript, and whatever
  * logging the client does. That is a property of handing a secret to an agent, and no server
  * change can undo it — so the tool does not pretend to, and it does not refuse. It SAYS so, in
  * the description an agent reads before calling it and in `.agents/skills/datapipelines/
@@ -31,8 +31,8 @@ import io.modelcontextprotocol.spec.McpSchema
  * user is willing to have in that transcript — a read-only role, or a short-lived password they
  * will rotate afterwards.
  *
- * The password never comes BACK: the result is the §3.2 shape, which carries `password_set:
- * true` and no password field at all ([toCreatedResponse]).
+ * The secret never comes BACK: the result is the §3.2 shape, which carries `credential.kind`
+ * and `password_set` and no secret field at all ([toCreatedResponse]).
  */
 class DatasourcesCreateTool(
     private val registrations: DatasourceCreateService,
@@ -42,13 +42,16 @@ class DatasourcesCreateTool(
             name = "datasources_create",
             description =
                 "Register a new datasource connection in the key's pinned workspace. Mirrors POST /api/v1/datasources: " +
-                    "name, dialect, jdbc_url, username and password are required; global (admin only) or workspace " +
-                    "select the binding, readonly forbids write-shaped use. Returns the stored metadata with " +
-                    "password_set: true — the password is never returned. " +
-                    "SECURITY: a password sent through this tool transits the agent's context, its transcript and any " +
+                    "name, dialect and jdbc_url are required, plus a credential — either credential: " +
+                    "{kind, username, secret} (kind = password | token | private_key | service_account_json | none) " +
+                    "or the legacy username/password pair, which means kind: password. kind: none is for a file " +
+                    "database or an IAM role and carries neither field. global (admin only) or workspace select the " +
+                    "binding, readonly forbids write-shaped use. Returns the stored metadata with credential.kind and " +
+                    "password_set — the secret is never returned. " +
+                    "SECURITY: a secret sent through this tool transits the agent's context, its transcript and any " +
                     "logging the client does. Prefer registering a datasource with a real credential in the UI or over " +
                     "REST; use this tool only with a credential the user is willing to have in that transcript — a " +
-                    "read-only role, or a short-lived password they will rotate. " +
+                    "read-only role, or a short-lived token they will rotate. " +
                     "Call datasources_test on the new name afterwards to confirm it connects.",
             schema = SCHEMA,
         )
@@ -64,8 +67,12 @@ class DatasourcesCreateTool(
                 put("name", args.requiredString("name"))
                 put("dialect", args.requiredString("dialect"))
                 put("jdbc_url", args.requiredString("jdbc_url"))
-                put("username", args.requiredString("username"))
-                put("password", args.requiredString("password"))
+                // Exactly ONE credential shape reaches the binder — the tool's schema declares
+                // both and the binder refuses a body carrying both, so the choice is made here
+                // rather than by a precedence rule nobody can see (§3.4).
+                args.rawMap()["credential"]?.let { put("credential", it) }
+                args.string("username")?.let { put("username", it) }
+                args.string("password")?.let { put("password", it) }
                 args.string("display_name")?.let { put("display_name", it) }
                 args.string("description")?.let { put("description", it) }
                 args.rawMap()["query_timeout_seconds"]?.let { put("query_timeout_seconds", it) }
@@ -83,18 +90,36 @@ class DatasourcesCreateTool(
             """
             {
               "type": "object",
-              "required": ["name", "dialect", "jdbc_url", "username", "password"],
+              "required": ["name", "dialect", "jdbc_url"],
               "additionalProperties": false,
               "properties": {
                 "name": {"type": "string"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string"},
-                "dialect": {"type": "string", "enum": ["POSTGRES", "MYSQL", "MSSQL", "ORACLE", "H2", "DUCKDB", "SQLITE"]},
+                "dialect": {"type": "string", "enum": ["POSTGRES", "MYSQL", "MSSQL", "ORACLE", "H2", "DUCKDB", "SQLITE", "LAKE"]},
                 "jdbc_url": {"type": "string"},
-                "username": {"type": "string"},
+                "credential": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "The credential (datasources.md §3.4). Use this OR the legacy username/password pair, never both.",
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["password", "token", "private_key", "service_account_json", "none"],
+                      "description": "password needs username+secret; token needs secret and may name a username; none needs neither."
+                    },
+                    "username": {"type": "string"},
+                    "secret": {
+                      "type": "string",
+                      "description": "Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
+                    }
+                  }
+                },
+                "username": {"type": "string", "description": "Legacy shape, with password: means credential kind 'password'."},
                 "password": {
                   "type": "string",
-                  "description": "Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
+                  "description": "Legacy shape, with username. Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
                 },
                 "query_timeout_seconds": {"type": "integer"},
                 "global": {"type": "boolean", "description": "Admin only. true = shared infrastructure, bound to no workspace."},
@@ -114,7 +139,8 @@ class DatasourcesCreateTool(
  * Built field by field for exactly the reason [toMcpMetadata] is: [Datasource] carries the
  * decrypted `password` on the paths that need it, and "credentials are never returned" has to be
  * a property of the CODE, not of whichever mapper happens to serialize it. `password_set` is
- * `true` because §9.1 requires a password to register — there is no other outcome to report.
+ * derived from the credential KIND (§3.4): every kind but `none` has a stored secret, and V13's
+ * CHECK is what makes those two statements the same.
  */
 internal fun Datasource.toCreatedResponse(): Map<String, Any?> =
     buildMap {
@@ -124,7 +150,8 @@ internal fun Datasource.toCreatedResponse(): Map<String, Any?> =
         put("dialect", dialect.wire)
         put("jdbc_url", jdbcUrl)
         put("username", username)
-        put("password_set", true)
+        put("credential", buildMap { put("kind", credentialKind.wire) })
+        put("password_set", credentialSet)
         put("query_timeout_seconds", queryTimeoutSeconds)
         if (introspectionIncludeSchemas.isNotEmpty()) put("introspection_include_schemas", introspectionIncludeSchemas)
         put("properties", mapOf("hikari" to properties.hikari, "jdbc" to properties.jdbc))

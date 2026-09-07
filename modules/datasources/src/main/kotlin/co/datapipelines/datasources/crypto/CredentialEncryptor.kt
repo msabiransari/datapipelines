@@ -39,7 +39,7 @@ import javax.crypto.spec.SecretKeySpec
  * Every call binds the ciphertext to the datasource it belongs to by passing the **datasource
  * name** as GCM associated data (`aad`). The name is immutable (§11.1) and is the row's primary
  * key, so it is available on both paths and can never drift from the value the ciphertext was
- * sealed under. The effect: a `password_encrypted` value copied from one datasource row to
+ * sealed under. The effect: a `credential_encrypted` value copied from one datasource row to
  * another fails the authentication tag instead of silently decrypting — a stored-credential
  * swap becomes a detectable tamper, not a working impersonation of another environment's DB.
  *

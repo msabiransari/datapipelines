@@ -86,7 +86,9 @@ class JdbcWritebackRunner(
         workspaceId: UUID,
     ): Long {
         val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
-        return writeAll(output, workspaceId, columns) { connection, table -> streamInsert(connection, table, columns, resultSet) }
+        return writeAll(output, workspaceId, columns) { connection, table, dialect ->
+            streamInsert(connection, table, columns, resultSet, dialect)
+        }
     }
 
     override fun writebackRows(
@@ -94,7 +96,10 @@ class JdbcWritebackRunner(
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
         workspaceId: UUID,
-    ): Long = writeAll(output, workspaceId, schema) { connection, table -> insertRows(connection, table, schema, rows) }
+    ): Long =
+        writeAll(output, workspaceId, schema) { connection, table, dialect ->
+            insertRows(connection, table, schema, rows, dialect)
+        }
 
     /**
      * The shared write-back shell (§6.4.3): datasource resolution, the identifier guards, and the
@@ -109,7 +114,7 @@ class JdbcWritebackRunner(
         output: NodeOutput.Datasource,
         workspaceId: UUID,
         columns: List<ColumnSchema>,
-        insert: (Connection, String) -> Long,
+        insert: (Connection, String, Dialect) -> Long,
     ): Long {
         val datasource =
             registry.getVisible(output.datasource, workspaceId)
@@ -121,11 +126,16 @@ class JdbcWritebackRunner(
         val table = SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.WRITEBACK_FAILED)
         SqlIdentifiers.validateColumnNames(columns.map { it.name }, PipelineErrorCodes.Node.WRITEBACK_FAILED)
 
+        // §6.4.3 (087): identifiers are quoted in the TARGET dialect's vocabulary, not the SQL
+        // standard's — MySQL needs backticks unless the server runs with ANSI_QUOTES, which the
+        // adapter cannot know, and MSSQL needs brackets. Resolved from the datasource the gate
+        // above returned, so the quoting and the connection can never describe different engines.
+        val dialect = datasource.dialect
         return registry.poolFor(datasource).leaseConnection().use { connection ->
             connection.autoCommit = false
             try {
-                if (output.mode == WriteMode.REPLACE) clearTarget(connection, table)
-                val written = insert(connection, table)
+                if (output.mode == WriteMode.REPLACE) clearTarget(connection, table, dialect)
+                val written = insert(connection, table, dialect)
                 connection.commit()
                 written
             } catch (e: SQLException) {
@@ -164,15 +174,16 @@ class JdbcWritebackRunner(
     private fun clearTarget(
         connection: Connection,
         table: String,
+        dialect: Dialect,
     ) {
         val savepoint = connection.setSavepoint("dp_writeback_replace")
         try {
-            connection.createStatement().use { it.execute("TRUNCATE TABLE ${SqlIdentifiers.quote(table)}") }
+            connection.createStatement().use { it.execute("TRUNCATE TABLE ${SqlIdentifiers.quote(table, dialect)}") }
             connection.releaseSavepoint(savepoint)
         } catch (e: SQLException) {
             if (isMissingTable(e)) throw e
             connection.rollback(savepoint)
-            connection.createStatement().use { it.execute("DELETE FROM ${SqlIdentifiers.quote(table)}") }
+            connection.createStatement().use { it.execute("DELETE FROM ${SqlIdentifiers.quote(table, dialect)}") }
         }
     }
 
@@ -181,10 +192,11 @@ class JdbcWritebackRunner(
         table: String,
         columns: List<ColumnSchema>,
         resultSet: ResultSet,
+        dialect: Dialect,
     ): Long {
-        val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
+        val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name, dialect) }
         val placeholders = columns.joinToString(", ") { "?" }
-        val sql = "INSERT INTO ${SqlIdentifiers.quote(table)} ($quoted) VALUES ($placeholders)"
+        val sql = "INSERT INTO ${SqlIdentifiers.quote(table, dialect)} ($quoted) VALUES ($placeholders)"
         return connection.prepareStatement(sql).use { statement ->
             var pending = 0
             var written = 0L
@@ -242,10 +254,11 @@ class JdbcWritebackRunner(
         table: String,
         columns: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
+        dialect: Dialect,
     ): Long {
-        val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
+        val quoted = columns.joinToString(", ") { SqlIdentifiers.quote(it.name, dialect) }
         val placeholders = columns.joinToString(", ") { "?" }
-        val sql = "INSERT INTO ${SqlIdentifiers.quote(table)} ($quoted) VALUES ($placeholders)"
+        val sql = "INSERT INTO ${SqlIdentifiers.quote(table, dialect)} ($quoted) VALUES ($placeholders)"
         return connection.prepareStatement(sql).use { statement ->
             var pending = 0
             var written = 0L

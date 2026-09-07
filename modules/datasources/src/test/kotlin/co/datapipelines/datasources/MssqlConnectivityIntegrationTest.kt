@@ -50,7 +50,7 @@ class MssqlConnectivityIntegrationTest {
                         dialect = Dialect.MSSQL,
                         jdbcUrl = mssql.jdbcUrl,
                         username = mssql.username,
-                        password = mssql.password,
+                        secret = mssql.password,
                         properties = DatasourceProperties(jdbc = mapOf("trustServerCertificate" to "true")),
                     ),
                 integerQuery = "SELECT CAST(1 AS INT) AS n",

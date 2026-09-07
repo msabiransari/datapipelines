@@ -276,7 +276,7 @@ class JarSmokeE2eTest {
                 )
                 s.execute(
                     "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
-                        "password_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
+                        "credential_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
                         "'Smoke DS', 'POSTGRES', '${postgres.jdbcUrl}', '${postgres.username}', " +
                         "'x'::bytea, '$USER', TRUE)",
                 )

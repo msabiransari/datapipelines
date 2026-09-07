@@ -5,12 +5,14 @@ import co.datapipelines.datasources.DatasourceAuditEvents
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -187,6 +189,30 @@ class ExecutorPrimitivesTest {
 
         SqlIdentifiers.quote("plain") shouldBe "\"plain\""
         SqlIdentifiers.quote("a\"b") shouldBe "\"a\"\"b\""
+    }
+
+    @Test
+    fun `write-back quoting speaks the TARGET dialect, not the SQL standard`() {
+        // The 2026-09-07 contract audit's §c defect: `SqlIdentifiers.quote` produced `"…"` on
+        // every dialect, so a write-back to MySQL emitted `INSERT INTO "orders" ("order") …`,
+        // which a server without ANSI_QUOTES reads as string literals and rejects. Reverting the
+        // routing turns the two non-standard rows below red — that is what makes this a guard.
+        // (`MysqlIdentifierQuotingIntegrationTest` in `datasources` proves the same thing on a
+        // live MySQL, in both directions.)
+        assertAll(
+            { SqlIdentifiers.quote("order", Dialect.MYSQL) shouldBe "`order`" },
+            { SqlIdentifiers.quote("order", Dialect.MSSQL) shouldBe "[order]" },
+            // Unchanged — byte-identical to what this module emitted before 087.
+            { SqlIdentifiers.quote("order", Dialect.POSTGRES) shouldBe SqlIdentifiers.quote("order") },
+            { SqlIdentifiers.quote("order", Dialect.H2) shouldBe SqlIdentifiers.quote("order") },
+            { SqlIdentifiers.quote("order", Dialect.DUCKDB) shouldBe SqlIdentifiers.quote("order") },
+            { SqlIdentifiers.quote("order", Dialect.SQLITE) shouldBe SqlIdentifiers.quote("order") },
+            { SqlIdentifiers.quote("order", Dialect.ORACLE) shouldBe SqlIdentifiers.quote("order") },
+            // Embedded quote characters are doubled in EVERY vocabulary — the injection boundary
+            // is the quoting, and it does not weaken because the character changed.
+            { SqlIdentifiers.quote("we`ird", Dialect.MYSQL) shouldBe "`we``ird`" },
+            { SqlIdentifiers.quote("we]ird", Dialect.MSSQL) shouldBe "[we]]ird]" },
+        )
     }
 
     // ------------------------------------------------------------------ stats

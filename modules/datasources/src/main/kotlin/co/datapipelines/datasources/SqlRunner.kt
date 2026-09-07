@@ -84,9 +84,13 @@ class SqlRunner(
      * ENGINE resolves the current schema at execution, which is the §7A rule for a query — the
      * introspector's explicit current-schema read exists to stop `getColumns` MERGING same-named
      * tables across schemas, a hazard a query cannot have, so the read is deliberately not
-     * repeated here. Schemaless dialects ignore the qualifier (there is no schema dimension to
-     * address). `order_by` absent means the top-N is engine-arbitrary — the caller documents
-     * that; each term's column is quoted like the table name.
+     * repeated here. Flat dialects ignore the qualifier (there is no namespace to address).
+     * `order_by` absent means the top-N is engine-arbitrary — the caller documents that; each
+     * term's column is quoted like the table name.
+     *
+     * [schema] is a NAMESPACE (087): `sales`, or the dotted `a1.sales` a two-level listing hands
+     * back. Every segment is quoted separately — quoting `a1.sales` as one identifier would
+     * address a schema of that literal name, which exists nowhere.
      */
     fun previewTable(
         datasource: Datasource,
@@ -96,12 +100,8 @@ class SqlRunner(
         limit: Int,
     ): QueryRows {
         val adapter = DialectAdapters.forDialect(datasource.dialect)
-        val qualified =
-            if (!schema.isNullOrBlank() && !adapter.introspectionSchemaless) {
-                adapter.quoteIdentifier(schema) + "." + adapter.quoteIdentifier(table)
-            } else {
-                adapter.quoteIdentifier(table)
-            }
+        val namespace = if (adapter.namespaceShape.isFlat) emptyList() else Namespaces.parse(schema)
+        val qualified = (namespace + table).joinToString(".") { adapter.quoteIdentifier(it) }
         val order =
             orderBy.joinToString(", ") { term ->
                 adapter.quoteIdentifier(term.column) + if (term.descending) " DESC" else " ASC"

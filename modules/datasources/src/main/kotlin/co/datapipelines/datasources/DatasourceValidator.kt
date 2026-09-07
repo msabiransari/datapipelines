@@ -28,23 +28,139 @@ class DatasourceValidator(
     private val adapters: (Dialect) -> DialectAdapter = DialectAdapters::forDialect,
     private val driverAvailable: (Dialect) -> Boolean = JdbcDrivers::isAvailable,
 ) {
-    /** @param isCreate true on create (password becomes required, §9). */
+    /**
+     * @param isCreate true on create (the credential secret becomes required, §9).
+     * @param storedKind the kind the row currently holds, on an update — null on create and for
+     *   callers that have not read the row. A kind CHANGE requires a secret (§3.4): without one
+     *   the update would relabel the stored secret as something it is not, and `none` → any other
+     *   kind would leave the column NULL against V13's `chk_datasource_credential_present`.
+     */
     fun validate(
         datasource: Datasource,
         isCreate: Boolean,
+        storedKind: CredentialKind? = null,
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
 
         validateName(datasource.name, errors)
-        if (isCreate && datasource.password.isNullOrEmpty()) {
-            errors += error(DatasourceErrorCodes.PASSWORD_MISSING, "password", "A password is required on create.")
-        }
+        validateCredential(datasource, isCreate, storedKind, errors)
         validateQueryTimeout(datasource.queryTimeoutSeconds, errors)
         validateIntrospectionIncludeSchemas(datasource, errors)
         validateJdbcUrl(datasource, errors)
         validateProperties(datasource, errors)
 
         return ValidationResult.of(errors)
+    }
+
+    /**
+     * §3.4 — the per-kind credential rules, in one place because they are one contract.
+     *
+     * Three questions, in the order an operator would want them answered:
+     *
+     * 1. **Can this dialect authenticate this way at all?** Resolved from the DIALECT enum via
+     *    the adapter's [DialectAdapter.supportedCredentialKinds]. `private_key` and
+     *    `service_account_json` are in no shipped adapter's set — they are catalogued for the
+     *    reference targets (Snowflake key-pair, BigQuery service accounts) and refused here
+     *    until a dialect declares it can use them. Fail-closed beats a row whose kind the pool
+     *    build would silently ignore.
+     * 2. **Is `username` present exactly when the kind allows it?** REQUIRED for `password`,
+     *    OPTIONAL for `token`, FORBIDDEN for the rest — the same rule V13's
+     *    `chk_datasource_credential_username` enforces at the column, restated here so the
+     *    caller gets a 400 with a field rather than a constraint violation.
+     * 3. **Is the secret present exactly when the kind allows it?** Required on CREATE for every
+     *    kind but `none` (an update that omits it keeps the stored one, §11); forbidden always
+     *    for `none`, in both directions — sending a secret with `kind: none` means the caller
+     *    believes something the row will not record, and a silent drop is how the dummy password
+     *    of §8A.1 survived four rounds.
+     *
+     * The code for a missing secret stays [DatasourceErrorCodes.PASSWORD_MISSING]: the catalog
+     * (pipeline-contract §13.8) is the authority for concrete codes and this round does not add
+     * one, so the existing code carries the widened meaning and the docs say so. Everything else
+     * is `properties_invalid`, the module's shape-error code.
+     */
+    private fun validateCredential(
+        datasource: Datasource,
+        isCreate: Boolean,
+        storedKind: CredentialKind?,
+        errors: MutableList<ValidationError>,
+    ) {
+        val kind = datasource.credentialKind
+        val supported = adapters(datasource.dialect).supportedCredentialKinds
+        if (kind !in supported) {
+            errors +=
+                propertiesError(
+                    "credential.kind",
+                    "dialect ${datasource.dialect.wire} cannot authenticate with credential kind '${kind.wire}'; " +
+                        "it accepts ${supported.map { it.wire }.sorted()}.",
+                )
+            // The field rules below are stated per kind; reporting them for a kind this dialect
+            // rejects outright would bury the one error that matters under two more.
+            return
+        }
+        validateCredentialField(
+            rule = kind.usernameRule,
+            value = datasource.username,
+            field = "username",
+            kind = kind,
+            required = true,
+            errors = errors,
+        )
+        validateCredentialField(
+            rule = kind.secretRule,
+            value = datasource.secret,
+            field = "credential.secret",
+            kind = kind,
+            // A secret is required on CREATE — and on an update that CHANGES the kind, because
+            // keeping the stored one would relabel it as something it is not, and `none` → any
+            // other kind would leave the column NULL against V13's present-CHECK (a constraint
+            // violation where the caller deserves a catalogued 400).
+            required = isCreate || (storedKind != null && storedKind != kind),
+            errors = errors,
+        )
+    }
+
+    /** One §3.4 field rule: present-when-required, absent-when-forbidden. */
+    private fun validateCredentialField(
+        rule: FieldRule,
+        value: String?,
+        field: String,
+        kind: CredentialKind,
+        required: Boolean,
+        errors: MutableList<ValidationError>,
+    ) {
+        when (rule) {
+            FieldRule.REQUIRED -> {
+                if (required && value.isNullOrEmpty()) {
+                    errors +=
+                        if (field == "credential.secret") {
+                            error(
+                                DatasourceErrorCodes.PASSWORD_MISSING,
+                                field,
+                                "credential.secret is required on create for credential kind '${kind.wire}'.",
+                            )
+                        } else {
+                            propertiesError(field, "$field is required for credential kind '${kind.wire}'.")
+                        }
+                }
+            }
+
+            FieldRule.FORBIDDEN -> {
+                if (!value.isNullOrEmpty()) {
+                    errors +=
+                        propertiesError(
+                            field,
+                            "$field must be absent for credential kind '${kind.wire}' — " +
+                                "nothing would authenticate with it, and storing it would misdescribe the datasource.",
+                        )
+                }
+            }
+
+            // OPTIONAL has nothing to check in either direction — present is fine, absent is
+            // fine — and saying so with an empty branch is what makes the `when` exhaustive
+            // over the enum rather than defaulted.
+            FieldRule.OPTIONAL -> {
+            }
+        }
     }
 
     /**
@@ -133,13 +249,19 @@ class DatasourceValidator(
      *
      * An ALLOWLIST, not the per-character wildcard denylist it replaces (R5 F7): the
      * denylist grew one character per review round (`*`, then `%`) while `?`, glob ranges
-     * `[a-z]`, pasted quoted identifiers, and qualified `db.schema` entries still stored —
-     * each looking like it exempts a family while exempting nothing, exactly the failure
-     * this rule exists to prevent. The complement — "can match a real schema name" — closes
-     * the whole class at once. A blank entry fails the alphabet too (empty matches `+`
-     * nothing), and normalization (which runs before validation on every save/validate
-     * path) already dropped blank-after-trim entries, so this branch fires only for direct
-     * raw-input callers.
+     * `[a-z]`, and pasted quoted identifiers still stored — each looking like it exempts a
+     * family while exempting nothing, exactly the failure this rule exists to prevent. The
+     * complement — "can match a real schema name" — closes the whole class at once. A blank
+     * entry fails the alphabet too (empty matches `+` nothing), and normalization (which runs
+     * before validation on every save/validate path) already dropped blank-after-trim entries,
+     * so this branch fires only for direct raw-input callers.
+     *
+     * **Dotted entries are now legal (087).** `a1.sales` is a NAMESPACE, and on a dialect with
+     * two browsable levels it is the only way to exempt one catalog's `sales` while leaving the
+     * other's excluded. Before 087 the rule refused qualified entries on the grounds that they
+     * "can never match a real schema as exact entries" — true while the matcher only ever saw a
+     * bare schema name, and false now that it sees the whole namespace. A single segment still
+     * matches the schema level on every dialect, so every stored entry keeps working.
      */
     private fun validateIntrospectionIncludeSchemas(
         datasource: Datasource,
@@ -150,10 +272,11 @@ class DatasourceValidator(
                 errors +=
                     propertiesError(
                         "introspection_include_schemas",
-                        "introspection_include_schemas entries must be exact schema names over the legal-identifier " +
-                            "alphabet of the supported dialects — letters, digits, `_`, `\$`, `#`, lowercase " +
-                            "(normalized at save); '${entry.truncateForError()}' is not. Wildcards, quotes, and " +
-                            "qualified db.schema names can never match a real schema as an exact entry.",
+                        "introspection_include_schemas entries must be exact schema names — or dotted namespaces " +
+                            "like 'catalog.schema' — over the legal-identifier alphabet of the supported dialects: " +
+                            "letters, digits, `_`, `\$`, `#`, lowercase (normalized at save). " +
+                            "'${entry.truncateForError()}' is not. Wildcards and quotes can never match a real " +
+                            "schema as an exact entry.",
                     )
             }
         }
@@ -175,7 +298,8 @@ class DatasourceValidator(
             propertyErrors +=
                 propertiesError(
                     "properties.${ns.truncateForError()}",
-                    "'${ns.truncateForError()}' is not a recognized properties namespace; only 'hikari' and 'jdbc' are allowed.",
+                    "'${ns.truncateForError()}' is not a recognized properties namespace; " +
+                        "only 'hikari', 'jdbc' and 'dialect' are allowed.",
                 )
         }
         // Server-managed keys under either namespace are derived from the entity/adapter and
@@ -213,6 +337,12 @@ class DatasourceValidator(
                             "code-execution / local-file / TLS-verification surface (§5.6).",
                     )
             }
+        // §12.1 (087): `dialect.*` is TYPED, so the adapter validates it key by key instead of a
+        // pool build discovering the problem. Resolved from the dialect enum like the refusal
+        // union, and refusing the whole namespace by default — a dialect gains keys by declaring
+        // them, never by an adapter forgetting to look.
+        propertyErrors += adapters(datasource.dialect).validateDialectProperties(props.dialect).errors
+
         // Name each hikari key HikariCP rejects (unknown name / un-parseable value).
         props.hikari
             .filterKeys { it.lowercase() !in RefusedPropertyKeys.SERVER_MANAGED }
@@ -284,18 +414,24 @@ class DatasourceValidator(
      * catching the family is the §5.4 constructibility gate. The underlying message is surfaced
      * in the error — scrubbed of credentials first (§6.1) — not swallowed.
      *
-     * A `PUT` that omits `password` legitimately reaches here with `password = null`, which
+     * A `PUT` that omits the credential legitimately reaches here with `secret = null`, which
      * [AbstractDialectAdapter.buildHikariConfig] refuses (DS-SEC-10). The credential is never used
      * — `initializationFailTimeout = -1` means no connection is attempted — so an explicit,
-     * obviously-synthetic [VALIDATION_ONLY_PASSWORD] is substituted rather than weakening the
-     * pool-build contract with a silent empty string.
+     * obviously-synthetic [VALIDATION_ONLY_SECRET] is substituted rather than weakening the
+     * pool-build contract with a silent empty string. [CredentialKind.NONE] is exempt: it has no
+     * secret by definition, and substituting one would build a pool the runtime will not build.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun testPoolBuild(
         datasource: Datasource,
         errors: MutableList<ValidationError>,
     ) {
-        val forBuild = if (datasource.password == null) datasource.copy(password = VALIDATION_ONLY_PASSWORD) else datasource
+        val forBuild =
+            if (datasource.secret == null && datasource.credentialKind != CredentialKind.NONE) {
+                datasource.copy(secret = VALIDATION_ONLY_SECRET)
+            } else {
+                datasource
+            }
         try {
             val config = adapters(datasource.dialect).buildHikariConfig(forBuild)
             config.initializationFailTimeout = TEST_POOL_NO_CONNECT
@@ -305,7 +441,7 @@ class DatasourceValidator(
                 propertiesError(
                     "properties",
                     "the connection pool could not be built: " +
-                        (e.message?.scrubbedForError(datasource.password) ?: "invalid properties"),
+                        (e.message?.scrubbedForError(datasource.secret) ?: "invalid properties"),
                 )
         }
     }
@@ -326,20 +462,23 @@ class DatasourceValidator(
         private val NAME_PATTERN = Regex("^[a-z0-9_-]+$")
 
         /**
-         * The §3.3/§7A allowlist entry alphabet — legal unquoted-identifier characters
-         * across the supported dialects, in the stored (lowercase, normalized) form.
+         * The §3.3/§7A allowlist entry alphabet — legal unquoted-identifier characters across the
+         * supported dialects, in the stored (lowercase, normalized) form, as one or more
+         * dot-separated segments (087: a namespace, not just a schema). Every segment must be
+         * non-empty, so `a.`, `.a` and `a..b` are still refused.
          */
-        private val INCLUDE_SCHEMA_ENTRY_PATTERN = Regex("""^[a-z0-9_$#]+$""")
+        private val INCLUDE_SCHEMA_ENTRY_PATTERN = Regex("""^[a-z0-9_$#]+(\.[a-z0-9_$#]+)*$""")
 
         /** §5.4: negative initializationFailTimeout → pool constructs without connecting. */
         private const val TEST_POOL_NO_CONNECT = -1L
 
         /**
-         * Stand-in credential for the save-time pool build of a `PUT` that omits `password`. Never
-         * reaches a socket (§5.4 builds with `initializationFailTimeout = -1`) and never leaves
-         * this class; spelled so that any appearance in a log is unmistakably not a real secret.
+         * Stand-in credential for the save-time pool build of a `PUT` that omits the credential.
+         * Never reaches a socket (§5.4 builds with `initializationFailTimeout = -1`) and never
+         * leaves this class; spelled so that any appearance in a log is unmistakably not a real
+         * secret.
          */
-        const val VALIDATION_ONLY_PASSWORD = "<validation-only-no-credential-supplied>"
+        const val VALIDATION_ONLY_SECRET = "<validation-only-no-credential-supplied>"
 
         /**
          * Server-managed HikariCP keys (lowercased) — refused under both namespaces (§5, §5.6).

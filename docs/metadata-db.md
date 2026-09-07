@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.9 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.10 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-05
@@ -411,8 +411,9 @@ CREATE TABLE datasources (
     description             TEXT,                           -- OPTIONAL (nullable) — datasources.md §3.3
     dialect                 TEXT        NOT NULL,           -- 'POSTGRES', 'ORACLE', etc.
     jdbc_url                TEXT        NOT NULL,
-    username                TEXT        NOT NULL,
-    password_encrypted      BYTEA       NOT NULL,           -- AES-256-GCM: nonce ‖ ciphertext ‖ tag
+    username                TEXT,                           -- NULL for the kinds that have none (V13)
+    credential_kind         TEXT        NOT NULL DEFAULT 'password',  -- §3.4 — WHAT the credential is (V13)
+    credential_encrypted    BYTEA,                          -- AES-256-GCM: version ‖ nonce ‖ ciphertext ‖ tag; NULL iff kind = 'none' (V13)
     properties_json         JSONB       NOT NULL DEFAULT '{}',  -- {"hikari": {...}, "jdbc": {...}}
     query_timeout_seconds   INTEGER,                        -- NULL = fall back to the global executor default
     introspection_include_schemas_json JSONB NOT NULL DEFAULT '[]', -- §7A allowlist: schemas exempt from the system-schema exclusion (V2)
@@ -433,6 +434,19 @@ CREATE TABLE datasources (
     ),
     CONSTRAINT chk_datasource_query_timeout CHECK (
         query_timeout_seconds IS NULL OR query_timeout_seconds >= 1
+    ),
+    CONSTRAINT chk_datasource_credential_kind CHECK (      -- V13
+        credential_kind IN ('password', 'token', 'private_key', 'service_account_json', 'none')
+    ),
+    CONSTRAINT chk_datasource_credential_present CHECK (   -- V13
+        (credential_kind = 'none') = (credential_encrypted IS NULL)
+    ),
+    CONSTRAINT chk_datasource_credential_username CHECK (  -- V13
+        CASE credential_kind
+            WHEN 'password' THEN username IS NOT NULL
+            WHEN 'token'    THEN TRUE
+            ELSE username IS NULL
+        END
     )
 );
 
@@ -445,7 +459,8 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 - `properties_json` holds the [Datasources §5](datasources.md#5-connection-pool-configuration) object verbatim: `{"hikari": {...}, "jdbc": {...}}`, both namespaces optional, `{}` when neither is set. Keys are **not** validated by this schema or by a key allow-list — they are validated at save time by building a test pool (D7/D2), which is the only check that stays true as HikariCP and the drivers evolve.
 - `query_timeout_seconds` is a **first-class column, not a `properties_json` key** — it is a datasource-level execution policy the executor reads per node, not a pool or driver property, and it needs to be queryable. When set it overrides [`datapipelines.executor.node-query-timeout-seconds`](configuration.md#32-executor); NULL means "use the global default" ([Datasources §5.5](datasources.md#55-query-timeout-precedence)).
 - `dialect`'s CHECK duplicates the application-level validation on purpose — a bad dialect reaching this table would break every pipeline referencing the datasource, and the DB is the last place to catch it. Values are the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set.
-- `password_encrypted` is `BYTEA` ciphertext only ([Datasources §7.1](datasources.md#71-encryption-at-rest)) — never plaintext, never returned by any endpoint, and never logged. The master key is required and fail-fast (D8).
+- `credential_encrypted` (V13; `password_encrypted` before it) is `BYTEA` ciphertext only ([Datasources §7.1](datasources.md#71-encryption-at-rest)) — never plaintext, never returned by any endpoint, and never logged. The master key is required and fail-fast (D8). The blob is **kind-agnostic**: a password, a bearer token, a PEM private key or a service-account JSON document are all sealed identically under the V10 versioned envelope with the datasource NAME as AAD, so a new credential kind needs no crypto change and rotation (§7.3) is unaffected.
+- The three V13 credential columns are one contract ([Datasources §3.4](datasources.md#34-credential-kinds)). `credential_kind` gains `DEFAULT 'password'`, which is what makes the backfill TRUE rather than a guess: every pre-087 row went through a save path that required a username and a password, so every one of them IS a password. `chk_datasource_credential_present` pins `kind = 'none'` ⟺ no ciphertext — that equivalence is why the §3.2 response can DERIVE `password_set` from the kind instead of carrying a read-side flag every constructor would have to get right. `chk_datasource_credential_username` restates §3.4's field rules at the column, as the backstop for a row written by restore or by hand; the application validator reports the same rules as field errors on a 400. `username` became nullable in the same migration: a private key, a service-account blob and "no credential" have no username, and the dummy value a NOT NULL column forced (`username: "sqlite"`, [Datasources §8A.1](datasources.md#8a1-file-shape)) is the lie V13 removes.
 - `created_by` is a real foreign key to `users(id)` (`ON DELETE RESTRICT`, the §2 default) — a user who owns datasources cannot be hard-deleted.
 - `workspace_id` (V4) binds the datasource to a workspace as **visibility/ownership only** — `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract). **`NULL = global`**: existing rows backfilled NULL, preserving the pre-workspaces shared behavior (D9). `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract — enforced since the readonly slice (save-time validation + executor backstop + the pool flag), and WRITABLE since the surfaces slice through the D8-gated registry save path (pool rebuilt on every flag write; `readonly` on a global datasource is admin-only). Since the surfaces slice both columns live on the entity and the repository's SQL: INSERT/UPDATE write `workspace_id`/`is_readonly` explicitly, and every read joins `workspaces` for the additive `workspace` name; visibility (`bound-to-active OR global`) is the repository's `findAllVisible`/`findVisibleByName` predicates — one authority for REST, MCP and the UI.
 - `idx_datasources_active` gives soft-delete parity with `pipelines` and `templates`: the registry's hot path is "list/lookup non-deleted datasources", and without it that scan had no supporting index. Note the PK index cannot serve it — `is_deleted` is not in the PK, so the filter would be a heap recheck on every row.
@@ -902,3 +917,4 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-03 | v1.7 | V9 migration (061/T84) | §4.10 `datasources` gains `last_test_at TIMESTAMPTZ`, `last_test_ok BOOLEAN` and `last_test_message TEXT` (migration V9) — the last connection test's outcome, [Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed). All three nullable with no default: all-NULL is "never tested", the truthful state of every existing row. The §2 `updated_at` rule gains its one exception — the outcome write does not move it, because an observation is not an edit and §8A.3 rule 1's byte-untouched guarantee is checked against exactly those columns. No new table, so §5A's promotion classification is unchanged: `datasources` stays environment-local, and an environment-local table's connectivity record is environment-local by construction. |
 | 2026-09-05 | v1.8 | V11 migration (074) | New **§4.13 `published_endpoints`** and **§4.14 `endpoint_key_bindings`** (migration V11, [REST API §19](rest-api.md#19-published-endpoints)) — a released pipeline served as `GET /api/x/…`, and which API keys authorise which node of that tree. §4.2 `api_keys` gains `kind` (`user` \| `endpoint`, CHECK-constrained, `DEFAULT 'user'` so the whole pre-V11 table backfills correctly) plus the partial index `idx_api_keys_endpoint_kind`. `pipeline_executions.chk_triggered_via` widens to admit `'ENDPOINT'` — a closed set since V1, so without this the first serve would fail on the constraint rather than on anything the design describes. §5 index table and §5A's classification updated: both new tables are **promotable** (a URL contract is authored, and bindings travel by key NAME because `api_keys` itself is environment-local — a target missing that name refuses the batch with `endpoint.promotion.key_missing`). |
 | 2026-09-05 | v1.9 | V12 migration (077) | §4.8 `templates`: `name` requires a **folder** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and migration **V12** carries the deploy gate for stored names — a `DO`-block pre-check that aborts naming every flat offender, active and soft-deleted, and **no DDL at all**. No table, column, index, constraint or classification changes, which is why every other section of this document is untouched. The gate deliberately ignores `pipelines`: that name is validated at save only, so a legacy flat pipeline still runs and an abort over it would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)). |
+| 2026-09-07 | v1.10 | V13 + V14 migrations (087) | §4.10 `datasources`: `password_encrypted` → **`credential_encrypted`, now NULLABLE**, plus **`credential_kind TEXT NOT NULL DEFAULT 'password'`** and a nullable `username` (V13, [Datasources §3.4](datasources.md#34-credential-kinds)). Three CHECKs: the kind is one of the enums.md §5A set, `kind = 'none'` ⟺ no ciphertext (which is what makes `password_set` derivable rather than a stored flag), and `username` is present exactly when the kind allows it. The backfill is TRUE rather than a guess — every pre-087 row went through a save path that required a username and a password. The credential blob stays kind-agnostic under the V10 versioned envelope, so rotation is untouched. **V14** widens `chk_datasource_dialect` to admit `'LAKE'` (dropped and recreated — Postgres has no ALTER for a CHECK expression); no data changes, since no existing row can hold a value that did not exist. |

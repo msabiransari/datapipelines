@@ -182,7 +182,7 @@ class PostgresSourceIntegrationTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = db.jdbcUrl,
             username = db.username,
-            password = db.password,
+            secret = db.password,
         )
 
     private companion object {

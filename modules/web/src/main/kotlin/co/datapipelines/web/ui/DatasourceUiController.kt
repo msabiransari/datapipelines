@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspacesProperties
+import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
@@ -36,6 +37,10 @@ class DatasourceUiController(
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
+        // §3.4: the register form's credential-kind select. Every catalogued kind is offered;
+        // the ones no shipped dialect can use are refused at save with the dialect named, which
+        // is a better answer than a silently short list that hides the contract.
+        model.addAttribute("credentialKinds", CredentialKind.entries.map { it.wire })
         model.addAttribute("selectedDialect", dialect ?: "")
         model.addAttribute("scopes", scopes())
         model.addAttribute("isAdmin", isAdmin())

@@ -224,7 +224,7 @@ class ParameterBindingIntegrationTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = db.jdbcUrl,
             username = db.username,
-            password = db.password,
+            secret = db.password,
         )
 
     private fun jdbc() = DriverManager.getConnection(db.jdbcUrl, db.username, db.password)

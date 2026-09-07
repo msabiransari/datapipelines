@@ -76,7 +76,7 @@ class CredentialEncryptorTest {
     @Test
     fun `a ciphertext moved to a different datasource no longer decrypts`() {
         // §5.6 / DS-SEC-9: the datasource name is GCM associated data, and the name is immutable
-        // (§11.1), so a `password_encrypted` value copied from one row into another — the exact
+        // (§11.1), so a `credential_encrypted` value copied from one row into another — the exact
         // move a DB-write attacker or a bad migration makes — fails the tag instead of silently
         // pointing pg-prod's credential at a datasource the attacker controls.
         val sealedForProd = encryptor.encrypt("prod-secret", "pg_prod")

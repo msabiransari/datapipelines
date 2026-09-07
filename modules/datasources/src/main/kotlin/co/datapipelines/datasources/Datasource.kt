@@ -10,16 +10,25 @@ import java.util.UUID
  * resolves the name to these connection details per environment. The mapping to the
  * `datasources` table is metadata-db §4.10 (the sole DDL authority).
  *
- * ## The [password] field
+ * ## The credential ([credentialKind], [username], [secret])
  *
- * [password] is the **plaintext** credential and is present only transiently:
+ * [credentialKind] says WHAT the stored credential is (§3.4): a password, a bearer/PAT token, a
+ * PEM private key, a service-account JSON blob, or nothing at all. It decides which of the other
+ * two fields may be present ([CredentialKind.usernameRule] / [CredentialKind.secretRule]) and
+ * where the adapter puts the secret at pool build ([DialectAdapter.applyCredential]) — the caller
+ * never names a driver slot.
+ *
+ * [secret] is the **plaintext** credential and is present only transiently:
  * - on create/update it carries the operator-supplied secret to the encryptor and the
  *   save-time test pool build (§5.4);
  * - when a row is loaded for a **pool build** it is populated by decrypting
- *   `password_encrypted` (§7.4);
+ *   `credential_encrypted` (§7.4);
  * - it is `null` everywhere else — a datasource read for listing or a `GET` response never
  *   holds it, and it is **never** serialized into a DTO, endpoint body, or log (§2 principle
  *   2, observability.md §9.2). The wire response substitutes `password_set: true|false`.
+ *
+ * It is `null` PERMANENTLY for [CredentialKind.NONE]: there is no credential, which is a
+ * different fact from "we did not load it" and is why the column is nullable (V13).
  */
 data class Datasource(
     val name: String,
@@ -27,8 +36,17 @@ data class Datasource(
     val description: String? = null,
     val dialect: Dialect,
     val jdbcUrl: String,
-    val username: String,
-    val password: String? = null,
+    /**
+     * The login name, when the credential kind has one (§3.4): REQUIRED for
+     * [CredentialKind.PASSWORD], optional for [CredentialKind.TOKEN], and **null** for every
+     * other kind — a private key, a service-account blob and "no credential" have no username,
+     * and storing a placeholder there is the lie V13 exists to end.
+     */
+    val username: String? = null,
+    /** §3.4: what [secret] IS. Defaults to the legacy `username`/`password` pair's meaning. */
+    val credentialKind: CredentialKind = CredentialKind.DEFAULT,
+    /** The plaintext credential — transient, kind-agnostic; see the class KDoc. */
+    val secret: String? = null,
     val queryTimeoutSeconds: Int? = null,
     val properties: DatasourceProperties = DatasourceProperties(),
     /**
@@ -142,53 +160,76 @@ data class Datasource(
      */
     override fun toString(): String =
         "Datasource(name=$name, dialect=${dialect.wire}, jdbcUrl=$jdbcUrl, username=$username, " +
-            "password_set=${password != null}, queryTimeoutSeconds=$queryTimeoutSeconds, isReadonly=$isReadonly, " +
+            "credential_kind=${credentialKind.wire}, secret_present=${secret != null}, " +
+            "queryTimeoutSeconds=$queryTimeoutSeconds, isReadonly=$isReadonly, " +
             "workspace=${workspaceName ?: "global"})"
+
+    /**
+     * The §3.2 `password_set` flag, derived from the KIND rather than from the transient
+     * [secret] — which is null on every read path and would report `false` for every
+     * datasource in existence.
+     *
+     * It is derivable because V13's CHECK makes it so: `credential_kind = 'none'` iff
+     * `credential_encrypted IS NULL`. So "this datasource has a stored credential" and "its
+     * kind is not none" are the same statement, enforced by the database rather than by a
+     * read-side flag this entity would have to carry and every constructor would have to get
+     * right.
+     */
+    val credentialSet: Boolean get() = credentialKind != CredentialKind.NONE
 }
-// The `password_set` field of a GET response is derived at the web layer from row existence:
-// every persisted datasource has a NOT NULL `password_encrypted` (metadata-db §4.10), so a
-// datasource the registry returns always has a credential set. This entity never exposes a
-// read-side `passwordSet` flag off the transient (null-on-read) `password` field.
 
 /**
- * The two namespaced passthrough maps under `properties` (datasources.md §5).
+ * The three namespaced maps under `properties` (datasources.md §5, §12.1).
  *
- * There is no allowlist of supported keys: [hikari] is applied verbatim to `HikariConfig`
- * and [jdbc] is passed to the driver via `addDataSourceProperty`. Correctness is enforced by
- * the save-time test pool build (§5.4), not by enumeration here.
+ * [hikari] and [jdbc] are PASSTHROUGH: there is no allowlist of supported keys — [hikari] is
+ * applied verbatim to `HikariConfig` and [jdbc] is passed to the driver via
+ * `addDataSourceProperty`, and correctness is enforced by the save-time test pool build (§5.4),
+ * not by enumeration here.
+ *
+ * [dialect] (087) is the opposite by design: TYPED per-dialect configuration, validated by the
+ * adapter (`DialectAdapter.validateDialectProperties`) and refused key by key when unrecognized.
+ * It exists because the connectors on the roadmap need settings that are neither a pool knob nor
+ * a driver property — Snowflake's `warehouse` and `role`, Databricks's `http_path` and `catalog`,
+ * a lake's catalog kind, region and endpoint. Those become connect-time SQL or driver arguments
+ * the ADAPTER assembles; letting them arrive as untyped passthrough would put engine
+ * configuration on the same footing as a Hikari timeout, and a typo would silently do nothing.
+ * The default implementation refuses the whole namespace, so a dialect gains `dialect.*` keys by
+ * declaring them, never by omission.
  *
  * [unknownNamespaces] preserves any top-level key of the incoming `properties` object that is
- * neither `hikari` nor `jdbc`. It exists so validation can reject it
+ * none of the three. It exists so validation can reject it
  * (`datasource.validation.properties_invalid`, §9) instead of silently dropping it — a typed
- * model with two fields alone would lose the evidence at parse time.
+ * model with three fields alone would lose the evidence at parse time.
  */
 data class DatasourceProperties(
     val hikari: Map<String, Any?> = emptyMap(),
     val jdbc: Map<String, Any?> = emptyMap(),
+    val dialect: Map<String, Any?> = emptyMap(),
     val unknownNamespaces: Set<String> = emptySet(),
 ) {
     companion object {
-        /** The only two reserved namespaces (§3.1). */
-        val RESERVED_NAMESPACES = setOf("hikari", "jdbc")
+        /** The reserved namespaces (§3.1, §12.1): two passthrough, one typed. */
+        val RESERVED_NAMESPACES = setOf("hikari", "jdbc", "dialect")
 
         /**
          * Splits a raw deserialized `properties` object (e.g. from the request JSON or from
          * `properties_json`) into the two known namespaces plus [unknownNamespaces].
          *
-         * A `hikari` or `jdbc` value that is not itself a map is treated as an unknown
-         * namespace: it cannot be applied as a property map, so validation must reject it
-         * rather than the code guessing.
+         * A `hikari`, `jdbc` or `dialect` value that is not itself a map is treated as an
+         * unknown namespace: it cannot be applied as a property map, so validation must reject
+         * it rather than the code guessing.
          */
         @Suppress("UNCHECKED_CAST")
         fun fromRaw(raw: Map<String, Any?>): DatasourceProperties {
             val hikari = (raw["hikari"] as? Map<String, Any?>).orEmpty()
             val jdbc = (raw["jdbc"] as? Map<String, Any?>).orEmpty()
+            val dialect = (raw["dialect"] as? Map<String, Any?>).orEmpty()
             val unknown =
                 raw.entries
                     .filter { (key, value) -> key !in RESERVED_NAMESPACES || value !is Map<*, *> }
                     .map { it.key }
                     .toSet()
-            return DatasourceProperties(hikari = hikari, jdbc = jdbc, unknownNamespaces = unknown)
+            return DatasourceProperties(hikari = hikari, jdbc = jdbc, dialect = dialect, unknownNamespaces = unknown)
         }
     }
 }

@@ -35,6 +35,9 @@ object TypeMappers {
             Dialect.H2 to H2IngressMapper,
             Dialect.DUCKDB to DuckDbTypeMapper,
             Dialect.SQLITE to SqliteTypeMapper,
+            // LAKE runs on DuckDB, so it maps DuckDB's JDBC types — the same engine reporting the
+            // same `getColumns` metadata. A second identical mapper would be a copy to drift.
+            Dialect.LAKE to DuckDbTypeMapper,
         )
 
     fun forDialect(dialect: Dialect): IngressTypeMapper = BY_DIALECT[dialect] ?: FallbackTypeMapper

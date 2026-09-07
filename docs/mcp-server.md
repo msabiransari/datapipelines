@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.20 (frozen contract — additive-only changes after this point)
+**Status:** v1.21 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-05
@@ -681,7 +681,7 @@ List a datasource's schemas — the entry point of the introspection flow.
 ```json
 {
   "name": "datasources_get_schemas",
-  "description": "List the schemas of a registered datasource by reading its live JDBC metadata, excluding the engine's own system schemas. The entry point of schema discovery: call this first, then get_tables(schema), then get_columns for only the tables the SQL needs. An empty list on a schemaless datasource is a valid answer. Read-only, for pipeline authoring.",
+  "description": "List the namespaces of a registered datasource by reading its live JDBC metadata, excluding the engine's own system schemas. The entry point of schema discovery: call this first, then get_tables(namespace), then get_columns for only the tables the SQL needs. Each entry carries an ordered `namespace` path and a `label`; on a two-level engine (catalog.schema, project.dataset) two entries can share a label and differ only by their outer segment, so pass the whole `namespace` back rather than the label. `schemas` repeats the labels for older clients. An empty list on a datasource with no namespaces is a valid answer. Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
@@ -692,7 +692,7 @@ List a datasource's schemas — the entry point of the introspection flow.
 }
 ```
 
-Returns: `{"schemas": ["name", ...], "truncated": bool}` — the schema names exactly as the driver reported them, as a page; `truncated: true` means the 2000-schema cap dropped some (on MySQL catalog routing the walk would otherwise span every database the server grants). On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads them from `getCatalogs()` — the same vocabulary `datasources_get_tables` routes through; system schemas/databases (`information_schema`, `mysql`, `performance_schema`, `sys` on MySQL) are excluded on every dialect. **An empty list is a valid result** — a schemaless datasource (SQLite, single-db DuckDB) has no schemas to list. See [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
+Returns: `{"schemas": ["label", ...], "entries": [{"namespace": [...], "label": "..."}], "truncated": bool}` — the namespaces exactly as the driver reported them, as a page. **Read `entries`**: `namespace` is the ordered path (outermost first) to pass back to `datasources_get_tables`/`_get_columns`, and `label` is its last segment. On a two-level engine (`catalog.schema`, `project.dataset`) two entries can share a label and differ only by their outer segment, which is what the array form exists for; `schemas` repeats the labels for pre-087 clients and is kept for one release. `truncated: true` means the 2000-entry cap dropped some (on MySQL catalog routing the walk would otherwise span every database the server grants). On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads them from `getCatalogs()` — the same vocabulary `datasources_get_tables` routes through; system schemas/databases (`information_schema`, `mysql`, `performance_schema`, `sys` on MySQL) are excluded on every dialect. **An empty list is a valid result** — a datasource with no namespace dimension (SQLite) has none to list. See [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -703,19 +703,24 @@ List a datasource's tables and views.
 ```json
 {
   "name": "datasources_get_tables",
-  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans schemas — pass each table's reported schema to datasources_get_columns. Read-only, for pipeline authoring.",
+  "description": "List the tables and views of a registered datasource by reading its live JDBC metadata. The listing spans namespaces — pass each table's reported `namespace` array to datasources_get_columns. Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
     "properties": {
       "name": {"type": "string", "description": "Datasource name."},
-      "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+      "namespace": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Optional namespace filter, outermost first, as returned by datasources_get_schemas. An unknown namespace matches nothing."
+      },
+      "schema": {"type": "string", "description": "Optional single-level filter; accepts the dotted 'catalog.schema' form. Superseded by namespace."}
     }
   }
 }
 ```
 
-Returns: `{"tables": [{"schema", "name", "type", "remarks"?}], "truncated": bool}` — `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `schema` filter is exact-match, not a LIKE pattern. Without a `schema` argument the listing **spans schemas** — pass each table's reported `schema` to `datasources_get_columns` (there, no schema argument means the connection's current schema only, and a datasource reporting **no current schema** fails with the catalogued `pipeline.execution.parameter_required` rather than merging same-named tables' columns — the merge hazard lives in `datasources_get_columns` alone; a tables listing carries each row's own schema and cannot merge, so it deliberately has no such guard and works unfiltered on those datasources too).
+Returns: `{"tables": [{"namespace": [...], "schema", "name", "type", "remarks"?}], "truncated": bool}` — `namespace` is the containing path outermost-first and `schema` its last segment (kept for one release so a pre-087 client reads what it always read); `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `namespace` and `schema` filters are exact-match, not LIKE patterns, and a namespace deeper than the dialect's own matches nothing. Without a filter the listing **spans namespaces** — pass each table's reported `namespace` to `datasources_get_columns` (there, no namespace argument means the connection's current one only, and a datasource reporting **none** fails with the catalogued `pipeline.execution.parameter_required` rather than merging same-named tables' columns — the merge hazard lives in `datasources_get_columns` alone; a tables listing carries each row's own namespace and cannot merge, so it deliberately has no such guard and works unfiltered on those datasources too).
 
 **Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
 
@@ -726,14 +731,19 @@ List one table's columns with canonical types.
 ```json
 {
   "name": "datasources_get_columns",
-  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it. Without a schema argument only the connection's current schema is read; if the datasource reports no current schema, an explicit schema is required (list them with datasources_get_schemas). Read-only, for pipeline authoring.",
+  "description": "List one table's columns with canonical types, read from the datasource's live JDBC metadata. Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array with it. Without a namespace only the connection's current one is read; if the datasource reports none, an explicit namespace is required (list them with datasources_get_schemas). On a two-level engine an unqualified read can merge same-named tables from different catalogs, which is why the namespace is worth passing. Read-only, for pipeline authoring.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "table"],
     "properties": {
       "name": {"type": "string", "description": "Datasource name."},
       "table": {"type": "string", "description": "Table name as returned by datasources_get_tables."},
-      "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+      "namespace": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing."
+      },
+      "schema": {"type": "string", "description": "Optional single-level filter; accepts the dotted 'catalog.schema' form. Superseded by namespace."}
     }
   }
 }
@@ -842,21 +852,39 @@ Register a new datasource connection. Mirrors `POST /api/v1/datasources` ([Datas
 ```json
 {
   "name": "datasources_create",
-  "description": "Register a new datasource connection in the key's pinned workspace. Mirrors POST /api/v1/datasources: name, dialect, jdbc_url, username and password are required; global (admin only) or workspace select the binding, readonly forbids write-shaped use. Returns the stored metadata with password_set: true — the password is never returned. SECURITY: a password sent through this tool transits the agent's context, its transcript and any logging the client does. Prefer registering a datasource with a real credential in the UI or over REST; use this tool only with a credential the user is willing to have in that transcript — a read-only role, or a short-lived password they will rotate. Call datasources_test on the new name afterwards to confirm it connects.",
+  "description": "Register a new datasource connection in the key's pinned workspace. Mirrors POST /api/v1/datasources: name, dialect and jdbc_url are required, plus a credential — either credential: {kind, username, secret} (kind = password | token | private_key | service_account_json | none) or the legacy username/password pair, which means kind: password. kind: none is for a file database or an IAM role and carries neither field. global (admin only) or workspace select the binding, readonly forbids write-shaped use. Returns the stored metadata with credential.kind and password_set — the secret is never returned. SECURITY: a secret sent through this tool transits the agent's context, its transcript and any logging the client does. Prefer registering a datasource with a real credential in the UI or over REST; use this tool only with a credential the user is willing to have in that transcript — a read-only role, or a short-lived token they will rotate. Call datasources_test on the new name afterwards to confirm it connects.",
   "inputSchema": {
     "type": "object",
-    "required": ["name", "dialect", "jdbc_url", "username", "password"],
+    "required": ["name", "dialect", "jdbc_url"],
     "additionalProperties": false,
     "properties": {
       "name": {"type": "string"},
       "display_name": {"type": "string"},
       "description": {"type": "string"},
-      "dialect": {"type": "string", "enum": ["POSTGRES", "MYSQL", "MSSQL", "ORACLE", "H2", "DUCKDB", "SQLITE"]},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "MYSQL", "MSSQL", "ORACLE", "H2", "DUCKDB", "SQLITE", "LAKE"]},
       "jdbc_url": {"type": "string"},
-      "username": {"type": "string"},
+      "credential": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The credential (datasources.md §3.4). Use this OR the legacy username/password pair, never both.",
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["password", "token", "private_key", "service_account_json", "none"],
+            "description": "password needs username+secret; token needs secret and may name a username; none needs neither."
+          },
+          "username": {"type": "string"},
+          "secret": {
+            "type": "string",
+            "description": "Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
+          }
+        }
+      },
+      "username": {"type": "string", "description": "Legacy shape, with password: means credential kind 'password'."},
       "password": {
         "type": "string",
-        "description": "Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
+        "description": "Legacy shape, with username. Write-only. It transits this agent's context and transcript — use a read-only or short-lived credential."
       },
       "query_timeout_seconds": {"type": "integer"},
       "global": {"type": "boolean", "description": "Admin only. true = shared infrastructure, bound to no workspace."},
@@ -869,7 +897,9 @@ Register a new datasource connection. Mirrors `POST /api/v1/datasources` ([Datas
 }
 ```
 
-Returns the [Datasources §3.2](datasources.md#32-json-structure-response--get-apiv1datasourcesname) response shape: the stored metadata with `password_set: true`, `last_test: null` (nothing has probed it yet) — and **no `password` field at any depth**.
+Returns the [Datasources §3.2](datasources.md#32-json-structure-response--get-apiv1datasourcesname) response shape: the stored metadata with `credential.kind`, `password_set` (derived from the kind — `false` for `none`), `last_test: null` (nothing has probed it yet) — and **no `password` or `credential.secret` field at any depth**.
+
+**The credential (§3.4).** Send EITHER `credential: {kind, username?, secret?}` or the legacy `username`/`password` pair, which means `kind: "password"`. A payload carrying both is refused — the two can disagree and there is no defensible winner. `kind: "none"` carries neither field and is the shape for a file database or an IAM role. A kind the dialect's driver cannot authenticate with is refused at save with `datasource.validation.properties_invalid`.
 
 #### 6.2.23 `endpoints_create`
 
@@ -1390,3 +1420,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-05 | v1.18 | pipeline folders (067) | Additive arguments only — **no new tool names**, the surface stays 21. `pipelines_list` and `templates_list` each gain **`prefix`**: absent = the flat listing (unchanged); present (`""` = the root) = ONE level of the folder tree, returning `{prefix, folders[{path, segment, *_count}], pipelines|templates[], total, has_more}`. `q`/`owner`/`datasource` are ignored while browsing; an illegal prefix answers an empty level, not an error. This closes a real gap for templates, which have had path ids since 043 and no way to browse a folder over MCP (verified 2026-09-04). `pipelines_create`/`pipelines_update` `name` patterns widen to the path grammar — rendered from `PipelineNameGrammar.pattern` itself, so the schema and the server rule cannot drift — with a description telling the agent to list the roots first and ask before minting one. §6.2.1 and §6.2.6 document browse-vs-search. |
 | 2026-09-05 | v1.19 | published endpoints (074) | Tool surface 24 → **28**: `endpoints_create` / `endpoints_list` / `endpoints_get` / `endpoints_delete` (§6.2) — publish a released, side-effect-free pipeline as `GET /api/x/…` and bind endpoint-kind keys to it. `create`/`delete` are `author`, the reads `read` (auth.md §7.6). **An endpoint-kind key cannot reach `/mcp` at all** (refused at `McpAuthFilter`; `/mcp` is a servlet outside `ScopeInterceptor`'s reach — security pass). No `api_keys_create` tool: a credential must not transit an agent's transcript. |
 | 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |
+| 2026-09-07 | v1.21 | 087 connector seams | No new tools. §6.2.22 `datasources_create` gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) and drops `username`/`password` from `required` — either shape is accepted, both together are refused; the dialect enum gains `LAKE`; the result carries `credential.kind` and a derived `password_set`. §6.2.16 `datasources_get_schemas` returns `entries: [{namespace, label}]` beside the legacy `schemas` array — two catalogs' same-named schemas are two entries, which a list of bare labels could not express. §6.2.17/§6.2.18 gain a `namespace` array argument beside `schema` (which now also accepts the dotted form), and every table row carries `namespace` beside `schema`. |

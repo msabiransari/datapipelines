@@ -74,7 +74,9 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `schemas delegates to the introspector and serves the shared wire projection`() {
-        val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = false)
+        val page =
+            co.datapipelines.datasources.SchemasPage
+                .ofLabels(listOf("public", "sales"), truncated = false)
         every { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) } returns page
 
         val data = controller.schemas("pg-prod").data
@@ -85,7 +87,7 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `tables delegates to the introspector and serves the shared wire projection`() {
-        val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
+        val page = TablesPage(listOf(TableInfo(listOf("public"), "orders", "TABLE")), truncated = true)
         every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") } returns page
 
         val data = controller.tables("pg-prod", schema = "sales").data
@@ -245,7 +247,7 @@ class DatasourceSchemaControllerTest {
         val data = controller.tables("pg-prod", schema = null).data
 
         (data as Map<*, *>)["tables"] shouldBe
-            listOf(mapOf("schema" to "db1", "name" to "orders", "type" to "TABLE"))
+            listOf(mapOf("namespace" to listOf("db1"), "schema" to "db1", "name" to "orders", "type" to "TABLE"))
     }
 
     @Test
@@ -357,7 +359,7 @@ class DatasourceSchemaControllerTest {
                 dialect = dialect,
                 jdbcUrl = jdbcUrl,
                 username = "app",
-                password = "secret",
+                secret = "secret",
             )
         val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
         every { registry.get(name) } returns datasource
@@ -395,7 +397,7 @@ class DatasourceSchemaControllerTest {
                 dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
                 jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
                 username = "app",
-                password = "secret",
+                secret = "secret",
             )
         val registry = mockk<co.datapipelines.datasources.DatasourceRegistry>()
         io.mockk.every { registry.get("pg-prod") } returns datasource

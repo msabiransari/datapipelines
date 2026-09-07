@@ -118,7 +118,11 @@ class SiteEngineFactsGuardTest {
     }
 
     private companion object {
-        /** POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE — H2 has no page, but must parse. */
-        const val DIALECTS = 7
+        /**
+         * POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE — H2 and LAKE have no engine
+         * page, but must parse. LAKE joined in 087 (the connector-seams round): the dialect and
+         * its adapter ship, the marketing page waits for the lake connector itself.
+         */
+        const val DIALECTS = 8
     }
 }

@@ -7,6 +7,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 
 /**
  * [DatasourceValidator] — the §9 rule set and the §5.4 test pool build (datasources.md §13.2).
@@ -99,6 +100,13 @@ class DatasourceValidatorTest {
         // whole class at once. One red case per family. Note `apex_` (trailing underscore,
         // no wildcard) is ACCEPTED, not rejected: it is a legal real schema name and the
         // allowlist matches exactly — same reasoning as the ratified 008 `_` deviation.
+        //
+        // `db.apex` LEFT this list in 087: a qualified entry is now a NAMESPACE and is the only
+        // way to exempt one catalog's schema while leaving another's excluded (§7A). The
+        // original reasoning — "can never match a real schema as an exact entry" — was true
+        // while the matcher only ever saw a bare schema name; it is false now that it sees the
+        // whole namespace. What stays rejected is a dotted entry with an EMPTY segment, which
+        // still cannot match anything.
         listOf(
             "apex_*", // glob prefix (the R3 family)
             "apex%", // SQL-LIKE (the R4 family)
@@ -106,7 +114,9 @@ class DatasourceValidatorTest {
             "ap_[a-z]", // glob range
             "\"apex_reporting\"", // pasted quoted identifier
             "`apex`", // pasted backtick-quoted identifier
-            "db.apex", // qualified db.schema
+            "db.", // a dotted entry with an EMPTY segment (087: `a.b` is legal, `a.` is not)
+            ".apex", // ditto, leading
+            "a..b", // ditto, interior
             "my app", // interior whitespace
             "schéma", // non-ASCII
         ).forEach { entry ->
@@ -138,9 +148,9 @@ class DatasourceValidatorTest {
 
     @Test
     fun `a password is required on create but not on update`() {
-        codes(Fixtures.h2(password = null), isCreate = true) shouldContain DatasourceErrorCodes.PASSWORD_MISSING
+        codes(Fixtures.h2(secret = null), isCreate = true) shouldContain DatasourceErrorCodes.PASSWORD_MISSING
         validator
-            .validate(Fixtures.h2(password = null), isCreate = false)
+            .validate(Fixtures.h2(secret = null), isCreate = false)
             .errors
             .map { it.code } shouldBe emptyList()
     }
@@ -314,7 +324,7 @@ class DatasourceValidatorTest {
 
     @Test
     fun `validation is exhaustive - multiple failures are collected together`() {
-        val broken = Fixtures.h2(name = "Bad Name!", queryTimeoutSeconds = 0, password = null)
+        val broken = Fixtures.h2(name = "Bad Name!", queryTimeoutSeconds = 0, secret = null)
 
         codes(broken) shouldContainAll
             listOf(
@@ -344,6 +354,45 @@ class DatasourceValidatorTest {
             dialect = Dialect.ORACLE,
             jdbcUrl = "jdbc:oracle:thin:@//db.internal:1521/svc",
             username = "app",
-            password = "secret",
+            secret = "secret",
         )
+
+    @Test
+    fun `a dotted namespace entry is accepted, and matches the whole namespace rather than the schema alone`() {
+        // 087/§7A: `a1.sales` exempts one catalog's `sales` and leaves the other's excluded —
+        // something a bare `sales` cannot express, because it exempts both.
+        validator
+            .validate(Fixtures.h2(introspectionIncludeSchemas = listOf("a1.sales", "apex_reporting")), isCreate = true)
+            .valid shouldBe true
+    }
+
+    @Test
+    fun `DS-SEC-22 - connectionInitSql is refused under BOTH namespaces, and it really did reach the pool`() {
+        // The hole, PROBED before it was closed rather than assumed: `new HikariConfig(Properties)`
+        // — the exact constructor the save-time validator and the runtime pool build use — returns
+        // the value back on HikariCP 6.3.0, 6.3.3 and 7.0.2. So `properties.hikari.connectionInitSql`
+        // was arbitrary connect-time SQL an operator could store, running on every new connection,
+        // IN THIS PROCESS on the embedded engines. Nobody had set one; that is luck, not
+        // containment. Since 087 the adapter also DERIVES the slot (§4.2A), so a passthrough would
+        // additionally replace the adapter's own setup.
+        val reachedTheConfig =
+            com.zaxxer.hikari
+                .HikariConfig(java.util.Properties().apply { setProperty("connectionInitSql", "SELECT sneaky()") })
+                .connectionInitSql
+        withClue("HikariConfig no longer reads connectionInitSql from Properties — re-derive the refusal's reason") {
+            reachedTheConfig shouldBe "SELECT sneaky()"
+        }
+
+        val initSql = mapOf("connectionInitSql" to "SELECT 1")
+        val hikari = validator.validate(Fixtures.h2(properties = DatasourceProperties(hikari = initSql)), isCreate = true)
+        val jdbc = validator.validate(Fixtures.h2(properties = DatasourceProperties(jdbc = initSql)), isCreate = true)
+
+        assertAll(
+            { hikari.errors.single().code shouldBe DatasourceErrorCodes.PROPERTIES_INVALID },
+            { hikari.errors.single().field shouldBe "properties.hikari.connectionInitSql" },
+            // Both carriers, identically — the §5.6 rule that makes a refusal a refusal.
+            { jdbc.errors.single().code shouldBe DatasourceErrorCodes.PROPERTIES_INVALID },
+            { jdbc.errors.single().field shouldBe "properties.jdbc.connectionInitSql" },
+        )
+    }
 }

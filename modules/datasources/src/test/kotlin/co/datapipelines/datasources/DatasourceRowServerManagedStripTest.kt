@@ -30,6 +30,8 @@ class DatasourceRowServerManagedStripTest {
             "datasourcejndi",
             "exceptionoverrideclassname",
             "readonly",
+            // DS-SEC-22 (087): connect-time SQL, and since 087 also server-derived.
+            "connectioninitsql",
         )
 
     @Test
@@ -73,9 +75,9 @@ class DatasourceRowServerManagedStripTest {
         // row-level projection the pool factory consumes is already clean.
         val row = row(hikari = mapOf("readOnly" to true, "maximumPoolSize" to 5))
 
-        val ds = row.toDatasource(password = "pw")
+        val ds = row.toDatasource(secret = "pw")
 
-        ds.password shouldBe "pw"
+        ds.secret shouldBe "pw"
         ds.properties.hikari shouldBe mapOf("maximumPoolSize" to 5)
     }
 
@@ -89,7 +91,8 @@ class DatasourceRowServerManagedStripTest {
         dialect = Dialect.H2,
         jdbcUrl = "jdbc:h2:mem:oob_row",
         username = "sa",
-        passwordEncrypted = ByteArray(0),
+        credentialKind = CredentialKind.PASSWORD,
+        credentialEncrypted = ByteArray(0),
         properties = DatasourceProperties(hikari = hikari, jdbc = jdbc),
         queryTimeoutSeconds = null,
         introspectionIncludeSchemas = emptyList(),

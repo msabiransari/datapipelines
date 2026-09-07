@@ -1,7 +1,9 @@
 package co.datapipelines.application.datasources
 
+import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.datasources.FieldRule
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -39,8 +41,8 @@ object DatasourcePayloadBinder {
     /**
      * Binds the §9.1/§9.4 payload; wire-value problems are 400s with catalogued codes.
      *
-     * @param requirePassword true on create (§9.1: a password is mandatory), false on update,
-     *   where an absent password means "keep the stored one".
+     * @param requirePassword true on create (§9.1: the credential secret is mandatory), false on
+     *   update, where an absent secret means "keep the stored one".
      * @param pathName the name from the URL on update — `name` is immutable (§11.1), so the path
      *   wins and the body's `name` is not read.
      */
@@ -63,14 +65,7 @@ object DatasourcePayloadBinder {
                     "Dialect '$dialectToken' is not one of ${Dialect.entries.map { it.wire }}.",
                     mapOf("dialect" to dialectToken.take(MAX_ECHOED_VALUE_CHARS)),
                 )
-        val password = body.get("password")?.takeIf { it.isTextual }?.asText()
-        if (requirePassword && password.isNullOrEmpty()) {
-            throw DatapipelinesException(
-                PipelineErrorCodes.Datasource.PASSWORD_MISSING,
-                "A password is required when registering a datasource.",
-                mapOf("datasource_name" to name),
-            )
-        }
+        val credential = credentialOf(body, name, requirePassword)
         return Datasource(
             name = name,
             displayName = body.get("display_name")?.takeIf { it.isTextual }?.asText() ?: name,
@@ -79,10 +74,9 @@ object DatasourcePayloadBinder {
             jdbcUrl =
                 body.get("jdbc_url")?.takeIf { it.isTextual }?.asText()
                     ?: throw invalid("jdbc_url", "a JDBC URL is required"),
-            username =
-                body.get("username")?.takeIf { it.isTextual }?.asText()
-                    ?: throw invalid("username", "a username is required"),
-            password = password,
+            username = credential.username,
+            credentialKind = credential.kind,
+            secret = credential.secret,
             queryTimeoutSeconds = body.get("query_timeout_seconds")?.takeIf { it.isInt }?.asInt(),
             // §3.3: the introspection allowlist — exact names. Normalized here as defense in
             // depth; the LOAD-BEARING normalization is the registry's save boundary (the
@@ -95,6 +89,90 @@ object DatasourcePayloadBinder {
                     DatasourceProperties.fromRaw(node.properties().associate { (k, v) -> k to MAPPER.convertValue(v, Any::class.java) })
                 } ?: DatasourceProperties(),
         )
+    }
+
+    /** One bound credential: the §3.4 triple, from whichever of the two accepted shapes was used. */
+    private data class BoundCredential(
+        val kind: CredentialKind,
+        val username: String?,
+        val secret: String?,
+    )
+
+    /**
+     * §3.4 — the credential, from EITHER accepted payload shape.
+     *
+     * ```json
+     * "credential": {"kind": "token", "username": "svc", "secret": "…"}   // the current shape
+     * "username": "app", "password": "…"                                   // the legacy pair
+     * ```
+     *
+     * The legacy pair is `kind: password` and stays accepted **forever** under the §12.1 frozen
+     * shape rule: it is what every client, every bootstrap file and every doc example written
+     * before 087 sends, and additive means additive. Declaring BOTH is a 400 rather than a
+     * precedence rule — the two can disagree, and no silent winner is defensible.
+     *
+     * Presence rules per kind are the VALIDATOR's ([DatasourceValidator]), enforced once for
+     * every write path including the ones that never touch this binder. Only two checks live
+     * here, and both are pre-existing behaviour this must not lose: a missing username and a
+     * missing secret are 400s at bind time with their own catalogued codes, so a `POST` with no
+     * credential still answers `password_missing` and not a generic shape error. Both are now
+     * asked of the KIND — a `kind: none` create legitimately has neither.
+     */
+    @Suppress("ThrowsCount") // one throw per distinct refusal, each with its own catalogued code
+    private fun credentialOf(
+        body: JsonNode,
+        name: String,
+        requireSecret: Boolean,
+    ): BoundCredential {
+        val block = body.get("credential")?.takeIf { it.isObject }
+        val legacyUsername = body.get("username")?.takeIf { it.isTextual }?.asText()
+        val legacyPassword = body.get("password")?.takeIf { it.isTextual }?.asText()
+        if (block != null && (legacyUsername != null || legacyPassword != null)) {
+            throw invalid(
+                "credential",
+                "a payload may carry EITHER 'credential' (the current shape) OR the legacy 'username'/'password' " +
+                    "pair, not both — they can disagree and there is no defensible winner",
+            )
+        }
+        val bound =
+            if (block == null) {
+                BoundCredential(CredentialKind.PASSWORD, legacyUsername, legacyPassword)
+            } else {
+                val kindToken =
+                    block
+                        .get("kind")
+                        ?.takeIf { it.isTextual }
+                        ?.asText()
+                        ?.trim()
+                        ?.lowercase()
+                val kind =
+                    if (kindToken == null) {
+                        CredentialKind.DEFAULT
+                    } else {
+                        CredentialKind.fromWireOrNull(kindToken)
+                            ?: throw invalid(
+                                "credential.kind",
+                                "credential.kind '$kindToken' is not one of ${CredentialKind.entries.map { it.wire }}",
+                            )
+                    }
+                BoundCredential(
+                    kind,
+                    block.get("username")?.takeIf { it.isTextual }?.asText(),
+                    block.get("secret")?.takeIf { it.isTextual }?.asText(),
+                )
+            }
+        if (bound.kind.usernameRule == FieldRule.REQUIRED && bound.username.isNullOrEmpty()) {
+            throw invalid("username", "a username is required for credential kind '${bound.kind.wire}'")
+        }
+        if (requireSecret && bound.kind.secretRule == FieldRule.REQUIRED && bound.secret.isNullOrEmpty()) {
+            throw DatapipelinesException(
+                PipelineErrorCodes.Datasource.PASSWORD_MISSING,
+                "A credential secret is required when registering a datasource with credential kind " +
+                    "'${bound.kind.wire}'.",
+                mapOf("datasource_name" to name),
+            )
+        }
+        return bound
     }
 
     /** The `workspace` binding name, when the payload names one. */

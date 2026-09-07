@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.4 (living document — updated as enums evolve)
+**Status:** v1.5 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -118,8 +118,28 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `H2` | `com.h2database:h2` (bundled; also used for staging) |
 | `DUCKDB` | `org.duckdb:duckdb_jdbc` (bundled) |
 | `SQLITE` | `org.xerial:sqlite-jdbc` (bundled) |
+| `LAKE` | `org.duckdb:duckdb_jdbc` (bundled) — object storage read in place (Parquet/Iceberg); DuckDB is the engine, with a different §5.6 posture from `DUCKDB`. See [Datasources §4.1](datasources.md#41-dialect-catalog). |
 
 **Reserved for future:** `SNOWFLAKE`, `BIGQUERY`, `REDSHIFT` (see [ROADMAP](ROADMAP.md)).
+
+---
+
+## 5A. `CredentialKind` — what a datasource's stored credential IS
+
+**Source:** [Datasources §3.4](datasources.md#34-credential-kinds) (single authority)
+**Used by:** datasources (validation, pool build, encryption), rest-api (`POST /api/v1/datasources`), mcp-server (`datasources_create`), metadata-db (`datasources.credential_kind`).
+
+Wire values are lowercase snake_case, so the `@JsonValue` mapping is explicit per the case convention above.
+
+| Value | Wire | `username` | `secret` | Description |
+|---|---|---|---|---|
+| `PASSWORD` | `password` | required | required on create | A database login. The default when a payload names no kind, and what the legacy top-level `username`/`password` pair means. |
+| `TOKEN` | `token` | optional | required on create | A bearer or personal access token, placed where the pinned driver wants it by the adapter. |
+| `PRIVATE_KEY` | `private_key` | absent | required on create | A PEM private key. Catalogued for the reference targets; no shipped dialect accepts it yet. |
+| `SERVICE_ACCOUNT_JSON` | `service_account_json` | absent | required on create | One service-account JSON document. Catalogued for the reference targets; no shipped dialect accepts it yet. |
+| `NONE` | `none` | absent | absent | Nothing is stored — an IAM role, OS auth, or an embedded file database with no authentication. |
+
+These are **not** `(reserved)` values in the enums.md sense: all five are accepted by the validator and stored by the column. What a shipped dialect can USE is narrower and is the adapter's declaration (`supportedCredentialKinds`, [Datasources §3.4](datasources.md#34-credential-kinds)) — a kind outside a dialect's set is refused at save with `datasource.validation.properties_invalid`, never stored and ignored.
 
 ---
 
@@ -433,6 +453,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `OutputTarget` | pipeline-contract | dag-executor, staging |
 | `WriteMode` | pipeline-contract | dag-executor |
 | `Dialect` | type-system | datasources, templates, pipeline-contract, mcp-server |
+| `CredentialKind` | [datasources.md §3.4](datasources.md#34-credential-kinds) | metadata-db, rest-api, mcp-server |
 | `TemplateEngine` | templates | templates |
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
@@ -476,3 +497,4 @@ This document itself is **additive-only** — values are never removed (only mar
 | 2026-08-31 | v1.6 | 026 post-merge follow-up | §15 registers `auth.password.change_failed` / `auth.password.change_locked` — the self-service change path's failure and lockout events added by the session-only credential fix (22be7b2) after the v1.5 sync. Unregistered, docs-audit check C flagged them at auth.md:487; they are audit events, not pipeline-contract error codes. |
 | 2026-08-30 | v1.5 | local password auth | §15 `AuthAuditEvent` gains the local-account events: `auth.login.bad_credentials`, `auth.login.locked`, `auth.password.{seeded,changed,reset,disabled}`, `auth.user.{created,unlocked}`; `auth.login.success`/`user_inactive` re-described as shared OIDC/local. The "no password or lockout events" note is replaced — they exist for the optional local accounts only (auth.md §5A). |
 | 2026-09-02 | v1.7 | MCP audit (052) | §15 gains the **MCP audit events** table: `mcp.tool.called` (registered here for the first time — the dispatcher has emitted it since the original mcp-server build) and `mcp.tool.write` (new, 052/R4: one event per mutating tool call, node runs included). Authority for both: MCP §14; same `audit_log` sink as the auth/datasource events. Cross-reference row widened to name the §15 sub-tables. |
+| 2026-09-07 | v1.5 | 087 connector seams | New **§5A `CredentialKind`** (`password` \| `token` \| `private_key` \| `service_account_json` \| `none`) — what a datasource's stored credential IS, authored by [Datasources §3.4](datasources.md#34-credential-kinds); the cross-reference table gains its row. §5 `Dialect` gains **`LAKE`** (object storage read in place; DuckDB is the engine, with a different §5.6 posture from `DUCKDB`) — not a reserved value: it ships with an adapter, a driver mapping and a CHECK. |

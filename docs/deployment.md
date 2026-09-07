@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.7
+**Status:** v1.8
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-01
@@ -71,6 +71,7 @@ Which drivers are present is a **packaging** property of the artifact, not a con
 | `H2` | Yes (bundled — also the staging engine) | — |
 | `DUCKDB` | Yes (bundled) | — |
 | `SQLITE` | Yes (bundled) | — |
+| `LAKE` | Yes (bundled — the same `duckdb_jdbc` jar as `DUCKDB`) | — |
 | `ORACLE` | **No** (OTN license) | Rebuild with `./gradlew -Poracle bootJar`, **or** drop `ojdbc11.jar` into `lib/` |
 | `MYSQL` | **No** (GPL-2.0 + FOSS exception, redistribution unverified) | Rebuild with `./gradlew -Pmysql bootJar`, **or** drop `mysql-connector-j.jar` into `lib/` |
 
@@ -859,3 +860,4 @@ operator.
 | 2026-08-05 | v1.1 | horizontal scaling | Added multi-instance horizontal scaling section. Application is stateless for all CRUD/UI/MCP/auth. In-flight executions are instance-local (acceptable for short-running pipelines). No sticky sessions required. Added multi-instance checklist. Added LB idle-timeout + SSE heartbeat note. |
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.15](SPEC-REVIEW-2026-08.md#215-deploymentmd): §5 env-var tables replaced by the startup-requirements list + pointer to configuration.md; the inline-vs-claim-check threshold key (superseded by the D9 result keys) and every other key configuration.md does not define were deleted [D8]; §4.2 rewritten as the result store with required `maxmemory-policy noeviction` and a sizing model [D9]; §8.3.1/§8.3.2 graceful-shutdown mechanism (readiness fail → drain to `execution-timeout-seconds` → `cancelAll(shutdown)` → exit) with k8s `preStop` + `terminationGracePeriodSeconds`, accepted loss stated [D7]; §6.2 instance-local story updated to cancel-on-disconnect + cross-instance cancel via Redis flag [D7]; Appendix A compose made bootable (OIDC provider env vars, Redis password wired to `requirepass`, noeviction, mounted provider YAML); new §3.5 JDBC driver matrix (bundled vs `-Poracle`/`-Pmysql` vs `lib/` drop-in); new §6.6 resource sizing (heap, container limit, `-XX:MaxRAMPercentage`); `-Duser.timezone=UTC` made normative in the image and bare-JVM entrypoints ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)); §6.2 diagram residue and §11 malformed bullet fixed |
 | 2026-08-29 | v1.3 | local password auth | §5.1 item 5 becomes "at least one authentication method": OIDC provider OR local accounts (auth.md §5A), with the operator's first-admin story for the no-IdP case (hash-seeded one-time credential, forced first-login change, admin resets — no SMTP, no self-registration). Appendix A compose comment and Appendix B quickstart updated: the demo now logs in with a local account (`demo-admin@demo.local` / `demo-admin`, one-time) and needs no OIDC client. |
+| 2026-09-07 | v1.8 | 087 connector seams | §3.5 driver matrix gains **`LAKE`** — bundled, and the same `duckdb_jdbc` jar as `DUCKDB`. It is a distinct dialect rather than a mode because the two need opposite §5.6 postures ([Datasources §4.1](datasources.md#41-dialect-catalog)); nothing about packaging changes, since there is no second driver to ship. |

@@ -115,7 +115,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
         // The operator changes the three things a "helpful" re-registration would put back:
         // the display name, the readonly flag, and the credential.
         jdbc.jdbcTemplate.update(
-            "UPDATE datasources SET display_name = ?, is_readonly = FALSE, password_encrypted = ?, updated_at = NOW()" +
+            "UPDATE datasources SET display_name = ?, is_readonly = FALSE, credential_encrypted = ?, updated_at = NOW()" +
                 " WHERE name = 'bootstrap-readonly'",
             "Operator renamed this",
             byteArrayOf(1, 2, 3),
@@ -229,7 +229,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
     private fun passwordHexOf(name: String): String =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = :n",
+                "SELECT encode(credential_encrypted, 'hex') FROM datasources WHERE name = :n",
                 mapOf("n" to name),
                 String::class.java,
             ),
@@ -239,7 +239,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
     private fun snapshot(): List<Map<String, Any?>> =
         jdbc.queryForList(
             "SELECT name, display_name, description, dialect, jdbc_url, username," +
-                " encode(password_encrypted, 'hex') AS pw, properties_json::text AS props," +
+                " encode(credential_encrypted, 'hex') AS pw, properties_json::text AS props," +
                 " query_timeout_seconds, is_readonly, is_deleted, workspace_id, created_by," +
                 " created_at, updated_at" +
                 " FROM datasources ORDER BY name",

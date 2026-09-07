@@ -190,7 +190,7 @@ object McpFixtures {
             dialect = dialect,
             jdbcUrl = "jdbc:postgresql://db:5432/app",
             username = "reporting",
-            password = "super-secret-password",
+            secret = "super-secret-password",
         )
 
     /**

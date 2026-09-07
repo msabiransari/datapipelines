@@ -59,7 +59,14 @@
                (a wrong host, a wrong port, a trailing space). They rendered in the body
                face. -->
           <td class="u-mono" th:text="${ds.jdbcUrl}"></td>
-          <td class="u-mono" th:text="${ds.username}"></td>
+          <!-- §3.4: the username, or the credential KIND when this kind has none — an empty
+               cell would read as "nobody filled it in" rather than "there is no login". -->
+          <td class="u-mono" th:if="${ds.username} != null" th:text="${ds.username}"></td>
+          <td th:if="${ds.username} == null">
+            <span class="ds-badge ds-badge-default"
+                  th:text="${ds.credentialKind.wire}"
+                  th:title="'This datasource authenticates with credential kind ' + ${ds.credentialKind.wire} + ', which has no username'">none</span>
+          </td>
           <!-- §8.1B (061/T84): the outcome of the LAST connection test, on the screen that
                said "fine" on 2026-09-02 while every execution failed at connect — listing a
                datasource never connects to it, so without this column the row cannot be
