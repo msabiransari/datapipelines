@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateEngine
+import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersion
@@ -20,9 +21,11 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
@@ -317,6 +320,67 @@ class TemplatesControllerTest {
 
         shouldThrow<ApiException> { controller.list(dialect = null, type = "csv", q = null, offset = null, limit = null) }
             .code shouldBe "pipeline.execution.invalid_parameter_type"
+    }
+
+    // The `prefix` browse presentation — the REST mirror of `templates_list {prefix}` (067),
+    // whose cases in TemplateToolsTest these mirror.
+
+    @Test
+    fun `browse returns ONE level - folders with counts and the level's own leaves`() {
+        authenticate()
+        // `?prefix=` (empty) is the ROOT: present-but-empty, a different request from an
+        // absent prefix (the flat listing).
+        every { repository.listChildFolders(workspaceId, null, null, null, TemplateRepository.MAX_PAGE_LIMIT) } returns
+            listOf(TemplateFolder("acme", "acme", 3), TemplateFolder("test", "test", 1))
+        every { repository.listChildTemplates(workspaceId, null, null, null, 0, 51) } returns listOf(template())
+        every { repository.countChildTemplates(workspaceId, null, null, null) } returns 1
+
+        val data = controller.browse(prefix = "", dialect = null, type = null, offset = null, limit = null).data
+
+        data["prefix"] shouldBe ""
+        (data["folders"] as List<*>).map { (it as Map<*, *>)["path"] } shouldContainExactly listOf("acme", "test")
+        (data["folders"] as List<*>).map { (it as Map<*, *>)["template_count"] } shouldContainExactly listOf(3, 1)
+        (data["templates"] as List<*>).map { (it as Template).id } shouldContainExactly listOf("test/fetch_orders.sql")
+        data["total"] shouldBe 1
+        data["has_more"] shouldBe false
+        // The flat listing is NOT consulted for a browse — one level per request, and browse
+        // and search are different presentations.
+        verify(exactly = 0) { repository.list(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `browse asks for exactly the named level, narrowed by the dialect filter`() {
+        authenticate()
+        every { repository.listChildFolders(workspaceId, "acme/finance", Dialect.MYSQL, null, TemplateRepository.MAX_PAGE_LIMIT) } returns
+            emptyList()
+        every { repository.listChildTemplates(workspaceId, "acme/finance", Dialect.MYSQL, null, 0, 51) } returns
+            listOf(template())
+        every { repository.countChildTemplates(workspaceId, "acme/finance", Dialect.MYSQL, null) } returns 1
+
+        val data = controller.browse(prefix = "acme/finance", dialect = "MYSQL", type = null, offset = null, limit = null).data
+
+        data["prefix"] shouldBe "acme/finance"
+        (data["folders"] as List<*>).size shouldBe 0
+        (data["templates"] as List<*>).map { (it as Template).id } shouldContainExactly listOf("test/fetch_orders.sql")
+        verify(exactly = 1) {
+            repository.listChildFolders(workspaceId, "acme/finance", Dialect.MYSQL, null, TemplateRepository.MAX_PAGE_LIMIT)
+        }
+    }
+
+    @Test
+    fun `browse with an illegal prefix answers an empty level and never reaches the database`() {
+        authenticate()
+
+        val data = controller.browse(prefix = "acme/../etc", dialect = null, type = null, offset = null, limit = null).data
+
+        data["prefix"] shouldBe "acme/../etc"
+        (data["folders"] as List<*>).size shouldBe 0
+        (data["templates"] as List<*>).size shouldBe 0
+        data["total"] shouldBe 0
+        data["has_more"] shouldBe false
+        verify(exactly = 0) { repository.listChildFolders(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { repository.listChildTemplates(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { repository.countChildTemplates(any(), any(), any(), any()) }
     }
 
     @Test

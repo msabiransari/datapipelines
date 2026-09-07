@@ -194,7 +194,7 @@ class PipelinesController(
      * The filter itself is [PipelineService.list] (D2, shared with `pipelines_list`); what stays
      * here is the offset/limit pagination contract, which the two surfaces genuinely differ on.
      */
-    @GetMapping
+    @GetMapping(params = ["!prefix"])
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
     fun list(
         @RequestParam(required = false) owner: UUID?,
@@ -210,5 +210,35 @@ class PipelinesController(
         val items = filtered.drop(page).take(size).map(PipelineResponses::listEntry)
         val pagination = Pagination.of(page, size, filtered.size.toLong(), items.size)
         return ApiResponse.of(PagedData(items, pagination))
+    }
+
+    /**
+     * §5.7 — ONE level of the pipeline tree, the REST mirror of `pipelines_list {prefix}`
+     * (067): [prefix]'s direct sub-folders with their subtree counts and its direct pipeline
+     * leaves, never a subtree. Chosen by the PRESENCE of `prefix`: `?prefix=` (empty) is the
+     * ROOT — a different request from an absent `prefix` (the flat listing above). The
+     * semantics are [PipelineService.browseLevel]'s, shared with the MCP tool: an unknown or
+     * illegal prefix answers an ordinary EMPTY level with 200, never a 400 and never a query
+     * error. `owner`/`datasource`/`q` do not apply here — browse and search are different
+     * presentations (template-hierarchy-design §9.2).
+     */
+    @GetMapping(params = ["prefix"])
+    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    fun browse(
+        @RequestParam prefix: String,
+        @RequestParam(required = false) offset: Int?,
+        @RequestParam(required = false) limit: Int?,
+    ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val level = pipelines.browseLevel(workspaceId, prefix, Pagination.clampOffset(offset), Pagination.clampLimit(limit))
+        return ApiResponse.of(
+            mapOf(
+                "prefix" to prefix,
+                "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
+                "pipelines" to level.pipelines.map(PipelineResponses::listEntry),
+                "total" to level.total,
+                "has_more" to level.hasMore,
+            ),
+        )
     }
 }
