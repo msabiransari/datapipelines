@@ -145,6 +145,26 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
+    fun `085 - the pipeline tree carries the same icon chrome as the templates tree`() {
+        // One stylesheet dresses both explorers (067's convention), so the DOM shape is
+        // pinned on both partials: folders at the root level, a leaf in a nested one.
+        val root = render("partials/pipeline-tree-level") { fillLevel() }
+        root shouldContain "class=\"ds-icon ds-icon-xs tpl-chevron\""
+        root shouldContain "lucide-sprite.svg#chevron-right"
+        root shouldContain "lucide-sprite.svg#folder\""
+        root shouldContain "lucide-sprite.svg#folder-open"
+        root shouldContain "tpl-level tpl-level-pending"
+
+        val nested = render("partials/pipeline-tree-level") { fillNestedLevel() }
+        nested shouldContain "lucide-sprite.svg#file-code"
+
+        // Search stays a flat list — no guides, no tree icons.
+        val search = render("partials/pipeline-search") { fillSearch() }
+        search shouldNotContain "lucide-sprite"
+        search shouldNotContain "tpl-chevron"
+    }
+
+    @Test
     fun `a leaf SELECTS - its detail swaps into the detail pane and nothing in the tree moves`() {
         // A NESTED level: since 077 a leaf can only sit under a folder (§4.1).
         val html = render("partials/pipeline-tree-level") { fillNestedLevel() }

@@ -63,7 +63,7 @@
     "package": "lucide-static",
     "version": "1.39.0",
     "file": "vendor/icons/lucide-sprite.svg",
-    "sha256": "8a4d00074a128b7f3b0e6541f3429809cce47f9d2af755e06f18aad844e405c7",
+    "sha256": "56528a08ab3e7455262517379907d5ec3a932281475103a1c764e8a561bb6b8e",
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
@@ -78,9 +78,13 @@
       "zoom-in",
       "zoom-out",
       "maximize",
-      "rotate-ccw"
+      "rotate-ccw",
+      "chevron-right",
+      "folder",
+      "folder-open",
+      "file-code"
     ],
-    "note": "059 \u2014 subset ONLY (12 glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks)."
+    "note": "059 \u2014 subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 \u00a7A: + the four explorer-tree glyphs."
   },
   "dagre": {
     "version": "0.8.5",

@@ -89,6 +89,34 @@ class TemplateTreeRenderTest {
     }
 
     @Test
+    fun `085 - folder rows carry the sprite chevron and folder state icons, leaves the file glyph`() {
+        val html = render("partials/template-tree-level") { fillLevel() }
+
+        // The unicode ▸ is retired: the disclosure marker is the sprite's chevron-right,
+        // followed by the folder state pair (CSS swaps folder → folder-open on [open]).
+        html shouldContain "class=\"ds-icon ds-icon-xs tpl-chevron\""
+        html shouldContain "lucide-sprite.svg#chevron-right"
+        html shouldContain "tpl-icon-folder\""
+        html shouldContain "lucide-sprite.svg#folder\""
+        html shouldContain "tpl-icon-folder-open"
+        html shouldContain "lucide-sprite.svg#folder-open"
+        // A leaf gets file-code in the same slot, and every icon is sized and hidden.
+        html shouldContain "lucide-sprite.svg#file-code"
+        html shouldNotContain "<svg class=\"ds-icon\""
+        // The pending placeholder the guides must not touch is unchanged.
+        html shouldContain "tpl-level tpl-level-pending"
+    }
+
+    @Test
+    fun `085 - search results stay a FLAT list with no tree chrome`() {
+        val html = render("partials/template-search") { fillSearch() }
+
+        html shouldNotContain "tpl-chevron"
+        html shouldNotContain "lucide-sprite"
+        html shouldNotContain "tpl-icon"
+    }
+
+    @Test
     fun `a nested level carries the derived id its placeholder announced`() {
         val nested =
             render("partials/template-tree-level") {
