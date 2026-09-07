@@ -4,6 +4,7 @@ import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RateLimitExceededException
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorCatalog
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -39,9 +40,16 @@ import org.springframework.web.filter.OncePerRequestFilter
  * before the transport sees the request.
  *
  * ## Headers and rejection
- * Every response carries the §12.2 `RateLimit-*` headers. A rejection is `429` with `Retry-After`
- * and the single system-wide code `rate_limit.exceeded` (§12.2, pipeline-contract §13.11), written
- * through `auth`'s [AuthErrorWriter] so the envelope is byte-identical to every other rejection.
+ * Every response carries the §12.2 `RateLimit-*` headers. A rejection is `429` with `Retry-After`,
+ * written through `auth`'s [AuthErrorWriter] so the envelope is byte-identical to every other
+ * rejection — and it carries one of TWO codes (§12.2, pipeline-contract §13.11):
+ *
+ *  - `rate_limit.exceeded` — the caller's budget is gone. Their doing; back off and retry.
+ *  - `rate_limit.unavailable` — the limiter could not decide and failed CLOSED (083, owner ruling
+ *    2026-09-06). Not the caller's doing, and an operator's page rather than a client's.
+ *
+ * Both are 429 and both surfaces (`/api/v1` and `/mcp`) see the same code, because this one
+ * filter meters both.
  */
 class RateLimitFilter(
     private val limiter: RateLimiter,
@@ -72,6 +80,15 @@ class RateLimitFilter(
         }
 
         response.setHeader(HttpHeaders.RETRY_AFTER, decision.retryAfterSeconds.toString())
+        if (decision.unavailable) refuseUnavailable(request, response, decision) else refuseThrottled(request, response, decision)
+    }
+
+    /** The caller spent its budget — `rate_limit.exceeded`, the code every layer shares. */
+    private fun refuseThrottled(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        decision: RateLimitDecision,
+    ) {
         val error = RateLimitExceededException(decision.limit.toInt())
         errorWriter.write(
             request = request,
@@ -86,6 +103,31 @@ class RateLimitFilter(
                     "window" to decision.window,
                     "retry_after_seconds" to decision.retryAfterSeconds,
                 ),
+        )
+    }
+
+    /**
+     * The limiter could not decide — `rate_limit.unavailable`, the fail-closed refusal.
+     *
+     * `details` deliberately carries no `limit` and no reason: the caller has spent nothing, so a
+     * limit would be a lie, and *which* dependency fell over is topology an unauthenticated
+     * caller does not get told (observability §9.2). The reason is in the WARN the limiter
+     * already logged, once, for the whole outage.
+     */
+    private fun refuseUnavailable(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        decision: RateLimitDecision,
+    ) {
+        val code = PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE
+        errorWriter.write(
+            request = request,
+            response = response,
+            status = ApiErrorCatalog.statusFor(code).value(),
+            code = code,
+            message = "The rate limiter could not evaluate this request and refused it.",
+            userMessage = ApiErrorCatalog.userMessageFor(code),
+            details = mapOf("retry_after_seconds" to decision.retryAfterSeconds),
         )
     }
 

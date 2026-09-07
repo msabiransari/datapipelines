@@ -15,9 +15,12 @@ import java.util.UUID
  * §3.1 rule 3); the port is `auth`'s and the bean is wired here, exactly the
  * [co.datapipelines.mcp.McpExecutionRunner] inversion pattern.
  *
- * **Fail open, loudly** (the [co.datapipelines.web.ratelimit.RedisRateLimiter] posture):
- * last-used is a convenience, never state of record — a Redis blip degrades a login to
- * "first membership", so a store failure is a WARN, never a failed login or request.
+ * **Fail open, loudly**, and deliberately the OPPOSITE posture to the sibling Redis client in
+ * this module: [co.datapipelines.web.ratelimit.RedisRateLimiter] fails CLOSED (083, owner ruling
+ * 2026-09-06) because admitting an unmetered request defeats the limiter, while last-used is a
+ * convenience and never state of record — a Redis blip degrades a login to "first membership",
+ * so a store failure is a WARN, never a failed login or request. The posture follows what the
+ * value PROTECTS, not what it is stored in.
  */
 class RedisLastUsedWorkspaceStore(
     private val redis: StringRedisTemplate,

@@ -567,6 +567,49 @@ Suites sharing a container must not depend on test-method order. To verify a mod
 
 The ordering properties are forwarded to the test JVM by the common conventions plugin; without them, JUnit's deterministic default ordering applies.
 
+### 9.4 The full gate, and how to read it
+
+The gate is two commands and a recount, **in this order**:
+
+```bash
+# 1. LINT FIRST — ~90 s, and it is where most rounds actually fail.
+./gradlew ktlintCheck detekt --rerun-tasks
+
+# 2. Then the build. --continue so ONE red task does not hide the other nine.
+./gradlew clean build ktlintCheck detekt editorJsTest --rerun-tasks --continue
+
+# 3. The verdict. Never the exit code — always the XML.
+./scripts/test-recount.sh
+```
+
+**Why lint first.** Gradle stops a failing task's dependents, so a ktlint violation in one module
+means the tests after it never ran — and the 20-minute build you were waiting on ends having told
+you about a missing newline. Ninety seconds up front turns that into ninety seconds. The same
+reason gives the standing rule after any lint fix: re-run `ktlintCheck detekt --rerun-tasks` for
+the **whole tree**, because the first run stopped at the first red task and never reached the
+later ones.
+
+**Why `--continue`.** Without it the build reports the first failure and abandons the rest, so a
+round's report says "one thing is broken" when three are. With it every task gets to fail on its
+own terms and the recount sees every module's results.
+
+**Why the recount and not the exit code.** A `--continue` build exits non-zero for a lint task
+while every test passed; a pipe reports the pipe's last stage; a backgrounded `…; echo $?` reports
+the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both trees wrote —
+`modules/*/` **and** `tests/*/` — and prints `files/tests/failures/errors/skipped`. It is committed
+rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
+total for four consecutive rounds before it existed.
+
+**`verifyTestsExecuted` and filtered runs.** The zero-test guard fails whenever a module produced
+fewer result files than it has `*Test.kt` sources — which is *always* true of a `--tests` filtered
+run. That `BUILD FAILED` is the guard doing its job, not a red suite: read the XML (or run the
+recount) for the verdict. Filtered runs are for iterating; the gate is unfiltered.
+
+**A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
+results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
+conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
+above.
+
 ---
 
 ## 10. Linting and Formatting

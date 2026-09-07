@@ -967,6 +967,7 @@ Defined and described in [REST API §7](rest-api.md#7-result-delivery).
 | Code | HTTP | Description |
 |---|---|---|
 | `rate_limit.exceeded` | 429 | Per-user rate limit hit (single code for all layers — REST, MCP, login) |
+| `rate_limit.unavailable` | 429 | The limiter could not decide (Redis unreachable); the request is refused, not admitted — the limiter fails **closed** |
 | `idempotency.key_reused_for_different_request` | 409 | Same `Idempotency-Key` submitted with a different request body |
 
 ### 13.12 Workspace resolution

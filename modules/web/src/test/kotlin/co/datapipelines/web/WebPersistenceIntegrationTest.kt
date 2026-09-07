@@ -1,5 +1,6 @@
 package co.datapipelines.web
 
+import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.events.DataReady
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.NodeCompleted
@@ -18,14 +19,19 @@ import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.config.RateLimitProperties
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.metrics.WebMetrics
+import co.datapipelines.web.ratelimit.RateLimitFilter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
+import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -35,6 +41,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import java.sql.DriverManager
 import java.sql.ResultSet
 import java.time.Instant
@@ -172,8 +182,17 @@ class WebPersistenceIntegrationTest {
     @Test
     fun `the rate limiter holds its counts in Redis`() {
         // Real Redis, pinned clock: the fixed window must not roll over mid-test.
+        //
+        // BOTH limits are 2, and that is the fix for the flake this test carried into five of
+        // seven gates (083 §A). The pinned clock pins the KEY's bucket, not Redis's own TTL
+        // clock: the per-second key is created with `EXPIRE 1`, so with only the second window
+        // binding, the three calls below had to complete inside one real second. Under a loaded
+        // full gate they did not, the key expired, `INCR` recreated it at 1, and the third
+        // request was allowed — green in isolation every single time. With the MINUTE window
+        // also at 2 the refusal is carried by a key whose TTL is 60 s, so any pause short of a
+        // minute is harmless, and whichever window binds reports the same limit of 2.
         val pinned = Instant.ofEpochSecond(1_700_000_000)
-        val limiter = RedisRateLimiter(redis, RateLimitProperties(requestsPerSecond = 2, requestsPerMinute = 1000)) { pinned }
+        val limiter = RedisRateLimiter(redis, RateLimitProperties(requestsPerSecond = 2, requestsPerMinute = 2)) { pinned }
         val user = UUID.randomUUID()
 
         limiter.consume(user).allowed shouldBe true
@@ -181,9 +200,65 @@ class WebPersistenceIntegrationTest {
         val third = limiter.consume(user)
         third.allowed shouldBe false
         third.limit shouldBe 2L
+        // A THROTTLE, not an outage. Without this the fail-closed refusal of the sibling test
+        // below would satisfy every other assertion here — a Redis that had gone away would read
+        // as a limiter working perfectly (083 §A).
+        third.reason shouldBe null
         val retryAfter: Long = third.retryAfterSeconds
         (retryAfter > 0L) shouldBe true
     }
+
+    @Test
+    fun `a limiter whose Redis has stopped refuses with 429 rate_limit unavailable`() {
+        // The sibling of the test above, and the only place the ruling is proved end to end
+        // against a real (absent) Redis rather than a thrown mock. No timing: the container is
+        // STOPPED, so the fault is a fact of the world, not a race.
+        val disposable = TestRedis.disposable()
+        try {
+            val limiter = RedisRateLimiter(disposable.template, RateLimitProperties())
+            val user = UUID.randomUUID()
+            limiter.consume(user).allowed shouldBe true
+
+            disposable.stopServer()
+
+            val decision = limiter.consume(user)
+            decision.allowed shouldBe false
+            decision.unavailable shouldBe true
+
+            // Through the real filter, because the CODE is the filter's half of the contract.
+            val response = MockHttpServletResponse()
+            val chain = mockk<jakarta.servlet.FilterChain>(relaxed = true)
+            SecurityContextHolder.getContext().authentication =
+                UsernamePasswordAuthenticationToken(principalFor(user), null, emptyList())
+            try {
+                RateLimitFilter(limiter, AuthErrorWriter(JsonMapper.builder().build()))
+                    .doFilter(MockHttpServletRequest("GET", "/api/v1/pipelines"), response, chain)
+            } finally {
+                SecurityContextHolder.clearContext()
+            }
+
+            response.status shouldBe 429
+            response.getHeader("Retry-After") shouldBe "1"
+            response.contentAsString shouldContain "\"code\":\"rate_limit.unavailable\""
+            verify(exactly = 0) { chain.doFilter(any(), any()) }
+        } finally {
+            disposable.close()
+        }
+    }
+
+    /** The authenticated principal the limiter filter meters against. */
+    private fun principalFor(user: UUID) =
+        co.datapipelines.auth.AuthenticatedPrincipal(
+            user,
+            "a@b.c",
+            "A",
+            setOf(co.datapipelines.auth.Scope.READ),
+            co.datapipelines.auth.AuthMethod.API_KEY,
+            "dpk_x",
+            workspace =
+                co.datapipelines.auth
+                    .WorkspaceContext(DEFAULT_WORKSPACE_ID, "default"),
+        )
 
     @Test
     fun `the cursor reads a real stored result through keyFor`() {

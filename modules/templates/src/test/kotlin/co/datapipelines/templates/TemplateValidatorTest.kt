@@ -227,15 +227,29 @@ class TemplateValidatorTest {
             }
         val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/fan${LibraryResolver.MAX_IMPORT_DEPTH}.sql", 1, "top")))
 
-        lateinit var result: TemplateValidationResult
-        val elapsed = measureTimeMillis { result = validator(*libs.toTypedArray()).validate(draft, workspaceId) }
+        val trace = ValidationTrace()
+        val result = validator(*libs.toTypedArray()).validate(draft, workspaceId, trace)
 
         // Asserting the VERDICT is what makes this test able to fail (HIGH-2). The graph is legal —
         // fan1 imports nothing and the deepest reach is exactly the §6.4 cap — so deleting the memo
         // does not merely slow the walk down: it trips MAX_EXPANSIONS and turns a valid template
         // into a rejected one. Timing alone would have passed on the backstop that masks the bug.
         withClue("the fan graph is legal: ${result.codes}") { result.isValid.shouldBeTrue() }
-        withClue("wide-fan-out import validation took ${elapsed}ms") { (elapsed < ADVERSARIAL_BUDGET_MS).shouldBeTrue() }
+
+        // And the BOUND, counted rather than timed (083 §B). Both numbers are derived from the
+        // input: the memo admits at most one expansion per (library, depth) pair, and each
+        // expansion judges at most one library's `imports` array. Measured here: 10 expansions
+        // and 91 visits against bounds of 100 and 1,000 — versus ~10^9 visits and 134 seconds
+        // for the same graph with the memo deleted. A stopwatch could only ever have said
+        // "fast on this box today".
+        val fanOut = libs.maxOf { it.imports.size }
+        val expansionBound = libs.size * LibraryResolver.MAX_IMPORT_DEPTH
+        withClue("$trace against expansions ≤ $expansionBound") {
+            (trace.importExpansions <= expansionBound).shouldBeTrue()
+        }
+        withClue("$trace against visits ≤ ${expansionBound * fanOut}") {
+            (trace.importVisits <= expansionBound * fanOut).shouldBeTrue()
+        }
     }
 
     @Test
@@ -280,13 +294,18 @@ class TemplateValidatorTest {
         val validator = TemplateValidator(LibraryResolver { _ -> registry }, maxBodyChars = 1_000)
         val overCap = "SELECT 1 ".repeat(200)
 
-        val elapsed =
-            measureTimeMillis {
-                validator.validate(TemplateFixtures.draft(body = overCap), workspaceId).codes shouldContain
-                    PipelineErrorCodes.Template.SYNTAX_ERROR
-            }
+        val trace = ValidationTrace()
+        validator.validate(TemplateFixtures.draft(body = overCap), workspaceId, trace).codes shouldContain
+            PipelineErrorCodes.Template.SYNTAX_ERROR
 
-        withClue("over-cap rejection took ${elapsed}ms") { (elapsed < ADVERSARIAL_BUDGET_MS).shouldBeTrue() }
+        // "Fast" was the old assertion; "never parsed" is the actual property, and it is what
+        // makes the cap worth having (083 §B). Zero work of either kind reached the body — a
+        // stronger claim than any duration, and one that cannot be satisfied by a quick parse.
+        withClue("the cap must keep the body away from the parser entirely: $trace") {
+            trace.parseAttempts shouldBe 0
+            trace.bracketScanChars shouldBe 0
+            trace.steps shouldBe 0
+        }
     }
 
     @Test
@@ -296,9 +315,18 @@ class TemplateValidatorTest {
         val line = "SELECT \${a} FROM t WHERE b='\${c}'\n"
         val body = buildString { while (length < TemplateValidator.DEFAULT_MAX_BODY_CHARS - line.length) append(line) }
 
-        val elapsed = measureTimeMillis { validator().validate(TemplateFixtures.draft(body = body), workspaceId).isValid.shouldBeTrue() }
+        val trace = ValidationTrace()
+        validator().validate(TemplateFixtures.draft(body = body), workspaceId, trace).isValid.shouldBeTrue()
 
-        withClue("${body.length}-char body validated in ${elapsed}ms") { (elapsed < ADVERSARIAL_BUDGET_MS).shouldBeTrue() }
+        // LINEAR, stated as a bound derived from the input: exactly one pass over the body and
+        // exactly one parse. A second pass — a re-scan, a re-parse, a regex that backtracks over
+        // the body twice — shows up here as a step count above the body's own length, which is
+        // the regression the old 5-second budget was groping at (083 §B).
+        withClue("$trace for a ${body.length}-char body") {
+            trace.bracketScanChars shouldBe body.length
+            trace.parseAttempts shouldBe 1
+            (trace.steps <= body.length + LINEAR_SLACK).shouldBeTrue()
+        }
     }
 
     @Test
@@ -345,12 +373,28 @@ class TemplateValidatorTest {
         // Parsing on a bounded stack (TemplateBodyParser.PARSE_STACK_BYTES) is what bounds it.
         val body = "\${a" + "+a".repeat(131_070) + "}"
 
+        val trace = ValidationTrace()
         lateinit var codes: List<String>
-        val elapsed = measureTimeMillis { codes = validator().validate(TemplateFixtures.draft(body = body), workspaceId).codes }
+        val elapsed = measureTimeMillis { codes = validator().validate(TemplateFixtures.draft(body = body), workspaceId, trace).codes }
 
+        // The VERDICT is the deterministic half: the bounded stack turns a body that would burn
+        // 37 s of save-thread CPU into a `syntax_error` — a decision, not a hang — and the
+        // counters say it took exactly one scan and one parse to reach it.
         codes shouldContain PipelineErrorCodes.Template.SYNTAX_ERROR
+        withClue("$trace") {
+            trace.bracketScanChars shouldBe body.length
+            trace.parseAttempts shouldBe 1
+        }
+
+        // The ONE wall-clock assertion left in this suite, and it is a TRIPWIRE, not a budget
+        // (083 §B). This case is the only one whose property is genuinely temporal — "fails FAST
+        // rather than burning the save thread" — and it is the case that cost five of the last
+        // seven gates a red test at the old 5 s budget (measured 5,833 ms under load; it takes
+        // ~2.7 s idle). 60 s sits an order of magnitude above the loaded measurement and well
+        // below the 37 s × N a regression to the unbounded stack would produce, so it can still
+        // catch the regression it exists for without being a claim about this box's load.
         withClue("parsing this ${body.length}-char body took ${elapsed}ms") {
-            (elapsed < ADVERSARIAL_BUDGET_MS).shouldBeTrue()
+            (elapsed < ADVERSARIAL_TRIPWIRE_MS).shouldBeTrue()
         }
     }
 
@@ -477,11 +521,26 @@ class TemplateValidatorTest {
 
     private companion object {
         /**
-         * Wall-clock budget for the §12.3 adversarial-input cases. Generous by two orders of
-         * magnitude against the measured cost (a 256K body parses and scans in well under
-         * 200 ms), and still far below the seconds-to-minutes the unbounded versions took — so it
-         * catches a regression to quadratic or exponential without being flaky on a loaded box.
+         * The single wall-clock TRIPWIRE left in this suite (083 §B).
+         *
+         * It guards the one §12.3 case whose property is genuinely temporal: a bracket-free
+         * `\${a+a+a…}` at the cap must fail FAST rather than burn the save thread. Every other
+         * adversarial case now asserts a counted bound off [ValidationTrace], because "bounded
+         * work" is a property of the algorithm and "under 5 seconds" was a property of this
+         * laptop — one that measured 5,833 ms under a loaded full gate and turned five of seven
+         * gates red while being green in isolation every single time it was checked.
+         *
+         * 60 s is a tripwire and not a budget: the healthy path is ~2.7 s, so nothing comes
+         * within an order of magnitude of it, and the regression it exists for (an unbounded
+         * parse stack) took 37.3 s for ONE body and grows from there.
          */
-        const val ADVERSARIAL_BUDGET_MS = 5_000L
+        const val ADVERSARIAL_TRIPWIRE_MS = 60_000L
+
+        /**
+         * Slack over the body length in the linearity assertion: the parse counts as one step
+         * and the import walk contributes none for a body with no imports. Named rather than
+         * inlined so the assertion reads as "one linear pass plus a constant".
+         */
+        const val LINEAR_SLACK = 8
     }
 }

@@ -1212,6 +1212,14 @@ RateLimit-Reset: 1691234567
 
 On limit exceeded: `429 Too Many Requests` with `Retry-After` header and the single system-wide code `rate_limit.exceeded` ([Pipeline Contract §13.11](pipeline-contract.md#1311-rate-limiting--idempotency)) — the same code at every layer (REST, MCP, login).
 
+### 12.3 When the limiter itself is unavailable
+
+The limiter **fails closed**. If its Redis cannot be reached, the request is refused — `429 Too Many Requests`, `Retry-After: 1`, and the **distinct** code `rate_limit.unavailable` (§13.11), in the standard §4.2 envelope. `/mcp` answers with the same code, because one filter meters both surfaces.
+
+The two codes exist so a client can tell the cases apart: `rate_limit.exceeded` is the caller's own budget and is fixed by slowing down, `rate_limit.unavailable` is the service's dependency and is fixed by the operator. The response body for the unavailable case carries no `limit` — the caller spent nothing — and never names the failing dependency.
+
+Failing open was rejected: it would make "make the limiter's Redis fail" the cheapest way past every limit in the system. There is **no configuration switch** to restore it. The outage is visible to operators on `/health` (the `redis` component the limiter shares — [§11.1](#111-health-check)) and as a single WARN per outage per instance ([Observability §3.2](observability.md#32-levels)).
+
 ---
 
 ## 13. CORS

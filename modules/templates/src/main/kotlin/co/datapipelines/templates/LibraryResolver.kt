@@ -29,10 +29,17 @@ class LibraryResolver(
         workspaceId: java.util.UUID,
         imports: List<TemplateImport>,
         collector: MutableList<TemplateValidationFailure>,
+        trace: ValidationTrace = ValidationTrace(),
     ) {
         addUnsafeEntryFailures(imports, collector)
         addDuplicateAliasFailures(imports, collector)
-        walk(registryFor(workspaceId), imports, depth = 1, path = emptySet(), state = WalkState(), collector = collector)
+        val state = WalkState()
+        walk(registryFor(workspaceId), imports, depth = 1, path = emptySet(), state = state, collector = collector)
+        // Published rather than merely bounded: the memo's whole justification is a step count
+        // ("10^9 without it, distinct-libraries × depth with it"), and a claim stated in a comment
+        // is a claim no test can make (083 §B).
+        trace.importVisits += state.visits
+        trace.importExpansions += state.expansions
     }
 
     /**
@@ -103,6 +110,7 @@ class LibraryResolver(
      */
     private class WalkState {
         val expanded = mutableSetOf<String>()
+        var visits = 0
         var expansions = 0
         var failures = 0
         var stopped = false
@@ -153,6 +161,7 @@ class LibraryResolver(
         // it, and that failure's message echoes the attacker's `id` — undoing, on a different code
         // path, the §6.3 rule that a refusal never reflects the value.
         if (!imp.isSafeToSynthesize()) return
+        state.visits++
         if (imp.key in path) {
             report(state, collector, importFailure(PipelineErrorCodes.Template.IMPORT_CYCLE, imp, "is part of an import cycle"))
             return

@@ -1,13 +1,17 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import co.datapipelines.web.ratelimit.RateLimiter
+import co.datapipelines.web.ratelimit.RedisRateLimiter
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -77,6 +81,36 @@ class ApplicationSmokeTest {
     }
 
     @Test
+    fun `the rate limiter's Redis is the SAME Redis health reports`() {
+        // 083 §A: the limiter now fails CLOSED, so its Redis being down refuses every metered
+        // request — which means an operator watching `/health` must see that outage there and
+        // not have to infer it. `/health` reports Boot's `redis` indicator, which is built from
+        // the ONE `RedisConnectionFactory` in the context; the limiter is built from the
+        // `StringRedisTemplate` that sits on that same factory.
+        //
+        // So the property to hold is "there is exactly one Redis connection in this application".
+        // A second factory — a limiter given its own client, say — would make the limiter's
+        // failure a signal `/health` cannot see, which is the whole thing the ruling forbids.
+        //
+        // The types are named as strings rather than imported because this module declares no
+        // Redis dependency of its own (§5.10: `app` depends on `web` and nothing else internal);
+        // they are on the test RUNTIME classpath, which is exactly where a wiring assertion needs
+        // them. Bean NAMES are all the count needs.
+        val factories = applicationContext.getBeanNamesForType(Class.forName(REDIS_CONNECTION_FACTORY))
+        withClue("Redis connection factories in the context: ${factories.toList()}") {
+            factories.size shouldBe 1
+        }
+        val templates = applicationContext.getBeanNamesForType(Class.forName(STRING_REDIS_TEMPLATE))
+        withClue("StringRedisTemplates in the context: ${templates.toList()}") {
+            templates.size shouldBe 1
+        }
+
+        // And the limiter really is the Redis one — a fallback in-process limiter would meter
+        // per instance and would not be covered by the reasoning above.
+        applicationContext.getBean(RateLimiter::class.java).shouldBeInstanceOf<RedisRateLimiter>()
+    }
+
+    @Test
     fun `ready returns 200 once the context is up`() {
         rest.getForEntity("/ready", String::class.java).statusCode.value() shouldBe 200
     }
@@ -120,6 +154,10 @@ class ApplicationSmokeTest {
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedPostgres.postgres
         private val redis get() = SharedRedis.redis
+
+        /** Named, not imported — see the health/limiter test for why. */
+        const val REDIS_CONNECTION_FACTORY = "org.springframework.data.redis.connection.RedisConnectionFactory"
+        const val STRING_REDIS_TEMPLATE = "org.springframework.data.redis.core.StringRedisTemplate"
 
         private const val SECRET_BYTES = 32
 

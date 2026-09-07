@@ -43,4 +43,16 @@ dependencies {
     // mockk mocks final classes, which is what lets those units be tested here rather than only
     // through the web module's integration suite (where this module earns no coverage).
     testImplementation(libs.mockk)
+
+    // 083 §D — the three JDBC classes here (PublishedEndpointRepository,
+    // EndpointKeyBindingRepository, EndpointServeAudit) were covered only by the WEB module's
+    // integration suite, which is why this module sat at 84.9% against an 84 floor. They get a
+    // Postgres of their own: every property they carry — a transaction-scoped advisory lock, an
+    // ON CONFLICT, a UNIQUE violation mapped to a catalog code, a JSONB ->> comparison — is a
+    // statement about Postgres that a mocked JdbcTemplate cannot make. Same fixture shape as
+    // every other module's SharedPostgres (DEVELOPMENT.md §9.1); the driver was already on this
+    // module's test runtime classpath.
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
 }

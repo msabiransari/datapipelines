@@ -173,6 +173,15 @@ class DialectConnectivityIntegrationTest {
          * one suite, one subject — MySQL stays per-class. */
         @Container
         @JvmStatic
-        val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4").withDatabaseName("my_app")
+        val mysql: MySQLContainer<*> =
+            MySQLContainer("mysql:8.4")
+                .withDatabaseName("my_app")
+                // Testcontainers' DEFAULT startup wait is 60 s, and MySQL's first boot
+                // (initialising the data directory) does not fit in it on a box running
+                // several lanes' containers — this suite failed a full gate with
+                // `Could not create new connection` while the server was still starting
+                // (083, found by the round's own gate). A startup ceiling is not a
+                // performance assertion; the boot's duration belongs to the machine.
+                .withStartupTimeout(java.time.Duration.ofMinutes(5))
     }
 }
