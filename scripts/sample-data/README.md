@@ -154,7 +154,7 @@ It fails unless the published `examples.json`, the published manifest's declared
 checksum, and `content/examples.json` here all agree. It is also the rehearsal
 step for every later release (deployment.md Appendix B).
 
-Finally set `SAMPLE_BASE_URL` in `deploy/env/demo.env` to
+Finally set `SAMPLE_BASE_URL` in `deploy/env/defaults.env` to
 `https://datapipelines-co.s3.amazonaws.com/sample-data/mobility` (deployment.md
 Appendix B).
 

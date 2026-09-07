@@ -10,8 +10,12 @@
 #   C. Error-code catalog: every error code used anywhere exists in
 #      docs/pipeline-contract.md (§12/§13, the single catalog). Audit-event
 #      names from enums.md §15 are exempt (events, not error codes).
-#   D. Forbidden legacy spellings (renamed/removed in the 2026-08 campaign)
-#      outside Change Log sections.
+#   D. Forbidden legacy spellings (renamed/removed in the 2026-08 campaign, and the
+#      pre-075/pre-081 deployment names) outside Change Log sections. Check D alone
+#      also scans the non-`docs/` files a deployer actually copies from — README.md,
+#      deploy/**, app.sh, scripts/*.sh — because a stale `deploy/.env` in a compose
+#      header misleads exactly as much as one in a spec, and 081's whole job was
+#      deleting files whose names are still typed from memory.
 #
 # docs/SPEC-REVIEW-2026-08.md is exempt from B–D: it is the historical record
 # of the old spellings. Change Log sections are exempt from D for the same
@@ -36,7 +40,11 @@ cd "$(dirname "$0")/.."
 if [[ "${1:-}" == "--self-test" ]]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  cp -R docs DEVELOPMENT.md scripts "$tmp/"
+  cp -R docs DEVELOPMENT.md scripts README.md app.sh "$tmp/"
+  mkdir -p "$tmp/deploy/env" "$tmp/deploy/sample-data"
+  cp deploy/*.yml deploy/secrets.env.example "$tmp/deploy/"
+  cp deploy/env/*.env "$tmp/deploy/env/"
+  cp deploy/sample-data/*.sh "$tmp/deploy/sample-data/"
   # Introduce one defect per check class. The heading first CLOSES staging.md's Change
   # Log section (the doc's last section): checks C and D exempt Change Log lines, so
   # defects appended bare at EOF were placebo — the self-test passed on A and B alone
@@ -50,6 +58,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Raises `workspace.nonexistent_code` here.'
     echo 'Legacy `terminal_node_id` mention.'
   } >> "$tmp/docs/staging.md"
+  # D over the NON-docs scan set, which checks A-C never reach: a header that still
+  # sends a deployer to a file 081 deleted must fail exactly like a stale spec line.
+  echo '# see deploy/env/posture/development.env' >> "$tmp/deploy/compose.yml"
   if (cd "$tmp" && bash scripts/docs-audit.sh >/dev/null 2>&1); then
     echo "SELF-TEST FAILED: doctored docs passed the audit" >&2; exit 1
   else
@@ -61,7 +72,9 @@ python3 - <<'PY'
 import re, sys, glob, os
 
 DOCS = sorted(glob.glob("docs/*.md")) + ["DEVELOPMENT.md"]
-EXEMPT_HISTORY = {"docs/SPEC-REVIEW-2026-08.md"}
+# This script IS the catalogue of forbidden spellings, so it names every one of them;
+# and the spec review is the historical record of the old ones.
+EXEMPT_HISTORY = {"docs/SPEC-REVIEW-2026-08.md", "scripts/docs-audit.sh"}
 failures = []
 
 def read(path):
@@ -179,7 +192,8 @@ events = set(re.findall(r"(?:auth|datasource|mcp|endpoint)\.[a-z_]+(?:\.[a-z_]+)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
-                      r"does not exist|no longer|instead of|there is no|no `", re.I)
+                      r"does not exist|no longer|instead of|there is no|no `|"
+                      r"the old|used to|before 0\d\d|pre-0\d\d", re.I)
 
 def code_ok(c):
     c = c.rstrip("*").rstrip(".")
@@ -226,7 +240,41 @@ FORBIDDEN = [
     (r"LARGE_RESULT_THRESHOLD", "key removed (D9)"),
     (r"\"params_schema\"|params_schema\s+(JSONB|TEXT)", "removed (D3)"),
     (r"jdbc:h2:mem[^\s`\"']*DB_CLOSE_DELAY", "flag removed from staging URL (D6)"),
+    # --- the deployment layout, 075 then 081 -------------------------------------
+    # 075 renamed the compose files and replaced the dotenv scaffolds; 081 collapsed
+    # the five tracked env files into deploy/env/defaults.env. Every one of these is
+    # a path someone types from memory, and a doc that names one sends a deployer to
+    # a file that is not there. `deploy/env/defaults.env` and
+    # `deploy/secrets.env.example` are the only two spellings that exist.
+    (r"docker-compose[.-]", "renamed compose.yml / compose.local-build.yml / compose.laptop-infra.yml (075)"),
+    (r"deploy/\.env", "replaced by deploy/env/defaults.env + deploy/secrets.env (075/081)"),
+    (r"\.env\.demo", "demo is a flag; the pins are in deploy/env/defaults.env (075/081)"),
+    (r"\.env\.local", "replaced by deploy/env/defaults.env (075)"),
+    (r"(?<!secrets)\.env\.example", "the template is deploy/secrets.env.example (081)"),
+    (r"deploy/env/(laptop|demo|example)\.env", "collapsed into deploy/env/defaults.env (081)"),
+    (r"deploy/env/posture/", "the posture's defaults live only in the profile ymls (081)"),
+    (r"deploy/env/secrets\.env\.example", "moved to deploy/secrets.env.example (081)"),
+    # --- secrets under compose-only names, 075 ------------------------------------
+    # deploy/secrets.env carries the app's OWN variable names so one file feeds every
+    # loader; a compose-only rename is what made it un-sourceable by a bare jar.
+    (r"METADATA_DB_PASSWORD", "renamed SPRING_DATASOURCE_PASSWORD (075)"),
+    (r"(?<![A-Z_])REDIS_PASSWORD=", "renamed DATAPIPELINES_REDIS_PASSWORD (075)"),
+    (r"(?<![A-Z_])JWT_SECRET=", "renamed DATAPIPELINES_JWT_SECRET (075)"),
+    (r"(?<![A-Z_])ENCRYPTION_KEY=", "renamed DATAPIPELINES_DB_ENCRYPTION_KEY (075)"),
 ]
+
+# Check D alone also covers the files a deployer copies from. They are not docs, so
+# checks A-C (anchors, config keys, error codes) do not apply to them.
+LEGACY_SCAN_EXTRA = sorted(
+    set(glob.glob("deploy/*.yml")) | set(glob.glob("deploy/*.example"))
+    | set(glob.glob("deploy/env/*.env")) | set(glob.glob("deploy/sample-data/*.sh"))
+    | set(glob.glob("scripts/*.sh")) | set(glob.glob("scripts/*/*.sh"))
+    | set(glob.glob("scripts/*/README.md"))
+    | {"README.md", "app.sh"}
+)
+for extra in LEGACY_SCAN_EXTRA:
+    if os.path.isfile(extra) and extra not in texts:
+        texts[extra] = read(extra)
 for p, t in texts.items():
     if p in EXEMPT_HISTORY:
         continue

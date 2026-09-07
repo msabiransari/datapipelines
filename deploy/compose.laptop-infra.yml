@@ -1,10 +1,25 @@
 # Local development infrastructure — DEVELOPMENT.md §2.
 #
-#   docker compose -f deploy/compose.laptop-infra.yml up -d
+#   docker compose -f deploy/compose.laptop-infra.yml \
+#     --env-file deploy/env/defaults.env --env-file deploy/secrets.env up -d
 #   docker compose -f deploy/compose.laptop-infra.yml ps
 #   docker compose -f deploy/compose.laptop-infra.yml down -v    # reset a dirty Flyway state
 #
-# Dev only: credentials are fixed and public, no passwords on Redis, no TLS.
+# THE SAME TWO ENV FILES AS EVERYTHING ELSE (081). Both credentials below come from the
+# variables the APP binds — `SPRING_DATASOURCE_PASSWORD` and `DATAPIPELINES_REDIS_PASSWORD`
+# — so the laptop's infrastructure and the jar that talks to it read ONE value each, out
+# of deploy/secrets.env. Before 081 this file hard-coded `datapipelines` and no Redis
+# password at all, and a third (now deleted) env file had to be loaded AFTER the secrets to undo
+# them; that inversion is what the owner's "only one env with defaults + secrets" ruling
+# removed. Each keeps its historical value as the interpolation default, so a bare
+# `up -d` with no env files still starts the stack a pre-081 checkout started.
+#
+# AN EXISTING dp-postgres-dev-data VOLUME still holds the password it was initialised
+# with (`datapipelines`): Postgres reads POSTGRES_PASSWORD only on first init. Either put
+# `SPRING_DATASOURCE_PASSWORD=datapipelines` in your deploy/secrets.env, or reset the dev
+# database with `docker compose -f deploy/compose.laptop-infra.yml down -v`.
+#
+# Dev only: no TLS, loopback binds, and a database whose data you can throw away.
 # The production shape is deployment.md Appendix A — do not copy this file there.
 # The app itself is NOT in this file; it runs from Gradle (DEVELOPMENT.md §6).
 #
@@ -34,7 +49,9 @@ services:
     environment:
       POSTGRES_DB: datapipelines
       POSTGRES_USER: datapipelines
-      POSTGRES_PASSWORD: datapipelines
+      # ONE name for the metadata DB password, the app's own (deploy/compose.yml does the
+      # same). The historical fixed dev value is the default so a bare `up -d` is unchanged.
+      POSTGRES_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-datapipelines}
     ports:
       # Loopback-only bind (2026-08-07 security review MEDIUM-4). A bare
       # "5434:5432" publishes the container on 0.0.0.0 — on any laptop sharing a
@@ -42,8 +59,8 @@ services:
       # the network. Dev infra must never be reachable off-host.
       # Host port 5434, NOT 5432: 5432/5433 collide with other local stacks
       # (Postgres.app defaults to 5432; algo-school holds 5433). 5434 is this
-      # project's dev port — keep it in sync with deploy/env/laptop.env,
-      # DEVELOPMENT.md §2/§4 and configuration.md §6.
+      # project's dev port — keep it in sync with SPRING_DATASOURCE_URL in
+      # deploy/env/defaults.env, DEVELOPMENT.md §2/§4 and configuration.md §6.
       - "127.0.0.1:${LAPTOP_PG_PORT:-5434}:5432"
     volumes:
       - postgres-dev-data:/var/lib/postgresql/data
@@ -58,20 +75,27 @@ services:
     image: redis:7-alpine
     # noeviction is REQUIRED (deployment.md §4.2.1): eviction silently destroys
     # results, idempotency keys and cancellation flags. Same policy as production;
-    # only the password and the memory ceiling differ.
+    # only the memory ceiling differs.
+    #
+    # The password is the app's own DATAPIPELINES_REDIS_PASSWORD (081). Before that this
+    # Redis had NO password and a third env file had to blank the app's — an
+    # unauthenticated Redis that configuration.md §7 warns about, kept alive by the very
+    # file that made the two disagree. The dev default is fixed and public, like the
+    # database's; deploy/secrets.env's generated value wins when the file is loaded.
     command: >
       redis-server
+      --requirepass ${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}
       --maxmemory 256mb
       --maxmemory-policy noeviction
     ports:
-      # Loopback-only bind (2026-08-07 security review MEDIUM-4). Dev Redis has no
-      # password at all, so an 0.0.0.0 bind is an unauthenticated open Redis.
+      # Loopback-only bind (2026-08-07 security review MEDIUM-4). Dev infra must never
+      # be reachable off-host.
       # Host port 6381, NOT 6379: 6379 is the universal default and algo-school
-      # holds 6380. Keep in sync with deploy/env/laptop.env, DEVELOPMENT.md §2/§4
-      # and configuration.md §6.
+      # holds 6380. Keep in sync with DATAPIPELINES_REDIS_PORT in
+      # deploy/env/defaults.env, DEVELOPMENT.md §2/§4 and configuration.md §6.
       - "127.0.0.1:${LAPTOP_REDIS_PORT:-6381}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10

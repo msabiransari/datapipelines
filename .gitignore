@@ -46,9 +46,10 @@ lib/*.jar
 # --- Local secrets ---
 # (2026-08-07 security review LOW-8: keystore/truststore and private-key formats
 #  added — a committed .p12 or .jks leaks a private key just as a .pem does.)
-# Dotenv files anywhere. 075 moved the deployment's settings into TRACKED files under
-# deploy/env/ (the repo is the source of truth for settings — a git-ignored version
-# number cost two stacks a week, T117) and left ONLY the secrets git-ignored.
+# Dotenv files anywhere. 075 moved the deployment's settings into TRACKED files, and
+# 081 collapsed them to ONE: deploy/env/defaults.env (the repo is the source of truth
+# for settings — a git-ignored version number cost two stacks a week, T117). Only the
+# secrets are git-ignored.
 .env
 .env.*
 # deploy/secrets.env — the one file that holds credentials. `secrets.*` below already
@@ -64,11 +65,12 @@ deploy/secrets.env
 *.truststore
 credentials.*
 secrets.*
-# ...but the TEMPLATE is committed — deploy/env/secrets.env.example is what a deployer
-# copies. The negation must stay BELOW `secrets.*` to win, and it must name the path:
-# git cannot re-include a file whose parent DIRECTORY is excluded, and `deploy/env/`
-# is not, so this works.
-!deploy/env/secrets.env.example
+# ...but the TEMPLATE is committed — deploy/secrets.env.example is what a deployer
+# copies, and `./app.sh --scaffold` generates deploy/secrets.env from it. 081 moved it
+# up out of deploy/env/, so the `!` rule moves with it. The negation must stay BELOW
+# `secrets.*` to win, and it must name the path: git cannot re-include a file whose
+# parent DIRECTORY is excluded, and `deploy/` is not, so this works.
+!deploy/secrets.env.example
 .claude/worktrees/
 .gate-logs/
 gate-logs/

@@ -33,9 +33,10 @@ COMPOSE=(docker compose -p "$PROJECT"
   -f deploy/compose.yml
   -f deploy/compose.local-build.yml
   -f tests/integration-tests/multi-instance/compose.two-instance.yml
-  # 075: deploy/.env is gone, and compose's implicit `<project dir>/.env` pickup with
-  # it. The env-file list is explicit and in precedence order — secrets LAST.
-  --env-file deploy/env/posture/development.env
+  # 075: the implicit `<project dir>/.env` pickup is gone. The env-file list is explicit
+  # and in precedence order — secrets LAST. 081 collapsed it to the two files every
+  # loader reads.
+  --env-file deploy/env/defaults.env
   --env-file deploy/secrets.env)
 
 mkdir -p gate-logs

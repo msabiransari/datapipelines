@@ -42,11 +42,17 @@ Deploying it for real is two variables — your name for the environment, and ho
 careful the product should be:
 
 ```bash
-cp deploy/env/secrets.env.example deploy/secrets.env   # generate the values it names
+./app.sh --scaffold                          # writes deploy/secrets.env, every secret generated
+$EDITOR deploy/secrets.env                   # uncomment DATAPIPELINES_ENV=prod and
+                                             # DATAPIPELINES_POSTURE=hardened; set your URL
 docker compose -f deploy/compose.yml \
-  --env-file deploy/env/posture/hardened.env \
+  --env-file deploy/env/defaults.env \
   --env-file deploy/secrets.env up -d
 ```
+
+Two env files, in that order, under every loader: `deploy/env/defaults.env` is tracked and
+carries every non-secret default; `deploy/secrets.env` is git-ignored and holds your
+credentials and your differences.
 
 Full setup and the variable reference: [`docs/environments.md`](docs/environments.md),
 [DEVELOPMENT.md](DEVELOPMENT.md), and the specs under [`docs/`](docs/).

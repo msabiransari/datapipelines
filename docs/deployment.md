@@ -171,7 +171,7 @@ The keys an operator most often changes at deploy time are `datapipelines.result
 
 ### 5.3 Full config file
 
-Every setting is an environment variable, and `deploy/env/example.env` lists all of them with their shipped defaults — [Environments](environments.md) is the operator's page for what to set and where. Operators who prefer a YAML file can mount `application.yml` at `/etc/datapipelines/application.yml` (configurable via `SPRING_CONFIG_ADDITIONAL_LOCATION`); this is the supported route for **more than one OIDC provider**, whose nested list is awkward as variables. Every key is expressible either as YAML or as its derived env var; the OIDC provider list is a nested structure and is normally supplied as YAML with `${...}` placeholders for the secrets. A complete annotated template is in [Configuration §5](configuration.md#5-full-applicationyml-template).
+Every setting is an environment variable, and `deploy/env/defaults.env` lists all the non-secret ones with their shipped values (`deploy/secrets.env.example` names the rest) — [Environments](environments.md) is the operator's page for what to set and where. Operators who prefer a YAML file can mount `application.yml` at `/etc/datapipelines/application.yml` (configurable via `SPRING_CONFIG_ADDITIONAL_LOCATION`); this is the supported route for **more than one OIDC provider**, whose nested list is awkward as variables. Every key is expressible either as YAML or as its derived env var; the OIDC provider list is a nested structure and is normally supplied as YAML with `${...}` placeholders for the secrets. A complete annotated template is in [Configuration §5](configuration.md#5-full-applicationyml-template).
 
 ---
 
@@ -265,11 +265,11 @@ in front behaves exactly as before, and the header stays ignored.
 
 Reference compose file provided in `deploy/compose.yml`. Single instance + Postgres + Redis.
 
-Compose is **one loader of the environment-variable contract**, not the contract itself ([Environments §3](environments.md#3-the-variable-contract)): the same settings drive a bare JAR, systemd, Kubernetes, ECS and Nomad. The env files it reads live in `deploy/env/` and are tracked; `deploy/secrets.env` is git-ignored and holds every credential.
+Compose is **one loader of the environment-variable contract**, not the contract itself ([Environments §3](environments.md#3-the-variable-contract)): the same settings drive a bare JAR, systemd, Kubernetes, ECS and Nomad. It reads TWO env files, in this order: `deploy/env/defaults.env`, which is tracked and carries every non-secret default, then `deploy/secrets.env`, which is git-ignored and holds every credential plus this deployment's own overrides (`DATAPIPELINES_POSTURE=hardened`, `DATAPIPELINES_ENV=prod`, the real database URL, the OIDC client).
 
 ```bash
 docker compose -f deploy/compose.yml \
-  --env-file deploy/env/posture/hardened.env \
+  --env-file deploy/env/defaults.env \
   --env-file deploy/secrets.env up -d
 ```
 
@@ -277,10 +277,10 @@ The app service passes **every** `DATAPIPELINES_*` variable the app binds, each 
 the same default `application.yml` ships — so a key that works against a host-run app
 (by exporting the variable) reaches the container too, and leaving it unset yields the
 shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
-`application.yml`'s placeholders — and `deploy/env/example.env`, the reference every
-non-compose deployer copies — and fails on a missing pass-through, a diverged default
-or a variable missing from that reference. It runs on **every `./gradlew build`**, not
-when someone remembers to run it.
+`application.yml`'s placeholders — and the two tracked env files — and fails on a missing
+pass-through, a diverged default, a variable declared in both tracked files or in neither,
+or a posture-dependent key passed with a default instead of in the valueless form. It runs
+on **every `./gradlew build`**, not when someone remembers to run it.
 
 ### 6.3A Promotion: a receiver deployment (055)
 
@@ -656,7 +656,7 @@ from the active families, and the MySQL service is shared.
 
 ### One command
 
-The base URLs and the pinned versions live in **`deploy/env/demo.env`**, which is
+The base URLs and the pinned versions live in **`deploy/env/defaults.env`**, which is
 tracked — a data change is a new version directory and a commit, so what a
 deployment loads is visible in the repository. From a checkout that builds its own
 image, the whole thing is:
@@ -671,8 +671,7 @@ the same env files `app.sh` does — secrets last:
 ```bash
 SAMPLE_NYC_ON=1 SAMPLE_TRADE_ON=1 docker compose \
   -f deploy/compose.yml -f deploy/compose.local-build.yml \
-  --env-file deploy/env/posture/development.env \
-  --env-file deploy/env/demo.env \
+  --env-file deploy/env/defaults.env \
   --env-file deploy/secrets.env \
   --profile demo-nyc --profile demo-trade up -d --wait
 ```
@@ -723,11 +722,11 @@ or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade]` does the
 ### What the demo profile turns on
 
 The profiles add a `mysql` service and the families' one-shot loaders, and point
-the app at the files they place on a read-only volume. `deploy/env/demo.env`
-enables **local password accounts** so the demo needs no OIDC client, and names
-the account the credential lands on; the password itself is a secret and is
-GENERATED into `deploy/secrets.env` — never a constant in a tracked file, on an
-app that binds every interface ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)).
+the app at the files they place on a read-only volume. The scaffolded
+`deploy/secrets.env` enables **local password accounts** so the demo needs no OIDC
+client, and names the account the credential lands on; the password itself is a
+secret and is GENERATED into that same file — never a constant in a tracked file, on
+an app that binds every interface ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)).
 There is now exactly ONE place the credential is written and ONE place it is read
 back from, which is why `app.sh` can print a login that works. It also sets the §7
 demo posture: `auto-per-user` provisioning (every
@@ -841,6 +840,7 @@ operator.
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-09-06 | v1.13 | mobility v5 + trade v4 (077 mandatory folders) | Both artifact sets republish with every template id under a folder (`nyc/mobility/…`, `nyc/reference/…`, `nyc/weather/…`, `trade/…`) — 13 of 25 demo templates were flat and are refused by 077's rule at seed time. Data files unchanged in content. Pins → `SAMPLE_VERSION=v5`, `SAMPLE_TRADE_VERSION=v4`; `check-published.sh v5` / `--family trade v4` byte-identical on publish. |
+| 2026-09-06 | v1.13 | 081 one env file | The `deploy/` layout is **two env files**: tracked `deploy/env/defaults.env` (every non-secret variable with the value this deployment ships) then git-ignored `deploy/secrets.env`, in that order under every loader, with `deploy/secrets.env.example` as the template that names every variable. The five files 075 put under `deploy/env/` (`laptop.env`, `demo.env`, `example.env`, `posture/development.env`, `posture/hardened.env`) are deleted; §6.2, §6.3A and Appendix B's raw-compose recipe use the two-file list. `deploy/compose.laptop-infra.yml` starts its Postgres and Redis from `SPRING_DATASOURCE_PASSWORD` / `DATAPIPELINES_REDIS_PASSWORD`, removing the laptop's load-order inversion. `./app.sh --scaffold` writes `deploy/secrets.env` from the template and stops, so the admin address can be set before the one-time seed; `--start` waits until the app is actually healthy (up to `HEALTH_WAIT_SECONDS`, default 360) instead of reporting the HEALTHCHECK deadline as a failure, and `--status` prints the seeded login too. |
 | 2026-09-05 | v1.12 | 075 environments and posture | **[Environments](environments.md) joins the spec set** — the operator page for `DATAPIPELINES_ENV` (the org's label) and `DATAPIPELINES_POSTURE` (`development` \| `hardened`), with the normative posture table, the environment-variable contract, and loader recipes for Compose, a bare JAR, systemd, Kubernetes, ECS and Nomad. The `deploy/` layout is renamed with no shims: `docker-compose.yml` → **`compose.yml`**, `docker-compose.local.yml` → **`compose.local-build.yml`**, `docker-compose.dev.yml` → **`compose.laptop-infra.yml`**; `deploy/application.yml` is **folded away** (every line was already in the image's own `application.yml` behind the same placeholders) and orgs wanting a yml use `SPRING_CONFIG_ADDITIONAL_LOCATION`; `deploy/.env`/`.env.demo`/`.env.example` and the root `.env.example` are replaced by tracked `deploy/env/**` (posture, demo, laptop, and `example.env` — every variable with its shipped default) plus git-ignored `deploy/secrets.env`. Secrets carry **the app's own variable names** (`DATAPIPELINES_JWT_SECRET`, `SPRING_DATASOURCE_PASSWORD`, …) instead of compose-only renames, so one file feeds every loader. §6.3A's promotion example is now env+posture. Demo is a **flag**: `DATAPIPELINES_DEMO=nyc,trade` (`./app.sh --demo nyc,trade`) replaces `--demo-nyc`/`--demo-trade`, with the versions in tracked `deploy/env/demo.env`, and `hardened` refuses it. `scripts/compose-env-audit.sh` now runs on every `./gradlew build` (it had drifted: 074's three `endpoints` keys shipped with no compose pass-through) and also checks `deploy/env/example.env`. Compose volume names derive from `COMPOSE_PROJECT_NAME`, so `-p <lane>` alone scopes a second copy's data. |
 | 2026-09-05 | v1.11 | mobility v4 + trade v3 (067 pipeline folders) | Both artifact sets republish with `examples.json` carrying the folder convention (`nyc/…`, `trade/…`); data files unchanged in content (every pinned table checksum re-derived identical; the DuckDB file's bytes differ as DuckDB files are not byte-deterministic). Pins move to `SAMPLE_VERSION=v4`, `SAMPLE_TRADE_VERSION=v3`. Until an operator moves the pin, a fresh demo seeds the old flat names — expected, version pins are operator config. |
 | 2026-09-04 | v1.10 | trade/v2 — Binance out, Federal Reserve H.10 in | The trade family republishes as **trade/v2**. The Binance market slice is **removed entirely** (its Vision terms are CC BY-NC-SA with an explicit no-hosting-of-derivative-feeds clause and a separate enterprise licence for commercial use — owner ruling 2026-09-04); the SQLite artifact is now `fx_rates.db`, built from the **Federal Reserve H.10** daily noon buying rates and their G.5 monthly averages for the five reconciled partners' currencies (a US Government work — no copyright), and the datasource is renamed `sample-market` → **`sample-fx`**. A third example pipeline, `imports_in_partner_currency`, restates US import value in the partner's own money across three engines (DuckDB facts → SQLite rates → H2 join). Two licence conditions that were never in the tree now ship with the data: the **verbatim Census notice** ("This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.") in the family README, the `sample-trade-us` datasource description and the manifest's Census provenance entry, and the **UN Comtrade citation** with the under-100,000-record note. `check-published.sh` learns `--family trade`; `SAMPLE_TRADE_VERSION` defaults to `v2` in `app.sh`, `deploy/.env.example` and the compose services. **An existing `deploy/.env.demo` pinning `SAMPLE_TRADE_VERSION=v1` is not rewritten by `app.sh` (version pins are operator config) — edit it, or the loader fetches a version whose market object no longer exists.** |
