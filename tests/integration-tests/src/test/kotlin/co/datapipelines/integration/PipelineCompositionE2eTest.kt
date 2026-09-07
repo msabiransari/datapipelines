@@ -29,6 +29,8 @@ import java.sql.DriverManager
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Pipeline composition E2E (design 2026-08-13-pipeline-node-type, §8): a `PIPELINE` node
@@ -98,10 +100,11 @@ class PipelineCompositionE2eTest {
                 listOf(pipelineNode("run_leaf", "test/comp_leaf", 1)),
             )
 
+        val cancelBudget = Duration.ofSeconds(CANCEL_BUDGET_SECONDS)
         val correlationId = UUID.randomUUID().toString()
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(parentId, correlationId)
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, correlationId)
             }
         events.map { it.first } shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
@@ -149,7 +152,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(rootId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, rootId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val rootExecutionId = events.last().second["execution_id"].asText()
@@ -199,19 +202,6 @@ class PipelineCompositionE2eTest {
         return familySize to children
     }
 
-    /** Runs a metadata-DB query against the Testcontainers Postgres, collecting every row. */
-    private fun <T> queryExecutions(
-        sql: String,
-        read: (java.sql.ResultSet) -> T,
-    ): List<T> =
-        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection.createStatement().use { statement ->
-                statement.executeQuery(sql).use { rs ->
-                    generateSequence { if (rs.next()) read(rs) else null }.toList()
-                }
-            }
-        }
-
     /**
      * F1 at the level a user sees it: the child's `pipeline_executions` row.
      *
@@ -231,32 +221,11 @@ class PipelineCompositionE2eTest {
     @Test
     @Order(4)
     fun `a child killed by the parent's timeout ends terminal in pipeline_executions, not RUNNING`() {
-        createTemplate("test/comp_slow.sql", "H2", "Composition Slow", SLOW_H2_SQL)
-        createPipeline(
-            "test/comp_slow_leaf",
-            "Composition Slow Leaf",
-            listOf(
-                mapOf(
-                    "id" to "slow_scan",
-                    "description" to "A query H2 really iterates, so the parent's deadline lands mid-flight",
-                    "type" to "DQL",
-                    "source" to H2_DATASOURCE,
-                    "template" to mapOf("id" to "test/comp_slow.sql", "version" to 1),
-                    "output" to mapOf("target" to "caller"),
-                    "depends_on" to emptyList<String>(),
-                ),
-            ),
-        )
-        val parentId =
-            createPipeline(
-                "test/comp_slow_parent",
-                "Composition Slow Parent",
-                listOf(pipelineNode("run_slow_leaf", "test/comp_slow_leaf", 1)),
-            )
+        val parentId = createSlowFamily("slow")
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
             }
         // The parent's own outcome is unchanged by this fix: a timeout is a FAILURE (§8.1).
         events.last().first shouldBe "pipeline_failed"
@@ -277,6 +246,75 @@ class PipelineCompositionE2eTest {
         queryExecutions("SELECT status FROM pipeline_executions WHERE execution_id = '$parentExecutionId'") {
             it.getString(1)
         }.single() shouldBe "FAILED"
+    }
+
+    /**
+     * 086 A3 — a `DELETE` on the parent ends the CHILD, promptly and as a cancellation.
+     *
+     * The child of a PIPELINE node runs as its own execution with its own `CancellationHandle`,
+     * and `DELETE /executions/{parent}` never touches it: the family's cancel sets an abort reason
+     * on the ROOT's handle only, so the child's `withStatement` entry guard — which reads the
+     * child's own reason — cannot fire. What stops the child is structured concurrency: the
+     * parent's job cancels the child's scope, whose `pollCancelFlag` `finally` then calls
+     * `cancelStatements()` on the child's handle. Both halves of A1 ride that route — the latch's
+     * second read is the coroutine's own liveness (true for the child the instant the ancestor
+     * cancels), and the re-issue hangs off `cancelStatements()` itself.
+     *
+     * ## What this pins, and what it does NOT
+     *
+     * It pins the family property: a `DELETE` on the parent ends the child `ABORTED` with a
+     * completed row, and the parent's terminal event is `execution_aborted`/`cancelled` inside
+     * [CANCEL_BUDGET_SECONDS] — not a `pipeline_failed`/timeout at the context's 15-second
+     * deadline, which is what a child left running would produce, because the parent's
+     * `coroutineScope` cannot rethrow until every child coroutine has finished and the child's is
+     * blocked inside `executeQuery`. Until this test the `DELETE` trigger had no composition
+     * coverage at all; only the parent-*timeout* trigger did (@Order(4)).
+     *
+     * It does **not** falsify A1: measured, it stays green with the latch and the re-issue both
+     * reverted. The DELETE cannot be aimed at the child's registration window from out here —
+     * by the time it lands the child's statement is executing and H2 honours the cancel on its
+     * own. Pinning the window needs the descheduling injected, which only the `dag`-level tests
+     * can do (`CancellationTest`'s two race cases and `CancelRaceStressTest`). Saying so is the
+     * point: this is a regression test for the family path, not evidence for the race fix.
+     */
+    @Test
+    @Order(5)
+    fun `a DELETE on the parent aborts a child whose statement is still in the registration window`() {
+        val parentId = createSlowFamily("cancel")
+
+        val cancelBudget = Duration.ofSeconds(CANCEL_BUDGET_SECONDS)
+        val correlationId = UUID.randomUUID().toString()
+        val stream = CompletableFuture.supplyAsync { consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, correlationId) }
+
+        // The child's row is written as the child execution starts — before its node runs, and so
+        // before the statement exists. Cancelling on that signal puts the DELETE inside the window
+        // rather than politely after it. The parent is found by its CORRELATION id: a subquery
+        // into `pipelines` would silently correlate (that table's key is `id`, so `pipeline_id`
+        // resolves to the OUTER query's column and the predicate becomes a tautology).
+        val parentExecutionId = awaitExecution("correlation_id = '$correlationId' AND parent_execution_id IS NULL", cancelBudget)
+        awaitExecution("parent_execution_id = '$parentExecutionId'", cancelBudget)
+
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .delete("/api/v1/executions/$parentExecutionId")
+            .then()
+            .statusCode(204)
+
+        val events = stream.get(CANCEL_BUDGET_SECONDS, TimeUnit.SECONDS)
+
+        // A cancel, not a deadline: the reason names the DELETE, and arriving at all inside the
+        // budget means the child's statement was really interrupted.
+        events.last().first shouldBe "execution_aborted"
+        events.last().second["reason"].asText() shouldBe "cancelled"
+
+        val child =
+            queryExecutions(
+                "SELECT status, completed_at FROM pipeline_executions WHERE parent_execution_id = '$parentExecutionId'",
+            ) { rs -> rs.getString(1) to rs.getTimestamp(2) }.single()
+        child.first shouldBe "ABORTED"
+        child.second shouldNotBe null
     }
 
     @Test
@@ -389,7 +427,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val parentExecutionId = events.last().second["execution_id"].asText()
@@ -422,7 +460,7 @@ class PipelineCompositionE2eTest {
     fun `the child run standalone computes the quarter itself`() {
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(childPipelineId(), UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, childPipelineId(), UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val executionId = events.last().second["execution_id"].asText()
@@ -462,7 +500,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val parentExecutionId = events.last().second["execution_id"].asText()
@@ -510,6 +548,36 @@ class PipelineCompositionE2eTest {
     }
 
     // ------------------------------------------------------------ helpers
+
+    /**
+     * A parent → child family over [SLOW_H2_SQL], named by [suffix]; returns the parent's id.
+     *
+     * Both long-running scenarios need the identical shape and differ only in what stops it —
+     * the parent's deadline (@Order(4)) or a `DELETE` on the parent (@Order(5), 086 A3).
+     */
+    private fun createSlowFamily(suffix: String): String {
+        createTemplate("test/comp_$suffix.sql", "H2", "Composition ${suffix.replaceFirstChar { it.uppercase() }}", SLOW_H2_SQL)
+        createPipeline(
+            "test/comp_${suffix}_leaf",
+            "Composition $suffix Leaf",
+            listOf(
+                mapOf(
+                    "id" to "slow_scan",
+                    "description" to "A query H2 really iterates, so the stop lands mid-flight",
+                    "type" to "DQL",
+                    "source" to H2_DATASOURCE,
+                    "template" to mapOf("id" to "test/comp_$suffix.sql", "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to emptyList<String>(),
+                ),
+            ),
+        )
+        return createPipeline(
+            "test/comp_${suffix}_parent",
+            "Composition $suffix Parent",
+            listOf(pipelineNode("run_${suffix}_leaf", "test/comp_${suffix}_leaf", 1)),
+        )
+    }
 
     private fun pipelineNode(
         id: String,
@@ -715,30 +783,6 @@ class PipelineCompositionE2eTest {
             .post("/api/v1/pipelines")
     }
 
-    /**
-     * Reads the SSE stream to its end (EOF is the completion signal — see TracerBulletE2eTest),
-     * returning (event name, payload) pairs. Callers wrap this in assertTimeoutPreemptively:
-     * the client sets no read timeout of its own.
-     */
-    private fun consumeExecutionStream(
-        pipelineId: String,
-        correlationId: String,
-    ): List<Pair<String, JsonNode>> {
-        val request =
-            HttpRequest
-                .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                .header("DP-Correlation-Id", correlationId)
-                .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream")
-                .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
-                .build()
-        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
-        response.statusCode() shouldBe 200
-
-        return E2eSse.parseEvents(response.body(), mapper)
-    }
-
     /** The H2 seed runs before datasource registration: first connection creates the database. */
     private fun seedH2() {
         DriverManager.getConnection(H2_JDBC_URL, H2_USER, H2_PASSWORD).use { connection ->
@@ -796,6 +840,13 @@ class PipelineCompositionE2eTest {
     companion object {
         private const val SECRET_BYTES = 32
         private const val SSE_BUDGET_MINUTES = 2L
+
+        /**
+         * 086 A3's budget. Below the context's 15-second execution deadline, so a run that reaches
+         * this bound cannot have been rescued by the parent's timeout, and far below the child's
+         * own 60-second `node-query-timeout-seconds` backstop.
+         */
+        private const val CANCEL_BUDGET_SECONDS = 12L
         private const val API_KEY_HEADER = "DP-API-Key"
 
         private const val H2_DATASOURCE = "h2-comp"
@@ -886,4 +937,72 @@ class PipelineCompositionE2eTest {
             oidc.close()
         }
     }
+}
+
+/**
+ * Runs a metadata-DB query against the Testcontainers Postgres, collecting every row.
+ *
+ * At file scope because it needs only the shared container, and keeping it out of the test class: they need only the
+ * shared container, and keeping them out of the test class keeps that class inside detekt's
+ * `LargeClass` bound as scenarios are added.
+ */
+private fun <T> queryExecutions(
+    sql: String,
+    read: (java.sql.ResultSet) -> T,
+): List<T> =
+    DriverManager
+        .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+        .use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(sql).use { rs -> generateSequence { if (rs.next()) read(rs) else null }.toList() }
+            }
+        }
+
+/** Polls `pipeline_executions` for the single row matching [predicate], and returns its id. */
+private fun awaitExecution(
+    predicate: String,
+    budget: Duration,
+): String {
+    val deadline = System.nanoTime() + budget.toNanos()
+    while (System.nanoTime() < deadline) {
+        queryExecutions("SELECT execution_id::text FROM pipeline_executions WHERE $predicate") { it.getString(1) }
+            .firstOrNull()
+            ?.let { return it }
+        Thread.sleep(EXECUTION_POLL_MS)
+    }
+    val dump =
+        queryExecutions(
+            "SELECT execution_id::text, status, parent_execution_id::text, triggered_via FROM pipeline_executions " +
+                "ORDER BY started_at DESC LIMIT 10",
+        ) { rs -> "${rs.getString(1)} ${rs.getString(2)} parent=${rs.getString(3)} via=${rs.getString(4)}" }
+    throw AssertionError("no pipeline_executions row appeared for: $predicate; recent rows:\n" + dump.joinToString("\n"))
+}
+
+private const val EXECUTION_POLL_MS = 25L
+
+/**
+ * Reads the SSE stream to its end (EOF is the completion signal — see TracerBulletE2eTest),
+ * returning (event name, payload) pairs. Callers wrap this in assertTimeoutPreemptively:
+ * the client sets no read timeout of its own.
+ */
+private fun consumeExecutionStream(
+    port: Int,
+    apiKey: String,
+    mapper: ObjectMapper,
+    pipelineId: String,
+    correlationId: String,
+): List<Pair<String, JsonNode>> {
+    val request =
+        HttpRequest
+            .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
+            .header("DP-API-Key", apiKey)
+            .header("DP-Correlation-Id", correlationId)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
+            .build()
+    val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+    response.statusCode() shouldBe 200
+
+    return E2eSse.parseEvents(response.body(), mapper)
 }
