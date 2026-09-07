@@ -403,7 +403,7 @@ class NodeRunner(
             statementFor(connection, bound).use { statement ->
                 statement.queryTimeout = timeout
                 ctx.handle.withStatement(node.id, statement) {
-                    query(statement, bound).use { rs -> block(rs) }
+                    ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) }.use { rs -> block(rs) }
                 }
             }
         }
@@ -455,14 +455,14 @@ class NodeRunner(
                     statementFor(connection, fullBound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
-                            update(statement, fullBound)
+                            ctx.handle.whileExecuting(node.id, statement) { update(statement, fullBound) }
                             // The row count runs on its OWN statement: H2 (and other drivers)
                             // refuse Statement-level `executeQuery(String)` on a prepared
                             // statement, so the count cannot ride the one that executed the CTAS.
                             connection.createStatement().use { countStatement ->
                                 countStatement.queryTimeout = timeout
                                 ctx.handle.withStatement(node.id, countStatement) {
-                                    countRows(countStatement, table)
+                                    ctx.handle.whileExecuting(node.id, countStatement) { countRows(countStatement, table) }
                                 }
                             }
                         }
@@ -502,10 +502,12 @@ class NodeRunner(
                     statementFor(connection, bound).use { statement ->
                         statement.queryTimeout = timeout
                         ctx.handle.withStatement(node.id, statement) {
-                            if (node.type == NodeType.DML) {
-                                update(statement, bound).toLong()
-                            } else {
-                                executeDdl(statement, bound)
+                            ctx.handle.whileExecuting(node.id, statement) {
+                                if (node.type == NodeType.DML) {
+                                    update(statement, bound).toLong()
+                                } else {
+                                    executeDdl(statement, bound)
+                                }
                             }
                         }
                     }
@@ -698,7 +700,7 @@ class NodeRunner(
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                val rs = phase(NodePhase.EXECUTE, node.id) { query(statement, bound) }
+                val rs = phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { query(statement, bound) } }
                 // Every branch consumes the cursor INSIDE this `use` — no live ResultSet escapes.
                 dispatchOutput(node, rs, ctx, startedAt, dialect)
             }
@@ -822,7 +824,10 @@ class NodeRunner(
             // unchanged; binding is the one thing the parameter case adds (042 C1/C4).
             if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
             ctx.handle.withStatement(node.id, statement) {
-                val affected = phase(NodePhase.EXECUTE, node.id) { statement.executeUpdate().toLong() }
+                val affected =
+                    phase(NodePhase.EXECUTE, node.id) {
+                        ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
+                    }
                 NodeResult.of(node.id, affected, startedAt)
             }
         }
@@ -838,7 +843,7 @@ class NodeRunner(
         statementFor(conn, bound).use { statement ->
             statement.queryTimeout = timeout
             ctx.handle.withStatement(node.id, statement) {
-                phase(NodePhase.EXECUTE, node.id) { executeDdl(statement, bound) }
+                phase(NodePhase.EXECUTE, node.id) { ctx.handle.whileExecuting(node.id, statement) { executeDdl(statement, bound) } }
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
