@@ -234,7 +234,7 @@ class BootstrapCredentialResyncIntegrationTest {
     @Test
     fun `an UNREADABLE stored credential is left alone and named as a key problem, not resynced`() {
         register(ORIGINAL_PASSWORD)
-        jdbc.jdbcTemplate.update("UPDATE datasources SET password_encrypted = ? WHERE name = '$NAME'", byteArrayOf(1, 2, 3))
+        jdbc.jdbcTemplate.update("UPDATE datasources SET credential_encrypted = ? WHERE name = '$NAME'", byteArrayOf(1, 2, 3))
         val beforeBoot = preV9Snapshot()
 
         val (summary, lines) = capturingLogs { registrar().register(bootstrapFile(), actor) }
@@ -338,7 +338,7 @@ class BootstrapCredentialResyncIntegrationTest {
             dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
             jdbcUrl = sampleUrl(),
             username = ROLE,
-            password = password,
+            secret = password,
             isReadonly = true,
         )
 
@@ -422,19 +422,19 @@ class BootstrapCredentialResyncIntegrationTest {
 
     private fun passwordHex(): String? =
         jdbc.queryForObject(
-            "SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = :n",
+            "SELECT encode(credential_encrypted, 'hex') FROM datasources WHERE name = :n",
             mapOf("n" to NAME),
             String::class.java,
         )
 
     /** Everything, credential and observation columns included — for "nothing moved at all". */
-    private fun snapshot(): List<Map<String, Any?>> = rows(PRE_V9_COLUMNS + ", encode(password_encrypted, 'hex') AS pw" + V9_COLUMNS)
+    private fun snapshot(): List<Map<String, Any?>> = rows(PRE_V9_COLUMNS + ", encode(credential_encrypted, 'hex') AS pw" + V9_COLUMNS)
 
     /**
      * Every column that existed BEFORE V9 — the definition of the datasource, `updated_at` and
      * the credential included. This is the byte-identity the rule-1 guarantee is about.
      */
-    private fun preV9Snapshot(): List<Map<String, Any?>> = rows(PRE_V9_COLUMNS + ", encode(password_encrypted, 'hex') AS pw")
+    private fun preV9Snapshot(): List<Map<String, Any?>> = rows(PRE_V9_COLUMNS + ", encode(credential_encrypted, 'hex') AS pw")
 
     /**
      * The definition WITHOUT the credential and WITHOUT `updated_at` — for the resync, where

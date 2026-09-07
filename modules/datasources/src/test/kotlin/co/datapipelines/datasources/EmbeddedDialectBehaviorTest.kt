@@ -491,10 +491,14 @@ class EmbeddedDialectBehaviorTest {
             displayName = "Embedded ${dialect.wire}",
             dialect = dialect,
             jdbcUrl = url,
-            username = "",
-            // §9 requires a password on create even where the engine ignores it: an embedded
-            // file/memory database has no authentication, so the value is inert here.
-            password = "embedded-no-auth",
+            // §3.4: an embedded file/memory database has no authentication at all, so the
+            // truthful kind is `none` and BOTH fields are absent. Before 087 this fixture
+            // carried `username = ""` and a `secret = "embedded-no-auth"` placeholder, purely
+            // because §9 required a password on create — the same lie the demo's bootstrap
+            // entries carried, and the one V13 removes.
+            credentialKind = CredentialKind.NONE,
+            username = null,
+            secret = null,
         )
 
     private companion object {

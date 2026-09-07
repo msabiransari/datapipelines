@@ -68,21 +68,21 @@ class DatasourceRegistryIntegrationTest {
         )
 
     @Test
-    fun `save encrypts the password and get never returns it`() {
+    fun `save encrypts the credential and get never returns it`() {
         val registry = registry()
-        val stored = registry.save(Fixtures.h2(name = "warehouse", password = "topsecret"), owner)
+        val stored = registry.save(Fixtures.h2(name = "warehouse", secret = "topsecret"), owner)
 
         // Neither the returned object nor a subsequent get carries the plaintext.
-        stored.password.shouldBeNull()
+        stored.secret.shouldBeNull()
         registry
             .get("warehouse")
             .shouldNotBeNull()
-            .password
+            .secret
             .shouldBeNull()
         // The row on disk holds ciphertext, not the plaintext.
         val onDisk =
             jdbc.queryForObject(
-                "SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = 'warehouse'",
+                "SELECT encode(credential_encrypted, 'hex') FROM datasources WHERE name = 'warehouse'",
                 emptyMap<String, Any>(),
                 String::class.java,
             )
@@ -92,7 +92,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `poolFor builds a real pool - decrypting once - and leases a working connection`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "live", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "live", secret = "pw"), owner)
 
         val datasource = registry.get("live").shouldNotBeNull()
         registry.poolFor(datasource).leaseConnection().use { connection ->
@@ -110,7 +110,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `is_readonly is persisted by save in both directions - the surfaces slice's writable flag`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "flagged", password = "pw", isReadonly = true), owner)
+        registry.save(Fixtures.h2(name = "flagged", secret = "pw", isReadonly = true), owner)
 
         registry.get("flagged").shouldNotBeNull().isReadonly shouldBe true
 
@@ -118,13 +118,13 @@ class DatasourceRegistryIntegrationTest {
         // that evicts the pool); the WEB layer's absent-flag-keeps-stored rule is enforced
         // by the controller reading the stored row first — this module persists what it is
         // handed, by design.
-        registry.save(Fixtures.h2(name = "flagged", password = "pw2", isReadonly = false), owner)
+        registry.save(Fixtures.h2(name = "flagged", secret = "pw2", isReadonly = false), owner)
         jdbc.queryForObject(
             "SELECT is_readonly FROM datasources WHERE name = 'flagged'",
             emptyMap<String, Any>(),
             Boolean::class.java,
         ) shouldBe false
-        registry.save(Fixtures.h2(name = "flagged", password = "pw3", isReadonly = true), owner)
+        registry.save(Fixtures.h2(name = "flagged", secret = "pw3", isReadonly = true), owner)
         jdbc.queryForObject(
             "SELECT is_readonly FROM datasources WHERE name = 'flagged'",
             emptyMap<String, Any>(),
@@ -135,7 +135,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `getLive sees a row-level readonly flip immediately - past the metadata cache (D10)`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "flippy", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "flippy", secret = "pw"), owner)
         // Warm the cache with the writable entry — this is exactly what save-time validation
         // read when the pipeline was saved.
         registry.get("flippy").shouldNotBeNull().isReadonly shouldBe false
@@ -151,7 +151,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `isReadonlyLive is the flag-only live read - sees a row-level flip, and null for an out-of-band soft-delete (044 F2 F7)`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "flagged_live", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "flagged_live", secret = "pw"), owner)
         registry.get("flagged_live") // warm the cache with the writable entry
 
         jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'flagged_live'", emptyMap<String, Any>())
@@ -173,7 +173,7 @@ class DatasourceRegistryIntegrationTest {
     fun `getVisibleLive sees a row-level flip immediately while getVisible serves the cache (044 F4)`() {
         val registry = registry()
         val workspace = insertWorkspace("live_ws")
-        registry.save(Fixtures.h2(name = "bound_live", password = "pw").copy(workspaceId = workspace), owner)
+        registry.save(Fixtures.h2(name = "bound_live", secret = "pw").copy(workspaceId = workspace), owner)
         // Warm the visibility cache with the writable entry — what a save validated against.
         registry.getVisible("bound_live", workspace).shouldNotBeNull().isReadonly shouldBe false
 
@@ -192,7 +192,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `a readonly row builds a read-only pool - real HikariConfig and pool build (layer 2b)`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "ro_pool", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "ro_pool", secret = "pw"), owner)
         jdbc.update("UPDATE datasources SET is_readonly = TRUE WHERE name = 'ro_pool'", emptyMap<String, Any>())
 
         // The pool factory reloads exactly this row (past the cache) and re-attaches the
@@ -201,7 +201,7 @@ class DatasourceRegistryIntegrationTest {
         // built from it — an assertion on a mocked adapter would prove the mock.
         val live = registry.getLive("ro_pool").shouldNotBeNull()
         live.isReadonly shouldBe true
-        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(password = "pw"))
+        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(secret = "pw"))
         config.isReadOnly shouldBe true
         config.initializationFailTimeout = -1
         HikariDataSource(config).use { pool -> pool.isReadOnly shouldBe true }
@@ -215,7 +215,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `testConnection reports connected with a server version for a reachable datasource`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "probe", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "probe", secret = "pw"), owner)
 
         val result = registry.testConnection("probe").shouldNotBeNull()
 
@@ -237,7 +237,7 @@ class DatasourceRegistryIntegrationTest {
     fun `testConnection records its outcome on the row and refreshes the cached read`() {
         val registry = registry()
         val repository = DatasourceRepository(jdbc)
-        registry.save(Fixtures.h2(name = "recorded", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "recorded", secret = "pw"), owner)
         // Warm the cache so the assertion below cannot pass on a cold read by accident.
         registry
             .get("recorded")
@@ -313,7 +313,7 @@ class DatasourceRegistryIntegrationTest {
         registry.save(
             Fixtures
                 .postgres(name = "leaky", jdbcUrl = "jdbc:postgresql://192.0.2.1:5432/nope?ApplicationName=dp")
-                .copy(username = "admin", password = "hunter2-the-secret"),
+                .copy(username = "admin", secret = "hunter2-the-secret"),
             owner,
         )
 
@@ -334,7 +334,7 @@ class DatasourceRegistryIntegrationTest {
         val registry = registry()
         jdbc.update(
             """
-            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted, created_by)
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted, created_by)
             VALUES ('nodriver', 'No driver', 'ORACLE', 'jdbc:oracle:thin:@//h:1521/svc', 'app', :pw, :owner)
             """.trimIndent(),
             mapOf("pw" to encryptor.encrypt("pw", "nodriver"), "owner" to owner),
@@ -349,7 +349,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `delete is blocked while a pipeline references the datasource`() {
         val registry = registry(references = { name -> if (name == "used") listOf(reference("pipeline_a")) else emptyList() })
-        registry.save(Fixtures.h2(name = "used", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "used", secret = "pw"), owner)
 
         val result = registry.delete("used")
 
@@ -363,7 +363,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `delete soft-deletes an unreferenced datasource`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "free", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "free", secret = "pw"), owner)
 
         registry.delete("free").deleted shouldBe true
         registry.exists("free") shouldBe false
@@ -372,9 +372,9 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `save on an existing name updates in place and keeps the password when omitted`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "cfg", password = "keepme"), owner)
+        registry.save(Fixtures.h2(name = "cfg", secret = "keepme"), owner)
 
-        val updated = registry.save(Fixtures.h2(name = "cfg", password = null).copy(displayName = "Config v2"), owner)
+        val updated = registry.save(Fixtures.h2(name = "cfg", secret = null).copy(displayName = "Config v2"), owner)
 
         updated.displayName shouldBe "Config v2"
         // The datasource remains usable after an update that omitted the password. (Retention of
@@ -389,7 +389,7 @@ class DatasourceRegistryIntegrationTest {
         // same entry invalid. A dry-run endpoint built on validate() would diverge from what
         // save actually persists. Both paths now normalize first: agreement by construction.
         val registry = registry()
-        val raw = Fixtures.h2(name = "blank_entry", password = "pw").copy(introspectionIncludeSchemas = listOf(" ", "apex"))
+        val raw = Fixtures.h2(name = "blank_entry", secret = "pw").copy(introspectionIncludeSchemas = listOf(" ", "apex"))
 
         registry.validate(raw).valid shouldBe true
 
@@ -406,7 +406,7 @@ class DatasourceRegistryIntegrationTest {
         // exactly what PUT accepts.
         jdbc.update(
             """
-            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted,
                                      introspection_include_schemas_json, created_by)
             VALUES ('roundtrip', 'Round Trip', 'H2', 'jdbc:h2:mem:roundtrip', 'sa', :pw,
                     CAST('[" ", "apex", "APEX"]' AS jsonb), :owner)
@@ -418,7 +418,7 @@ class DatasourceRegistryIntegrationTest {
         val restored = registry.get("roundtrip").shouldNotBeNull()
         restored.introspectionIncludeSchemas shouldBe listOf("apex")
 
-        val resaved = registry.save(restored.copy(password = "p"), owner)
+        val resaved = registry.save(restored.copy(secret = "p"), owner)
 
         resaved.introspectionIncludeSchemas shouldBe listOf("apex")
         checkNotNull(registry.get("roundtrip")).introspectionIncludeSchemas shouldBe listOf("apex")
@@ -433,7 +433,7 @@ class DatasourceRegistryIntegrationTest {
         // boundary GET, PUT-revalidation and pool build all cross.
         jdbc.update(
             """
-            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted,
                                      properties_json, created_by)
             VALUES ('oob_managed', 'Out of band', 'H2', 'jdbc:h2:mem:oob_managed', 'sa', :pw,
                     CAST('{"hikari": {"readOnly": true, "maximumPoolSize": 5}}' AS jsonb), :owner)
@@ -448,13 +448,13 @@ class DatasourceRegistryIntegrationTest {
         restored.properties.hikari shouldBe mapOf("maximumPoolSize" to 5)
 
         // The unmodified round-trip saves (400 before 050).
-        val resaved = registry.save(restored.copy(password = "p"), owner)
+        val resaved = registry.save(restored.copy(secret = "p"), owner)
         resaved.properties.hikari shouldBe mapOf("maximumPoolSize" to 5)
 
         // And the pool the row builds carries the ENTITY's flag (false), never the stored key's
         // (true) — proven on a real HikariConfig, the layer-2b test's discipline.
         val live = registry.getLive("oob_managed").shouldNotBeNull()
-        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(password = "p"))
+        val config = DialectAdapters.forDialect(live.dialect).buildHikariConfig(live.copy(secret = "p"))
         config.isReadOnly shouldBe false
         config.maximumPoolSize shouldBe 5
     }
@@ -465,14 +465,14 @@ class DatasourceRegistryIntegrationTest {
         // was replaced, so a registry that forgot to evict would have stayed green while every
         // execution kept querying the OLD database after a PUT repointed the datasource.
         val registry = registry()
-        registry.save(Fixtures.h2(name = "movable", jdbcUrl = "jdbc:h2:mem:before_move", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "movable", jdbcUrl = "jdbc:h2:mem:before_move", secret = "pw"), owner)
 
         val before = registry.get("movable").shouldNotBeNull()
         registry.poolFor(before).leaseConnection().use { connection ->
             connection.createStatement().use { it.execute("CREATE TABLE marker_before (id INT)") }
         }
 
-        registry.save(Fixtures.h2(name = "movable", jdbcUrl = "jdbc:h2:mem:after_move", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "movable", jdbcUrl = "jdbc:h2:mem:after_move", secret = "pw"), owner)
 
         val after = registry.get("movable").shouldNotBeNull()
         after.jdbcUrl shouldBe "jdbc:h2:mem:after_move"
@@ -489,12 +489,12 @@ class DatasourceRegistryIntegrationTest {
         // §6.3. The load-bearing half is invalidation: a cache that never dropped an entry would
         // keep serving a deleted datasource, and pipeline validation would keep accepting it.
         val registry = registry()
-        registry.save(Fixtures.h2(name = "cached", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "cached", secret = "pw"), owner)
 
         registry.get("cached").shouldNotBeNull().displayName shouldBe "Test H2"
         registry.dialectOf("cached") shouldBe Dialect.H2
 
-        registry.save(Fixtures.h2(name = "cached", password = "pw").copy(displayName = "Renamed"), owner)
+        registry.save(Fixtures.h2(name = "cached", secret = "pw").copy(displayName = "Renamed"), owner)
         registry.get("cached").shouldNotBeNull().displayName shouldBe "Renamed"
 
         registry.delete("cached").deleted shouldBe true
@@ -521,9 +521,9 @@ class DatasourceRegistryIntegrationTest {
     fun `an update publishes the name after the row changed - the channel's only payload`() {
         val publisher = RecordingPublisher()
         val registry = registry(invalidation = publisher)
-        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_a", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_a", secret = "pw"), owner)
 
-        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_b", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "repointed", jdbcUrl = "jdbc:h2:mem:repoint_b", secret = "pw"), owner)
 
         // Publish fires on the UPDATE — the save shape that can leave a peer's pool stale.
         // (Create publishes nothing: no pool for the name can exist anywhere until first use,
@@ -541,7 +541,7 @@ class DatasourceRegistryIntegrationTest {
                 invalidation = publisher,
                 references = { name -> if (name == "guarded") listOf(reference("p1")) else emptyList() },
             )
-        usedUp.save(Fixtures.h2(name = "guarded", password = "pw"), owner)
+        usedUp.save(Fixtures.h2(name = "guarded", secret = "pw"), owner)
         usedUp.delete("guarded")
         publisher.published.shouldBeEmpty()
 
@@ -549,7 +549,7 @@ class DatasourceRegistryIntegrationTest {
         registry.delete("never_existed")
         publisher.published.shouldBeEmpty()
 
-        registry.save(Fixtures.h2(name = "dropped", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "dropped", secret = "pw"), owner)
         registry.delete("dropped").deleted shouldBe true
         publisher.published shouldBe listOf("dropped")
     }
@@ -557,7 +557,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `evictPool is the subscriber's target - drains a live pool, no-ops without one`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "pooled", jdbcUrl = "jdbc:h2:mem:evict_target", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "pooled", jdbcUrl = "jdbc:h2:mem:evict_target", secret = "pw"), owner)
         val ds = registry.get("pooled").shouldNotBeNull()
         // Build the pool, then drain it through the interface the Redis subscriber calls.
         registry.poolFor(ds)
@@ -571,10 +571,10 @@ class DatasourceRegistryIntegrationTest {
         // so save() takes the create branch and the database — the only atomic authority — raises
         // duplicate_name from the primary-key violation.
         val registry = registry()
-        registry.save(Fixtures.h2(name = "gone", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "gone", secret = "pw"), owner)
         registry.delete("gone").deleted shouldBe true
 
-        val thrown = shouldThrow<DatapipelinesException> { registry.save(Fixtures.h2(name = "gone", password = "pw"), owner) }
+        val thrown = shouldThrow<DatapipelinesException> { registry.save(Fixtures.h2(name = "gone", secret = "pw"), owner) }
 
         thrown.code shouldBe DatasourceErrorCodes.DUPLICATE_NAME
     }
@@ -582,7 +582,7 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `dialectOf resolves a registered datasource and is null otherwise`() {
         val registry = registry()
-        registry.save(Fixtures.h2(name = "known", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "known", secret = "pw"), owner)
 
         registry.dialectOf("known") shouldBe Dialect.H2
         registry.dialectOf("missing").shouldBeNull()
@@ -607,7 +607,7 @@ class DatasourceRegistryIntegrationTest {
         // that difference is the whole point of the amended model.
         val sink = RecordingAuditSink()
         val registry = registry(auditSink = sink)
-        registry.save(Fixtures.h2(name = "audited", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "audited", secret = "pw"), owner)
         val datasource = registry.get("audited").shouldNotBeNull()
 
         registry.poolFor(datasource).leaseConnection().use { }
@@ -623,10 +623,10 @@ class DatasourceRegistryIntegrationTest {
     fun `an update that evicts a live pool emits exactly one datasource_pool_rebuild, with the actor`() {
         val sink = RecordingAuditSink()
         val registry = registry(auditSink = sink)
-        registry.save(Fixtures.h2(name = "rebuilt", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "rebuilt", secret = "pw"), owner)
         registry.poolFor(registry.get("rebuilt").shouldNotBeNull()).leaseConnection().use { }
 
-        registry.save(Fixtures.h2(name = "rebuilt", password = "pw").copy(displayName = "v2"), owner)
+        registry.save(Fixtures.h2(name = "rebuilt", secret = "pw").copy(displayName = "v2"), owner)
 
         sink.countOf(DatasourceAuditEvents.POOL_REBUILD) shouldBe 1
         sink.events.single { it.event == DatasourceAuditEvents.POOL_REBUILD }.actor shouldBe owner.toString()
@@ -636,9 +636,9 @@ class DatasourceRegistryIntegrationTest {
     fun `an update with no live pool decrypts nothing and so emits no rebuild event`() {
         val sink = RecordingAuditSink()
         val registry = registry(auditSink = sink)
-        registry.save(Fixtures.h2(name = "never_leased", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "never_leased", secret = "pw"), owner)
 
-        registry.save(Fixtures.h2(name = "never_leased", password = "pw").copy(displayName = "v2"), owner)
+        registry.save(Fixtures.h2(name = "never_leased", secret = "pw").copy(displayName = "v2"), owner)
 
         sink.eventNames() shouldBe emptyList()
     }
@@ -647,7 +647,7 @@ class DatasourceRegistryIntegrationTest {
     fun `testConnection emits exactly one datasource_connection_test audit event`() {
         val sink = RecordingAuditSink()
         val registry = registry(auditSink = sink)
-        registry.save(Fixtures.h2(name = "tested", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "tested", secret = "pw"), owner)
 
         registry.testConnection("tested").shouldNotBeNull()
 
@@ -671,7 +671,7 @@ class DatasourceRegistryIntegrationTest {
         // implying a decrypt that does not happen.
         val sink = RecordingAuditSink()
         val registry = registry(auditSink = sink)
-        registry.save(Fixtures.h2(name = "leased", password = "pw"), owner)
+        registry.save(Fixtures.h2(name = "leased", secret = "pw"), owner)
         val datasource = registry.get("leased").shouldNotBeNull()
         val pool = registry.poolFor(datasource)
 
@@ -690,7 +690,7 @@ class DatasourceRegistryIntegrationTest {
         // entries are normalized, and the exemption matches the driver-reported spelling.
         val registry = registry()
         registry.save(
-            Fixtures.h2(name = "mixed", password = "pw", introspectionIncludeSchemas = listOf(" APEX_Reporting ", "Sales")),
+            Fixtures.h2(name = "mixed", secret = "pw", introspectionIncludeSchemas = listOf(" APEX_Reporting ", "Sales")),
             owner,
         )
 

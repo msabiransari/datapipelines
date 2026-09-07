@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.4 (frozen contract — additive-only changes after this point)
+**Status:** v2.5 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-05
@@ -941,8 +941,11 @@ Content-Type: application/json
   "display_name": "Production Postgres",
   "dialect": "POSTGRES",
   "jdbc_url": "jdbc:postgresql://host:5432/db",
-  "username": "readonly_user",
-  "password": "...",                // write-only; never returned in GET
+  "credential": {                   // §3.4 — WHAT the credential is
+    "kind": "password",             // password | token | private_key | service_account_json | none
+    "username": "readonly_user",
+    "secret": "..."                 // write-only; never returned in GET
+  },
   "introspection_include_schemas": ["apex_reporting"],  // OPTIONAL — §9.7 escape hatch for the
                                                         // system-schema exclusion (exact names,
                                                         // no patterns; lowercased at bind)
@@ -957,6 +960,8 @@ Content-Type: application/json
   }
 }
 ```
+
+**The credential ([Datasources §3.4](datasources.md#34-credential-kinds)).** Send EITHER the `credential` object or the legacy top-level `username`/`password` pair, which means `kind: "password"` and stays accepted under the frozen-shape rule. A body carrying BOTH is `400 datasource.validation.properties_invalid` — the two can disagree and there is no defensible winner. `kind: "none"` carries neither field and is the shape for a file database or an IAM role; `kind: "token"` carries a secret and may name a username. A kind the dialect's pinned driver cannot authenticate with is `400 datasource.validation.properties_invalid` naming what the dialect accepts. A missing secret on create is `400 datasource.validation.password_missing` for every kind but `none`.
 
 `properties` has exactly two reserved namespaces — `hikari` (HikariCP's own camelCase property names, durations in milliseconds) and `jdbc` (driver connection properties) — validated by a test pool build at save time. See [Datasources §5](datasources.md#5-connection-pool-configuration).
 
@@ -980,7 +985,7 @@ Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints pagina
 GET /datasources/{name}
 ```
 
-Returns everything except `password`, plus the additive `workspace` (the bound workspace's name, `null` = global), `readonly` (workspaces design §9) and `last_test` fields. `last_test` is the outcome of the last connection test — `{"tested_at": "...", "ok": true|false, "message": "..."}`, or `null` when the datasource has never been probed ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)); it is also on every `GET /datasources` row, which is what lets a reader see a credential has stopped working without running an execution. A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
+Returns everything except the credential SECRET — neither `password` nor `credential.secret` — plus the additive `credential` (`{kind, username?}`, §3.4), `workspace` (the bound workspace's name, `null` = global), `readonly` (workspaces design §9) and `last_test` fields. `password_set` is derived from `credential.kind`: `false` exactly for `kind: "none"`, which genuinely has no stored credential. Top-level `username` is still returned and is `null` for the kinds that have none. `last_test` is the outcome of the last connection test — `{"tested_at": "...", "ok": true|false, "message": "..."}`, or `null` when the datasource has never been probed ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)); it is also on every `GET /datasources` row, which is what lets a reader see a credential has stopped working without running an execution. A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
 
 ### 9.4 Update datasource
 
@@ -988,7 +993,7 @@ Returns everything except `password`, plus the additive `workspace` (the bound w
 PUT /datasources/{name}
 ```
 
-Updates connection details. Password is optional — omit to keep existing. The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent. The `global`/`readonly` flags are optional — absent keeps the stored value, present attempts a gated write: `global` (either direction) and mutating a global datasource are admin-only, and `readonly` on a GLOBAL datasource is admin-only (workspaces design §6 last paragraph); a member may flip `readonly` on their workspace-bound datasource when the D8 gate is on. An accepted flag write crosses the same registry save path as every update — the connection pool is drained and rebuilds under the new settings at the next lease. Errors: `400 datasource.validation.workspace_forbidden` for the refusals.
+Updates connection details. The credential secret is optional — omit `credential.secret` (or the legacy `password`) to keep the stored one. `credential.kind` is part of the body like every other field: changing it to `none` clears the stored credential, and changing it to ANY other kind requires a secret in the same request — `400 datasource.validation.password_missing` otherwise, because keeping the stored secret would relabel it as something it is not ([Datasources §3.4](datasources.md#34-credential-kinds)). The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent. The `global`/`readonly` flags are optional — absent keeps the stored value, present attempts a gated write: `global` (either direction) and mutating a global datasource are admin-only, and `readonly` on a GLOBAL datasource is admin-only (workspaces design §6 last paragraph); a member may flip `readonly` on their workspace-bound datasource when the D8 gate is on. An accepted flag write crosses the same registry save path as every update — the connection pool is drained and rebuilds under the new settings at the next lease. Errors: `400 datasource.validation.workspace_forbidden` for the refusals.
 
 ### 9.5 Delete datasource
 
@@ -1636,3 +1641,4 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 | 2026-09-05 | v2.2 | 067 pipeline folders | Additive and route-free: §5.1 records that a pipeline `name` is now a **folder path** (the template grammar, [Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)) — every pre-067 name is still valid as a one-segment path, so no request shape changes and no client breaks. §5.7 records that `q` matches across full paths, and that folder BROWSING deliberately stays off REST: it is served by `GET /partials/pipelines?prefix=…` and by MCP `pipelines_list {prefix}`. **No route changes**, because a pipeline is UUID-addressed — the `%2F` problem that forced v2.0 for templates cannot arise here. |
 | 2026-09-05 | v2.3 | 074 published endpoints | New **§19**: a released, side-effect-free pipeline served as `GET /api/x/…`, answering the `data_ready` payload verbatim. One catch-all handler over a registry — never runtime route registration (R-EP1). Ambiguous paths are refused at publish (`endpoint.path_conflict`) rather than resolved by precedence, so at request time at most one pattern matches. Validation reports every defect at once and is strict about unknown query parameters. `202` on timeout with the execution still running (R-EP3), never `504`. §3.6's registry gains `DP-Result-Page-Rows` (R-EP4 — one contract, honoured by §6's execute too) and the `DP-Execution-Id` response header. Management is `/api/v1/endpoints`, addressed by `?path=` for the same measured reason §8's templates are. |
 | 2026-09-05 | v2.4 | 077 mandatory folders | §5.1: a pipeline `name` needs a **folder** — 2–10 segments, not 1–10 ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)). `POST /api/v1/pipelines` and `POST /api/v1/templates` answer `400` with the existing codes (`pipeline.validation.name_invalid`, `template.validation.id_invalid`) for a flat name, and `details.reason` now separates `folder_required` from `grammar`. **A narrowing, not an addition** — the one kind of change §11 forbids after the freeze — taken pre-release on the owner ruling of 2026-09-05: with no rename (Template Hierarchy §4.5), a root-level name created after the tag is permanent, and the root would accrete scratch with no way to tidy it. No route changes. |
+| 2026-09-07 | v2.5 | 087 connector seams | §9.1 gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) — `{kind, username?, secret?}`; the legacy top-level `username`/`password` pair still works and means `kind: password`, and a body carrying both is `400 datasource.validation.properties_invalid`. §9.3's response gains `credential: {kind, username?}` and derives `password_set` from the kind (`false` for `none`); top-level `username` is now nullable. §9.4: `credential.kind` is part of the body — moving to `none` clears the stored credential. §9.7's `/tables` and `/tables/{table}/columns` accept `?namespace=` (repeated or dotted) beside `?schema=`, and every table row gains a `namespace` array beside `schema`; `/schemas` gains `entries: [{namespace, label}]` beside the legacy `schemas`. All additive. |

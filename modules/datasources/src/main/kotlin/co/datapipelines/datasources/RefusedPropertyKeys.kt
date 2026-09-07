@@ -44,12 +44,25 @@ internal object DialectRefusalSets {
     fun forDialect(dialect: Dialect): Set<String> =
         when (dialect) {
             Dialect.POSTGRES -> POSTGRES
+
             Dialect.ORACLE -> ORACLE
+
             Dialect.MSSQL -> MSSQL
+
             Dialect.MYSQL -> MYSQL
+
             Dialect.H2 -> H2
+
             Dialect.DUCKDB -> DUCKDB
+
             Dialect.SQLITE -> SQLITE
+
+            // LAKE shares DuckDB's set VERBATIM, including `enable_external_access`. The lake
+            // adapter opens that setting by NOT defaulting it to false, never by letting an
+            // operator set it: `properties.jdbc` is applied after `defaultProperties`, so a
+            // shrunk set would let a datasource re-close (or re-open) the engine's sandbox from
+            // row data. The refusal set is about who may set a key, not about its value.
+            Dialect.LAKE -> DUCKDB
         }
 
     /**
@@ -361,7 +374,9 @@ internal object RefusedPropertyKeys {
      * is a validation failure rather than a silent override.
      *
      * `exceptionOverrideClassName` is here per §5.6: HikariCP instantiates whatever class it
-     * names, so it is a class-loading surface, not a tuning knob.
+     * names, so it is a class-loading surface, not a tuning knob. `connectionInitSql` is here
+     * for the sibling reason (DS-SEC-22): it is connect-time SQL, and since 087 it is derived
+     * from the adapter's typed `connectionInit`.
      *
      * `readOnly` is here per workspaces design §6 layer 2b (D6): the flag is the server's to
      * derive from the entity — `config.isReadOnly = datasource.isReadonly` — so an operator
@@ -383,6 +398,14 @@ internal object RefusedPropertyKeys {
             "datasourcejndi",
             "exceptionoverrideclassname",
             "readonly",
+            // DS-SEC-22 (087): HikariCP runs `connectionInitSql` on every new connection, so a
+            // `properties.hikari.connectionInitSql` is CONNECT-TIME SQL — a §5.6 category the
+            // refusal sets already name for `INIT` (H2) and `session_init_sql_file` (DuckDB),
+            // and one that executes IN THIS PROCESS on the embedded engines. It was reachable
+            // before 087 and nobody had set it, which is luck rather than containment. It is
+            // now also server-DERIVED (`DialectAdapter.connectionInit`, §4.2A), so an operator
+            // passthrough would additionally silently replace the adapter's own setup.
+            "connectioninitsql",
         )
 
     /**
@@ -419,6 +442,63 @@ internal object RefusedPropertyKeys {
     val SECRET_VALUED_SUFFIXES = listOf("password", "passwd", "pwd", "secret", "clientkey")
 
     /**
+     * The §5.6 **named** secret-valued keys — DS-SEC-21 (087): driver properties whose VALUE is
+     * credential material and whose NAME the [SECRET_VALUED_SUFFIXES] predicate provably cannot
+     * catch.
+     *
+     * The suffix predicate is deliberately narrow (its own KDoc explains why), and narrowness has
+     * a cost the 2026-09-07 contract audit found: it covers `…password`, `…pwd`, `…secret` and
+     * `…clientkey`, so it catches Databricks's `PWD` and `OAuth2Secret` — and misses every secret
+     * whose name ends in a bare `key` or `token`. Both spellings are real, in the drivers of the
+     * connectors on the roadmap. Verified against the vendors' own current documentation, read
+     * **2026-09-07**:
+     *
+     *  - **BigQuery** (Google's `com.google.cloud:google-cloud-bigquery-jdbc`, docs.cloud.google.com
+     *    "Use the JDBC driver for BigQuery"): `OAuthPvtKey` is "the service account key … a raw
+     *    JSON keyfile object or a path to the JSON keyfile"; `OAuthAccessToken` and
+     *    `OAuthRefreshToken` are the pre-generated-token credentials. Three secrets, zero suffix
+     *    matches. `OAuthClientSecret` is caught by the suffix rule; `OAuthPvtKeyPath` and
+     *    `OAuthServiceAcctEmail` are a path and an identifier, refused here anyway because a path
+     *    the driver reads is the §5.6 local-file category.
+     *  - **Databricks** (`com.databricks:databricks-jdbc` 3.4.2, its README): the OAuth
+     *    token-passthrough flow is `AuthMech=11;Auth_Flow=0;Auth_AccessToken=<token>` — again a
+     *    bare `…token`.
+     *
+     * **Why the fix is enumeration and not a wider suffix.** Adding `key`/`token` to
+     * [SECRET_VALUED_SUFFIXES] would refuse, by construction, every future property whose name
+     * merely ENDS in those words — `sslkey` (a path), a hypothetical `tokenTimeout`, a
+     * `keyStoreType` — and the predicate's whole justification is that a legitimate property
+     * cannot end in one of its suffixes. Enumerating the names that are actually secrets keeps
+     * that justification true. The price is that a new dialect must do the work, so §5.6 states
+     * it as a rule: **before a dialect ships, every driver property whose value is credential
+     * material and whose name escapes the suffixes is added here.**
+     *
+     * Cross-dialect rather than per-dialect on purpose: these names belong to drivers this build
+     * does not ship, so keying them to a `Dialect` value that does not exist yet would put the
+     * guard behind the very change it has to survive. On the shipped dialects they cost nothing —
+     * no pinned driver has a property so named — and on the day the dialect lands the key is
+     * already refused, in both carriers, with no one having had to remember.
+     *
+     * The contract these serve, stated once (datasources.md §5.6): **a credential travels ONLY in
+     * `credential` — never in `jdbc_url`, never in `properties.*`.** `credential` is encrypted at
+     * rest (§7.1); `jdbc_url` and `properties_json` are stored plaintext and returned to `read`
+     * scope (§3.2). There is no third carrier and no exception.
+     */
+    val SECRET_VALUED_KEYS =
+        setOf(
+            // BigQuery — the service-account key itself, inline or as a path.
+            "oauthpvtkey",
+            "oauthpvtkeypath",
+            "oauthpvtkeyfilepath",
+            // BigQuery — pre-generated OAuth credentials.
+            "oauthaccesstoken",
+            "oauthrefreshtoken",
+            // Databricks — the OAuth token-passthrough flow's credential.
+            "auth_accesstoken",
+            "authaccesstoken",
+        )
+
+    /**
      * Whether [key] is refused under [refusedKeys] — the enumerated union **or** the §5.6
      * secret-valued suffix predicate.
      *
@@ -431,7 +511,7 @@ internal object RefusedPropertyKeys {
         refusedKeys: Set<String>,
     ): Boolean {
         val lower = key.lowercase()
-        return lower in refusedKeys || SECRET_VALUED_SUFFIXES.any { lower.endsWith(it) }
+        return lower in refusedKeys || lower in SECRET_VALUED_KEYS || SECRET_VALUED_SUFFIXES.any { lower.endsWith(it) }
     }
 
     /**
@@ -440,7 +520,10 @@ internal object RefusedPropertyKeys {
      * which is the §5.6 fail-closed rule made structural.
      *
      * The [SECRET_VALUED_SUFFIXES] predicate is *not* folded in here — it is unbounded over key
-     * names and so cannot be expressed as a set. Callers test membership through [isRefused].
+     * names and so cannot be expressed as a set. [SECRET_VALUED_KEYS] is not folded in either,
+     * for a different reason: this function's result is what the *error messages* enumerate, and
+     * listing seven properties of drivers this build does not ship would be noise. Callers test
+     * membership through [isRefused], which applies all three.
      */
     fun forDialect(
         dialect: Dialect,

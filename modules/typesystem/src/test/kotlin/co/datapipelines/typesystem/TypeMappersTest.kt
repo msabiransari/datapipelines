@@ -40,13 +40,16 @@ class TypeMappersTest {
         TypeMappers.forDialect(Dialect.H2) shouldBe H2IngressMapper
         TypeMappers.forDialect(Dialect.DUCKDB) shouldBe DuckDbTypeMapper
         TypeMappers.forDialect(Dialect.SQLITE) shouldBe SqliteTypeMapper
+        // §5.8: LAKE runs on DuckDB, so it maps DuckDB's types — the same mapper, not a copy.
+        TypeMappers.forDialect(Dialect.LAKE) shouldBe DuckDbTypeMapper
     }
 
     @Test
-    fun `the seven supported dialects are exactly the enums-md §5 list`() {
+    fun `the supported dialects are exactly the enums-md §5 list`() {
         // Reserved values (SNOWFLAKE, BIGQUERY, REDSHIFT) MUST NOT appear in v1 code.
+        // LAKE is NOT reserved: it ships with an adapter, a driver mapping and a CHECK (087).
         Dialect.entries.map { it.wire } shouldContainExactly
-            listOf("POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE")
+            listOf("POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE")
     }
 
     @ParameterizedTest(name = "{0}")

@@ -64,7 +64,7 @@ class DatasourceRepositoryIntegrationTest {
         row.properties.hikari["maximumPoolSize"] shouldBe 8
         row.properties.jdbc["ssl"] shouldBe "true"
         // The stored credential is ciphertext and decrypts back to the original.
-        encryptor.decrypt(row.passwordEncrypted, row.name) shouldBe "s3cret"
+        encryptor.decrypt(checkNotNull(row.credentialEncrypted), row.name) shouldBe "s3cret"
     }
 
     @Test
@@ -92,7 +92,7 @@ class DatasourceRepositoryIntegrationTest {
             checkNotNull(
                 repository.update(
                     Fixtures.postgres(name = "pg").copy(displayName = "Renamed", queryTimeoutSeconds = 99),
-                    passwordEncrypted = null,
+                    credentialEncrypted = null,
                 ),
             )
 
@@ -100,7 +100,7 @@ class DatasourceRepositoryIntegrationTest {
         updated.queryTimeoutSeconds shouldBe 99
         (updated.updatedAt >= created.updatedAt) shouldBe true
         // Password kept: still decrypts to the original.
-        encryptor.decrypt(checkNotNull(repository.findByName("pg")).passwordEncrypted, "pg") shouldBe "original"
+        encryptor.decrypt(checkNotNull(checkNotNull(repository.findByName("pg")).credentialEncrypted), "pg") shouldBe "original"
     }
 
     @Test
@@ -109,7 +109,7 @@ class DatasourceRepositoryIntegrationTest {
 
         repository.update(Fixtures.postgres(name = "pg"), encryptor.encrypt("rotated", "pg"))
 
-        encryptor.decrypt(checkNotNull(repository.findByName("pg")).passwordEncrypted, "pg") shouldBe "rotated"
+        encryptor.decrypt(checkNotNull(checkNotNull(repository.findByName("pg")).credentialEncrypted), "pg") shouldBe "rotated"
     }
 
     @Test
@@ -192,7 +192,7 @@ class DatasourceRepositoryIntegrationTest {
         checkNotNull(repository.findByName("without_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
 
         // And an update that drops the allowlist persists the drop.
-        repository.update(Fixtures.postgres(name = "with_allowlist"), passwordEncrypted = null)
+        repository.update(Fixtures.postgres(name = "with_allowlist"), credentialEncrypted = null)
         checkNotNull(repository.findByName("with_allowlist")).introspectionIncludeSchemas shouldBe emptyList()
     }
 
@@ -204,7 +204,7 @@ class DatasourceRepositoryIntegrationTest {
         // compares lowercase reported schemas against stored strings verbatim).
         jdbc.update(
             """
-            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted,
                                      introspection_include_schemas_json, created_by)
             VALUES ('restored', 'Restored', 'H2', 'jdbc:h2:mem:restored', 'sa', :pw,
                     CAST('["APEX_REPORTING"]' AS jsonb), :owner)
@@ -223,7 +223,7 @@ class DatasourceRepositoryIntegrationTest {
         // round-trip (the validator rejects blanks) while exempting nothing.
         jdbc.update(
             """
-            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+            INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted,
                                      introspection_include_schemas_json, created_by)
             VALUES ('dirty', 'Dirty', 'H2', 'jdbc:h2:mem:dirty', 'sa', :pw,
                     CAST('[" ", "apex", "APEX", " sales "]' AS jsonb), :owner)
@@ -301,7 +301,7 @@ class DatasourceRepositoryIntegrationTest {
         // ...updated_at moved, and the credential is the new one.
         after["updated_at"] shouldNotBe before["updated_at"]
         passwordHexOf("resync") shouldNotBe oldCipher
-        encryptor.decrypt(checkNotNull(repository.findByName("resync")).passwordEncrypted, "resync") shouldBe "new"
+        encryptor.decrypt(checkNotNull(checkNotNull(repository.findByName("resync")).credentialEncrypted), "resync") shouldBe "new"
 
         repository.updateCredential("absent", ByteArray(1)) shouldBe false
     }
@@ -321,7 +321,7 @@ class DatasourceRepositoryIntegrationTest {
         jdbc
             .queryForList(
                 "SELECT name, display_name, description, dialect, jdbc_url, username," +
-                    " encode(password_encrypted, 'hex') AS pw, properties_json::text AS props, query_timeout_seconds," +
+                    " encode(credential_encrypted, 'hex') AS pw, properties_json::text AS props, query_timeout_seconds," +
                     " introspection_include_schemas_json::text AS incl, is_readonly, workspace_id, is_deleted," +
                     " created_at, updated_at, created_by" +
                     " FROM datasources WHERE name = :n",
@@ -331,7 +331,7 @@ class DatasourceRepositoryIntegrationTest {
     private fun passwordHexOf(name: String): String =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT encode(password_encrypted, 'hex') FROM datasources WHERE name = :n",
+                "SELECT encode(credential_encrypted, 'hex') FROM datasources WHERE name = :n",
                 mapOf("n" to name),
                 String::class.java,
             ),

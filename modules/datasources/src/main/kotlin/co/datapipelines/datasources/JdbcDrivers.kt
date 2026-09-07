@@ -22,6 +22,9 @@ object JdbcDrivers {
             Dialect.H2 to "org.h2.Driver",
             Dialect.DUCKDB to "org.duckdb.DuckDBDriver",
             Dialect.SQLITE to "org.sqlite.JDBC",
+            // LAKE is DuckDB with a different §5.6 posture — same driver, same jar, same URL
+            // sub-protocol; what differs is the adapter (datasources.md §4.2A).
+            Dialect.LAKE to "org.duckdb.DuckDBDriver",
         )
 
     /** The fully-qualified driver class name for [dialect]. Total over the enum. */

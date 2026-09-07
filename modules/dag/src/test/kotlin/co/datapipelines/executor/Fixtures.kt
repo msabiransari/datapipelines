@@ -380,7 +380,7 @@ class FakeDatasourceRegistry(
             leased.incrementAndGet()
             // The password matters once a container-backed source is in play (C4); H2 fixtures
             // leave it null and get the empty string they had before.
-            val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.password ?: "")
+            val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
             return CountingConnection(delegate, closed)
         }
 

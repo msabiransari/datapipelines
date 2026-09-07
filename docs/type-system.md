@@ -333,6 +333,12 @@ SQLite is **dynamically typed**: columns have "type affinity" (INTEGER, TEXT, BL
 
 **SQLite DATE/TIME/TIMESTAMP policy:** SQLite has no native temporal types. Conventions vary widely: ISO 8601 text, Unix epoch seconds (INTEGER), Unix epoch millis (INTEGER), Julian day (REAL). In v1, we map all temporal-looking columns from SQLite to `STRING` and do not attempt heuristic parsing. Pipeline authors who know their storage convention should `CAST` in their query template or post-process the result.
 
+### 5.8 LAKE (Parquet / Iceberg through DuckDB)
+
+`LAKE` is a distinct dialect ([Datasources §4.1](datasources.md#41-dialect-catalog)) whose engine is DuckDB, so its ingress mapping is **§5.6's, verbatim** — the same engine reporting the same `getColumns` metadata for the same JDBC type codes. `TypeMappers.forDialect(LAKE)` returns `DuckDbTypeMapper` rather than a second copy, because two identical tables are two tables to drift.
+
+What Parquet and Iceberg add is nested types (`STRUCT`, `LIST`, `MAP`), which DuckDB reports through the same catalog. They fall under §8.2's unknown-type policy today — canonical `STRING` with a warning — exactly as they do on an embedded DuckDB file, and nested-type support is v2 for every dialect at once ([§12](#12-open-questions--future-additions)).
+
 ---
 
 ## 6. H2 Staging Type Mapping (Canonical → H2)
@@ -668,6 +674,7 @@ object TypeMappers {
         H2          -> H2IngressMapper
         DUCKDB      -> DuckDbTypeMapper
         SQLITE      -> SqliteTypeMapper
+        LAKE        -> DuckDbTypeMapper   // §5.8 — DuckDB is the engine
         // Documented else path: a Dialect value this build does not know
         // (e.g. one added to the enum ahead of its mapper) degrades instead
         // of throwing — every column maps to STRING with the §8.2 warning.
@@ -727,3 +734,4 @@ These are explicitly **out of scope for v1** but tracked for future versions. Li
 |---|---|---|---|
 | 2026-08-05 | v1.0 | initial draft | Initial type system specification: 11 canonical types, wire encoding, 7 dialect mappings, edge cases, stability promise |
 | 2026-08-07 | v1.1 | spec review | Per [SPEC-REVIEW-2026-08 §2.17](SPEC-REVIEW-2026-08.md#217-type-systemmd) (all [M]): §7.1 column descriptor gains optional `nullable` and opens `additionalProperties` with a normative clients-MUST-ignore-unknown-fields rule (resolves the §9.2 additive-evolution contradiction); PG unsized `numeric` adjudicated to `BIGDECIMAL` with **precision omitted = unbounded** — §3/§4/§5.1/§6/§7.1/§7.3 aligned on that single rule and the two conflicting synthetic-ceiling values deleted; §6 H2 `DECIMAL` limit and `pipeline.staging.precision_overflow` threshold both fixed at 100000 (matches staging.md §5.2); §5.7 REAL-affinity typo fixed and the two BLOB-affinity rows disambiguated (declared BLOB → `BINARY`, no declared type → `STRING`); §1/§2 principle 6 stability-promise pointer corrected to §9; new §3.5 normative egress rules (TIMESTAMP/TIME exactly 6 fractional digits, BINARY = RFC 4648 §4 base64 with padding); §8.4 promotes the UTC-JVM deployment precondition (`-Duser.timezone=UTC`) to a normative rule linked to deployment.md §3.1; §11.2 `forDialect` gains the documented `else` fallback wired to §8.2 (`FallbackTypeMapper` → STRING + `type_mapping.unknown_source_type`); §11.1 `H2TypeMapper` split into `H2IngressMapper`/`H2EgressMapper` per staging.md §5.3; §11.3 test list extended to cover the new rules. |
+| 2026-09-07 | v1.2 | 087 connector seams | New **§5.8 LAKE**: the dialect's ingress mapping is §5.6's verbatim — DuckDB is the engine, and `TypeMappers.forDialect(LAKE)` returns `DuckDbTypeMapper` rather than a second table to drift. §11.2's dispatch sketch gains the row. Nested Parquet/Iceberg types (`STRUCT`, `LIST`, `MAP`) fall under §8.2's unknown-type policy today, exactly as on an embedded DuckDB file. |

@@ -66,6 +66,10 @@ class FlywayMigrationIntegrationTest {
                 // 077 — the §4.1 folder requirement's deploy gate. No DDL: a DO-block
                 // pre-check only, which is why no other assertion in this file moves.
                 "12|folder required|true",
+                // 087 §A — the credential-kind rename + columns + three CHECKs.
+                "13|datasource credential kind|true",
+                // 087 §C — LAKE joins chk_datasource_dialect. No data change.
+                "14|lake dialect|true",
             )
     }
 
@@ -280,6 +284,13 @@ class FlywayMigrationIntegrationTest {
                 // 074 (V11) — the api_keys.kind enum column. Sorted first, like every other row:
                 // the query is ORDER BY'd and the assertion is order-sensitive.
                 "chk_api_keys_kind",
+                // 087 §A (V13) — the three credential CHECKs of metadata-db §4.10: the kind is
+                // in the enums.md §5A set, `kind = 'none'` iff no ciphertext (which is what makes
+                // `password_set` derivable), and `username` is present exactly when the kind
+                // allows it.
+                "chk_datasource_credential_kind",
+                "chk_datasource_credential_present",
+                "chk_datasource_credential_username",
                 "chk_datasource_dialect",
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",

@@ -96,9 +96,17 @@ class DialectAdaptersTest {
             )
         // DuckDB is Postgres-lineage: its engine catalogs report as plain rows (verified against
         // the pinned duckdb_jdbc 1.5.5.1 — getSchemas() returns main, information_schema,
-        // pg_catalog), so the bare {information_schema} default leaks pg_catalog.
+        // pg_catalog), so the bare {information_schema} default leaks pg_catalog. The two DOTTED
+        // entries are 087's: once the listing carries catalogs, DuckDB's own `system` and `temp`
+        // catalogs become visible and EACH holds a schema called `main` (probed 2026-09-07:
+        // getSchemas() reports system.main, system.information_schema, system.pg_catalog and
+        // temp.main beside the user's memory.main). A bare `main` entry cannot be used — it is
+        // the ordinary user schema of every DuckDB database — so only the qualified name works.
         DialectAdapters.forDialect(Dialect.DUCKDB).introspectionSystemSchemas shouldContainExactlyInAnyOrder
-            setOf("information_schema", "pg_catalog")
+            setOf("information_schema", "pg_catalog", "system.main", "temp.main")
+        // The lake adapter carries the same floor: same engine, same catalogs.
+        DialectAdapters.forDialect(Dialect.LAKE).introspectionSystemSchemas shouldContainExactlyInAnyOrder
+            setOf("information_schema", "pg_catalog", "system.main", "temp.main")
     }
 
     @Test
@@ -288,7 +296,7 @@ class DialectAdaptersTest {
         // credential — against a DB that allows blank passwords, silently succeeding.
         val thrown =
             shouldThrow<IllegalArgumentException> {
-                DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2(password = null))
+                DialectAdapters.forDialect(Dialect.H2).buildHikariConfig(Fixtures.h2(secret = null))
             }
 
         thrown.message.orEmpty() shouldContain "test_h2"

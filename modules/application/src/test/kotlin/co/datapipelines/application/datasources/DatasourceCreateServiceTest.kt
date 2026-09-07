@@ -91,7 +91,7 @@ class DatasourceCreateServiceTest {
             { created.name shouldBe "pg_prod" },
             { created.dialect shouldBe Dialect.POSTGRES },
             { created.username shouldBe "readonly" },
-            { created.password shouldBe "s3cret" },
+            { created.secret shouldBe "s3cret" },
             // display_name defaults to the name; description stays absent.
             { created.displayName shouldBe "pg_prod" },
             { created.description.shouldBeNull() },

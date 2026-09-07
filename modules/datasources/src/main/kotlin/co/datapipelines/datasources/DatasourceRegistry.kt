@@ -112,7 +112,7 @@ interface DatasourceRegistry {
      * Creates or updates a datasource (create when no live row exists), running the full §9
      * rule set plus the test pool build (§5.4) first and encrypting the password before it is
      * written. Throws [DatasourceValidationException] on validation failure. Returns the stored
-     * datasource with [Datasource.password] `null` — the credential is never echoed back.
+     * datasource with [Datasource.secret] `null` — the credential is never echoed back.
      */
     fun save(
         datasource: Datasource,
@@ -135,7 +135,7 @@ interface DatasourceRegistry {
      * - stored credential authenticates → [CredentialResync.STORED_WORKS]; the row is left
      *   byte-untouched, because the operator's value is the working one.
      * - stored fails and the FILE credential authenticates →
-     *   [CredentialResync.RESYNCED]; **only `password_encrypted` is written** — not the name,
+     *   [CredentialResync.RESYNCED]; **only `credential_encrypted` is written** — not the name,
      *   the display name, the URL, the properties or the readonly flag — and the pool is
      *   evicted so the next lease uses it.
      * - neither authenticates → [CredentialResync.BOTH_FAILED]; the row is left alone. There

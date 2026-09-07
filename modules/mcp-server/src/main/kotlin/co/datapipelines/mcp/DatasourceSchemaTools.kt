@@ -44,10 +44,14 @@ class DatasourcesGetSchemasTool(
         McpTools.tool(
             name = "datasources_get_schemas",
             description =
-                "List the schemas of a registered datasource by reading its live JDBC metadata, excluding the " +
+                "List the namespaces of a registered datasource by reading its live JDBC metadata, excluding the " +
                     "engine's own system schemas. The entry point of schema discovery: call this first, then " +
-                    "get_tables(schema), then get_columns for only the tables the SQL needs. An empty list on a " +
-                    "schemaless datasource is a valid answer. Read-only, for pipeline authoring.",
+                    "get_tables(namespace), then get_columns for only the tables the SQL needs. Each entry carries " +
+                    "an ordered `namespace` path and a `label`; on a two-level engine (catalog.schema, " +
+                    "project.dataset) two entries can share a label and differ only by their outer segment, so pass " +
+                    "the whole `namespace` back rather than the label. `schemas` repeats the labels for older " +
+                    "clients. An empty list on a datasource with no namespaces is a valid answer. Read-only, for " +
+                    "pipeline authoring.",
             schema =
                 """
                 {
@@ -80,8 +84,8 @@ class DatasourcesGetTablesTool(
             name = "datasources_get_tables",
             description =
                 "List the tables and views of a registered datasource by reading its live JDBC metadata. " +
-                    "The listing spans schemas — pass each table's reported schema to datasources_get_columns. " +
-                    "Read-only, for pipeline authoring.",
+                    "The listing spans namespaces — pass each table's reported `namespace` array to " +
+                    "datasources_get_columns. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -89,7 +93,12 @@ class DatasourcesGetTablesTool(
                   "required": ["name"],
                   "properties": {
                     "name": {"type": "string", "description": "Datasource name."},
-                    "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+                    "namespace": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "Optional namespace filter, outermost first, as returned by datasources_get_schemas. An unknown namespace matches nothing."
+                    },
+                    "schema": {"type": "string", "description": "Optional single-level filter; accepts the dotted 'catalog.schema' form. Superseded by namespace."}
                   }
                 }
                 """.trimIndent(),
@@ -101,7 +110,9 @@ class DatasourcesGetTablesTool(
     ): Any {
         val name = args.requiredString("name")
         val gated = datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.tables(gated, args.string("schema")).toWireMap() }
+        return introspecting(name) {
+            introspector.tables(gated, args.string("schema"), namespaceFilter = args.namespace()).toWireMap()
+        }
     }
 }
 
@@ -115,10 +126,11 @@ class DatasourcesGetColumnsTool(
             name = "datasources_get_columns",
             description =
                 "List one table's columns with canonical types, read from the datasource's live JDBC metadata. " +
-                    "Pass the table name exactly as datasources_get_tables returned it. Without a schema argument " +
-                    "only the connection's current schema is read; if the datasource reports no current schema, " +
-                    "an explicit schema is required (list them with datasources_get_schemas). " +
-                    "Read-only, for pipeline authoring.",
+                    "Pass the table name exactly as datasources_get_tables returned it, and its `namespace` array " +
+                    "with it. Without a namespace only the connection's current one is read; if the datasource " +
+                    "reports none, an explicit namespace is required (list them with datasources_get_schemas). " +
+                    "On a two-level engine an unqualified read can merge same-named tables from different " +
+                    "catalogs, which is why the namespace is worth passing. Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -127,7 +139,12 @@ class DatasourcesGetColumnsTool(
                   "properties": {
                     "name": {"type": "string", "description": "Datasource name."},
                     "table": {"type": "string", "description": "Table name as returned by datasources_get_tables."},
-                    "schema": {"type": "string", "description": "Optional schema filter. An unknown schema matches nothing."}
+                    "namespace": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "The table's namespace, outermost first, as datasources_get_tables reported it. An unknown namespace matches nothing."
+                    },
+                    "schema": {"type": "string", "description": "Optional single-level filter; accepts the dotted 'catalog.schema' form. Superseded by namespace."}
                   }
                 }
                 """.trimIndent(),
@@ -140,9 +157,25 @@ class DatasourcesGetColumnsTool(
         val name = args.requiredString("name")
         val table = args.requiredString("table")
         val gated = datasources.requireVisible(name, ctx)
-        return introspecting(name) { introspector.columns(gated, table, args.string("schema")).map { it.toWireMap() } }
+        return introspecting(name) {
+            introspector.columns(gated, table, args.string("schema"), args.namespace()).map { it.toWireMap() }
+        }
     }
 }
+
+/**
+ * The `namespace` argument of the two filtered introspection tools: an array of segments,
+ * outermost first, with the dotted shorthand expanded so an agent may send either
+ * `["a1", "sales"]` or `["a1.sales"]`. Null when absent or empty — "no filter", never a filter
+ * on an empty name.
+ */
+private fun McpArguments.namespace(): List<String>? =
+    (rawMap()["namespace"] as? List<*>)
+        ?.filterIsInstance<String>()
+        ?.flatMap { it.split('.') }
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.takeIf { it.isNotEmpty() }
 
 /**
  * The §7A error boundaries shared by the three tools: the introspector's

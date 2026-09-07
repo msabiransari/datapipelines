@@ -259,7 +259,7 @@ Generate the secret the way every other one here is generated — `openssl rand 
 
 ### 3.20 Credential key provider
 
-Where the AES data keys for `datasources.password_encrypted` come from ([Datasources §7.1](datasources.md#71-encryption-at-rest)). The seam exists so a customer's AWS/GCP/Azure/Vault key store is an **implementation of a contract**, not a change to the crypto — `docs/key-providers.md` is the guide an implementer works from. Every stored credential carries the key VERSION it was sealed under as its first byte, which is what makes rotation lazy-safe.
+Where the AES data keys for `datasources.credential_encrypted` come from ([Datasources §7.1](datasources.md#71-encryption-at-rest)). The seam exists so a customer's AWS/GCP/Azure/Vault key store is an **implementation of a contract**, not a change to the crypto — `docs/key-providers.md` is the guide an implementer works from. Every stored credential carries the key VERSION it was sealed under as its first byte, which is what makes rotation lazy-safe.
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|

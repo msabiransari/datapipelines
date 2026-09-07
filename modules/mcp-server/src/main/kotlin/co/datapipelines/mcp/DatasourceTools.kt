@@ -25,6 +25,11 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
         put("dialect", dialect.wire)
         put("jdbc_url", jdbcUrl)
         put("username", username)
+        // §3.4 additive: WHAT the stored credential is, never the secret itself. An agent
+        // reading this can tell a token-authenticated warehouse from a password login and a
+        // file database with no credential at all — the fact it needs to author or to explain
+        // an authentication failure.
+        put("credential", buildMap { put("kind", credentialKind.wire) })
         put("query_timeout_seconds", queryTimeoutSeconds)
         // The §3.3 allowlist, so an agent debugging why a schema is or isn't visible can see
         // that one is active — omitted when empty, the same envelope convention as REST §3.2.

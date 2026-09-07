@@ -15,7 +15,9 @@ internal object Fixtures {
     fun h2(
         name: String = "test_h2",
         jdbcUrl: String = "jdbc:h2:mem:$name",
-        password: String? = "secret",
+        secret: String? = "secret",
+        credentialKind: CredentialKind = CredentialKind.PASSWORD,
+        username: String? = "sa",
         queryTimeoutSeconds: Int? = null,
         properties: DatasourceProperties = DatasourceProperties(),
         introspectionIncludeSchemas: List<String> = emptyList(),
@@ -27,8 +29,9 @@ internal object Fixtures {
             description = "A fixture datasource.",
             dialect = Dialect.H2,
             jdbcUrl = jdbcUrl,
-            username = "sa",
-            password = password,
+            username = username,
+            credentialKind = credentialKind,
+            secret = secret,
             queryTimeoutSeconds = queryTimeoutSeconds,
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
@@ -47,7 +50,7 @@ internal object Fixtures {
             dialect = Dialect.POSTGRES,
             jdbcUrl = jdbcUrl,
             username = "app",
-            password = "secret",
+            secret = "secret",
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
@@ -69,7 +72,7 @@ internal object Fixtures {
             dialect = dialect,
             jdbcUrl = urlFor(dialect, name),
             username = "app",
-            password = "secret",
+            secret = "secret",
             properties = properties,
             introspectionIncludeSchemas = introspectionIncludeSchemas,
         )
@@ -80,12 +83,21 @@ internal object Fixtures {
     ): String =
         when (dialect) {
             Dialect.POSTGRES -> "jdbc:postgresql://db.internal:5432/app"
+
             Dialect.ORACLE -> "jdbc:oracle:thin:@//db.internal:1521/svc"
+
             Dialect.MSSQL -> "jdbc:sqlserver://db.internal:1433;databaseName=app"
+
             Dialect.MYSQL -> "jdbc:mysql://db.internal:3306/app"
+
             Dialect.H2 -> "jdbc:h2:mem:$name"
+
             Dialect.DUCKDB -> "jdbc:duckdb::memory:"
+
             Dialect.SQLITE -> "jdbc:sqlite::memory:"
+
+            // LAKE is DuckDB underneath, so the URL sub-protocol is `duckdb` (§4.1).
+            Dialect.LAKE -> "jdbc:duckdb:"
         }
 }
 

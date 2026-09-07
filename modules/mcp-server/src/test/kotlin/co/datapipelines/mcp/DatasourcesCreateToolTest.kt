@@ -5,6 +5,7 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -126,7 +127,7 @@ class DatasourcesCreateToolTest {
         assertAll(
             { registry.saved.single().name shouldBe "pg_prod" },
             { registry.saved.single().dialect shouldBe Dialect.POSTGRES },
-            { registry.saved.single().password shouldBe "s3cret-from-the-agent" },
+            { registry.saved.single().secret shouldBe "s3cret-from-the-agent" },
             { registry.saved.single().workspaceId shouldBe McpFixtures.WORKSPACE_ID },
         )
 
@@ -137,7 +138,11 @@ class DatasourcesCreateToolTest {
                 .write(result)
         assertAll(
             { json shouldNotContain "s3cret-from-the-agent" },
-            { json shouldNotContain "\"password\"" },
+            { json shouldNotContain "\"password\":" },
+            // The FIELD, not the word: `"credential":{"kind":"password"}` legitimately names the
+            // kind, and asserting on the bare quoted word made the kind's own value look like a
+            // leak (087). What must never appear is a `"password":` KEY carrying a value.
+            { json shouldNotContain "\"secret\":" },
             { json shouldContain "\"password_set\":true" },
         )
     }
@@ -255,6 +260,65 @@ class DatasourcesCreateToolTest {
             { registry.saved shouldHaveSize 0 },
             { sink.rows.map { it.first } shouldBe listOf("mcp.tool.called") },
             { sink.rows.single().second["outcome"] shouldBe "scope_refused" },
+        )
+    }
+
+    @Test
+    fun `a credential block with kind token is stored and never echoed - the §3-4 shape over MCP`() {
+        // The gate's claim, mechanised. `token` is the kind the warehouse connectors need and the
+        // one no pre-087 payload could express; the tool takes it, the shared binder binds it, the
+        // registry stores it, and the RESULT carries the kind and nothing else about it.
+        val result =
+            tool().call(
+                McpArguments(
+                    mapOf(
+                        "name" to "warehouse",
+                        "dialect" to "POSTGRES",
+                        "jdbc_url" to "jdbc:postgresql://wh:5432/app",
+                        "credential" to mapOf("kind" to "token", "secret" to "pat-do-not-echo"),
+                    ),
+                ),
+                McpFixtures.ctx(Scope.AUTHOR),
+            )
+
+        registry.saved shouldHaveSize 1
+        val json =
+            co.datapipelines.executor.ExecutorJson
+                .write(result)
+        assertAll(
+            { registry.saved.single().credentialKind shouldBe CredentialKind.TOKEN },
+            { registry.saved.single().secret shouldBe "pat-do-not-echo" },
+            // §3.4: a token MAY name a username; this payload does not, and none is invented.
+            { registry.saved.single().username shouldBe null },
+            { json shouldNotContain "pat-do-not-echo" },
+            { json shouldContain "\"kind\":\"token\"" },
+            { json shouldContain "\"password_set\":true" },
+        )
+    }
+
+    @Test
+    fun `kind none registers a file datasource with no credential, and password_set says so`() {
+        val result =
+            tool().call(
+                McpArguments(
+                    mapOf(
+                        "name" to "file_db",
+                        "dialect" to "SQLITE",
+                        "jdbc_url" to "jdbc:sqlite:/srv/sample/ref.db",
+                        "credential" to mapOf("kind" to "none"),
+                    ),
+                ),
+                McpFixtures.ctx(Scope.AUTHOR),
+            )
+
+        val json =
+            co.datapipelines.executor.ExecutorJson
+                .write(result)
+        assertAll(
+            { registry.saved.single().credentialKind shouldBe CredentialKind.NONE },
+            { registry.saved.single().secret shouldBe null },
+            // Derived from the kind, not asserted: a file database genuinely has no credential.
+            { json shouldContain "\"password_set\":false" },
         )
     }
 }

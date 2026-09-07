@@ -28,8 +28,10 @@ datasources:
       daily and monthly rollups. Tables: trips, trips_daily, trips_monthly.
     dialect: POSTGRES
     jdbc_url: jdbc:postgresql://postgres:5432/dp_sample_trips
-    username: ${SAMPLE_DB_USER}
-    password: ${SAMPLE_PG_PASSWORD}
+    credential:
+      kind: password
+      username: ${SAMPLE_DB_USER}
+      secret: ${SAMPLE_PG_PASSWORD}
     readonly: true
     global: true
 
@@ -41,8 +43,10 @@ datasources:
       observations.
     dialect: MYSQL
     jdbc_url: jdbc:mysql://mysql:3306/dp_sample_weather
-    username: ${SAMPLE_DB_USER}
-    password: ${SAMPLE_MYSQL_PASSWORD}
+    credential:
+      kind: password
+      username: ${SAMPLE_DB_USER}
+      secret: ${SAMPLE_MYSQL_PASSWORD}
     readonly: true
     global: true
 
@@ -54,20 +58,20 @@ datasources:
       rate_codes, payment_types, calendar.
     dialect: SQLITE
     # SQLite is a FILE. There is no server, no login, and the xerial driver
-    # ignores both of these values entirely.
+    # ignores a username and password entirely.
     #
-    # They are non-empty anyway because datasources.md §9
-    # (`datasource.validation.password_missing`) rejects a null-or-EMPTY password
-    # on create, and bootstrap registration goes through that same save path with
-    # no startup-only shortcut (§8A.3). (The §8A.1 doc example briefly showed
-    # `username: "" / password: ""` for this entry and could not register —
-    # boot-verified as T38; the doc example was fixed 2026-08-29 to this shape.)
-    #
-    # This is NOT a credential and is NOT a secret: nothing authenticates with
-    # it, and there is nothing it could grant access to.
+    # Until 087 this entry carried
+    #     username: "sqlite"
+    #     password: "sqlite-file-datasource-has-no-authentication"
+    # not because anything used them but because the contract had no way to say
+    # "there is no credential": `datasource.validation.password_missing` rejected
+    # a null-or-EMPTY password on create, and bootstrap registration goes through
+    # that same save path with no startup-only shortcut (§8A.3). `credential.kind:
+    # none` (datasources.md §3.4) is that way, and V13 stores it as a NULL
+    # `credential_encrypted` — the row now says what is true.
     jdbc_url: jdbc:sqlite:/srv/sample/nyc_reference.db
-    username: "sqlite"
-    password: "sqlite-file-datasource-has-no-authentication"
+    credential:
+      kind: none
     properties:
       jdbc:
         # 1 = SQLiteOpenMode.READONLY on the pinned org.xerial:sqlite-jdbc

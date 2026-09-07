@@ -19,11 +19,14 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
@@ -59,7 +62,7 @@ class DatasourcesControllerTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://db:5432/app",
             username = "readonly",
-            password = null,
+            secret = null,
             properties = DatasourceProperties(hikari = mapOf("maximumPoolSize" to 10), jdbc = mapOf("sslmode" to "verify-full")),
         )
 
@@ -88,6 +91,33 @@ class DatasourcesControllerTest {
         )
 
     @Test
+    fun `create takes the credential block, and the response carries the kind but never the secret`() {
+        // §3.4 over REST — the twin of the MCP case in DatasourcesCreateToolTest. Both entry
+        // points go through the same binder and the same service (049's rule), so what is asserted
+        // here is the REST projection: `credential.kind` out, no secret at any depth,
+        // `password_set` derived from the kind rather than hard-coded true.
+        authenticate()
+        every { registry.exists("wh") } returns false
+        val stored = slot<co.datapipelines.datasources.Datasource>()
+        every { registry.save(capture(stored), userId) } answers { stored.captured.copy(secret = null) }
+
+        val body =
+            mapper.readTree(
+                """{"name":"wh","dialect":"POSTGRES","jdbc_url":"jdbc:postgresql://wh:5432/app",
+                   "credential":{"kind":"token","secret":"pat-do-not-echo"}}""",
+            )
+        val json = mapper.writeValueAsString(controller.create(body))
+
+        assertAll(
+            { stored.captured.credentialKind shouldBe co.datapipelines.datasources.CredentialKind.TOKEN },
+            { stored.captured.secret shouldBe "pat-do-not-echo" },
+            { json shouldNotContain "pat-do-not-echo" },
+            { json shouldNotContain "\"secret\":" },
+            { json shouldContain "\"kind\":\"token\"" },
+        )
+    }
+
+    @Test
     fun `create persists through the registry and never echoes the password`() {
         authenticate()
         every { registry.exists("pg-prod") } returns false
@@ -96,7 +126,11 @@ class DatasourcesControllerTest {
         val json = mapper.writeValueAsString(controller.create(createBody))
 
         json shouldNotContain "s3cret"
-        json shouldNotContain "\"password\""
+        // The FIELD, not the word: `"credential":{"kind":"password"}` legitimately names the kind
+        // (§3.4), and asserting on the bare quoted word made the kind's own value look like a
+        // leak (087). What must never appear is a KEY carrying a secret value.
+        json shouldNotContain "\"password\":"
+        json shouldNotContain "\"secret\":"
         mapper
             .readTree(json)
             .get("data")
@@ -216,7 +250,7 @@ class DatasourcesControllerTest {
         val bound = datasource().copy(workspaceId = workspaceId, workspaceName = "acme")
         every { registry.getVisible("pg-prod", workspaceId) } returns bound
         val updateBody = mapper.readTree("""{"dialect":"POSTGRES","jdbc_url":"jdbc:postgresql://db2:5432/app","username":"ro"}""")
-        every { registry.save(match { it.password == null && it.jdbcUrl == "jdbc:postgresql://db2:5432/app" }, userId) } returns
+        every { registry.save(match { it.secret == null && it.jdbcUrl == "jdbc:postgresql://db2:5432/app" }, userId) } returns
             bound.copy(jdbcUrl = "jdbc:postgresql://db2:5432/app")
 
         controller.update("pg-prod", updateBody).data["jdbc_url"] shouldBe "jdbc:postgresql://db2:5432/app"

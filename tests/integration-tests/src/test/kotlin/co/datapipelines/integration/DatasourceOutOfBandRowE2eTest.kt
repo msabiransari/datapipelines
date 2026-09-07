@@ -104,7 +104,7 @@ class DatasourceOutOfBandRowE2eTest {
             connection.createStatement().use { statement ->
                 statement.execute(
                     """
-                    INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, password_encrypted,
+                    INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, credential_encrypted,
                                              properties_json, created_by)
                     VALUES ('$DS', 'Out of band', 'H2', 'jdbc:h2:mem:oob_e2e', 'sa', decode('00', 'hex'),
                             CAST('{"hikari": {"readOnly": true, "maximumPoolSize": 5}}' AS jsonb),

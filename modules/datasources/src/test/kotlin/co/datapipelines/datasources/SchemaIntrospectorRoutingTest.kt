@@ -138,20 +138,28 @@ class SchemaIntrospectorRoutingTest {
     }
 
     @Test
-    fun `columns reads the current schema from the schemaPattern argument for schema-filtered dialects`() {
+    fun `columns reads the current NAMESPACE - the schema in schemaPattern and the catalog beside it`() {
+        // 087: the schema still goes in `schemaPattern` (that is what "schema-filtered dialect"
+        // means and it has not changed), but the CATALOG argument is no longer a hard-coded null —
+        // it carries the connection's own catalog. On Postgres that is a no-op (pgjdbc ignores the
+        // argument, and a connection has exactly one database anyway); on H2 the pinned driver
+        // honours it; on a two-catalog engine it is the difference between reading one table's
+        // columns and reading two tables' columns merged into one list. One default, correct
+        // everywhere, rather than one that is correct only while every connection has one catalog.
         val meta = mockk<DatabaseMetaData>()
         val columnsRs = mockk<ResultSet>(relaxed = true)
         every { meta.searchStringEscape } returns "\\"
-        every { meta.getColumns(null, "sales", "deals", "%") } returns columnsRs
+        every { meta.getColumns("app", "sales", "deals", "%") } returns columnsRs
         every { columnsRs.next() } returns false
         val (introspector, name) =
             introspectorOver(Dialect.POSTGRES, meta) { connection ->
                 every { connection.schema } returns "sales"
+                every { connection.catalog } returns "app"
             }
 
         introspector.columns(name, "deals") shouldBe emptyList()
 
-        verify(exactly = 1) { meta.getColumns(null, "sales", "deals", "%") }
+        verify(exactly = 1) { meta.getColumns("app", "sales", "deals", "%") }
     }
 
     @Test

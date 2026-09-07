@@ -72,16 +72,30 @@
           <label class="u-block u-secondary u-text-sm u-mb-xs">JDBC URL</label>
           <input type="text" name="jdbcUrl" class="ds-input" placeholder="jdbc:postgresql://host:5432/db" required>
         </div>
+        <!-- datasources.md §3.4: WHAT the credential is decides which of the two inputs
+             below apply. Neither carries `required`, because `none` (a file database, an
+             IAM role) legitimately has neither — the per-kind rules are the registry
+             validator's, and its refusal renders inline in this modal. -->
+        <div class="u-mb-md">
+          <label class="u-block u-secondary u-text-sm u-mb-xs">Credential</label>
+          <select name="credentialKind" class="ds-input">
+            <option th:each="k : ${credentialKinds}" th:value="${k}" th:text="${k}">password</option>
+          </select>
+        </div>
         <div class="u-flex u-gap-md u-mb-md">
           <div class="u-grow">
             <label class="u-block u-secondary u-text-sm u-mb-xs">Username</label>
-            <input type="text" name="username" class="ds-input" required>
+            <input type="text" name="username" class="ds-input">
           </div>
           <div class="u-grow">
-            <label class="u-block u-secondary u-text-sm u-mb-xs">Password</label>
-            <input type="password" name="password" class="ds-input" required>
+            <label class="u-block u-secondary u-text-sm u-mb-xs">Secret</label>
+            <input type="password" name="password" class="ds-input">
           </div>
         </div>
+        <p class="u-secondary u-text-sm u-mb-md u-mt-0">
+          <code>password</code> needs both; <code>token</code> needs the secret and may name a user;
+          <code>none</code> needs neither — a file database or an IAM role.
+        </p>
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs">Description (optional)</label>
           <input type="text" name="description" class="ds-input">

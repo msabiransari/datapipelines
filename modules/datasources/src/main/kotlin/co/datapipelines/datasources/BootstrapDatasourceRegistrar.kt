@@ -150,7 +150,7 @@ class BootstrapDatasourceRegistrar(
         broken: MutableList<String>,
     ) {
         val name = entry.datasource.name
-        val fileCredential = entry.datasource.password ?: return
+        val fileCredential = entry.datasource.secret ?: return
         when (registry.resyncBootstrapCredential(name, fileCredential)) {
             CredentialResync.RESYNCED -> {
                 resynced += name
@@ -159,7 +159,7 @@ class BootstrapDatasourceRegistrar(
                         "message=\"the stored credential no longer authenticates and the bootstrap file's does; " +
                         "the credential alone was updated — no other column was touched\"",
                     name,
-                    entry.passwordEnvKey ?: "<literal>",
+                    entry.credentialEnvKey ?: "<literal>",
                 )
             }
 
@@ -171,7 +171,7 @@ class BootstrapDatasourceRegistrar(
                         "the row was left unchanged. Fix the environment variable named here (or the " +
                         "database role it belongs to) and restart, or correct the datasource in the UI\"",
                     name,
-                    entry.passwordEnvKey ?: "<literal>",
+                    entry.credentialEnvKey ?: "<literal>",
                 )
             }
 

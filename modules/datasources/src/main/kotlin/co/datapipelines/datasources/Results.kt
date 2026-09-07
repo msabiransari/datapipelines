@@ -108,7 +108,7 @@ enum class CredentialResync {
     STORED_WORKS,
 
     /**
-     * The stored credential does not authenticate and the FILE's does — `password_encrypted`
+     * The stored credential does not authenticate and the FILE's does — `credential_encrypted`
      * is replaced and nothing else is. The desync the 2026-09-02 incident was made of.
      */
     RESYNCED,

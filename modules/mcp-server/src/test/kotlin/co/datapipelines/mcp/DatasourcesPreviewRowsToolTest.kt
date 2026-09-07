@@ -39,7 +39,7 @@ class DatasourcesPreviewRowsToolTest {
             dialect = Dialect.POSTGRES,
             jdbcUrl = "jdbc:postgresql://x/y",
             username = "u",
-            password = null,
+            secret = null,
         )
 
     private fun page(vararg rows: Map<String, Any?>) =

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 
 /**
- * The seven supported source database dialects (enums.md §5; authored by
+ * The eight supported source database dialects (enums.md §5; authored by
  * type-system.md §5, which holds one mapping table per value).
  *
  * ## Why this type lives in `typesystem`
@@ -34,6 +34,30 @@ enum class Dialect(
     H2("H2"),
     DUCKDB("DUCKDB"),
     SQLITE("SQLITE"),
+
+    /**
+     * A **lake**: object storage read in place (Parquet, Iceberg), with DuckDB as the engine
+     * (datasources.md §4.1/§4.2A, round 087). Named for the offering — the owner named it
+     * `dp-lake` on 2026-09-07 — not for the engine, which the docs name once.
+     *
+     * ## Why a distinct dialect and not a `mode` on [DUCKDB]
+     *
+     * The two need DIFFERENT §5.6 postures: the embedded adapter locks
+     * `enable_external_access = false` (no filesystem, no network — the load-bearing control that
+     * stops author SQL loading a native extension inside the app's own process), and a lake
+     * cannot read S3 with that lock on. A per-datasource `mode` would therefore make the refusal
+     * set and the connect-time hardening a function of ROW DATA.
+     *
+     * That is precisely what §5.6 forbids: `DialectRefusalSets.forDialect` is an exhaustive
+     * `when` over this enum *"so there is no code path that can yield an empty set for an
+     * unrecognized dialect or a non-conforming adapter, because the lookup never consults the
+     * adapter instance."* A mode flag puts the adapter instance — and behind it a database row —
+     * back in that lookup. Every other per-dialect total map (`TypeMappers.forDialect`,
+     * `JdbcDrivers`, `DialectAdapters`, the `chk_datasource_dialect` CHECK, the MCP tool's enum)
+     * is keyed the same way, so a mode would need a second dispatch key threaded through all of
+     * them. A dialect value is one line in each.
+     */
+    LAKE("LAKE"),
     ;
 
     companion object {

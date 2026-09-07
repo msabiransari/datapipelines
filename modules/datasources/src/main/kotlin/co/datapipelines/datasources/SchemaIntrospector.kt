@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.Namespaces.toExactMatch
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.IngressTypeMapper
 import java.sql.Connection
@@ -18,27 +19,39 @@ import java.sql.SQLFeatureNotSupportedException
  * filter matches nothing and returns empty — a filter for something that does not exist means
  * "no results", not an error (the same philosophy as `datasources_list`'s dialect filter).
  *
- * `table` and `schema` filters are **exact-match identifiers, not LIKE patterns**: `_` and `%`
- * are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table named
- * `order_items` cannot match its wildcard sibling `order1items`. The escape applies only to
+ * `table`, `schema` and `namespace` filters are **exact-match identifiers, not LIKE patterns**:
+ * `_` and `%` are escaped with the driver's [DatabaseMetaData.getSearchStringEscape], so a table
+ * named `order_items` cannot match its wildcard sibling `order1items`. The escape applies only to
  * the true pattern arguments (`schemaPattern`, `tableNamePattern`) — the **catalog argument is
  * a literal** and is never escaped, or a catalog-routing driver (Connector/J) could not select
- * a database whose stored name contains `_`/`%`.
+ * a database whose stored name contains `_`/`%`. Routing and parsing live in [Namespaces].
+ *
+ * ## Namespaces, and the merge this round removed (087)
+ *
+ * Every read is qualified by the dialect's [NamespaceShape], not by "a schema". The catalog
+ * argument used to be a hard-coded `null` on all three operations, which is correct only while a
+ * connection has exactly one catalog. It does not on a DuckDB lake with two ATTACHed files, and
+ * the consequence was measured rather than inferred (2026-09-07, duckdb_jdbc 1.5.5.1): two
+ * catalogs each holding a `sales.orders` listed as two indistinguishable `sales` schemas, and
+ * `getColumns(null, "sales", "orders")` returned BOTH tables' columns as if they were one table's.
+ * The same read qualified by catalog returns each table's own columns.
  */
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
 ) {
     /**
-     * §7A — the schema listing, the entry point of the introspection flow (schemas → tables →
-     * columns). A plain list of schema names as the driver reported them, with the dialect's
-     * system schemas excluded, capped at [maxSchemas] (`truncated: true` when the cap dropped
-     * any — the same cap+1 early-exit discipline as [tables]).
+     * §7A — the namespace listing, the entry point of the introspection flow (schemas → tables →
+     * columns). Each entry is the ordered path a caller can pass back as a filter plus the label
+     * to show, with the dialect's system schemas excluded, capped at [maxSchemas]
+     * (`truncated: true` when the cap dropped any — the same cap+1 early-exit discipline as
+     * [tables]).
      *
-     * The vocabulary follows [DialectAdapter.schemaArrivesInCatalog]: for catalog-routing
-     * drivers (Connector/J defaults) the databases ARE the JDBC catalogs, so the listing reads
-     * `getCatalogs()`/TABLE_CAT — `getSchemas()` there reports a single blank schema. An EMPTY
-     * list is a valid result, not an error: a schemaless dialect (SQLite, single-db DuckDB)
-     * genuinely has no schemas to list.
+     * The vocabulary follows the dialect's [NamespaceShape]: for catalog-routing drivers
+     * (Connector/J defaults) the databases ARE the JDBC catalogs, so the listing reads
+     * `getCatalogs()`/TABLE_CAT — `getSchemas()` there reports a single blank schema. For every
+     * other dialect it reads `getSchemas()`, whose TABLE_CATALOG column is what makes two
+     * same-named schemas in different catalogs two DIFFERENT entries. An EMPTY list is a valid
+     * result, not an error: a flat dialect (SQLite) genuinely has no namespaces to list.
      */
     fun schemas(
         datasourceName: String,
@@ -58,11 +71,12 @@ class SchemaIntrospector(
         maxSchemas: Int = MAX_LISTING_ROWS,
     ): SchemasPage =
         withMetaData(datasource) { _, meta, _ ->
+            val shape = DialectAdapters.forDialect(datasource.dialect).namespaceShape
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            val rs = if (adapter.schemaArrivesInCatalog) meta.catalogs else meta.schemas
+            val rs = if (shape.innermostArrivesInCatalog) meta.catalogs else meta.schemas
             val exempt = datasource.introspectionIncludeSchemas.toSet()
             rs.use {
-                val out = mutableListOf<String>()
+                val out = mutableListOf<SchemaEntry>()
                 var truncated = false
                 // Same jump discipline as readTables (whose suppression this mirrors): system
                 // rows are skipped WITHOUT counting against the cap, and the cap+1-th USER
@@ -71,13 +85,17 @@ class SchemaIntrospector(
                 while (it.next()) {
                     // The JDBC "" sentinel ("objects without a catalog") is not a schema
                     // an agent can pass to get_tables — skip it rather than list it.
-                    val schema = it.getString(adapter.schemaResultColumn()).asNonBlankOrNull() ?: continue
-                    if (adapter.isSystemSchema(schema, exempt)) continue
+                    val label = it.getString(shape.innermostResultColumn).asNonBlankOrNull() ?: continue
+                    // getSchemas() reports the owning catalog in TABLE_CATALOG (getCatalogs() has
+                    // no second column, and its single value IS the innermost level). That column
+                    // is what keeps `a1.sales` and `a2.sales` two entries instead of one.
+                    val namespace = listOfNotNull(if (shape.hasOuterCatalog) it.catalogOf() else null, label)
+                    if (adapter.isSystemSchema(namespace, exempt)) continue
                     if (out.size == maxSchemas) {
                         truncated = true
                         break
                     }
-                    out.add(schema)
+                    out.add(SchemaEntry(namespace, label))
                 }
                 SchemasPage(out, truncated)
             }
@@ -96,26 +114,30 @@ class SchemaIntrospector(
         datasourceName: String,
         schemaFilter: String? = null,
         maxTables: Int = MAX_LISTING_ROWS,
-    ): TablesPage = tables(registry.get(datasourceName) ?: throw notFound(datasourceName), schemaFilter, maxTables)
+        namespaceFilter: List<String>? = null,
+    ): TablesPage = tables(registry.get(datasourceName) ?: throw notFound(datasourceName), schemaFilter, maxTables, namespaceFilter)
 
     /** §7A for an already-gated [datasource] — see [schemas]'s C3 note. */
     fun tables(
         datasource: Datasource,
         schemaFilter: String? = null,
         maxTables: Int = MAX_LISTING_ROWS,
+        namespaceFilter: List<String>? = null,
     ): TablesPage =
         withMetaData(datasource) { _, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             // The caller's filter goes through the same blank-sentinel rule as driver-reported
             // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
-            // schemas — never the JDBC '' sentinel, which matches nothing on any dialect.
-            val filter = schemaFilter.asNonBlankOrNull()
-            val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(filter, meta)
+            // namespaces — never the JDBC '' sentinel, which matches nothing on any dialect.
+            val filter = Namespaces.filterOf(namespaceFilter, schemaFilter)
+            // A filter deeper than the dialect's namespace names no real place: empty, not an
+            // error, exactly like an unknown schema (Namespaces.route returns null for it).
+            val routed = Namespaces.route(adapter.namespaceShape, filter, meta) ?: return@withMetaData TablesPage(emptyList(), false)
             readTables(
                 meta,
                 adapter,
-                catalog,
-                escapedSchemaPattern,
+                routed.first,
+                routed.second,
                 maxTables,
                 datasource.introspectionIncludeSchemas.toSet(),
             )
@@ -132,17 +154,19 @@ class SchemaIntrospector(
      * fallback it used to take is exactly the merge the contract forbids: the read fails with
      * [CurrentSchemaUnknownException] and the caller passes an explicit schema from [schemas].
      * The schemaless dialects are the deliberate exception — no schema dimension means no
-     * same-named siblings to merge ([DialectAdapter.introspectionSchemaless]).
+     * same-named siblings to merge ([NamespaceShape.isFlat]).
      */
     fun columns(
         datasourceName: String,
         table: String,
         schemaFilter: String? = null,
+        namespaceFilter: List<String>? = null,
     ): List<ColumnInfo> =
         columns(
             registry.get(datasourceName) ?: throw notFound(datasourceName),
             table,
             schemaFilter,
+            namespaceFilter,
         )
 
     /** §7A for an already-gated [datasource] — see [schemas]'s C3 note. */
@@ -150,30 +174,30 @@ class SchemaIntrospector(
         datasource: Datasource,
         table: String,
         schemaFilter: String? = null,
+        namespaceFilter: List<String>? = null,
     ): List<ColumnInfo> =
         withMetaData(datasource) { connection, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
+            val shape = adapter.namespaceShape
             val exempt = datasource.introspectionIncludeSchemas.toSet()
             // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
-            // The schemaless exemption is STRUCTURAL, not driver-dependent: a schemaless
-            // dialect never consults the connection's current schema at all (R5 F3 — the
-            // old order was safe only because the vendored sqlite-jdbc hardcodes
-            // getSchema() = null; a future schemaless driver whose getSchema()/getCatalog()
-            // throws would have turned a working unfiltered read into a classified failure),
-            // so the current-schema default — never the JDBC '' sentinel — applies only to
-            // schema-capable dialects.
+            // The flat-dialect exemption is STRUCTURAL, not driver-dependent: a flat dialect
+            // never consults the connection's current schema at all (R5 F3 — the old order was
+            // safe only because the vendored sqlite-jdbc hardcodes getSchema() = null; a future
+            // flat driver whose getSchema()/getCatalog() throws would have turned a working
+            // unfiltered read into a classified failure), so the current-namespace default —
+            // never the JDBC '' sentinel — applies only to dialects that HAVE a namespace.
+            val supplied = Namespaces.filterOf(namespaceFilter, schemaFilter)
             val effectiveFilter =
-                schemaFilter.asNonBlankOrNull()
-                    ?: if (adapter.introspectionSchemaless) null else connection.currentSchema(adapter, datasource.name)
-            if (effectiveFilter == null && !adapter.introspectionSchemaless) {
+                supplied.ifEmpty { if (shape.isFlat) emptyList() else connection.currentNamespace(adapter, datasource.name) }
+            if (effectiveFilter.isEmpty() && !shape.isFlat) {
                 throw CurrentSchemaUnknownException(datasource.name)
             }
-            val (catalog, escapedSchemaPattern) = adapter.routeAndEscape(effectiveFilter, meta)
-            meta.getColumns(catalog, escapedSchemaPattern, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
+            val routed = Namespaces.route(shape, effectiveFilter, meta) ?: return@withMetaData emptyList()
+            meta.getColumns(routed.first, routed.second, table.toExactMatch(meta.searchStringEscape), "%").use { rs ->
                 buildList {
                     while (rs.next()) {
-                        val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
-                        if (adapter.isSystemSchema(schema, exempt)) continue
+                        if (adapter.isSystemSchema(rs.namespaceOf(shape), exempt)) continue
                         add(mapColumnRow(rs, adapter.typeMapper))
                     }
                 }
@@ -200,15 +224,15 @@ class SchemaIntrospector(
             // before the system-row test would flag truncation on a trailing system row.
             @Suppress("LoopWithTooManyJumpStatements")
             while (rs.next()) {
-                val schema = rs.getString(adapter.schemaResultColumn()).asNonBlankOrNull()
-                if (adapter.isSystemSchema(schema, exemptSchemas)) continue
+                val namespace = rs.namespaceOf(adapter.namespaceShape)
+                if (adapter.isSystemSchema(namespace, exemptSchemas)) continue
                 if (maxRows != null && out.size == maxRows) {
                     truncated = true
                     break
                 }
                 out.add(
                     TableInfo(
-                        schema,
+                        namespace,
                         rs.getString("TABLE_NAME"),
                         rs.getString("TABLE_TYPE"),
                         // Blank remarks are absent (F8's rule): Connector/J reports REMARKS as
@@ -277,47 +301,52 @@ class SchemaIntrospector(
      * customer's own APEX_REPORTING schema). Lowercase-exact, like the stored allowlist.
      */
     private fun DialectAdapter.isSystemSchema(
-        schema: String?,
+        namespace: List<String>,
         exemptSchemas: Set<String> = emptySet(),
     ): Boolean {
-        if (schema == null) return false
+        val schema = namespace.lastOrNull() ?: return false
         val lower = schema.lowercase()
-        if (exemptSchemas.isNotEmpty() && lower in exemptSchemas) return false
+        if (exemptSchemas.isNotEmpty()) {
+            // §3.3 (087): an allowlist entry may be the bare schema — today's spelling — or the
+            // DOTTED namespace, which is the only way to exempt `a1.sales` while leaving
+            // `a2.sales` excluded. Both forms are matched here so the two spellings cannot mean
+            // different things on different code paths.
+            if (lower in exemptSchemas) return false
+            if (Namespaces.join(namespace).lowercase() in exemptSchemas) return false
+        }
+        val dotted = Namespaces.join(namespace).lowercase()
         return introspectionSystemSchemas.any { entry ->
-            if (entry.endsWith("*")) lower.startsWith(entry.dropLast(1)) else lower == entry
+            when {
+                // A prefix entry (Oracle's versioned `apex_*`) matches the schema level only.
+                entry.endsWith("*") -> lower.startsWith(entry.dropLast(1))
+
+                // A DOTTED floor entry names a whole namespace (087): DuckDB's engine catalogs
+                // hold a schema called `main`, and `main` alone is a perfectly ordinary user
+                // schema everywhere else — only `system.main` identifies the engine's own.
+                entry.contains(Namespaces.SEPARATOR) -> dotted == entry
+
+                else -> lower == entry
+            }
         }
     }
 
     /**
-     * Where the escaped schema filter goes: the catalog argument for drivers that carry the
-     * database there ([DialectAdapter.schemaArrivesInCatalog]), the schemaPattern otherwise.
+     * A result row's namespace, outermost first, in this dialect's own vocabulary: the owning
+     * catalog (when the shape has a real outer level) then the innermost level from whichever
+     * column carries it. Blank segments are dropped — the JDBC `""` sentinel means "objects
+     * without a catalog/schema", never a name.
      */
-    private fun DialectAdapter.routeSchemaFilter(filter: String?): Pair<String?, String?> =
-        if (schemaArrivesInCatalog) filter to null else null to filter
+    private fun java.sql.ResultSet.namespaceOf(shape: NamespaceShape): List<String> =
+        listOfNotNull(
+            if (shape.hasOuterCatalog) getString("TABLE_CAT").asNonBlankOrNull() else null,
+            getString(shape.innermostResultColumn).asNonBlankOrNull(),
+        )
+
+    /** `getSchemas()`'s owning-catalog column, blank-sentinel-filtered. */
+    private fun java.sql.ResultSet.catalogOf(): String? = getString("TABLE_CATALOG").asNonBlankOrNull()
 
     /**
-     * The shared route-FIRST, escape-only-the-pattern dance of tables() and columns():
-     * returns `(catalog, escapedSchemaPattern)`. The JDBC **catalog argument is a LITERAL**
-     * ("must match the catalog name as it is stored"), so an escaped value there matches
-     * nothing — any MySQL database named with `_`/`%`. Only true pattern arguments
-     * (`schemaPattern`, `tableNamePattern`) get [toExactMatch] — and `getSearchStringEscape`
-     * is read only when a pattern actually needs escaping. One home for the rule, so an
-     * escaping fix can never land in one call site and miss the other.
-     */
-    private fun DialectAdapter.routeAndEscape(
-        filter: String?,
-        meta: DatabaseMetaData,
-    ): Pair<String?, String?> {
-        val (catalog, schemaPattern) = routeSchemaFilter(filter)
-        val escaped = if (schemaPattern == null) null else schemaPattern.toExactMatch(meta.searchStringEscape)
-        return catalog to escaped
-    }
-
-    /** The result column that carries the schema: TABLE_CAT for catalog-routing drivers, TABLE_SCHEM otherwise. */
-    private fun DialectAdapter.schemaResultColumn(): String = if (schemaArrivesInCatalog) "TABLE_CAT" else "TABLE_SCHEM"
-
-    /**
-     * The connection's current schema, in this dialect's own vocabulary: the **catalog** for
+     * The connection's current NAMESPACE, in this dialect's own vocabulary: the **catalog** for
      * catalog-routing drivers (Connector/J keeps the current database there and leaves
      * `getSchema()` null), `getSchema()` for everyone else. Null when the driver reports none
      * — and the JDBC blank sentinel counts as none: `""` means "objects without a
@@ -347,12 +376,26 @@ class SchemaIntrospector(
      *    NEVER a raw rethrow to the surface: the surfaces catch only the two module
      *    exceptions, and a raw driver exception is a 500 / JSON-RPC -32603.
      */
-    private fun Connection.currentSchema(
+    private fun Connection.currentNamespace(
         adapter: DialectAdapter,
+        datasourceName: String,
+    ): List<String> {
+        val shape = adapter.namespaceShape
+        val innermost = currentInnermost(shape, datasourceName) ?: return emptyList()
+        // The outer segment matters as much as the inner one on a multi-catalog connection: a
+        // current schema of `sales` with no catalog is what merged two ATTACHed catalogs' tables.
+        // `getCatalog()` failing is not fatal here — the one-catalog dialects behave as before.
+        val outer = if (shape.hasOuterCatalog) runCatching { catalog }.getOrNull()?.takeUnless { it.isBlank() } else null
+        return listOfNotNull(outer, innermost)
+    }
+
+    /** The innermost current level, classified — see [currentNamespace]'s three families. */
+    private fun Connection.currentInnermost(
+        shape: NamespaceShape,
         datasourceName: String,
     ): String? =
         try {
-            if (adapter.schemaArrivesInCatalog) catalog else schema
+            if (shape.innermostArrivesInCatalog) catalog else schema
         } catch (_: SQLFeatureNotSupportedException) {
             // The typed capability statement: the driver reports none. Deliberately
             // discarded — the exception type itself is the entire signal.
@@ -380,26 +423,6 @@ class SchemaIntrospector(
             message = "Datasource '$name' is not registered in this environment.",
             details = mapOf("datasource" to name),
         )
-
-    /**
-     * Escapes `_`, `%` and the escape character itself so the string matches **only itself**
-     * as a JDBC metadata name pattern (the driver's `getSearchStringEscape` says how to escape).
-     * An empty escape string means the driver defines none — the name passes through as-is.
-     */
-    private fun String.toExactMatch(escape: String): String {
-        if (escape.isEmpty()) return this
-        val escapeChar = escape[0]
-        return buildString {
-            this@toExactMatch.forEach { ch ->
-                if (ch == '_' || ch == '%') {
-                    append(escape)
-                } else if (ch == escapeChar) {
-                    append(escape)
-                }
-                append(ch)
-            }
-        }
-    }
 
     private companion object {
         /**

@@ -95,7 +95,11 @@ class McpResourceReaderTest {
         assertAll(
             { text shouldContain "jdbc:postgresql" },
             { text shouldNotContain "super-secret-password" },
-            { text shouldNotContain "\"password\"" },
+            { text shouldNotContain "\"password\":" },
+            // The FIELD, not the word: `"credential":{"kind":"password"}` legitimately names the
+            // kind, and asserting on the bare quoted word made the kind's own value look like a
+            // leak (087). What must never appear is a `"password":` KEY carrying a value.
+            { text shouldNotContain "\"secret\":" },
         )
     }
 

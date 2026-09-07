@@ -41,7 +41,9 @@ class DatasourceSchemaToolsTest {
 
     @Test
     fun `get_schemas threads its arguments and serves the shared wire projection`() {
-        val page = co.datapipelines.datasources.SchemasPage(listOf("public", "sales"), truncated = true)
+        val page =
+            co.datapipelines.datasources.SchemasPage
+                .ofLabels(listOf("public", "sales"), truncated = true)
         every { introspector.schemas(match<Datasource> { it.name == "pg-prod" }) } returns page
 
         val payload =
@@ -53,7 +55,7 @@ class DatasourceSchemaToolsTest {
 
     @Test
     fun `get_tables threads its arguments and serves the shared wire projection`() {
-        val page = TablesPage(listOf(TableInfo("public", "orders", "TABLE")), truncated = true)
+        val page = TablesPage(listOf(TableInfo(listOf("public"), "orders", "TABLE")), truncated = true)
         every { introspector.tables(match<Datasource> { it.name == "pg-prod" }, "sales") } returns page
 
         val payload =
@@ -148,7 +150,7 @@ class DatasourceSchemaToolsTest {
                 dialect = co.datapipelines.typesystem.Dialect.POSTGRES,
                 jdbcUrl = "jdbc:postgresql://db.internal:5432/app",
                 username = "app",
-                password = "secret",
+                secret = "secret",
             )
         val registry = mockk<DatasourceRegistry>()
         every { registry.get("down") } returns datasource
@@ -181,7 +183,7 @@ class DatasourceSchemaToolsTest {
                 dialect = co.datapipelines.typesystem.Dialect.MYSQL,
                 jdbcUrl = "jdbc:mysql://db.internal:3306",
                 username = "app",
-                password = "secret",
+                secret = "secret",
             )
         val real =
             realIntrospectorOver(meta, datasource = gated) { connection ->
@@ -216,7 +218,7 @@ class DatasourceSchemaToolsTest {
                 dialect = co.datapipelines.typesystem.Dialect.MYSQL,
                 jdbcUrl = "jdbc:mysql://db.internal:3306",
                 username = "app",
-                password = "secret",
+                secret = "secret",
             )
         val real =
             realIntrospectorOver(meta, datasource = gated) { connection ->
@@ -229,7 +231,7 @@ class DatasourceSchemaToolsTest {
 
         payload shouldBe
             mapOf(
-                "tables" to listOf(mapOf("schema" to "db1", "name" to "orders", "type" to "TABLE")),
+                "tables" to listOf(mapOf("namespace" to listOf("db1"), "schema" to "db1", "name" to "orders", "type" to "TABLE")),
                 "truncated" to false,
             )
     }
@@ -251,7 +253,7 @@ class DatasourceSchemaToolsTest {
                 dialect = co.datapipelines.typesystem.Dialect.MYSQL,
                 jdbcUrl = "jdbc:mysql://db.internal:3306",
                 username = "app",
-                password = "secret",
+                secret = "secret",
             ),
         connectionSetup: (java.sql.Connection) -> Unit = {},
     ): SchemaIntrospector {
@@ -296,7 +298,7 @@ class DatasourceSchemaToolsTest {
                         dialect = co.datapipelines.typesystem.Dialect.DUCKDB,
                         jdbcUrl = "jdbc:duckdb::memory:",
                         username = "app",
-                        password = "secret",
+                        secret = "secret",
                     ),
             ) { connection ->
                 every { connection.schema } throws java.sql.SQLException("Connection was closed", null, 0)
@@ -414,7 +416,8 @@ class DatasourceSchemaToolsTest {
                 ),
             )
         every { introspector.schemas(any<Datasource>()) } returns
-            co.datapipelines.datasources.SchemasPage(listOf("public"), truncated = false)
+            co.datapipelines.datasources.SchemasPage
+                .ofLabels(listOf("public"), truncated = false)
         every { introspector.tables(any<Datasource>(), any()) } returns TablesPage(emptyList(), truncated = false)
         every { introspector.columns(any<Datasource>(), any(), any()) } returns emptyList()
 

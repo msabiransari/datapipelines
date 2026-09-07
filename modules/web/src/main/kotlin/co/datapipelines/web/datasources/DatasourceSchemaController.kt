@@ -62,13 +62,24 @@ class DatasourceSchemaController(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.schemas(it).toWireMap() })
 
-    /** §7A — tables and views, optionally narrowed to one schema; capped, `truncated` when the cap dropped any. */
+    /**
+     * §7A — tables and views, optionally narrowed to one NAMESPACE; capped, `truncated` when the
+     * cap dropped any.
+     *
+     * Two spellings of one filter (087). `?namespace=a1&namespace=sales` is the repeated-parameter
+     * form Spring binds to a list, `?namespace=a1.sales` the dotted shorthand, and `?schema=sales`
+     * the pre-087 parameter — which keeps working forever (§12.1) and, on a dialect with two
+     * browsable levels, may itself carry a dotted namespace so an agent can pass back exactly what
+     * a listing gave it. `namespace` wins when both are present.
+     */
     @GetMapping("/{name}/tables")
     @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
-    ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.tables(it, schema).toWireMap() })
+        @RequestParam(required = false) namespace: List<String>? = null,
+    ): ApiResponse<Map<String, Any?>> =
+        ApiResponse.of(visible(name) { introspector.tables(it, schema, namespaceFilter = namespaceOf(namespace)).toWireMap() })
 
     /** §7A — one table's columns with canonical types; empty when the table does not exist. */
     @GetMapping("/{name}/tables/{table}/columns")
@@ -77,8 +88,25 @@ class DatasourceSchemaController(
         @PathVariable name: String,
         @PathVariable table: String,
         @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) namespace: List<String>? = null,
     ): ApiResponse<List<Map<String, Any?>>> =
-        ApiResponse.of(visible(name) { introspector.columns(it, table, schema).map { c -> c.toWireMap() } })
+        ApiResponse.of(
+            visible(name) { introspector.columns(it, table, schema, namespaceOf(namespace)).map { c -> c.toWireMap() } },
+        )
+
+    /**
+     * The `namespace` parameter, in either accepted spelling: Spring binds `?namespace=a&namespace=b`
+     * to a two-element list and `?namespace=a.b` to a one-element list holding the dotted form, so
+     * a single element carrying dots is expanded here. One home for the rule, shared by both
+     * endpoints — the module-level parser ([co.datapipelines.datasources] `Namespaces`) is the same
+     * one the MCP tools and the include-schemas allowlist use.
+     */
+    private fun namespaceOf(namespace: List<String>?): List<String>? =
+        namespace
+            ?.flatMap { it.split('.') }
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.takeIf { it.isNotEmpty() }
 
     /**
      * §5.3 visibility, then the shared error boundaries — and the gate's snapshot is the

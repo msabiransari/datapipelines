@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.Dialect
@@ -127,8 +128,9 @@ class DatasourcePartialController(
         @RequestParam name: String,
         @RequestParam dialect: String,
         @RequestParam jdbcUrl: String,
-        @RequestParam username: String,
-        @RequestParam password: String,
+        @RequestParam(required = false, defaultValue = "password") credentialKind: String,
+        @RequestParam(required = false) username: String?,
+        @RequestParam(required = false) password: String?,
         @RequestParam(required = false) displayName: String?,
         @RequestParam(required = false) description: String?,
         @RequestParam(required = false, defaultValue = "false") global: Boolean,
@@ -139,6 +141,12 @@ class DatasourcePartialController(
             val resolvedDialect =
                 Dialect.entries.firstOrNull { it.wire.equals(dialect.trim(), ignoreCase = true) }
                     ?: return refused("Unknown dialect '$dialect'.")
+            // §3.4: the form states the KIND; `none` (a file database, an IAM role) carries
+            // neither field, so both inputs are optional here and the registry's validator —
+            // not an HTML `required` attribute — is what enforces the per-kind rules.
+            val kind =
+                CredentialKind.fromWireOrNull(credentialKind.trim().lowercase())
+                    ?: return refused("Unknown credential kind '$credentialKind'.")
             val workspaceId = rules.resolveCreateBinding(principal, global, null)
             val datasource =
                 Datasource(
@@ -147,8 +155,9 @@ class DatasourcePartialController(
                     description = description?.trim()?.takeIf { it.isNotEmpty() },
                     dialect = resolvedDialect,
                     jdbcUrl = jdbcUrl.trim(),
-                    username = username.trim(),
-                    password = password,
+                    username = username?.trim()?.takeIf { it.isNotEmpty() },
+                    credentialKind = kind,
+                    secret = password?.takeIf { it.isNotEmpty() },
                     isReadonly = readonly,
                     workspaceId = workspaceId,
                 )
@@ -179,7 +188,8 @@ class DatasourcePartialController(
 
     /**
      * The screen's search covers EVERY column the table renders (§4.5): name +
-     * readonly, dialect, workspace, URL, username, last-test state — plus description,
+     * readonly, dialect, workspace, URL, username, credential kind, last-test state — plus
+     * description,
      * which is searchable though only the modal shows it. A search that silently ignores a
      * visible column reads as "no results" to the user (029). The workspace column
      * renders the bound workspace's name or the literal `global`, so both match; the
@@ -200,7 +210,9 @@ class DatasourcePartialController(
                     .lowercase()
                     .contains(lower) ||
                 d.jdbcUrl.lowercase().contains(lower) ||
-                d.username.lowercase().contains(lower) ||
+                (d.username?.lowercase()?.contains(lower) == true) ||
+                d.credentialKind.wire
+                    .contains(lower) ||
                 (d.workspaceName ?: "global").lowercase().contains(lower) ||
                 (d.isReadonly && "readonly".contains(lower)) ||
                 lastTestLabel(d).contains(lower) ||
