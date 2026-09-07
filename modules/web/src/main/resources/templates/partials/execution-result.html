@@ -5,7 +5,7 @@
     </div>
   </th:block>
   <th:block th:unless="${#lists.isEmpty(rows)}">
-    <div style="overflow-x: auto;">
+    <div class="u-scroll-x">
       <table class="ds-table">
         <thead>
           <tr>
@@ -20,11 +20,11 @@
       </table>
     </div>
 
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--gap-md); font-size: var(--text-sm); color: var(--text-secondary);">
+    <div class="u-row u-between u-mt-md u-text-sm u-secondary">
       <div>
         Showing rows <span th:text="${offset + 1}">1</span>&ndash;<span th:text="${offset + #lists.size(rows)}">N</span> of <span th:text="${totalRows}">T</span>
       </div>
-      <div style="display: flex; gap: var(--gap-sm);">
+      <div class="u-row">
         <th:block th:if="${prevOffset != null}">
           <!-- th:attr + @{...}: th:hx-get is no processor (no htmx dialect is
                registered) — it shipped literally and these pager buttons were

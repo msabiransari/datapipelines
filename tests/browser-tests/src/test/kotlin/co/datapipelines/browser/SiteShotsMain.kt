@@ -94,12 +94,21 @@ object SiteShotsMain {
             "/datasources",
             "/templates",
             "/executions",
+            // 079 §C: the API section joins the shot list — it is a top-level screen now.
+            "/api-console",
             "/workspaces",
             "/promotion",
             "/settings",
             "/docs",
             "/admin/users",
         )
+
+    /**
+     * The routes the RAIL links to — APP_PAGES minus `/settings`, which 079 §B moved into the
+     * avatar menu. The still-shot list keeps /settings (it is a screen); the click-through
+     * cannot, because there is no rail link to click.
+     */
+    private val RAIL_ROUTES = APP_PAGES.filterNot { it == "/settings" }
 
     /** The two review widths the `app` set captures every screen at. */
     private val APP_VIEWPORTS = listOf(1440 to 900, 2560 to 1440)
@@ -233,7 +242,40 @@ object SiteShotsMain {
         // Playwright finalises the .webm on context.close(); it is renamed below.
         withBrowser(options) { page ->
             signIn(page, email, password)
-            APP_PAGES.forEach { route ->
+
+            // 079: the walk uses RAIL_ROUTES, not APP_PAGES. /settings is still a screen and
+            // is still photographed, but it has no rail link any more — it moved into the
+            // avatar menu (§B) — so clicking `nav.app-nav a[href='/settings']` waits forever.
+            RAIL_ROUTES.forEach { route ->
+                page.locator("nav.app-nav a[href='$route']").first().click()
+                page.waitForURL({ url -> url.endsWith(route) })
+                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            }
+
+            // 079 §A/§B: the four interactions the round asks a reviewer to watch, after the
+            // section walk. Each waits on the state it produces, never on a clock.
+            page.locator("#rail-collapse").click()
+            page.locator("html.rail-collapsed").waitFor()
+            page.locator("#rail-collapse").click()
+            page.locator("html:not(.rail-collapsed)").waitFor()
+
+            page.locator("#app-avatar").click()
+            page.locator("#app-user-menu:not([hidden])").waitFor()
+
+            // The theme PATCH answers with an out-of-band swap of #theme-link, so the href
+            // CHANGING is the completion signal — a sleep here would film a half-swapped page.
+            page.locator("#mode-toggle").click()
+            page.waitForFunction(
+                "() => document.getElementById('theme-link').getAttribute('href').includes('/themes/dark.css')",
+            )
+            page.locator("#mode-toggle").click()
+            page.waitForFunction(
+                "() => document.getElementById('theme-link').getAttribute('href').includes('/themes/light.css')",
+            )
+            page.keyboard().press("Escape")
+
+            // Three sections in the restored theme, so the film ends where a reader starts.
+            listOf("/pipelines", "/api-console", "/executions").forEach { route ->
                 page.locator("nav.app-nav a[href='$route']").first().click()
                 page.waitForURL({ url -> url.endsWith(route) })
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)

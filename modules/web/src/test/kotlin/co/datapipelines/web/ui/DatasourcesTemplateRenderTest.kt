@@ -157,7 +157,8 @@ class DatasourcesTemplateRenderTest {
         // The list still renders inside the page, and the layout serves the stack
         // plus the toast lifecycle script.
         html shouldContain "id=\"datasource-list-wrapper\""
-        html shouldContain "id=\"toast\" class=\"ds-toast-stack\""
+        // 079 §D: the stack's offset moved off an inline style= onto .app-toast-stack.
+        html shouldContain "id=\"toast\" class=\"ds-toast-stack app-toast-stack\""
         html shouldContain "/js/toast.js"
     }
 

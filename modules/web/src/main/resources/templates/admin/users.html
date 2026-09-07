@@ -2,7 +2,12 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <h1 class="ds-headline" style="margin:0 0 var(--gap-lg) 0">User Management</h1>
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline u-m0">Users</h1>
+      <p class="app-page-sub">Every user across every workspace. Admin-ness is not a scope — it is this list.</p>
+    </div>
+  </div>
 
   <!-- Out-of-band target for one-time password notices (create / reset). -->
   <div id="admin-notice"></div>
@@ -11,14 +16,14 @@
         hx-post="/partials/admin/users"
         hx-target="#user-table-body"
         hx-swap="afterbegin"
-        style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
+        class="u-row u-mb-md">
     <input type="email" name="email" class="ds-input app-input-inline" placeholder="new-user@example.com" required>
     <input type="text" name="displayName" class="ds-input app-input-inline" placeholder="Display name (optional)">
     <button type="submit" class="ds-button ds-button-primary ds-button-sm">Create local user</button>
-    <span style="color:var(--text-secondary);font-size:var(--text-xs)">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
+    <span class="u-secondary u-text-xs">Creates a local account with a one-time password, shown once (auth.md §5A.1)</span>
   </form>
 
-  <div style="display:flex;gap:var(--gap-sm);align-items:center;margin-bottom:var(--gap-md)">
+  <div class="u-row u-mb-md">
     <input type="text" id="userSearch" class="ds-input app-input-inline-lg" placeholder="Search by email or name"
            hx-get="/partials/admin/users"
            hx-trigger="keyup changed delay:300ms"
@@ -45,9 +50,9 @@
       <!-- The load placeholder is what the dashboard skeletons made the house idiom
            (025 B2): real shimmer rows, not a "Loading..." caption. Replaced whole by the
            htmx.ajax load below. -->
-      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
-      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
-      <tr><td colspan="7" style="padding:0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
+      <tr><td colspan="7" class="u-p0"><div class="ds-skeleton ds-skeleton-table-row"></div></td></tr>
     </tbody>
   </table>
 

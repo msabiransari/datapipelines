@@ -18,24 +18,41 @@
           <th>Version</th>
           <th>Status</th>
           <th>Started</th>
-          <th>Duration</th>
+          <th class="num">Duration</th>
+          <th>Via</th>
         </tr>
       </thead>
       <tbody>
-        <tr th:each="r : ${executions}" style="cursor: pointer;" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
+        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
           <td>
-            <span th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}"
-                  th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
-                  th:title="${p != null} ? ${p.name} : null">pipeline</span>
+            <!-- 079 §E: the display name is prose, the machine path sits UNDER it in mono
+                 (§3.3 — mono is for identifiers only). The path was previously only a
+                 `title`, which is invisible on a touch screen and to anyone not hovering. -->
+            <!-- th:with is precedence 500 and th:if is 300, so a `th:with` on the SAME
+                 element is not yet in scope when the condition is evaluated — the path line
+                 silently never rendered until a screenshot showed it missing. The binding
+                 goes on a wrapping th:block, where both children can see it. -->
+            <th:block th:with="p=${pipelineNames != null ? pipelineNames[r.pipelineId] : null}">
+              <span class="app-name"
+                    th:text="${p != null} ? (${p.displayName != null} ? ${p.displayName} : ${p.name}) : (${r.pipelineId.toString().substring(0, 8) + '...'})"
+                    th:title="${p != null} ? ${p.name} : null">pipeline</span>
+              <span class="app-path" th:if="${p != null and p.displayName != null}" th:text="${p.name}">nyc/mobility/x</span>
+            </th:block>
           </td>
           <td th:text="${r.pipelineVersion}">1</td>
           <td>
-            <span class="ds-badge"
-                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${r.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${r.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
-                  th:text="${r.status.name()}">status</span>
+            <!-- The chip shows prose ("Success"); the ENUM rides on data-status, which is
+                 what a test or a script should read. Asserting on display text makes a copy
+                 change a test failure and a machine reader's problem. -->
+            <span class="app-chip" th:attr="data-status=${r.status.name()}"
+                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
           </td>
           <td th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>
-          <td th:text="${r.durationMs != null} ? ${r.durationMs + 'ms'} : '-'">dur</td>
+          <td class="num" th:text="${r.durationMs != null} ? ${r.durationMs + ' ms'} : '—'">dur</td>
+          <!-- 079 §E: `triggered_via` was already selected on every row and rendered on
+               exactly one screen (the detail view). "Who started this" is the first
+               question asked of a failed run; it belongs in the list. -->
+          <td class="u-muted u-text-xs" th:text="${r.triggeredVia.name()}">MCP</td>
         </tr>
       </tbody>
     </table>

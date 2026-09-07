@@ -44,4 +44,38 @@ class PipelineNames(
                     PipelineName(name = rs.getString("name"), displayName = rs.getString("display_name"))
             }.toMap()
     }
+
+    /**
+     * 079 §C: the RELEASED version of each pipeline, for the published-endpoints table.
+     *
+     * A published endpoint pins a pipeline, never a version — the latest RELEASED version is
+     * resolved per request (`EndpointPublishService`). So `pipelines.current_version` is the
+     * wrong number to show: it is the newest version of any status, and rendering a DRAFT
+     * number next to a live endpoint would state that the endpoint serves something it does
+     * not. This asks for the highest version whose status is RELEASED, which is exactly what
+     * a call to that endpoint will run.
+     *
+     * A pipeline with no released version yields no entry, and the template renders "—" —
+     * an endpoint can outlive the release it was published against (the pipeline's only
+     * release can be discarded), and that is worth seeing rather than papering over.
+     *
+     * ONE batch query, same rule as [lookup]: the table has as many rows as the workspace has
+     * endpoints, and a query per row is how a list page becomes slow without anyone noticing.
+     */
+    fun releasedVersions(
+        workspaceId: UUID,
+        pipelineIds: Collection<UUID>,
+    ): Map<UUID, Int> {
+        if (pipelineIds.isEmpty()) return emptyMap()
+        return jdbc
+            .query(
+                "SELECT v.pipeline_id, MAX(v.version) AS released" +
+                    " FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id" +
+                    " WHERE p.workspace_id = :workspaceId AND v.pipeline_id IN (:ids)" +
+                    " AND v.status = 'RELEASED' GROUP BY v.pipeline_id",
+                mapOf("workspaceId" to workspaceId, "ids" to pipelineIds.toSet()),
+            ) { rs, _ ->
+                rs.getObject("pipeline_id", UUID::class.java) to rs.getInt("released")
+            }.toMap()
+    }
 }

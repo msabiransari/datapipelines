@@ -3,27 +3,27 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div class="app-center">
-    <div class="ds-card app-card-auth" style="text-align: center;">
-      <h1 class="ds-headline" style="margin-bottom: var(--gap-xs);">datapipelines.co</h1>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-lg);">Sign in to continue</p>
+    <div class="ds-card app-card-auth u-center">
+      <h1 class="ds-headline u-mb-xs">datapipelines.co</h1>
+      <p class="u-secondary u-text-sm u-mb-lg">Sign in to continue</p>
 
       <th:block th:if="${error}">
-        <div th:if="${#strings.equals(error, 'expired')}" style="background: var(--accent-warning-bg); color: var(--accent-warning); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'expired')}" class="app-alert app-alert-warning u-mb-md">
           Your login session has expired. Please try again.
         </div>
-        <div th:if="${#strings.equals(error, 'domain_not_allowed')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'domain_not_allowed')}" class="app-alert app-alert-danger u-mb-md">
           Your email domain is not allowed.
         </div>
-        <div th:if="${#strings.equals(error, 'inactive')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'inactive')}" class="app-alert app-alert-danger u-mb-md">
           Your account is inactive. Please contact an administrator.
         </div>
-        <div th:if="${#strings.equals(error, 'oidc_error')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'oidc_error')}" class="app-alert app-alert-danger u-mb-md">
           Login failed. Please try again.
         </div>
-        <div th:if="${#strings.equals(error, 'credentials')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'credentials')}" class="app-alert app-alert-danger u-mb-md">
           Invalid email or password.
         </div>
-        <div th:if="${#strings.equals(error, 'locked')}" style="background: var(--accent-danger); color: var(--accent-danger-text); padding: var(--gap-sm); border-radius: var(--radius-base); margin-bottom: var(--gap-md); font-size: var(--text-sm);">
+        <div th:if="${#strings.equals(error, 'locked')}" class="app-alert app-alert-danger u-mb-md">
           This account is temporarily locked. Try again later or contact an administrator.
         </div>
       </th:block>
@@ -32,29 +32,28 @@
            enabled; an OIDC-only deployment renders exactly what it always has. One
            form, then a divider, then the provider buttons — never tabs.
            076 §B: /login and the OIDC redirects are full navigations, never boosted. -->
-      <form th:if="${localEnabled}" method="post" th:action="@{/login}" style="text-align: left;" hx-boost="false">
+      <form th:if="${localEnabled}" method="post" th:action="@{/login}" class="u-left" hx-boost="false">
         <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}" />
-        <label for="login-email" style="display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-xs);">Email</label>
-        <input id="login-email" type="email" name="email" class="ds-input" style="width: 100%; margin-bottom: var(--gap-sm);"
+        <label for="login-email" class="u-block u-text-sm u-secondary u-mb-xs">Email</label>
+        <input id="login-email" type="email" name="email" class="ds-input u-full u-mb-sm"
                required autocomplete="username" />
-        <label for="login-password" style="display: block; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--gap-xs);">Password</label>
-        <input id="login-password" type="password" name="password" class="ds-input" style="width: 100%; margin-bottom: var(--gap-md);"
+        <label for="login-password" class="u-block u-text-sm u-secondary u-mb-xs">Password</label>
+        <input id="login-password" type="password" name="password" class="ds-input u-full u-mb-md"
                required autocomplete="current-password" />
-        <button type="submit" class="ds-button ds-button-primary" style="display: block; width: 100%;">Sign in</button>
+        <button type="submit" class="ds-button ds-button-primary u-block u-full">Sign in</button>
       </form>
 
       <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}"
-           style="display: flex; align-items: center; gap: var(--gap-sm); margin: var(--gap-md) 0; color: var(--text-secondary); font-size: var(--text-sm);">
-        <span style="flex: 1; border-top: 1px solid var(--border-default);"></span>
+           class="u-row u-my-md u-secondary u-text-sm">
+        <span class="u-grow u-divider-top"></span>
         <span>or</span>
-        <span style="flex: 1; border-top: 1px solid var(--border-default);"></span>
+        <span class="u-grow u-divider-top"></span>
       </div>
 
       <th:block th:each="provider : ${providers}">
         <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
-           class="ds-button ds-button-secondary"
+           class="ds-button ds-button-secondary u-block u-full u-mb-sm u-center u-no-underline"
            hx-boost="false"
-           style="display: block; width: 100%; margin-bottom: var(--gap-sm); text-align: center; text-decoration: none;"
            th:text="${provider.displayName}">Provider Name</a>
       </th:block>
     </div>

@@ -83,11 +83,13 @@ class JarSmokeE2eTest {
         // B2: the partials are fetched by the page's hx-gets — assert them directly.
         val stats = get("/partials/dashboard-stats")
         stats.second shouldBe 200
-        stats.first shouldContain "Total Pipelines"
+        stats.first shouldContain "Total pipelines"
         val recent = get("/partials/recent-executions")
         recent.second shouldBe 200
         // The seeded execution is rendered — real content, not an error shell.
-        recent.first shouldContain "SUCCESS"
+        // 079 §E: the chip's TEXT is prose ("Success"); the enum rides on data-status, which
+        // is the machine-readable statement this assertion was always about.
+        recent.first shouldContain "data-status=\"SUCCESS\""
         recent.first shouldContain SEEDED_EXECUTION
         noneCarriesErrorMarkers("/", "/partials/dashboard-stats", "/partials/recent-executions")
     }
@@ -104,9 +106,14 @@ class JarSmokeE2eTest {
         // enumeration. ORDER can: the resolver returns the names SORTED (auto first, forest
         // before light), the fallback is hand-ordered (saas first, light before forest) — the
         // two inversions below are only producible by real enumeration.
-        body shouldContain "value=\"auto\""
-        body.indexOf("value=\"auto\"") shouldBeLessThan body.indexOf("value=\"saas\"")
-        body.indexOf("value=\"forest\"") shouldBeLessThan body.indexOf("value=\"light\"")
+        // 079: matched on `<option value="…"` rather than on `value="…"` anywhere in the
+        // document. The shell's avatar menu carries its own theme controls now, and any
+        // attribute NAME ending in `value` (a `data-…-value`) contains the bare substring —
+        // which made the ordering probe read one control's attributes against another's.
+        // The claim was always about the SELECT's option list; now it says so.
+        body shouldContain "<option value=\"auto\""
+        body.indexOf("<option value=\"auto\"") shouldBeLessThan body.indexOf("<option value=\"saas\"")
+        body.indexOf("<option value=\"forest\"") shouldBeLessThan body.indexOf("<option value=\"light\"")
         noneCarriesErrorMarkers("/settings")
     }
 

@@ -2,15 +2,15 @@
   <!-- The one-time secret panel: PERSISTENT and inline by design (§5.1's hard rule —
        a 6s toast never carries anything the user must keep). The OOB toast below only
        POINTS at this panel; the plaintext never leaves this div. -->
-  <div style="margin-bottom:var(--gap-md)">
-    <p style="color:var(--text-primary);font-weight:var(--weight-semibold);margin:0 0 var(--gap-xs) 0">Your new API key (shown once):</p>
-    <div style="display:flex;gap:var(--gap-xs);align-items:center">
-      <input type="text" readonly th:value="${key}" style="flex:1;font-family:var(--font-mono);font-size:var(--text-sm);padding:var(--gap-xs) var(--gap-sm);border:1px solid var(--accent-success);border-radius:var(--radius-base);background:var(--surface-secondary);color:var(--text-primary)">
-      <button class="ds-button ds-button-ghost ds-button-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)" style="white-space:nowrap">Copy</button>
+  <div class="u-mb-md">
+    <p class="u-primary u-semibold u-m0 u-mb-xs">Your new API key (shown once):</p>
+    <div class="u-flex u-items-center u-gap-xs">
+      <input type="text" readonly th:value="${key}" class="app-secret-field u-mono u-text-sm u-primary">
+      <button class="ds-button ds-button-ghost ds-button-sm u-nowrap" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
     </div>
-    <p style="color:var(--accent-danger);font-size:var(--text-xs);margin:var(--gap-xs) 0 0 0">Copy this key now. You won't see it again.</p>
+    <p class="u-danger u-text-xs u-m0 u-mt-xs">Copy this key now. You won't see it again.</p>
   </div>
-  <p style="color:var(--text-secondary);font-size:var(--text-sm);margin:0">Key <span th:text="${keyId}" style="font-family:var(--font-mono)">dpk_xxx</span> (<span th:text="${keyName}">name</span>) created successfully.</p>
+  <p class="u-secondary u-text-sm u-m0">Key <span th:text="${keyId}" class="u-mono">dpk_xxx</span> (<span th:text="${keyName}">name</span>) created successfully.</p>
   <!-- E2: the create response is the ONLY chance to refresh the table without a reload;
        `keys` was already in the model and rendered nowhere. Same table markup as the
        page (settings/api-keys :: keysTable) — extracted, never duplicated. The OOB

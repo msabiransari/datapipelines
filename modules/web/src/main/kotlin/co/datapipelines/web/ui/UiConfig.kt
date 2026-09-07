@@ -34,6 +34,13 @@ class UiConfig {
     @Bean
     fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
 
+    /** 079 §A: the rail's Pipelines/Templates badges, behind a 60s TTL (see [NavCounts]). */
+    @Bean
+    fun navCounts(
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        templates: TemplateRepository,
+    ): NavCounts = NavCounts(pipelines, templates)
+
     /** 067: the pipelines explorer's one model, shared by the page and the partial controllers. */
     @Bean
     fun pipelineBrowseModel(

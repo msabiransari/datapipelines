@@ -2,9 +2,14 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div style="margin-bottom: var(--gap-lg);">
-    <h1 class="ds-headline" style="margin-bottom: var(--gap-xs);">Dashboard</h1>
-    <p style="color: var(--text-secondary); font-size: var(--text-sm);">Overview of your data pipelines</p>
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Dashboard</h1>
+      <p class="app-page-sub" th:text="${activeWorkspace != null} ? ${activeWorkspace} + ' · the last 24 hours' : 'The last 24 hours'">workspace · the last 24 hours</p>
+    </div>
+    <div class="app-page-actions">
+      <a class="ds-button ds-button-secondary" th:href="@{/executions}">All executions</a>
+    </div>
   </div>
 
   <!--
@@ -13,18 +18,23 @@
     fragment signatures — which emitted `children` unchanged AND made the partials
     unrenderable standalone (the 500 the hx-gets hit); the skeletons live here directly.
   -->
-  <div class="ds-stats" hx-get="/partials/dashboard-stats" hx-trigger="load" hx-swap="outerHTML">
+  <div class="ds-stats app-grid app-grid-3 u-mb-md" hx-get="/partials/dashboard-stats" hx-trigger="load" hx-swap="outerHTML">
     <div class="ds-skeleton ds-skeleton-card"></div>
     <div class="ds-skeleton ds-skeleton-card"></div>
     <div class="ds-skeleton ds-skeleton-card"></div>
   </div>
 
-  <div style="margin-top: var(--gap-lg);">
-    <h2 class="ds-title" style="margin-bottom: var(--gap-md);">Recent Executions</h2>
+  <div class="ds-card app-card-table">
+    <div class="app-card-h">
+      <h2 class="ds-title">Recent executions</h2>
+      <a class="u-text-sm" th:href="@{/executions}">View all →</a>
+    </div>
     <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
-      <div class="ds-skeleton ds-skeleton-table-row"></div>
-      <div class="ds-skeleton ds-skeleton-table-row"></div>
-      <div class="ds-skeleton ds-skeleton-table-row"></div>
+      <div class="app-card-b">
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+        <div class="ds-skeleton ds-skeleton-table-row"></div>
+      </div>
     </div>
   </div>
 </th:block>

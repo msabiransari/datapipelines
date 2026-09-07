@@ -54,6 +54,15 @@
   margin-bottom: var(--gap-sm);
 }
 
+/* 079 §D: the preview panel's head sits directly on its pane — the
+   `margin-bottom:0` it carried inline, as a class. The rule lives here rather
+   than in app.css because template-editor.css loads AFTER app.css, so a
+   utility there could not outrank `.te-panel-head`; the compound selector
+   settles it on specificity too. */
+.te-panel-head.te-panel-head-flush {
+  margin-bottom: 0;
+}
+
 .te-panel-head h2 {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);

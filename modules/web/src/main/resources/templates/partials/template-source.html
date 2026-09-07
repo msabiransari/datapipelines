@@ -21,7 +21,7 @@
   <!-- READ-ONLY: a version other than the working one. -->
   <th:block th:if="${readOnly}">
     <div class="te-panel-head">
-      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+      <div class="u-row">
         <h2>Template Source</h2>
         <span class="ds-badge ds-badge-default" th:text="'v' + ${selectedVersion}">v2</span>
         <!-- One expression for both values: the badge states what the row IS, and there is
@@ -29,9 +29,9 @@
         <span class="ds-badge"
               th:classappend="${selectedStatus == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-success'"
               th:text="${selectedStatus}">RELEASED</span>
-        <span style="color:var(--text-secondary);font-size:var(--text-sm)">read-only</span>
+        <span class="u-secondary u-text-sm">read-only</span>
       </div>
-      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+      <div class="u-row">
         <button class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"
                 th:attr="hx-post=@{/partials/templates/editor/edit(name=${templateName},version=${selectedVersion})}"
                 hx-target="#tpl-edit-refusal" hx-swap="innerHTML">Edit</button>
@@ -42,12 +42,12 @@
          The actor is the stored user id — this app resolves no display name for it
          anywhere, so it renders as the id rather than as a name it would have to invent. -->
     <p th:if="${releasedAt != null}"
-       style="margin:0;color:var(--text-secondary);font-size:var(--text-sm)">
+       class="u-m0 u-secondary u-text-sm">
       <span>Released</span>
       <span th:text="${#temporals.format(releasedAt, 'yyyy-MM-dd HH:mm')}">2026-09-01 10:00</span>
       <th:block th:if="${releasedBy != null}">
         <span>by</span>
-        <span style="font-family:var(--font-mono)" th:text="${releasedBy}">user-id</span>
+        <span class="u-mono" th:text="${releasedBy}">user-id</span>
       </th:block>
     </p>
 
@@ -70,11 +70,11 @@
   </th:block>
 
   <div class="te-preview">
-    <div class="te-panel-head" style="margin-bottom:0">
-      <div style="display:flex;gap:var(--gap-sm);align-items:center">
+    <div class="te-panel-head te-panel-head-flush">
+      <div class="u-row">
         <h2>Preview Output</h2>
         <button class="ds-button ds-button-primary" onclick="renderPreview()" id="previewBtn">Preview</button>
-        <span id="previewSpinner" style="display:none;color:var(--text-secondary);font-size:var(--text-sm)">Rendering...</span>
+        <span id="previewSpinner" class="u-hidden u-secondary u-text-sm">Rendering...</span>
       </div>
     </div>
     <div id="previewPane" class="te-preview-pane"></div>

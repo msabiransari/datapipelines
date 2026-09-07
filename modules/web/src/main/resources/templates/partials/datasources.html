@@ -62,7 +62,7 @@
                wrong, only silent. The driver's message rides in the title attribute
                (already redaction-scrubbed at the probe: no password, no credential-bearing
                URL) so a failing row explains itself on hover without widening the table. -->
-          <td style="white-space: nowrap;">
+          <td class="u-nowrap">
             <th:block th:if="${ds.lastTest} == null">
               <span class="ds-badge ds-badge-default" title="No connection test has been run against this datasource yet">never tested</span>
             </th:block>
@@ -71,11 +71,11 @@
                     th:title="${ds.lastTest.message} ?: 'The last connection test succeeded'">ok</span>
               <span th:unless="${ds.lastTest.ok}" class="ds-badge ds-badge-danger"
                     th:title="${ds.lastTest.message} ?: 'The last connection test failed'">failed</span>
-              <span style="color: var(--text-tertiary); font-size: var(--text-xs);"
+              <span class="u-muted u-text-xs"
                     th:text="${#temporals.format(ds.lastTest.testedAt, 'yyyy-MM-dd HH:mm')}">2026-09-03 10:00</span>
             </th:block>
           </td>
-          <td class="num" style="white-space: nowrap;">
+          <td class="num u-nowrap">
             <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
               <!-- Result goes to the #toast stack; the row and table are never
                    touched, so the table layout cannot break. hx-disabled-elt

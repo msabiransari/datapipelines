@@ -103,20 +103,44 @@ class UiLayoutChromeAdviceTest {
     }
 
     @Test
-    fun `anonymous requests render no nav links and no logout`() {
+    fun `anonymous requests render no rail, no nav links and no logout`() {
         val html = renderLayout(authenticated = false, currentPath = "/login")
 
+        // 079 §A: the whole rail is gated on `authenticated`, which is also what keeps
+        // `nav.app-nav` at zero occurrences for an anonymous request
+        // (NavigationGoldenPathBrowserTest). The BRAND survives, in the slim anonymous
+        // top bar — the login page has to say whose login it is.
         html shouldNotContain "app-nav-link"
-        html shouldNotContain "Logout"
+        html shouldNotContain "app-rail\""
+        html shouldNotContain "Log out"
         html shouldContain "app-brand"
+        html shouldContain "app-topbar-anon"
     }
 
     @Test
-    fun `authenticated requests render nav links with the current section active`() {
+    fun `authenticated requests render the rail with the current section active`() {
         val html = renderLayout(authenticated = true, currentPath = "/executions")
 
         html shouldContain "app-nav-link"
-        html shouldContain "Logout"
-        Regex("""class="app-nav-link active"[^>]*>Executions""").containsMatchIn(html) shouldBe true
+        html shouldContain "Log out"
+        // The highlight is a class AND aria-current, both server-computed for the first
+        // paint and both mirrored by shell.js after a boosted swap (079 §A). Asserted on
+        // the WHOLE opening tag rather than on an attribute order Thymeleaf is free to
+        // change: the two states must land on the SAME anchor, and only that one.
+        val active = Regex("""<a[^>]*\bclass="app-nav-link active"[^>]*>""").findAll(html).map { it.value }.toList()
+        active.size shouldBe 1
+        active.single() shouldContain "data-nav-label=\"Executions\""
+        active.single() shouldContain "aria-current=\"page\""
+    }
+
+    @Test
+    fun `the top bar renders the breadcrumb the nav table derived`() {
+        val html = renderLayout(authenticated = true, currentPath = "/executions")
+
+        html shouldContain "app-crumbs"
+        // crumbGroup/crumbPage are AppShellAdvice's, so this stub render leaves them null
+        // and the crumb falls back to the brand word — the point pinned here is that the
+        // top bar's three crumb elements exist for shell.js to write into after a swap.
+        html shouldContain "app-crumb-page"
     }
 }

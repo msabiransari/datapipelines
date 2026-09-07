@@ -2,11 +2,11 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <div class="app-center" style="min-height: 60vh;">
-    <div class="ds-card app-card-auth" style="text-align: center;">
-      <h2 class="ds-headline" style="margin-bottom: var(--gap-sm);">404</h2>
-      <h3 style="font-size: var(--text-lg); margin-bottom: var(--gap-md);">Page Not Found</h3>
-      <p style="color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--gap-lg);">
+  <div class="app-center u-modal-tall">
+    <div class="ds-card app-card-auth u-center">
+      <h2 class="ds-headline u-mb-sm">404</h2>
+      <h3 class="u-text-lg u-mb-md">Page Not Found</h3>
+      <p class="u-secondary u-text-sm u-mb-lg">
         The page you are looking for does not exist.
       </p>
       <a th:href="@{/dashboard}" class="ds-button ds-button-secondary">Go to Dashboard</a>
