@@ -42,16 +42,14 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)
 
-    // 086 A2: `StatementCancelDialectTest` MEASURES `Statement.cancel()` against every dialect the
-    // product bundles a driver for — dag-executor.md §8.3.2's table is a measurement, and a claim
-    // about a driver read out of its documentation is worth nothing (the reason `datasources`
-    // takes these same engines' jars for its own dialect tests). SQLite and DuckDB are embedded:
-    // no container, no image pull. MySQL needs the container module and the driver; unlike
-    // `datasources` this needs **no** lock exclusion, because the exclusion there exists only so
-    // ONE lockfile can validate both `-Pmysql` states (§5.4.1) and nothing here is flag-gated —
-    // the coordinate is unconditionally on this module's test runtime and locks like any other.
+    // 086 A2: `StatementCancelDialectTest` MEASURES `Statement.cancel()` — dag-executor.md
+    // §8.3.2's table is a measurement, and a claim about a driver read out of its documentation is
+    // worth nothing (the reason `datasources` takes these same engines' jars for its own dialect
+    // tests). Only the EMBEDDED engines are automated here: no container, no image pull, ~26 s.
+    // Postgres and MySQL are measured too, but not from this module — §8.3.2 records their rows
+    // with the runs that produced them and says so, because a server container is a poor trade for
+    // one table row in the round whose purpose was deleting a flaky gate. Both jars are already on
+    // this module's runtime classpath transitively; these two lines put them on testCompile.
     testImplementation(libs.sqlite.jdbc)
     testImplementation(libs.duckdb.jdbc)
-    testImplementation(libs.testcontainers.mysql)
-    testRuntimeOnly(libs.mysql.connector.j)
 }
