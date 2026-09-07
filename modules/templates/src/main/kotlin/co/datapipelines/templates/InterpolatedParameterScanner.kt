@@ -79,38 +79,47 @@ internal object InterpolatedParameterScanner {
         found: MutableSet<String>,
     ) {
         if (element == null) return
-        val type = FreemarkerAst.typeOf(element)
-        when (type) {
+        when (FreemarkerAst.typeOf(element)) {
             FreemarkerAst.DOLLAR_VARIABLE -> {
-                val text = FreemarkerAst.ownText(element)
-                (declared + guarded).forEach { name ->
-                    if (name !in shadowed && isReferencedIn(text, name)) found += name
-                }
+                reportMatches(FreemarkerAst.ownText(element), declared + guarded, shadowed, found)
                 return // the interpolation's expression subtree is not template elements
             }
 
             FreemarkerAst.IF_BLOCK, FreemarkerAst.CONDITIONAL_BLOCK -> {
                 // The branch's own text prints its condition (`#if x??`, `#elseif x`); children
                 // are walked normally below, so nested conditionals report for themselves.
-                val text = FreemarkerAst.ownText(element)
-                guarded.forEach { name ->
-                    if (name !in shadowed && isReferencedIn(text, name)) found += name
-                }
+                reportMatches(FreemarkerAst.ownText(element), guarded, shadowed, found)
             }
 
             FreemarkerAst.MACRO -> {
-                val inner = shadowed + macroParameters(FreemarkerAst.ownText(element))
-                FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, inner, found) }
+                walkChildren(element, declared, guarded, shadowed + macroParameters(FreemarkerAst.ownText(element)), found)
                 return
             }
 
             FreemarkerAst.ITERATOR_BLOCK -> {
-                val inner = shadowed + loopVariableOf(FreemarkerAst.ownText(element))
-                FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, inner, found) }
+                walkChildren(element, declared, guarded, shadowed + loopVariableOf(FreemarkerAst.ownText(element)), found)
                 return
             }
         }
-        FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, shadowed, found) }
+        walkChildren(element, declared, guarded, shadowed, found)
+    }
+
+    private fun walkChildren(
+        element: TemplateElement,
+        declared: Set<String>,
+        guarded: Set<String>,
+        shadowed: Set<String>,
+        found: MutableSet<String>,
+    ) = FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, shadowed, found) }
+
+    /** Every [names] entry used as a variable in [expression] and not shadowed here. */
+    private fun reportMatches(
+        expression: String,
+        names: Set<String>,
+        shadowed: Set<String>,
+        found: MutableSet<String>,
+    ) = names.forEach { name ->
+        if (name !in shadowed && isReferencedIn(expression, name)) found += name
     }
 
     /**
