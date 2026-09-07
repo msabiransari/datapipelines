@@ -639,9 +639,10 @@ The sample data is **published, versioned artifact sets** (one per family), not
 something the app downloads: loading it is a deployment step (sample-data design
 D5). Any deployment that pulls the same version gets the same databases, byte for
 byte in content. The build scripts that produce them live at
-[`scripts/sample-data/`](../scripts/sample-data/README.md) (nyc family) and
+[`scripts/sample-data/`](../scripts/sample-data/README.md) (nyc family),
 [`scripts/sample-data-trade/`](../scripts/sample-data-trade/README.md) (trade
-family); everything below is the consuming side.
+family) and [`scripts/sample-data-lake/`](../scripts/sample-data-lake/README.md)
+(**dp-lake**); everything below is the consuming side.
 
 Two independent families, each behind its own compose profile and app.sh flag —
 an engineer spins up exactly the data they need:
@@ -653,6 +654,11 @@ an engineer spins up exactly the data they need:
 
 Both together is fine — the app's bootstrap keys are comma-separated lists built
 from the active families, and the MySQL service is shared.
+
+A third family, **dp-lake**, is *published but not yet consumable*: the artifact
+build lands with round 088 and the datasource that reads it (dialect `lake`, name
+`sample-lake`) is round 089. It has no compose profile, no loader and no `--demo`
+flag, because there is nothing to load — see the next section.
 
 ### One command
 
@@ -759,6 +765,39 @@ It runs as two services because no pinned image carries both a Postgres and a
 MySQL client, and installing one at container start would put an unpinned package
 fetch in the one place that has to be reproducible.
 
+### dp-lake — the family with no loader
+
+`sample-data/lake/<version>/` is different in kind from the two above and the
+difference is the point: **it is read in place**. Nothing is downloaded at demo
+start, nothing is restored into an engine, and there is no one-shot loader
+service. The query engine reads the Parquet objects over HTTPS and fetches only
+the ones a query's predicates name.
+
+What is published (build runbook:
+[`scripts/sample-data-lake/README.md`](../scripts/sample-data-lake/README.md)):
+
+| Object set | Shape | Read when |
+|---|---|---|
+| `hvfhv_zone_day`, `hvfhs_companies` | one Parquet file each, single-digit MB | every run of the showcase pipeline |
+| `hvfhv_trips_sample` | Parquet, one file per month, ~500 MB total | a trip-level question; one month is ~21 MB |
+| `hvfhv_trips` | Parquet partitioned by `pickup_date`, ~7 GB over ~730 objects | **only the day partitions a query names** |
+| `hvfhv_trips_iceberg` | an Apache Iceberg table, ~500 MB | the Iceberg read path |
+| `manifest.json` | — | the registry seed: `tables[]` carries name, format, path, partition column, row count |
+
+**Egress is the operating cost to watch, and it is bounded by the query, not by
+the artifact.** A demo session running the shipped pipeline at its default
+one-month window reads a few MB. The exposure is a visitor who writes
+`SELECT * FROM hvfhv_trips` with no date predicate — a ~7 GB full scan at S3
+egress prices, per run. Set a bucket request-rate or budget alarm before the lake
+demo is announced.
+
+Because there is no loader, the consuming side of this family is a datasource
+registration, and that is round 089
+([Datasources §14](datasources.md#14-open-questions--future-additions)). Until it
+lands, the published objects are inert: nothing in the app reads them, and the
+showcase pipeline that would use them ships in its own examples file
+(`scripts/sample-data/content/examples-lake.json`) that no deployment loads yet.
+
 ### Resetting an engine volume desyncs the demo login
 
 The loader creates the `dp_demo_ro` login with the passwords from the env files,
@@ -803,6 +842,7 @@ published bytes with the repo's.
    ```bash
    ./scripts/sample-data/check-published.sh v2                  # nyc (mobility), the default family
    ./scripts/sample-data/check-published.sh --family trade v2   # the trade family
+   ./scripts/sample-data-lake/check-published.sh --family lake v1   # dp-lake (a different contract, below)
    ```
 
    It fetches the published manifest and `examples.json`, and fails unless the
@@ -815,6 +855,17 @@ published bytes with the repo's.
    locally staged build (`file://…/scripts/sample-data/work`, or the local-serve
    recipe in `app.sh`). Network by nature, so it is a rehearsal step, never part
    of `./gradlew build`.
+   The **lake** family's guard is a separate script because it checks a different
+   thing. That family has no `examples.json` — its content lives with the nyc
+   family — so what can drift is not content but the objects themselves. It
+   fetches the published manifest, refuses a manifest whose `version` disagrees
+   with its directory, **fails if any provenance row still carries
+   `license_verified: null`**, samples one object per table and compares SHA-256,
+   and fetches the Iceberg metadata file to confirm every location it records
+   sits inside the published prefix — an Iceberg table that still names a build
+   machine's directory is unreadable, and nothing about an object listing shows
+   it. Folding two unrelated contracts behind one `--family` flag would make
+   "check-published passed" mean two different things.
 2. **The repo copy is validated in `build`** — the templates module's
    `SampleDataExamplesContentTest` runs every shipped template and pipeline
    through the app's own save-time validators (049 C1), so content the seeder
@@ -825,7 +876,9 @@ published bytes with the repo's.
 
 Every `provenance` row in `manifest.json` ships `license_verified: null`. The
 build verifies no licence and claims none; the licence strings are research
-claims carried with their evidence links in `scripts/sample-data/sources.lock`.
+claims carried with their evidence links in each family's `sources.lock`
+(`scripts/sample-data/`, `scripts/sample-data-trade/`,
+`scripts/sample-data-lake/`).
 
 **Publishing with any `license_verified` still null blocks go-live** (design §8).
 Verify each source's current terms, record the date, and swap — do not ship — any
@@ -839,6 +892,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-07 | v1.15 | 088 dp-lake data | **Appendix B gains a third sample-data family, `dp-lake`** — NYC TLC High Volume FHV (Uber/Lyft/Via/Juno) trips published at `s3://datapipelines-co/sample-data/lake/<version>/` as Parquet partitioned by `pickup_date`, a 1-in-16 sample, a zone/day pre-aggregate and an Apache Iceberg copy of the sample. New section "**dp-lake — the family with no loader**": it is **read in place**, so there is no compose profile, no loader service and no `--demo` flag — the datasource that reads it (dialect `lake`, `sample-lake`) is round 089, and the showcase pipeline ships in its own `scripts/sample-data/content/examples-lake.json` that no deployment loads yet. The drift-guards section gains `scripts/sample-data-lake/check-published.sh --family lake <version>` and says why it is a separate script (no `examples.json`; it checks object hashes, the licence gate and the Iceberg metadata's recorded locations). Egress is stated as the operating cost: bounded by a query's date predicate, unbounded for an unfiltered scan of the ~7 GB table. No application code, no deployment change. |
 | 2026-09-07 | v1.14 | mobility v6 (082) | The demo briefing gains a CALCULATOR node (`fiscal_quarter` → `run_fiscal_quarter`, bound as the first caller column) so the feature is visible out of the box; data files unchanged; baselines re-keyed. Pin → `SAMPLE_VERSION=v6` in `deploy/env/defaults.env`; `check-published.sh v6` byte-identical. |
 | 2026-09-06 | v1.13 | mobility v5 + trade v4 (077 mandatory folders) | Both artifact sets republish with every template id under a folder (`nyc/mobility/…`, `nyc/reference/…`, `nyc/weather/…`, `trade/…`) — 13 of 25 demo templates were flat and are refused by 077's rule at seed time. Data files unchanged in content. Pins → `SAMPLE_VERSION=v5`, `SAMPLE_TRADE_VERSION=v4`; `check-published.sh v5` / `--family trade v4` byte-identical on publish. |
 | 2026-09-06 | v1.13 | 081 one env file | The `deploy/` layout is **two env files**: tracked `deploy/env/defaults.env` (every non-secret variable with the value this deployment ships) then git-ignored `deploy/secrets.env`, in that order under every loader, with `deploy/secrets.env.example` as the template that names every variable. The five files 075 put under `deploy/env/` (`laptop.env`, `demo.env`, `example.env`, `posture/development.env`, `posture/hardened.env`) are deleted; §6.2, §6.3A and Appendix B's raw-compose recipe use the two-file list. `deploy/compose.laptop-infra.yml` starts its Postgres and Redis from `SPRING_DATASOURCE_PASSWORD` / `DATAPIPELINES_REDIS_PASSWORD`, removing the laptop's load-order inversion. `./app.sh --scaffold` writes `deploy/secrets.env` from the template and stops, so the admin address can be set before the one-time seed; `--start` waits until the app is actually healthy (up to `HEALTH_WAIT_SECONDS`, default 360) instead of reporting the HEALTHCHECK deadline as a failure, and `--status` prints the seeded login too. |

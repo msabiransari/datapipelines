@@ -1,0 +1,126 @@
+# scripts/sample-data-lake/sources.lock — the pins that make the published dp-lake
+# artifact rebuildable. Same format and the same discipline as
+# ../sample-data/sources.lock (sample-data design D8, §4.1); read by the SAME
+# machinery (../sample-data/lib/common.sh — the trade family's arrangement).
+#
+# FORMAT — space-separated, three or more fields, `#` comments:
+#   param  <key>   <value>          human-declared build input (the window, the
+#                                   sampling modulus, the tool versions). Editing
+#                                   one of these changes the ARTIFACT, so it is a
+#                                   reviewed change and the version directory must
+#                                   be bumped (version dirs are immutable).
+#   url    <id>    <url>            the exact source URL for logical source <id>
+#   sha256 <id>    <hash>           the pinned SHA-256 of that file, verified after
+#                                   download. `PENDING` = not yet pinned; pin.sh
+#                                   fills it and download.sh refuses to treat a
+#                                   PENDING source as verified.
+#   tool   <n>-<p> <ver> <url> <sha256>   a pinned build binary, per platform
+#
+# Regenerate the derived lines with `./scripts/sample-data-lake/pin.sh` — never by
+# hand, and never as a reflex when a build fails a checksum: a mismatch means the
+# upstream file CHANGED, which changes what we publish.
+#
+# There are no `unpinned:` sources here and no `window` content pins: every TLC
+# monthly Parquet is an immutable published file, so the file-level SHA is the
+# honest pin. (The mobility family needs the content-pin machinery only for NOAA,
+# which regenerates its CSVs nightly.)
+#
+# LICENCE EVIDENCE (design §8 — the go-live gate). Every claim below is a research
+# claim recorded for the owner to verify; this build verifies none of them and
+# manifest.json therefore ships `license_verified: null` for all of them.
+# The dossier of record — every page re-fetched 2026-09-07, every operative
+# sentence quoted verbatim, including the ONE difference from the yellow-taxi
+# position (HVFHV carries its own accuracy disclaimer) — is
+#   ../datapipelines-orchestration/notes/2026-09-07-lake-license-dossier.md
+# Evidence links:
+#   NYC TLC trip records (the page that publishes the HVFHV monthly Parquet)
+#     https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+#   High Volume FHV data dictionary (the hvfhs_license_num -> company mapping)
+#     https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_hvfhs.pdf
+#   NYC Open Data — the programme the datasets belong to, and its grant
+#     https://data.cityofnewyork.us/browse?Data-Collection_Data-Collection=TLC%20Trip%20Data
+#     https://opendata.cityofnewyork.us/faq/
+#     https://opendata.cityofnewyork.us/overview/
+#   NYC.gov site-wide terms (incorporated by the Open Data terms)
+#     https://www.nyc.gov/home/terms-of-use.page
+
+# --- build inputs (human-declared) -----------------------------------------
+
+param window_start           2023-01
+param window_end             2024-12
+param trips_sample_modulus   16
+param duckdb_version         v1.5.5
+param pyiceberg_version      0.12.0
+param artifact_version       v1
+param bucket_uri             s3://datapipelines-co/sample-data/lake
+# The design §8 go-live gate: set ONLY by the owner after checking every source's
+# CURRENT terms (dossier above). Absent or "null" = manifest ships
+# license_verified: null and publishing blocks go-live. The 088 lane deliberately
+# leaves it null: research is not a stamp.
+param license_verified       null
+
+# --- derived pins (regenerate with pin.sh) ---------------------------------
+
+# NYC TLC High Volume For-Hire Vehicle (Uber / Lyft / Via / Juno) trip records —
+# monthly Parquet, the pinned 24-month window, ~480 MB each (~11.6 GB total).
+# Same publisher and same CloudFront host as the yellow-taxi months the mobility
+# family pins (../sample-data/sources.lock:58-108). Immutable in practice
+# (Last-Modified predates the pin by years) but TLC HAS re-published historical
+# months before; that is precisely what the SHA pin catches.
+url    tlc-hvfhv-2023-01.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-01.parquet
+sha256 tlc-hvfhv-2023-01.parquet    cb066a3fe0770e44dde67cfc43e8b964b7b3ca7f2c90dc35d2d57cb7e41629b8
+url    tlc-hvfhv-2023-02.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-02.parquet
+sha256 tlc-hvfhv-2023-02.parquet    5a9f32bda414abcb0f04f2286ca8af5670ac9e535fdd86f2aa3840b71d62fdc2
+url    tlc-hvfhv-2023-03.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-03.parquet
+sha256 tlc-hvfhv-2023-03.parquet    57e607736d4460050e823acb1af82f9a23ed36382b131217fa56597f4f7c0f5a
+url    tlc-hvfhv-2023-04.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-04.parquet
+sha256 tlc-hvfhv-2023-04.parquet    edf8bfe4435fec30bc8830750834c570f597fc129e6a9b7779366280f4bed276
+url    tlc-hvfhv-2023-05.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-05.parquet
+sha256 tlc-hvfhv-2023-05.parquet    af892a2dd4262a9197a6ba84ed53ce8b27e0746106b67e8fe8f0b4ca7eabd2f3
+url    tlc-hvfhv-2023-06.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-06.parquet
+sha256 tlc-hvfhv-2023-06.parquet    cb78866e5a685db8733e2be8210d3f9498cef7e2aaa01086e88b363dfa825855
+url    tlc-hvfhv-2023-07.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-07.parquet
+sha256 tlc-hvfhv-2023-07.parquet    76a5e0b404a4ec0c2e70b2cf3f482fe64b117dc83602dcc4b31036e099347e55
+url    tlc-hvfhv-2023-08.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-08.parquet
+sha256 tlc-hvfhv-2023-08.parquet    1f657d06e9465217005104c594578100ab1b5c846f353efd87372f991709d6fd
+url    tlc-hvfhv-2023-09.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-09.parquet
+sha256 tlc-hvfhv-2023-09.parquet    3f3fb7b6f62bf1a7ed07bfd1af7a23be0f798d101f27b77331e9a52b4d4a10f4
+url    tlc-hvfhv-2023-10.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-10.parquet
+sha256 tlc-hvfhv-2023-10.parquet    fd577706331f37f6470945af6c268b27af036cf51eaa5689bc84481a1e0579f0
+url    tlc-hvfhv-2023-11.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-11.parquet
+sha256 tlc-hvfhv-2023-11.parquet    a48486cfb760c0839a8f7b507f3b89d5ac5fc5433c67233dcb6a89c91ea08e1c
+url    tlc-hvfhv-2023-12.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2023-12.parquet
+sha256 tlc-hvfhv-2023-12.parquet    ff23e07001de2ec2d2e44f82d748c3a2ec88efdc5df7532248248cca59cc0dd9
+url    tlc-hvfhv-2024-01.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-01.parquet
+sha256 tlc-hvfhv-2024-01.parquet    9897de352aa52cea36b70348cc6721b8d4494327ce39c85f0dba83d86ecaa098
+url    tlc-hvfhv-2024-02.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-02.parquet
+sha256 tlc-hvfhv-2024-02.parquet    54bafa7bcf3f06e7833fcbccf7ef158eb793a72ee1c4bb8bf080e56ae71a15d6
+url    tlc-hvfhv-2024-03.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-03.parquet
+sha256 tlc-hvfhv-2024-03.parquet    ff25b93f890f889637963b749d0839ec5a15f075d23ea5297b3312ed9a10d6d9
+url    tlc-hvfhv-2024-04.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-04.parquet
+sha256 tlc-hvfhv-2024-04.parquet    1493f3edd0486bf6c3f949cb5a66ec49e9d04f7ad6e94f85626f16aa6fec7260
+url    tlc-hvfhv-2024-05.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-05.parquet
+sha256 tlc-hvfhv-2024-05.parquet    152db11cbc95a796fea0b9cb26184b3c4cfad181fa9d7488d4c61f06c521b4b5
+url    tlc-hvfhv-2024-06.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-06.parquet
+sha256 tlc-hvfhv-2024-06.parquet    4772ee1ab01e639a5db74169b49049f74f0f46a0c925fd3b67f9f068221f6373
+url    tlc-hvfhv-2024-07.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-07.parquet
+sha256 tlc-hvfhv-2024-07.parquet    3a511a8df72441d72b32f6ce9829e29f5d61666e37f1b40b8d352cc5830c81e1
+url    tlc-hvfhv-2024-08.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-08.parquet
+sha256 tlc-hvfhv-2024-08.parquet    99fd2913d2c8935e4c1d166f229290a90971b6564c490a8ba2a257de9e08fae2
+url    tlc-hvfhv-2024-09.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-09.parquet
+sha256 tlc-hvfhv-2024-09.parquet    d2d26d608a775555128a2b435d375f5d25d3d8125b688c57fc60d5a0fb5a1d3b
+url    tlc-hvfhv-2024-10.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-10.parquet
+sha256 tlc-hvfhv-2024-10.parquet    8ee625798a6543148c3a3e33df5e2cf44acb17af904dbfff925d1cd4f077afb5
+url    tlc-hvfhv-2024-11.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-11.parquet
+sha256 tlc-hvfhv-2024-11.parquet    cc3547280a9ff6edb4eaa467a3aa0ea2a372fca746e3e733d1ea3152d56daed3
+url    tlc-hvfhv-2024-12.parquet    https://d37ci6vzurychx.cloudfront.net/trip-data/fhvhv_tripdata_2024-12.parquet
+sha256 tlc-hvfhv-2024-12.parquet    dcf0885722bc76ab7b5f22a23b784513caf7e7c2b23381ed854610c436c48887
+
+# DuckDB CLI — BUILD-TIME ETL ONLY. Not a runtime dialect; it is here because it
+# reads TLC's Parquet natively and writes partitioned Parquet. Pinned per platform
+# exactly like the mobility family's (009/F1). The same three lines, deliberately
+# duplicated rather than cross-read: a family's lock must be readable on its own,
+# and a bump on one side must not silently move the other side's artifact.
+tool   duckdb-osx-universal         v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-universal.zip 7a4bc3a93f7f92f5b40cd09c21afaf98e415c6cb9d9170064993782e779f4115
+tool   duckdb-linux-amd64           v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip 08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05
+tool   duckdb-linux-arm64           v1.5.5 https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip 02163197027a42149147364d31fa67cac82108517a4be43304a1cc226eaef07a

@@ -1,0 +1,189 @@
+{
+  "templates": [
+    {
+      "schema_version": 1,
+      "id": "nyc/lake/rideshare_zone_day.sql",
+      "engine": "freemarker",
+      "dialect": "LAKE",
+      "display_name": "Rideshare trips and fares per pickup zone and day (lake)",
+      "description": "Reads the pre-aggregated hvfhv_zone_day table straight out of the dp-lake object store - Parquet on S3, queried in place, nothing downloaded. One row per pickup zone and day, summed across Uber, Lyft, Via and Juno. The table is already at (zone, day, company) grain, so this node reads a few hundred thousand rows rather than the 400M-row trip table beside it. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "imports": [],
+      "body": "SELECT\n    r.pickup_date                     AS pickup_date,\n    r.pu_location_id                  AS pu_location_id,\n    SUM(r.trip_count)                 AS rideshare_trips,\n    ROUND(SUM(r.total_base_fare), 2)  AS rideshare_base_fare,\n    SUM(r.shared_request_count)       AS rideshare_shared_requests\nFROM hvfhv_zone_day r\nWHERE r.pickup_date BETWEEN :start_date AND :end_date\nGROUP BY r.pickup_date, r.pu_location_id",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/lake/taxi_zone_day.sql",
+      "engine": "freemarker",
+      "dialect": "POSTGRES",
+      "display_name": "Yellow-taxi trips and fares per pickup zone and day",
+      "description": "Trip-level scan of the sample-trips Postgres database at (day, pickup zone) grain - the same grain the lake node returns, so the two engines' rows line up without either side being re-aggregated. The raw TLC feed carries implausible rows, so this node keeps only 0 < distance < 100 miles and 0 < total < 1000 USD, which is what makes an average a fact rather than an artefact of one bad row. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "imports": [],
+      "body": "SELECT\n    t.pickup_date                 AS pickup_date,\n    t.pu_location_id              AS pu_location_id,\n    COUNT(*)                      AS taxi_trips,\n    ROUND(SUM(t.total_amount), 2) AS taxi_total_amount\nFROM trips t\nWHERE t.pickup_date BETWEEN :start_date AND :end_date\n  AND t.trip_distance_mi > 0 AND t.trip_distance_mi < 100\n  AND t.total_amount     > 0 AND t.total_amount     < 1000\nGROUP BY t.pickup_date, t.pu_location_id",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/lake/zones.sql",
+      "engine": "freemarker",
+      "dialect": "SQLITE",
+      "display_name": "TLC taxi zones and boroughs (for the lake showcase)",
+      "description": "Reads the 265-row zone lookup from the sample-reference SQLite datasource. Takes no parameters. The two catch-all zones ('Unknown' and 'N/A') are excluded so a borough rollup has no bucket that is not a borough. Both the taxi table and the lake table carry the same TLC zone ids, which is why one lookup serves both.",
+      "imports": [],
+      "body": "SELECT\n    z.location_id AS location_id,\n    z.borough     AS borough,\n    z.zone        AS zone_name\nFROM zones z\nWHERE z.borough NOT IN ('Unknown', 'N/A')",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/lake/daily_rain.sql",
+      "engine": "freemarker",
+      "dialect": "MYSQL",
+      "display_name": "Daily precipitation, averaged across the NYC stations",
+      "description": "One row per day from the sample-weather MySQL database with precipitation in millimetres, averaged across the five NYC-area stations. Days with no PRCP reading anywhere come back NULL and are treated as dry by the answer node. Expects DATE parameters start_date and end_date. The shipped sample covers 2023-01-01 to 2024-12-31; the default window is one month so the trip-level scan stays a few seconds.",
+      "imports": [],
+      "body": "SELECT\n    o.obs_date                                                   AS obs_date,\n    ROUND(AVG(CASE WHEN o.element = 'PRCP' THEN o.value END), 2) AS precip_mm\nFROM observations o\nWHERE o.obs_date BETWEEN :start_date AND :end_date\n  AND o.element = 'PRCP'\nGROUP BY o.obs_date",
+      "is_library": false
+    },
+    {
+      "schema_version": 1,
+      "id": "nyc/lake/taxi_vs_rideshare.sql",
+      "engine": "freemarker",
+      "dialect": "H2",
+      "display_name": "Taxi vs rideshare share per borough, dry vs rainy",
+      "description": "The answer node. Puts the four staged tables together in tempdb: yellow-taxi zone-days from Postgres, rideshare zone-days from the lake, the borough lookup from SQLite and the day's rainfall from MySQL. The two trip sources are UNIONed to a common grain before aggregation rather than joined, so a zone-day that only one of them saw still counts - an inner join between them would silently drop it and every share on the screen would be wrong by a few points. Binds :rain_threshold_mm (a declared parameter) and :window_span_days (from the CALCULATOR node).",
+      "imports": [],
+      "body": "WITH grain AS (\n    SELECT t.pickup_date AS d, t.pu_location_id AS z,\n           t.taxi_trips  AS taxi_trips, 0 AS rideshare_trips\n    FROM stg_taxi t\n    UNION ALL\n    SELECT r.pickup_date, r.pu_location_id,\n           0, r.rideshare_trips\n    FROM stg_rideshare r\n)\nSELECT\n    z.borough                                                                       AS borough,\n    CASE WHEN COALESCE(w.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END AS weather,\n    SUM(g.taxi_trips)                                                               AS taxi_trips,\n    SUM(g.rideshare_trips)                                                          AS rideshare_trips,\n    ROUND(100.0 * CAST(SUM(g.rideshare_trips) AS DECIMAL(18,4))\n          / NULLIF(SUM(g.taxi_trips) + SUM(g.rideshare_trips), 0), 1)               AS rideshare_share_pct,\n    ROUND(CAST(SUM(g.taxi_trips) AS DECIMAL(18,4))\n          / NULLIF(:window_span_days + 1, 0), 1)                                    AS taxi_trips_per_day,\n    ROUND(CAST(SUM(g.rideshare_trips) AS DECIMAL(18,4))\n          / NULLIF(:window_span_days + 1, 0), 1)                                    AS rideshare_trips_per_day\nFROM grain g\nJOIN stg_zones z ON z.location_id = g.z\nLEFT JOIN stg_rain w ON w.obs_date = g.d\nGROUP BY z.borough,\n         CASE WHEN COALESCE(w.precip_mm, 0) >= :rain_threshold_mm THEN 'rainy' ELSE 'dry' END\nORDER BY borough, weather",
+      "is_library": false
+    }
+  ],
+  "pipelines": [
+    {
+      "schema_version": 1,
+      "name": "nyc/mobility/taxi_vs_rideshare",
+      "display_name": "Taxi vs rideshare, by borough, dry vs rainy",
+      "description": "FOUR ENGINES in one pipeline, one of them a data lake read in place. Yellow-taxi trips come from Postgres, Uber/Lyft/Via/Juno trips from Parquet on S3 (nothing is downloaded - only the rows the query names are fetched), the borough lookup from SQLite and the day's rainfall from MySQL; a CALCULATOR turns the two date parameters into the window length so the per-day rates are real rates. The question it answers: in each borough, what share of trips is rideshare rather than yellow taxi, and does the answer change when it rains?",
+      "settings": {
+        "tempdb": {
+          "engine": "H2"
+        }
+      },
+      "parameters": {
+        "start_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-12-01",
+          "description": "Inclusive start of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "end_date": {
+          "type": "DATE",
+          "required": false,
+          "default": "2024-12-31",
+          "description": "Inclusive end of the reporting window. The sample covers 2023-01-01 to 2024-12-31."
+        },
+        "rain_threshold_mm": {
+          "type": "BIGDECIMAL",
+          "precision": 6,
+          "scale": 1,
+          "required": false,
+          "default": "2.5",
+          "description": "Millimetres of precipitation, averaged across the five stations, at or above which a day counts as rainy. 2.5 mm is the US National Weather Service's 'light rain' floor."
+        }
+      },
+      "nodes": [
+        {
+          "id": "stage_taxi",
+          "description": "Stage yellow-taxi trips per pickup zone and day from Postgres.",
+          "type": "DQL",
+          "source": "sample-trips",
+          "template": {
+            "id": "nyc/lake/taxi_zone_day.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_taxi"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_rideshare",
+          "description": "Stage rideshare trips per pickup zone and day from the dp-lake object store. The datasource is read-only Parquet on S3: the pre-aggregate is a few hundred thousand rows, and the 400M-row trip table beside it is only touched by a query that names it.",
+          "type": "DQL",
+          "source": "sample-lake",
+          "template": {
+            "id": "nyc/lake/rideshare_zone_day.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_rideshare"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_zones",
+          "description": "Stage the taxi-zone lookup so both trip sources can be rolled up to boroughs.",
+          "type": "DQL",
+          "source": "sample-reference",
+          "template": {
+            "id": "nyc/lake/zones.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_zones"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "stage_rain",
+          "description": "Stage the day's average precipitation from MySQL.",
+          "type": "DQL",
+          "source": "sample-weather",
+          "template": {
+            "id": "nyc/lake/daily_rain.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "tempdb",
+            "table": "stg_rain"
+          },
+          "depends_on": []
+        },
+        {
+          "id": "window_span",
+          "description": "How many whole days the reporting window spans. A CALCULATOR node: no SQL, no rows - one typed value written into the execution Context under window_span_days, which the answer node binds as :window_span_days to turn totals into per-day rates. Computing it in SQL would mean each engine's own date arithmetic, and there are four of them here.",
+          "type": "CALCULATOR",
+          "kind": "date_diff",
+          "inputs": {
+            "from": "$start_date",
+            "to": "$end_date",
+            "unit": "day"
+          },
+          "context_key": "window_span_days",
+          "depends_on": []
+        },
+        {
+          "id": "taxi_vs_rideshare",
+          "description": "Join the four staged tables and report the rideshare share per borough, split by whether the day was rainy.",
+          "type": "DQL",
+          "source": "tempdb",
+          "template": {
+            "id": "nyc/lake/taxi_vs_rideshare.sql",
+            "version": 1
+          },
+          "output": {
+            "target": "caller"
+          },
+          "depends_on": [
+            "stage_taxi",
+            "stage_rideshare",
+            "stage_zones",
+            "stage_rain",
+            "window_span"
+          ]
+        }
+      ]
+    }
+  ]
+}
