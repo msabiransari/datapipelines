@@ -1085,7 +1085,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
 - **`private_key` / `service_account_json` credential kinds reaching a real dialect.** The kinds are catalogued and refused by every shipped adapter (§3.4); Snowflake key-pair auth and BigQuery service accounts are what will declare them.
-- **OAuth / IAM auth for cloud databases**: Snowflake, BigQuery (when those dialects are added).
+- **`LAKE` dialect — an object store read in place (the dialect and adapter shipped in 087; the registry, per-table views and the demo datasource are round 089)**: a datasource whose "database" is a set of Parquet and Apache Iceberg objects in a bucket, queried without a server and without a load step. The demo data for it is already published (`s3://datapipelines-co/sample-data/lake/<version>/`, built by [`scripts/sample-data-lake/`](../scripts/sample-data-lake/README.md) — 088); the dialect, the `sample-lake` bootstrap entry and the registry seed that reads the artifact's `manifest.json` `tables[]` block are **round 089**.
 
 ---
 
