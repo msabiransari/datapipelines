@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -45,6 +46,9 @@ object PipelineResponses {
                 // A stored body that is not an object cannot be merged; it also cannot have passed
                 // save-time validation, so this is corruption, not a client error.
                 ?: error("pipeline ${record.id} body is not a JSON object")
+        // 078 A5-composition: the calculator context_keys list under `parameters` as derived
+        // optional execute inputs — derived from the body, never stored.
+        DerivedInputs.mergeInto(body)
         body
             .put("id", record.id.toString())
             .put("version", version?.version ?: record.currentVersion)

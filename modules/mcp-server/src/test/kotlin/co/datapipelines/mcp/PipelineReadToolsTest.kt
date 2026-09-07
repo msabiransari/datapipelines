@@ -173,6 +173,40 @@ class PipelineReadToolsTest {
         McpTools.readTree(body.toString()).has("upgrade_available") shouldBe false
     }
 
+    /**
+     * 078 A5-composition: a calculator `context_key` is an implicit optional execute input, so
+     * the read surfaces list it under `parameters` — typed by the kind's output (`ANY` for an
+     * ANY-output kind), `required: false`, marked `derived: true`. Declared parameters carry no
+     * flag: absence is the false. Derived on read, never stored.
+     */
+    @Test
+    fun `get lists calculator context keys under parameters as derived optional inputs`() {
+        every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns revenue
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
+        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns CALCULATOR_BODY
+        every { pipelines.findVersionDetail(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            co.datapipelines.pipeline.PipelineVersionDetail(
+                pipelineId = McpFixtures.PIPELINE_ID,
+                version = 1,
+                status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                bodyHash = "hash-v1",
+                createdAt = java.time.Instant.EPOCH,
+                createdBy = McpFixtures.USER,
+            )
+
+        val body = PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to McpFixtures.PIPELINE_ID.toString())), ctx)
+        val parameters = McpTools.readTree(body.toString())["parameters"]
+
+        val quarter = parameters["run_fiscal_quarter"]
+        quarter["type"].asText() shouldBe "INTEGER"
+        quarter["required"].asBoolean() shouldBe false
+        quarter["derived"].asBoolean() shouldBe true
+        parameters["anything"]["type"].asText() shouldBe "ANY"
+        // The declared parameter keeps its own shape — no derived flag.
+        parameters["region"]["type"].asText() shouldBe "STRING"
+        parameters["region"].has("derived") shouldBe false
+    }
+
     private fun upgrade(
         node: String,
         templateId: String,
@@ -341,5 +375,28 @@ class PipelineReadToolsTest {
     fun `a non-uuid id is a protocol error`() {
         val error = shouldThrow<McpError> { PipelinesGetTool(service, usage).call(McpArguments(mapOf("id" to "not-a-uuid")), ctx) }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
+    }
+
+    private companion object {
+        /** A body with one declared parameter and two calculator keys (typed + ANY-output). */
+        val CALCULATOR_BODY =
+            """
+            {
+              "schema_version": 1,
+              "name": "monthly_revenue",
+              "display_name": "Monthly Revenue",
+              "description": "Revenue by customer.",
+              "parameters": {"region": {"type": "STRING", "required": true}},
+              "nodes": [
+                {"id": "fq", "description": "fq", "type": "CALCULATOR", "kind": "fiscal_quarter",
+                 "inputs": {"date": "${'$'}current_date", "fiscal_start": "01-01"},
+                 "context_key": "run_fiscal_quarter", "depends_on": []},
+                {"id": "cq", "description": "cq", "type": "CALCULATOR", "kind": "coalesce",
+                 "inputs": {"values": ["a", "b"]}, "context_key": "anything", "depends_on": ["fq"]},
+                {"id": "fetch", "description": "fetch", "type": "DQL", "source": "pg-prod",
+                 "template": {"id": "test/revenue.sql", "version": 1}, "depends_on": ["cq"]}
+              ]
+            }
+            """.trimIndent()
     }
 }

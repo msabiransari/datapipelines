@@ -37,11 +37,13 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.DecimalNode
 import com.fasterxml.jackson.databind.node.IntNode
 import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -101,6 +103,27 @@ class SubPipelineExecutionRunnerTest {
         }
         """.trimIndent()
 
+    /** 078 A5-composition: a child whose inputs are calculator `context_key`s, not parameters. */
+    private val childBodyWithCalculator =
+        """
+        {
+          "schema_version": 1,
+          "name": "test/monthly_revenue",
+          "display_name": "Monthly revenue",
+          "description": "",
+          "parameters": {},
+          "nodes": [
+            {"id": "cq", "description": "cq", "type": "CALCULATOR", "kind": "fiscal_quarter",
+             "inputs": {"date": "${'$'}current_date", "fiscal_start": "01-01"}, "context_key": "child_quarter"},
+            {"id": "ca", "description": "ca", "type": "CALCULATOR", "kind": "coalesce",
+             "inputs": {"values": ["a", "b"]}, "context_key": "child_any", "depends_on": ["cq"]},
+            {"id": "q", "description": "q", "type": "DQL", "source": "tempdb",
+             "template": {"id": "test/tq", "version": 1}, "output": {"target": "caller"},
+             "depends_on": ["ca"]}
+          ]
+        }
+        """.trimIndent()
+
     private fun childRecord() =
         PipelineRecord(
             id = childRecordId,
@@ -114,9 +137,9 @@ class SubPipelineExecutionRunnerTest {
             updatedAt = Instant.now(),
         )
 
-    private fun stubRegistry() {
+    private fun stubRegistry(body: String = childBody) {
         every { pipelines.findByNameIncludingDeleted(any(), "test/monthly_revenue") } returns childRecord()
-        every { pipelines.findVersionBody(any(), childRecordId, 4) } returns childBody
+        every { pipelines.findVersionBody(any(), childRecordId, 4) } returns body
     }
 
     private fun pipelineNode(
@@ -291,6 +314,68 @@ class SubPipelineExecutionRunnerTest {
             val parameters = stub.captured.single().parameters
             parameters["region"] shouldBe TextNode("EU")
             parameters["limit"] shouldBe IntNode(25)
+        }
+
+    // ------------------------------------------------ 078 A5-composition: the runtime mapping half
+
+    @Test
+    fun `a ref mapped onto a child calculator key resolves from the parent's live Context`() =
+        runTest {
+            stubRegistry(childBodyWithCalculator)
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_quarter" to TextNode("\${run_fiscal_quarter}")))
+
+            runner(stub).run(node, context(values = mapOf("run_fiscal_quarter" to 1)))
+
+            // The reference reads ANY Context tier — here a parent calculator output, not a
+            // declared parent parameter — and is re-encoded to the child key's wire type.
+            stub.captured.single().parameters["child_quarter"] shouldBe IntNode(1)
+        }
+
+    @Test
+    fun `a ref mapped onto an ANY-output child calculator key takes the referenced scalar`() =
+        runTest {
+            stubRegistry(childBodyWithCalculator)
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_any" to TextNode("\${anything}")))
+
+            runner(stub).run(node, context(values = mapOf("anything" to java.math.BigDecimal("4.5"))))
+
+            stub.captured.single().parameters["child_any"] shouldBe DecimalNode(java.math.BigDecimal("4.5"))
+        }
+
+    /**
+     * 078 A5-composition's NO AUTO-PASSTHROUGH ruling (owner 2026-09-05: hidden coupling): a
+     * parent calculator key spelled exactly like the child's is NOT forwarded — only the keys
+     * the node explicitly maps reach the child request, so the child's node computes its own.
+     */
+    @Test
+    fun `an unmapped parent value never reaches the child request, even under the child's own key`() =
+        runTest {
+            stubRegistry(childBodyWithCalculator)
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context(values = mapOf("child_quarter" to 1, "child_any" to "x")))
+
+            stub.captured.single().parameters shouldBe emptyMap()
+        }
+
+    @Test
+    fun `a runtime value that does not read as the target type fails the mapping, not with a raw cast`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+            // Save-time skips this check when the parent key is an ANY-output calculator key
+            // (typed only by the run) — the failure lands HERE, named, with the catalogued code.
+            val node = pipelineNode(parameters = mapOf("limit" to TextNode("\${anything}")))
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner(stub).run(node, context(values = mapOf("anything" to "not a number")))
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            thrown.message shouldContain "'\${anything}' onto child input 'limit' (INTEGER)"
         }
 
     /**

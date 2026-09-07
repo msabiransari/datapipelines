@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -219,6 +220,9 @@ class PipelinesGetTool(
         val json = loaded.bodyJson
         val detail = loaded.version
         val tree = McpTools.readTree(json) as? com.fasterxml.jackson.databind.node.ObjectNode ?: error("body of $id is not an object")
+        // 078 A5-composition: the calculator context_keys list under `parameters` as derived
+        // optional execute inputs — derived from the body, never stored.
+        DerivedInputs.mergeInto(tree)
         tree.put("version", detail.version)
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)

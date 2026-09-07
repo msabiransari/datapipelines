@@ -182,6 +182,45 @@ class PipelinesControllerTest {
         data.has("draft") shouldBe false
     }
 
+    /**
+     * 078 A5-composition: a calculator `context_key` is an implicit optional execute input, so
+     * the detail endpoint lists it under `parameters` — typed by the kind's output (`ANY` for
+     * an ANY-output kind), `required: false`, marked `derived: true`. Derived on read, never
+     * stored; declared parameters carry no flag.
+     */
+    @Test
+    fun `get lists calculator context keys under parameters as derived optional inputs`() {
+        authenticate()
+        every { repository.findById(any(), pipelineId) } returns record
+        every { repository.findDraftDetail(any(), pipelineId) } returns null
+        every { repository.findCurrentVersionDetail(any(), pipelineId) } returns releasedDetail
+        every { repository.findVersionBody(any(), pipelineId, 1) } returns
+            """
+            {"schema_version":1,"name":"monthly_revenue","display_name":"Monthly Revenue","description":"d",
+             "parameters":{"region":{"type":"STRING","required":true}},
+             "settings":{"tempdb":{"engine":"H2"}},
+             "nodes":[
+               {"id":"fq","description":"fq","type":"CALCULATOR","kind":"fiscal_quarter",
+                "inputs":{"date":"${'$'}current_date","fiscal_start":"01-01"},
+                "context_key":"run_fiscal_quarter","depends_on":[]},
+               {"id":"cq","description":"cq","type":"CALCULATOR","kind":"coalesce",
+                "inputs":{"values":["a","b"]},"context_key":"anything","depends_on":["fq"]},
+               {"id":"fetch","description":"fetch","type":"DQL","source":"pg-prod",
+                "template":{"id":"test/revenue.sql","version":1},"depends_on":["cq"]}
+             ]}
+            """.trimIndent()
+
+        val parameters = controller.get(pipelineId).data.get("parameters")
+
+        val quarter = parameters.get("run_fiscal_quarter")
+        quarter.get("type").asText() shouldBe "INTEGER"
+        quarter.get("required").asBoolean() shouldBe false
+        quarter.get("derived").asBoolean() shouldBe true
+        parameters.get("anything").get("type").asText() shouldBe "ANY"
+        parameters.get("region").get("type").asText() shouldBe "STRING"
+        parameters.get("region").has("derived") shouldBe false
+    }
+
     @Test
     fun `update requires the If-Match precondition header`() {
         authenticate()
