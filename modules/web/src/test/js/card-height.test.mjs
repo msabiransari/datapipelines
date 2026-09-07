@@ -39,15 +39,22 @@ function nodeStyle(sheet) {
   return sheet.find((e) => e.selector === "node").style;
 }
 
-/** A node double: `data()` reads and writes like Cytoscape's. */
+/** A node double: `data()` and `style()` read and write like Cytoscape's. */
 function fakeNode(id, data) {
   const store = Object.assign({}, data);
+  const bypass = {};
   return {
+    bypass,
     id: () => id,
     data(key, value) {
       if (arguments.length === 0) return store;
       if (arguments.length === 1) return store[key];
       store[key] = value;
+      return this;
+    },
+    style(key, value) {
+      if (arguments.length === 1) return bypass[key];
+      bypass[key] = value;
       return this;
     },
   };
@@ -108,12 +115,21 @@ function graphWith(cardHeights) {
   return { graph, nodes, layouts, cards };
 }
 
-test("the node's painted height is its OWN measured card, not the token", () => {
-  const style = nodeStyle(loadGraph().buildStylesheet(TOKENS));
-  assert.equal(typeof style.height, "function", "a fixed number cannot vary per node");
+test("the stylesheet's height is the token FLOOR, and it is JSON — never a function", () => {
+  const sheet = loadGraph().buildStylesheet(TOKENS);
+  assert.equal(nodeStyle(sheet).height, 148, "the token is the floor a node starts at");
 
-  assert.equal(style.height(fakeNode("a", { cardH: 191 })), 191, "a measured card wins");
-  assert.equal(style.height(fakeNode("b", {})), 148, "…and the token is the floor until it is measured");
+  // The invariant behind that, and the reason the per-node height is a BYPASS: a live
+  // re-apply goes through `cy.style().fromJson(sheet).update()`, which silently DROPS
+  // every function value. Measured on Chrome 148: with a function height, one theme
+  // switch collapsed every node to Cytoscape's default 30px box. A sheet that is not
+  // JSON cannot survive a theme switch, so no entry in it may be a function.
+  const functions = [];
+  sheet.forEach((entry) =>
+    Object.entries(entry.style).forEach(([k, v]) => {
+      if (typeof v === "function") functions.push(`${entry.selector} { ${k} }`);
+    }));
+  assert.deepEqual(functions, [], "a function value here does not survive fromJson()");
 });
 
 test("syncCardHeights writes each rendered height onto its node and re-lays out once", () => {
@@ -124,6 +140,9 @@ test("syncCardHeights writes each rendered height onto its node and re-lays out 
   assert.equal(started, true, "a changed box needs new positions — dagre is tuned to the card");
   assert.equal(nodes[0].data("cardH"), 191);
   assert.equal(nodes[1].data("cardH"), 148);
+  // The style BYPASS is what Cytoscape actually paints, and what survives a re-apply.
+  assert.equal(nodes[0].style("height"), 191);
+  assert.equal(nodes[1].style("height"), 148);
   // One re-layout, and the pass it triggers finds nothing left to change.
   assert.equal(layouts.length, 1);
 });
@@ -143,6 +162,7 @@ test("a card that measures zero is ignored rather than collapsing the node", () 
 
   assert.equal(graph.syncCardHeights(), false);
   assert.equal(nodes[0].data("cardH"), undefined);
+  assert.equal(nodes[0].style("height"), undefined, "and nothing is painted from a 0");
 });
 
 test("the CSS gives the card a FLOOR, not a fixed height", () => {

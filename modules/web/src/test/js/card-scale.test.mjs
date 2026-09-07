@@ -80,12 +80,25 @@ test("colours stay a :root read — the container carries geometry only", () => 
   assert.equal(readDesignTokens("cy-canvas").brand, "#abc123");
 });
 
-/** A Cytoscape double that records the stylesheet it is given and defers layout. */
+/**
+ * A Cytoscape double that records the stylesheet it is given and defers layout. The
+ * re-apply goes through `cy.style().fromJson(sheet).update()` — `cy.style(sheet)`
+ * resets a live graph to Cytoscape's defaults (082 addendum P1, measured live) — so
+ * the double mirrors that shape rather than the setter.
+ */
 function fakeCy() {
   const applied = [];
+  const styleApi = {
+    fromJson(sheet) {
+      applied.push(sheet);
+      return styleApi;
+    },
+    update() {},
+  };
   return {
     applied,
-    style: (sheet) => applied.push(sheet),
+    style: () => styleApi,
+    nodes: () => [],
     elements: () => ({ layout: () => ({ one: () => {}, run: () => {} }) }),
   };
 }
@@ -110,9 +123,7 @@ test("refreshCardMetrics re-applies the box when the stage crosses the threshold
   assert.equal(graph.tokens.cardW, 272);
   const node = graph.cy.applied[0].find((e) => e.selector === "node");
   assert.equal(node.style.width, 272, "the Cytoscape box follows the HTML card");
-  // The height is per element since the addendum; unmeasured, the stepped-up token
-  // is the floor it falls back to.
-  assert.equal(node.style.height({ data: () => undefined }), 170);
+  assert.equal(node.style.height, 170, "the stepped-up token is the new floor");
 
   // Idempotent at the new width.
   assert.equal(graph.refreshCardMetrics(), false);

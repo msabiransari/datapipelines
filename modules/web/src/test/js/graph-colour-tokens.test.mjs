@@ -85,9 +85,10 @@ function withDom(rootVars, opts) {
     if (el === root) {
       return { getPropertyValue: (k) => (el.__vars[k] === undefined ? "" : el.__vars[k]) };
     }
-    // The probe: a browser resolves whatever `var(--x)` it was handed.
+    // The probe: a browser resolves whatever `var(--x)` it was handed. `computedAs`
+    // chooses the SERIALISATION, which is the whole point of these tests.
     const m = /^var\((--[a-z-]+)\)$/.exec(el.style.color || "");
-    const value = m && !options.probeBlind ? RESOLVED[m[1]] || "" : "";
+    const value = m && !options.probeBlind ? (options.computedAs || RESOLVED)[m[1]] || "" : "";
     return { color: value, getPropertyValue: () => "" };
   };
   return { body, created };
@@ -141,6 +142,56 @@ test("every colour token is resolved, not just the mixed ones", () => {
   ].forEach(([key, name]) => {
     assert.equal(tokens[key], RESOLVED[name], `${key} (${name}) was not resolved`);
   });
+});
+
+/**
+ * What Chrome ACTUALLY returned, measured against the live editor on 2026-09-07: a
+ * `color-mix(in srgb, …)` token computes to CSS Color 4's `color(srgb …)` form, not to
+ * legacy `rgb()`. The first cut of this fix accepted only strings starting with "rgb",
+ * so it silently fell back to the raw token and Cytoscape kept logging
+ * "The style property `line-color: color-mix(…)` is invalid" — the defect, unfixed,
+ * with a green unit test. This table is that measurement, kept.
+ */
+const CHROME_COLOR4 = {
+  "--brand": "color(srgb 0.184314 0.419608 1)",
+  "--brand-soft": "color(srgb 0.870588 0.901961 1)",
+  "--edge": "color(srgb 0.412745 0.436078 0.480392)",
+  "--edge-active": "color(srgb 0.184314 0.419608 1)",
+  "--edge-done": "color(srgb 0.082353 0.501961 0.239216)",
+  "--surface-raised": "color(srgb 1 1 1)",
+  "--border-subtle": "color(srgb 0.698039 0.717647 0.749020)",
+  "--accent-success": "color(srgb 0.082353 0.501961 0.239216)",
+  "--accent-danger": "color(srgb 0.862745 0.149020 0.149020)",
+  "--accent-warning": "color(srgb 0.631373 0.384314 0.027451)",
+  "--text-muted": "color(srgb 0.392157 0.454902 0.545098)",
+  "--surface-page": "color(srgb 0.972549 0.976471 0.984314)",
+};
+
+test("Chrome's color(srgb …) answer is normalised to rgb() — the form Cytoscape parses", () => {
+  withDom(ROOT_VARS, { computedAs: CHROME_COLOR4 });
+  const { readDesignTokens, buildStylesheet } = loadGraph();
+
+  const tokens = readDesignTokens();
+  assert.equal(tokens.edgeIdle, "rgb(105, 111, 122)");
+  assert.equal(tokens.brandSoft, "rgb(222, 230, 255)");
+
+  const serialised = JSON.stringify(buildStylesheet(tokens));
+  assert.ok(!/color-mix/.test(serialised), "a color-mix expression reached the stylesheet");
+  assert.ok(!/color\(srgb/.test(serialised), "a color() expression reached the stylesheet — Cytoscape cannot parse it either");
+});
+
+test("toLegacyRgb converts what it understands and refuses what it does not", () => {
+  const { toLegacyRgb } = loadGraph();
+
+  assert.equal(toLegacyRgb("color(srgb 0.412745 0.436078 0.480392)"), "rgb(105, 111, 122)");
+  assert.equal(toLegacyRgb("color(srgb 0.5 0.5 0.5 / 0.5)"), "rgba(128, 128, 128, 0.5)");
+  assert.equal(toLegacyRgb("rgb(1, 2, 3)"), "rgb(1, 2, 3)", "already legacy — passed through");
+  assert.equal(toLegacyRgb("#abc123"), "#abc123", "a hex is a colour Cytoscape parses");
+  // Refusing is the point: a guess here would paint a WRONG colour with no signal.
+  // The canvas sampler behind it is the general answer for these.
+  assert.equal(toLegacyRgb("oklch(0.5 0.1 200)"), null);
+  assert.equal(toLegacyRgb(""), null);
+  assert.equal(toLegacyRgb(null), null);
 });
 
 test("the probe is removed again — the page keeps no measuring element", () => {

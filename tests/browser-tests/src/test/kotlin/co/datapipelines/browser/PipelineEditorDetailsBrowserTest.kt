@@ -201,6 +201,29 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         light shouldMatch Regex("""^(rgb|#).*""")
         dark shouldMatch Regex("""^(rgb|#).*""")
         complaints.shouldBeEmpty()
+
+        // The sharper half, and the one that catches the SECOND defect. `cy.style(array)`
+        // — 080's re-apply — does not replace a live graph's stylesheet, it resets the
+        // whole thing to Cytoscape's DEFAULTS (measured on Chrome 148: #999 lines, 30px
+        // edges, #999 node fills — the owner's "thick grey bands"). A default is still a
+        // parseable colour, so the assertions above pass on the broken code. Comparing
+        // three properties with distinctive defaults against the TOKENS the graph is
+        // holding is what actually proves the sheet applied.
+        val applied =
+            page.evaluate(
+                """() => {
+                     const ed = window.__peInstance;
+                     const e = ed.cy.edges()[0], n = ed.cy.nodes()[0];
+                     const f = (v) => (Array.isArray(v) ? 'rgb(' + v.join(', ') + ')' : String(v));
+                     const norm = (s) => String(s).replace(/\s+/g, '');
+                     return [
+                       norm(f(e.style('line-color'))) === norm(ed.graph.tokens.edgeIdle),
+                       norm(f(n.style('background-color'))) === norm(ed.graph.tokens.nodeSurface),
+                       String(e.style('width')) === '2px',
+                     ].join(',');
+                   }""",
+            ).toString()
+        applied shouldBe "true,true,true"
     }
 
     /**

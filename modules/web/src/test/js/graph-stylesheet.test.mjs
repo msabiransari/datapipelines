@@ -49,10 +49,9 @@ test("the node is the mock's CARD — 236px, chrome only, the text is the HTML o
   // fight the HTML overlay (059's contract, kept).
   assert.equal(style["label"], undefined, "no canvas label — the HTML overlay owns the text");
   assert.equal(style.width, 236, "the mock's card width");
-  // 082 addendum P1: the height is per element — the card sizes to its content and
-  // syncCardHeights writes the measured value onto the node. With nothing measured yet
-  // the token is the floor, which is what this fixture asserts.
-  assert.equal(style.height({ data: () => undefined }), 148);
+  // 082 addendum P1: the card sizes to its content, so this token is the FLOOR; the
+  // measured per-node height is an element bypass (card-height.test.mjs).
+  assert.equal(style.height, 148);
   assert.equal(style["corner-radius"], "12px", "the mock's --r-lg maps to the design system's --radius-lg");
   assert.equal(style["border-color"], TOKENS.nodeBorder);
 });

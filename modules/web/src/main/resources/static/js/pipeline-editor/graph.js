@@ -46,6 +46,30 @@
    * The fallback contract is unchanged: a token that is NOT DECLARED at all still
    * yields the mock's light hex, so a stale theme file cannot blank the graph.
    */
+  /**
+   * `getComputedStyle(...).color` is NOT always `rgb(…)`. Measured on Chrome 148
+   * against the live editor (2026-09-07): a `color-mix(in srgb, …)` token computes to
+   * **`color(srgb 0.412745 0.436078 0.480392)`** — CSS Color 4's `color()` form, which
+   * Cytoscape parses no better than the `color-mix` it came from. So the computed
+   * string is normalised to legacy `rgb()` here. Pure, and exported for node --test:
+   * this exact conversion is what stands between the canvas and a grey fallback.
+   *
+   * Returns null when the string is in no form this can convert, which the caller
+   * reads as "leave the raw token" rather than "paint something wrong".
+   */
+  function toLegacyRgb(computed) {
+    if (!computed) return null;
+    var value = String(computed).trim();
+    if (value.indexOf("rgb") === 0 || value.charAt(0) === "#") return value;
+    // color(srgb r g b) and color(srgb r g b / a), components in 0..1.
+    var srgb = /^color\(\s*srgb\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*(?:\/\s*([0-9.]+)\s*)?\)$/.exec(value);
+    if (!srgb) return null;
+    var byte = function (x) { return Math.max(0, Math.min(255, Math.round(parseFloat(x) * 255))); };
+    var rgb = byte(srgb[1]) + ", " + byte(srgb[2]) + ", " + byte(srgb[3]);
+    var alpha = srgb[4] === undefined ? 1 : parseFloat(srgb[4]);
+    return alpha >= 1 ? "rgb(" + rgb + ")" : "rgba(" + rgb + ", " + alpha + ")";
+  }
+
   function colourResolver() {
     if (typeof document === "undefined" || !document.createElement || !document.body) {
       return { resolve: function (_n, raw) { return raw; }, done: function () {} };
@@ -58,15 +82,41 @@
     probe.style.visibility = "hidden";
     probe.style.pointerEvents = "none";
     document.body.appendChild(probe);
+
+    // The general fallback for any colour syntax `toLegacyRgb` does not know: paint it
+    // on a 1x1 canvas and read the pixel back. Whatever the browser understood, this
+    // returns its sRGB bytes. Created lazily — most reads never need it.
+    var ctx = null;
+    function sample(value) {
+      try {
+        if (ctx === null) {
+          var canvas = document.createElement("canvas");
+          canvas.width = 1;
+          canvas.height = 1;
+          ctx = (canvas.getContext && canvas.getContext("2d")) || false;
+        }
+        if (!ctx) return null;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = "#000000";
+        ctx.fillStyle = value;
+        ctx.fillRect(0, 0, 1, 1);
+        var d = ctx.getImageData(0, 0, 1, 1).data;
+        return d[3] === 255
+          ? "rgb(" + d[0] + ", " + d[1] + ", " + d[2] + ")"
+          : "rgba(" + d[0] + ", " + d[1] + ", " + d[2] + ", " + (d[3] / 255).toFixed(3) + ")";
+      } catch (e) {
+        return null;
+      }
+    }
+
     return {
       resolve: function (name, raw) {
         probe.style.color = "";
         probe.style.color = "var(" + name + ")";
-        var resolved = getComputedStyle(probe).color;
-        // An `rgb(`/`rgba(` answer is the browser's own computation and always wins.
-        // Anything else (a browser that refused the assignment) leaves the raw token,
-        // which is exactly the pre-082 behaviour rather than a blank canvas.
-        return resolved && resolved.indexOf("rgb") === 0 ? resolved : raw;
+        var computed = getComputedStyle(probe).color;
+        // The raw token is the last resort — exactly the pre-082 behaviour, never a
+        // blank canvas.
+        return toLegacyRgb(computed) || sample(computed) || raw;
       },
       done: function () {
         if (probe.parentNode) probe.parentNode.removeChild(probe);
@@ -141,14 +191,14 @@
         style: {
           "background-color": tokens.nodeSurface,
           width: cardW,
-          // 082 addendum P1: the card sizes to its content (CSS `min-height`), so the
-          // painted box is PER NODE — a three-fact card is taller than a one-fact one,
-          // and a fixed height left the footer hanging outside the border. syncCardHeights
-          // measures each rendered card and writes `cardH` onto its node; the token is the
-          // floor used until the first measurement (and by the pure node --test callers).
-          height: function (ele) {
-            return (ele && ele.data && ele.data("cardH")) || tokens.cardH || 148;
-          },
+          // The token is the FLOOR. The real, per-node height is an element style
+          // BYPASS written by syncCardHeights (082 addendum P1) — deliberately not a
+          // stylesheet function: `cy.style().fromJson(sheet)`, which updateTheme has to
+          // use (below), silently DROPS function values, and a height that survives the
+          // first paint but not a theme switch is worse than no height at all. Measured
+          // on Chrome 148: with a function here, one theme switch collapsed every node
+          // to Cytoscape's default 30px box.
+          height: tokens.cardH || 148,
           shape: "round-rectangle",
           "border-width": 1,
           "border-color": tokens.nodeBorder,
@@ -612,7 +662,11 @@
       self.cardElement(n.id(), function (el) {
         var h = Math.ceil(el.offsetHeight);
         if (h > 0 && h !== n.data("cardH")) {
+          // `data` for the minimap and for anything reading the model; the STYLE
+          // bypass is what Cytoscape paints, and it survives a `fromJson().update()`
+          // where a stylesheet function would not.
           n.data("cardH", h);
+          n.style("height", h);
           changed++;
         }
       });
@@ -1146,11 +1200,30 @@
     if (active) self.ensureFlow();
   };
 
+  /**
+   * Re-apply the stylesheet to a LIVE graph.
+   *
+   * `cy.style(array)` — what 080 used on every theme switch — does not replace the
+   * sheet: it resets the whole style to Cytoscape's DEFAULTS. Measured on the live
+   * editor (Chrome 148, 2026-09-07): after one call, `line-color` was `#999`, edge
+   * `width` 30px and node `background-color` `#999`. That is the owner's "the
+   * re-render on a theme switch collapses edges into thick grey bands", and it is a
+   * SECOND defect beside the `color-mix` one — the tokens were fine by then.
+   *
+   * `cy.style().fromJson(sheet).update()` is the call that re-applies. Its one
+   * condition is that the sheet be JSON — every function value is dropped — which is
+   * why the node height is a plain token here and a per-element bypass there.
+   */
+  PipelineGraph.prototype.applyStylesheet = function () {
+    if (!this.cy) return;
+    this.cy.style().fromJson(buildStylesheet(this.tokens)).update();
+  };
+
   PipelineGraph.prototype.updateTheme = function () {
     var self = this;
     self.tokens = readDesignTokens(self.containerId);
     if (!self.cy) return;
-    self.cy.style(buildStylesheet(self.tokens));
+    self.applyStylesheet();
     // A theme can move a metric (a font stack that failed to load, a different border
     // width), and the measured heights would then be stale. Re-measuring is a no-op
     // unless a card really moved (082 addendum P1).
@@ -1176,7 +1249,7 @@
     var next = readDesignTokens(self.containerId);
     if (next.cardW === self.tokens.cardW && next.cardH === self.tokens.cardH) return false;
     self.tokens = next;
-    self.cy.style(buildStylesheet(next));
+    self.applyStylesheet();
     // The floor moved, so the measured heights are stale: re-measure after the pass
     // (082 addendum P1) exactly as the first render does.
     self._heightPasses = 0;
@@ -1192,6 +1265,7 @@
     buildElements: buildElements,
     buildCardHtml: buildCardHtml,
     readDesignTokens: readDesignTokens,
+    toLegacyRgb: toLegacyRgb,
     layoutOptions: layoutOptions,
     pulseEnabled: pulseEnabled,
     clampFitZoom: clampFitZoom,
