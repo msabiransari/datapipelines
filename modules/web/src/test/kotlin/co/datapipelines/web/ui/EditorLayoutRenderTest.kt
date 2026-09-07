@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -56,6 +57,35 @@ class EditorLayoutRenderTest {
 
         html shouldContain "class=\"app-container app-main\""
         html shouldNotContain "app-main-bleed"
+    }
+
+    /**
+     * 082 §B — the stray node list. The keyboard node picker (`#pe-node-list`, revealed
+     * by `:focus-within`) and the legend were each anchored to the stage's bottom-left
+     * corner on their own, so the picker rendered ON TOP of the legend the moment it
+     * opened — visible in 080's dark Details screenshot, where `od_matrix / stage_zones
+     * / briefing` covers the chips.
+     *
+     * The fix is structural rather than a nudge: both live in ONE `.pe-stage-bl` column
+     * pinned by its bottom edge, picker FIRST so flex order stacks it above the legend.
+     * Two boxes anchored to one corner cannot be made non-overlapping by CSS alone, so
+     * the invariant this pins is the nesting and the order — the geometry itself is
+     * asserted live in `PipelineEditorDetailsBrowserTest`.
+     */
+    @Test
+    fun `the keyboard node picker and the legend share the stage's one bottom-left stack`() {
+        val html = engine.process("pipelines/editor", webContext().apply { fillEditor() })
+
+        val stack = html.indexOf("""class="pe-stage-bl"""")
+        val picker = html.indexOf("""id="pe-node-list"""")
+        val legend = html.indexOf("""class="pe-legend"""")
+        // The live region closes the stage and is NOT in the stack — it bounds it.
+        val afterStack = html.indexOf("""id="pe-live-region"""")
+
+        stack shouldBeGreaterThan -1
+        picker shouldBeGreaterThan stack
+        legend shouldBeGreaterThan picker
+        afterStack shouldBeGreaterThan legend
     }
 
     /** The editor controller's model, plus the layout chrome the shell needs. */

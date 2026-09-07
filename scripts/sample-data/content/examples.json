@@ -206,7 +206,7 @@
       "engine": "freemarker",
       "dialect": "H2",
       "display_name": "Borough briefing over the composed matrix (tempdb)",
-      "description": "The answer node of mobility_briefing. Reads the borough-by-borough matrix produced by the CHILD pipeline (delivered into tempdb by the PIPELINE node) and reduces it to one line per borough: trips, the share that never leaves the borough, and revenue per trip. Every number comes from the one child result, so the numerator and the denominator are the same population.",
+      "description": "The answer node of mobility_briefing. Reads the borough-by-borough matrix produced by the CHILD pipeline (delivered into tempdb by the PIPELINE node) and reduces it to one line per borough: trips, the share that never leaves the borough, and revenue per trip. The first column binds :run_fiscal_quarter, the value the fiscal_quarter CALCULATOR node wrote into the execution Context, so the run labels itself. Every number comes from the one child result, so the numerator and the denominator are the same population.",
       "imports": [
         {
           "id": "nyc/lib/metrics.sql",
@@ -214,7 +214,7 @@
           "alias": "met"
         }
       ],
-      "body": "SELECT\n    o.pickup_borough                                                       AS borough,\n    MAX(z.zone_count)                                                      AS pickup_zones,\n    SUM(o.trip_count)                                                      AS trip_count,\n    SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END) AS trips_within_borough,\n    <@met.share_pct part=\"SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END)\" whole=\"SUM(o.trip_count)\"/> AS pct_within_borough,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>      AS revenue_per_trip\nFROM stg_od_matrix o\nLEFT JOIN (SELECT borough, COUNT(*) AS zone_count FROM stg_zones GROUP BY borough) z\n       ON z.borough = o.pickup_borough\nGROUP BY o.pickup_borough\nORDER BY SUM(o.trip_count) DESC",
+      "body": "SELECT\n    :run_fiscal_quarter                                                    AS fiscal_quarter,\n    o.pickup_borough                                                       AS borough,\n    MAX(z.zone_count)                                                      AS pickup_zones,\n    SUM(o.trip_count)                                                      AS trip_count,\n    SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END) AS trips_within_borough,\n    <@met.share_pct part=\"SUM(CASE WHEN o.dropoff_borough = o.pickup_borough THEN o.trip_count ELSE 0 END)\" whole=\"SUM(o.trip_count)\"/> AS pct_within_borough,\n    <@met.per_unit total=\"SUM(o.total_amount)\" qty=\"SUM(o.trip_count)\"/>      AS revenue_per_trip\nFROM stg_od_matrix o\nLEFT JOIN (SELECT borough, COUNT(*) AS zone_count FROM stg_zones GROUP BY borough) z\n       ON z.borough = o.pickup_borough\nGROUP BY o.pickup_borough\nORDER BY SUM(o.trip_count) DESC",
       "is_library": false
     }
   ],
@@ -754,8 +754,20 @@
           "depends_on": []
         },
         {
+          "id": "fiscal_quarter",
+          "description": "Label the run with the fiscal quarter the reporting window ends in. A CALCULATOR node: no SQL, no rows - one typed value written into the execution Context under run_fiscal_quarter, which the briefing node binds as :run_fiscal_quarter. fiscal_start comes from the deployment's own setting, so the same pipeline labels its output correctly on a deployment whose fiscal year does not start in January.",
+          "type": "CALCULATOR",
+          "kind": "fiscal_quarter",
+          "inputs": {
+            "date": "$end_date",
+            "fiscal_start": "$org_fiscal_start_date"
+          },
+          "context_key": "run_fiscal_quarter",
+          "depends_on": []
+        },
+        {
           "id": "briefing",
-          "description": "Reduce the child's matrix to one briefing line per borough.",
+          "description": "Reduce the child's matrix to one briefing line per borough, labelled with the window's fiscal quarter.",
           "type": "DQL",
           "source": "tempdb",
           "template": {
@@ -767,7 +779,8 @@
           },
           "depends_on": [
             "od_matrix",
-            "stage_zones"
+            "stage_zones",
+            "fiscal_quarter"
           ]
         }
       ]

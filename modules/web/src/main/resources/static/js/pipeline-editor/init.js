@@ -215,9 +215,14 @@
           // 080 §B: a tap SELECTS and fills the dock's Details tab — the pane the
           // 065 inspector overlay became. The card's expand button and Enter on a
           // focused row land here too (openNodeDetails delegates).
+          // 082 §B: a POINTER tap must not move DOM focus into the keyboard node
+          // list. The list is revealed by :focus-within, so focusing a row from a
+          // mouse tap floated the picker into the stage's bottom-left corner on
+          // every click (080's dark Details shot). The selection, the ring and the
+          // roving tabindex all still move — only focus() is withheld.
           self.cy.on("tap", "node", function (evt) {
             var nodeData = evt.target.data();
-            self.selectNodeById(nodeData.id);
+            self.selectNodeById(nodeData.id, false);
           });
 
           self.cy.on("tap", function (evt) {
@@ -258,6 +263,7 @@
           self.resultPanel.ttlInterval = null;
         }
         self.stopRunClock("idle");
+        if (self.graph && self.graph.stopStageWatch) self.graph.stopStageWatch();
         if (self.cy) {
           self.cy.destroy();
           self.cy = null;
@@ -284,9 +290,9 @@
        * calls showPane('details')). The 065 split between select-only and open
        * died with the overlay: there is no second pane to keep closed.
        */
-      selectNodeById: function (id) {
+      selectNodeById: function (id, moveFocus) {
         var self = this;
-        if (!self.selectOnly(id)) return;
+        if (!self.selectOnly(id, moveFocus)) return;
         self.dock.selectNode(id);
         self.loadNodeSql();
       },
@@ -316,7 +322,12 @@
        * affordance they are.
        */
       openNodeDetails: function (id) {
-        this.selectNodeById(id);
+        // 082 §B: both routes into this are triggers that ALREADY hold the focus —
+        // the card's expand button under the pointer, and the node row a keyboard
+        // user pressed Enter on. Moving focus onto the list would either reveal the
+        // picker over a mouse user's canvas or take the ring off the row that opened
+        // the pane; the roving tabindex still follows the selection either way.
+        this.selectNodeById(id, false);
       },
 
       /*

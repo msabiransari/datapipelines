@@ -113,7 +113,10 @@
               <td>
                 <label th:for="'promote-' + ${candidate.name}">
                   <span class="app-name" th:text="${candidate.displayName}">Daily revenue</span>
-                  <span class="u-secondary u-text-sm"
+                  <!-- §3.3/§4.17: the pipeline PATH is mono, under the display name — the
+                       same `.app-path` treatment the execution lists use, rather than a
+                       one-off muted span in the body face. -->
+                  <span class="app-path"
                         th:text="${candidate.name}">daily_revenue</span>
                 </label>
               </td>

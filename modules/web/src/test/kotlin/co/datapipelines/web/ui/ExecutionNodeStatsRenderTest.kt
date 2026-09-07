@@ -53,7 +53,10 @@ class ExecutionNodeStatsRenderTest {
                 webContext().apply { setVariable("nodeStats", nodeStats) },
             )
 
-        html shouldContain "<th class=\"num\">Context</th>"
+        // 082 §D: Context is a MONO IDENTIFIER column, not a `.num` numeric one — and the
+        // node id beside it is mono for the same reason (§3.3's decision table).
+        html shouldContain "<th>Context</th>"
+        html shouldContain "<td class=\"u-mono\">quarter</td>"
         html shouldContain "current_quarter → 2026-Q3"
         // Exactly one em-dash: the DQL row's Context cell, and nothing else.
         html.split("—").size - 1 shouldBe 1
