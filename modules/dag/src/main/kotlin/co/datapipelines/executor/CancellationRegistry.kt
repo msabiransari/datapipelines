@@ -1,11 +1,15 @@
 package co.datapipelines.executor
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import org.slf4j.LoggerFactory
 import java.sql.SQLException
 import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -91,6 +95,43 @@ interface CancellationHandle {
         stmt: Statement,
         body: suspend () -> T,
     ): T
+
+    /**
+     * Runs [driverCall] — the blocking `execute*` on [stmt] — behind the **cancel latch**, on the
+     * node's own thread, at the last instant before the driver is entered (086 A1).
+     *
+     * ## The window this closes
+     *
+     * [withStatement] registers the statement and only then does the caller reach the driver.
+     * Everything in between — the last few statements of the runner, and any amount of
+     * *descheduling* on a loaded box — is a window in which the statement is registered but the
+     * driver holds no command yet. A `cancel()` landing there calls `Statement.cancel()` on a
+     * statement that is not executing, and **every** bundled driver silently drops it
+     * (§8.3.2's table, measured); the query then starts anyway and runs to completion, with the
+     * already-cancelled coroutine unable to observe anything until the blocking call returns.
+     * That is not a driver caveat — it is a window the executor owns, and this is where it is
+     * closed: re-read the latch on the executing thread, and refuse to enter the driver at all.
+     *
+     * Both halves of "cancelled" are read, because different paths set them:
+     * [abortReason] for the registry's own `cancel()` (which sets it *before* cancelling the root
+     * job, so there is an instant where only this is true), and the coroutine's own liveness for
+     * [cancelStatements] — the timeout, sibling-failure and ancestor paths set no reason at all
+     * (§5.3), and there the cancellation is already on the context. The second is what carries
+     * this guard onto a composed **child** execution, whose own handle the family's cancel never
+     * touches (§8.3, "a descendant stopped by an ancestor").
+     *
+     * The statement is cancelled and closed before the refusal, so nothing downstream can execute
+     * it: a closed statement is inert whatever a later caller does with it.
+     *
+     * @throws ExecutionAbortedException when this execution was cancelled through the registry.
+     * @throws kotlinx.coroutines.CancellationException carrying the ancestor's or the deadline's
+     *   own cause when the node's scope was cancelled from outside.
+     */
+    suspend fun <T> whileExecuting(
+        nodeId: String,
+        stmt: Statement,
+        driverCall: () -> T,
+    ): T
 }
 
 /** The production [CancellationRegistry]: a concurrent map of live executions. */
@@ -134,6 +175,9 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         private val job = AtomicReference<Job?>()
         private val reason = AtomicReference<AbortReason?>()
 
+        /** One re-issue watcher per handle at a time — see [scheduleReissue]. */
+        private val reissuing = AtomicBoolean()
+
         override val abortReason: AbortReason? get() = reason.get()
 
         override val registeredStatements: Int get() = statements.size
@@ -145,6 +189,7 @@ class InMemoryCancellationRegistry : CancellationRegistry {
         /** §8.3.2 step 1 without step 2 — see [CancellationHandle.cancelStatements]. */
         override fun cancelStatements() {
             statements.values.forEach(::cancelQuietly)
+            scheduleReissue()
         }
 
         override suspend fun <T> withStatement(
@@ -163,6 +208,16 @@ class InMemoryCancellationRegistry : CancellationRegistry {
             }
             try {
                 return body()
+            } catch (e: CancellationException) {
+                // Already the right shape — passed through untouched, and BEFORE the conversion
+                // below. Wrapping it would attach it as the *suppressed cause* of a second
+                // `ExecutionAbortedException`, and `PipelineExecutor.recordSuppressedFailure`
+                // reads exactly that field to answer "what did this node hit before the abort?".
+                // It would then map a cancellation through `ErrorCodeMapper`, whose fallback row
+                // is a real code — so a node the cancel latch refused cleanly would report
+                // `query_execution_failed` in the abort snapshot, against §8.3's "cancellation
+                // carries no error code at all". Only a DRIVER error needs converting.
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
@@ -187,6 +242,80 @@ class InMemoryCancellationRegistry : CancellationRegistry {
                 throw e
             } finally {
                 statements.remove(id)
+            }
+        }
+
+        override suspend fun <T> whileExecuting(
+            nodeId: String,
+            stmt: Statement,
+            driverCall: () -> T,
+        ): T {
+            latch(nodeId, stmt)
+            return driverCall()
+        }
+
+        /**
+         * The cancel latch, re-read on the executing thread — see [CancellationHandle.whileExecuting].
+         *
+         * `ensureActive()` is second, not first, and both are needed. [cancel] sets [reason] and
+         * only *then* cancels the root job, so between the two the context is still active while
+         * the execution is unambiguously cancelled; reading [reason] first is also what carries
+         * the right [AbortReason] instead of a bare `JobCancellationException`.
+         */
+        private suspend fun latch(
+            nodeId: String,
+            stmt: Statement,
+        ) {
+            reason.get()?.let {
+                LOG.debug("Cancel latch refused the driver call for node {} of execution {}", nodeId, executionId)
+                cancelQuietly(stmt)
+                closeQuietly(stmt)
+                throw ExecutionAbortedException(it)
+            }
+            currentCoroutineContext().ensureActive()
+        }
+
+        /**
+         * Re-issues `Statement.cancel()` while any statement is still registered (086 A1).
+         *
+         * The latch in [whileExecuting] closes the window the executor can see. What it cannot see
+         * is the driver's own: `executeQuery` parses and plans before it registers a command with
+         * the session, and a thread descheduled inside that prologue leaves a statement that is
+         * executing from our side and cancellable from nobody's. One `cancel()` is therefore a
+         * *hope*; re-issuing until the statement deregisters is the guarantee. Deregistration is
+         * the stop condition precisely because it means the blocking call returned.
+         *
+         * Bounded at [REISSUE_ATTEMPTS] × [REISSUE_INTERVAL_MS] because it is not the last line of
+         * defence: a driver whose `cancel()` is a genuine no-op is stopped by the statement's own
+         * `queryTimeout`, which every node sets from
+         * `datapipelines.executor.node-query-timeout-seconds`. Nothing here waits on the query.
+         *
+         * Its own daemon thread, created only when a cancel finds live statements: the callers are
+         * an HTTP worker (`DELETE /executions/{id}`), the SSE grace timer and the shutdown hook,
+         * and none of them may block — `Statement.cancel()` on Postgres opens a *new* socket to the
+         * server, so even the first pass is not free.
+         */
+        private fun scheduleReissue() {
+            if (statements.isEmpty()) return
+            if (!reissuing.compareAndSet(false, true)) return
+            Thread({ reissueUntilDrained() }, "dag-cancel-reissue-$executionId")
+                .apply { isDaemon = true }
+                .start()
+        }
+
+        private fun reissueUntilDrained() {
+            try {
+                repeat(REISSUE_ATTEMPTS) {
+                    Thread.sleep(REISSUE_INTERVAL_MS)
+                    if (statements.isEmpty()) return
+                    statements.values.forEach(::cancelQuietly)
+                }
+                LOG.debug("Cancel re-issue gave up for execution {}; queryTimeout is the backstop", executionId)
+            } catch (e: InterruptedException) {
+                LOG.debug("Cancel re-issue interrupted for execution {}: {}", executionId, e.message)
+                Thread.currentThread().interrupt()
+            } finally {
+                reissuing.set(false)
             }
         }
 
@@ -218,8 +347,27 @@ class InMemoryCancellationRegistry : CancellationRegistry {
             }
         }
 
+        /** Same contract as [cancelQuietly]: a close that refuses must not mask the abort. */
+        private fun closeQuietly(stmt: Statement) {
+            try {
+                stmt.close()
+            } catch (e: SQLException) {
+                LOG.debug("Statement.close() refused for execution {}: {}", executionId, e.message)
+            }
+        }
+
         private companion object {
             val LOG = LoggerFactory.getLogger(ExecutionCancellationHandle::class.java)
+
+            /**
+             * The re-issue cadence. Short enough that a dropped cancel costs milliseconds rather
+             * than the query's full runtime, long enough that a driver whose `cancel()` opens a
+             * connection (Postgres) is not asked to do so in a tight loop.
+             */
+            const val REISSUE_INTERVAL_MS = 25L
+
+            /** 80 × 25 ms = 2 s of re-issuing; past that, `queryTimeout` owns the problem. */
+            const val REISSUE_ATTEMPTS = 80
         }
     }
 }

@@ -1025,6 +1025,9 @@ interface CancellationHandle {
 
     /** Registers [stmt] against [nodeId] for the duration of [body], then deregisters it. */
     suspend fun <T> withStatement(nodeId: String, stmt: Statement, body: suspend () -> T): T
+
+    /** The cancel latch, re-read on the executing thread immediately before the driver call — §8.3.2. */
+    suspend fun <T> whileExecuting(nodeId: String, stmt: Statement, driverCall: () -> T): T
 }
 
 /** The cross-instance half: the Redis flag a DELETE writes and the executing instance polls. */
@@ -1040,8 +1043,9 @@ Three notes on this surface, all load-bearing:
 - **`withStatement`'s `body` is `suspend () -> T`**, where v1.2 wrote `() -> T`. It has to be: the caller node's drain into the result store runs inside this block (§6.4.2) and is suspending Redis I/O. A non-suspending signature would force a `runBlocking` inside a coroutine.
 - **`abortReason` is public on the handle** because the failure funnel reads it: a failure raised *outside* a registered statement — staging, the result-store drain, write-back — can land while the execution is already aborting, and `node_failed` must not be emitted for it (§10 allows one terminal event, and an `execution_aborted` is already on its way). The node is then recorded `ABORTED`-with-cause (§7.2) rather than `FAILED`.
 - **`cancelStatements()` is step 1 of §8.3.2 without step 2** — statements interrupted, no abort reason set. It is what the timeout path uses (§5.3) and what the failure path uses to stop running siblings (§8.3.3). Reusing `cancel(...)` there would relabel every timeout as a cancellation.
+- **`whileExecuting` wraps the blocking driver call, and every one of them goes through it** — the datasource DQL/DML/DDL paths and the four tempdb ones. Registering a statement is not the same as the driver holding a command, and the gap between them is where a cancel is lost (§8.3.2, "The registration window"). It reads BOTH the handle's `abortReason` and the coroutine's own liveness: the registry's `cancel()` sets the reason before it cancels the root job, while `cancelStatements()` sets no reason at all — and that second read is what carries the guard onto a composed **child** execution, whose own handle the family's cancel never touches.
 
-`withStatement` also refuses to register a statement for an execution that has *already* been cancelled (re-checking after the put, so a `cancel()` that swept the map cannot leave an uninterruptible statement behind), and converts a cancel-induced driver error into `ExecutionAbortedException` — carrying the original as a **suppressed** exception, so §7.2 can still record what the node hit.
+`withStatement` refuses to register a statement for an execution that has *already* been cancelled (re-checking after the put, so a `cancel()` that swept the map cannot leave an uninterruptible statement behind), and converts a cancel-induced driver error into `ExecutionAbortedException` — carrying the original as a **suppressed** exception, so §7.2 can still record what the node hit.
 
 Every in-flight node holds exactly one registered `Statement` (§6.3). The registry is per-instance and in-memory, but **cancellation requests travel through Redis** so `DELETE /executions/{id}` works from ANY instance (the standard deployment has no sticky sessions):
 
@@ -1060,7 +1064,34 @@ Worst-case cancellation latency is therefore ~one heartbeat interval; the common
 3. **Emit `execution_aborted`** (terminal event, [REST API §6.4.8](rest-api.md#648-execution_aborted)) with `reason`, `status: ABORTED`, and the node-stats snapshot (running/pending nodes report `ABORTED`).
 4. **Run the `finally` block**: deregister from the registry, clear the Redis cancel flag, drop the staged tables and close the tempdb connection (§9), release the execution slot. Cleanup runs `NonCancellable` — it must complete even though we got here *by* cancellation.
 
-Statements that ignore `cancel()` (some drivers, some statement kinds) are not waited on — they finish or hit their own `queryTimeout`. The connection is returned to the pool by `use` either way; a driver that cannot interrupt is a driver-quality issue, not an executor leak.
+Statements that ignore `cancel()` are not waited on — they finish or hit their own `queryTimeout`. The connection is returned to the pool by `use` either way; a driver that cannot interrupt is a driver-quality issue, not an executor leak.
+
+##### The registration window (086)
+
+Step 1 is only as good as the driver's willingness to accept a cancel, and a driver accepts one **only while it holds a registered command**. Between `withStatement` putting a statement in the map and the runner entering `executeQuery` there is no command — and on a loaded instance a descheduled thread can sit in that gap for hundreds of milliseconds. A `cancel()` landing there is dropped, the query then starts anyway, and the already-cancelled coroutine observes nothing until the blocking call returns: an execution that reports `ABORTED` only after running its query to completion, or not before its caller's deadline.
+
+This is the executor's window, not the driver's, and two mechanisms close it:
+
+- **The cancel latch.** `whileExecuting` re-reads the cancellation state on the executing thread at the last instant before the driver call, and refuses to enter the driver at all when it is set — cancelling and closing the statement first, so nothing downstream can execute it. This covers the whole gap the executor can see, including an arbitrarily long descheduling.
+- **Cancel re-issue.** `cancelStatements()` re-issues `Statement.cancel()` on a bounded schedule (25 ms, up to 2 s) while any statement stays registered, stopping the moment the map drains — which is exactly when the blocking call returned. This covers the gap the executor *cannot* see: the driver's own prologue, where `executeQuery` parses and plans before the session holds a command. One `cancel()` is a hope; re-issuing until deregistration is the guarantee.
+
+Neither is the last line of defence. Past the re-issue window, `datapipelines.executor.node-query-timeout-seconds` still bounds the statement, exactly as the paragraph above says.
+
+##### `Statement.cancel()` by dialect — measured, not documented
+
+Measured 2026-09-07 against the pinned drivers. "In flight" is a cancel issued while the statement is demonstrably executing; "before registration" is one issued **to completion before** the driver is entered — the window above, taken to its limit, which is deterministic where racing it would only measure the box's scheduler.
+
+| Dialect | Driver | In flight | Before registration | Re-measured every gate |
+|---|---|---|---|---|
+| H2 | com.h2database:h2 2.3.232 | honoured (~0.79 s) | **dropped** | yes |
+| SQLite | org.xerial:sqlite-jdbc 3.49.1.0 | honoured (~0.87 s) | **dropped** | yes |
+| DuckDB | org.duckdb:duckdb_jdbc 1.5.5.1 | honoured (~0.79 s) | **dropped** | yes |
+| MySQL | com.mysql:mysql-connector-j 9.7.0 | honoured (0.90 / 0.79 / 0.78 s) | **dropped** | no — see below |
+| Postgres | org.postgresql:postgresql 42.7.13 | honoured (0.97 s) | **dropped** | no — see below |
+
+`StatementCancelDialectTest` automates the three **embedded** engines: no container, no image, ~26 s, and the guard fails if any of them changes its answer. The two server engines are deliberately not automated in `dag`. MySQL's container needs a five-minute startup ceiling to become connectable on a loaded box (the same wall [datasources](datasources.md) hit) and cost 9–11 minutes when it did not; Postgres measured 0.97 s probed alone but could not be measured *stably inside a suite* — its cancel is a second connection carrying a backend PID, delivered asynchronously, and after other probes the two readings inverted. Their rows above are real measurements with the runs that produced them; they are not gate-enforced pins, and this table says so rather than implying a guard that does not exist.
+
+Two things follow, and both hold across every engine measured. **No supported dialect ignores an in-flight `cancel()`** — the "some drivers, some statement kinds" caveat above describes none of them today, and `queryTimeout` is the backstop for a driver we have not measured rather than for one we ship. And **every** supported dialect drops a cancel issued before registration, so the window is universal rather than an H2 quirk; nothing downstream will close it, which is why the latch and the re-issue exist.
 
 #### 8.3.3 Failure-driven cancellation
 
@@ -1390,6 +1421,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-07 | v1.7 | 086 cancel race | §8.3.2: the **registration window** named as a defect the executor owns, not a driver caveat — between `withStatement` registering a statement and the runner entering `executeQuery` the driver holds no command, and a `cancel()` landing there is dropped, so the query runs its full length under an already-cancelled coroutine. Two mechanisms close it, both documented: the **cancel latch** (`whileExecuting`, added to `CancellationHandle` in §8.3.1 and wrapping every one of the seven blocking driver calls — it reads the handle's `abortReason` AND the coroutine's liveness, the second being what carries the guard onto a composed child whose own handle a family cancel never touches) and **cancel re-issue** (`cancelStatements()` re-issues `Statement.cancel()` at 25 ms for up to 2 s while a statement stays registered, covering the driver's own parse-and-plan prologue, which no check of ours can see). `node-query-timeout-seconds` is unchanged as the backstop past that window. New MEASURED table: `Statement.cancel()` in flight is honoured by all five bundled dialects (H2, Postgres, MySQL, SQLite, DuckDB) — so the old "some drivers, some statement kinds" caveat describes none of them — and a cancel issued before registration is dropped by all five, so the window is universal rather than an H2 quirk. |
 | 2026-09-02 | v1.4 | 051 auth/config sweep | §8.3 gains the descendant sentence (T20): an in-flight child stopped by an ancestor’s cancellation or expired deadline ends ABORTED — carrying the family’s abort reason (a DELETE’s `cancelled` survives onto every descendant’s row; an ancestor timeout also records `cancelled`, since no catalogued reason exists for it) — never FAILED, which would misattribute the stop to the child’s own pipeline. Scope liveness, not exception shape, tells “my deadline” from “an ancestor’s” |
 | 2026-08-05 | v1.0 | initial draft | Initial DAG executor spec: ~150-line `Dag<T>`, parallel execution via coroutines, fail-fast, SSE integration, idempotency |
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) §2.6 — **D1**: terminal-node auto-detection replaced by caller-node resolution (§4.1, §5.1, §5.2); omitted `output` resolves to `NodeOutput.Caller` at deserialization; zero-caller executions emit no `data_ready`; executor asserts nothing about DAG position. **D5**: `pipeline.staging.h2_creation_failed` → `pipeline.staging.creation_failed`; `idempotency.key_reused_for_different_request`; §8.2 table completed and re-pointed at pipeline-contract §13. **D6**: `StagingFactory.create(executionId, engine)` declared canonical; no `DB_CLOSE_DELAY`; explicit `DROP ALL OBJECTS` + close in `finally`; single connection Mutex-guarded and §12.1's "no concurrent tempdb access" claim corrected. **D7**: new §8.3 Cancellation — per-node `Statement` registry, `Statement.cancel()` before coroutine cancel, three triggers (DELETE / disconnect grace / shutdown), `execution_aborted` terminal event. **D8**: §5.3 limits reference configuration.md keys instead of restating defaults. **D9**: §6.4.2 caller path materializes the ResultSet into the Redis result store inside `connection.use`, enforcing `result.max-size-bytes` (`result.too_large`) and failing with `result.storage_unavailable`; `data_ready` built from the stored result. **[M]**: semaphore permit now acquired after `awaitAll(deps)` (chain-deadlock fix); execution-slot acquisition added; `withTimeout(execution-timeout-seconds)`; `node_completed` success-only and single `NodeFailed` emission; `NodeResult` defined with `callerResultRef` and its projection to `NodeStats` (§7); `PipelineExecutionFailed` constructor aligned with §8.1; `NodeExecutionException` passes `cause` to `Throwable` instead of shadowing it; `Dispatchers.IO` → `ExecutorDispatcher`; `Dag` dead no-op loop removed and `dependencies[id]!!` → `emptySet()` default; `independentBatches()` marked diagnostic/UI-only (§3.3); §4 retitled "Executor-Facing Model" and §8.3 "Cancellation" to fix inbound anchors; "(future)" removed from the observability link. |

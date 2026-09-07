@@ -28,10 +28,13 @@ import io.mockk.mockk
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.sql.Statement
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Shared builders for the executor suites. */
@@ -325,10 +328,28 @@ class FakeDatasourceRegistry(
      * repository read behind the backstop fails while the target datasource is healthy.
      */
     private val liveReadFailure: RuntimeException? = null,
+    /**
+     * Millis to spend **before** delegating each driver call, drawn per statement (086 B).
+     *
+     * This is the descheduling a loaded box inserts between `withStatement` registering a
+     * statement and the runner entering `executeQuery` — the window the O7 flake lived in.
+     * Simulating the *scheduler* is the only synthetic part: the statement is a real H2 one, so
+     * the `cancel()` that arrives during the prologue is dropped by H2 itself, exactly as
+     * [StatementCancelDialectTest] measured on all five bundled drivers. Null (the default)
+     * leaves connections undecorated and every existing suite unchanged.
+     */
+    private val driverPrologueMs: (() -> Long)? = null,
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
     val closed = AtomicInteger()
+
+    /**
+     * Cancels that reached a statement while it was still in its prologue — i.e. registered with
+     * the executor and holding no driver command. The non-vacuity floor for any sweep of the
+     * cancel race: a run where this stays 0 never tested the window at all.
+     */
+    val cancelsInPrologue = AtomicInteger()
 
     override fun list(dialect: Dialect?): List<Datasource> = datasources.values.toList()
 
@@ -365,7 +386,8 @@ class FakeDatasourceRegistry(
 
     override fun delete(name: String): DeleteResult = DeleteResult(true, name)
 
-    override fun poolFor(datasource: Datasource): ConnectionPool = TrackingPool(datasource, leased, closed)
+    override fun poolFor(datasource: Datasource): ConnectionPool =
+        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue)
 
     override fun testConnection(name: String): TestResult? = TestResult(true, Instant.now())
 
@@ -373,6 +395,8 @@ class FakeDatasourceRegistry(
         private val datasource: Datasource,
         private val leased: AtomicInteger,
         private val closed: AtomicInteger,
+        private val prologueMs: (() -> Long)?,
+        private val cancelsInPrologue: AtomicInteger,
     ) : ConnectionPool {
         override val name: String get() = datasource.name
 
@@ -381,7 +405,7 @@ class FakeDatasourceRegistry(
             // The password matters once a container-backed source is in play (C4); H2 fixtures
             // leave it null and get the empty string they had before.
             val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.password ?: "")
-            return CountingConnection(delegate, closed)
+            return CountingConnection(delegate, closed, prologueMs, cancelsInPrologue)
         }
 
         override fun close() = Unit
@@ -392,10 +416,99 @@ class FakeDatasourceRegistry(
 private class CountingConnection(
     private val delegate: Connection,
     private val closed: AtomicInteger,
+    private val prologueMs: (() -> Long)?,
+    private val cancelsInPrologue: AtomicInteger,
 ) : Connection by delegate {
     override fun close() {
         closed.incrementAndGet()
         delegate.close()
+    }
+
+    override fun createStatement(): Statement = decorate(delegate.createStatement())
+
+    override fun createStatement(
+        resultSetType: Int,
+        resultSetConcurrency: Int,
+    ): Statement = decorate(delegate.createStatement(resultSetType, resultSetConcurrency))
+
+    override fun prepareStatement(sql: String): java.sql.PreparedStatement = decorate(delegate.prepareStatement(sql))
+
+    override fun prepareStatement(
+        sql: String,
+        resultSetType: Int,
+        resultSetConcurrency: Int,
+    ): java.sql.PreparedStatement = decorate(delegate.prepareStatement(sql, resultSetType, resultSetConcurrency))
+
+    private fun decorate(statement: Statement): Statement =
+        prologueMs?.let { DelayedRegistrationStatement(statement, it(), cancelsInPrologue) } ?: statement
+
+    private fun decorate(statement: java.sql.PreparedStatement): java.sql.PreparedStatement =
+        prologueMs?.let { DelayedRegistrationPreparedStatement(statement, it(), cancelsInPrologue) } ?: statement
+}
+
+/**
+ * A statement that enters the driver [prologueMs] late — see [FakeDatasourceRegistry.driverPrologueMs].
+ *
+ * `cancel()` is passed straight through to the real driver, which is the point: during the
+ * prologue H2 holds no command and drops it, so the executor's own latch and re-issue are the only
+ * things that can end the query. Nothing here decides the outcome.
+ */
+private class DelayedRegistrationStatement(
+    private val delegate: Statement,
+    private val prologueMs: Long,
+    private val cancelsInPrologue: AtomicInteger,
+) : Statement by delegate {
+    private val inPrologue = AtomicBoolean()
+
+    override fun cancel() {
+        if (inPrologue.get()) cancelsInPrologue.incrementAndGet()
+        delegate.cancel()
+    }
+
+    override fun executeQuery(sql: String): java.sql.ResultSet = prologue { delegate.executeQuery(sql) }
+
+    override fun executeUpdate(sql: String): Int = prologue { delegate.executeUpdate(sql) }
+
+    override fun execute(sql: String): Boolean = prologue { delegate.execute(sql) }
+
+    private fun <T> prologue(driverCall: () -> T): T {
+        inPrologue.set(true)
+        try {
+            Thread.sleep(prologueMs)
+        } finally {
+            inPrologue.set(false)
+        }
+        return driverCall()
+    }
+}
+
+/** The prepared sibling of [DelayedRegistrationStatement], for the bound-parameter path. */
+private class DelayedRegistrationPreparedStatement(
+    private val delegate: java.sql.PreparedStatement,
+    private val prologueMs: Long,
+    private val cancelsInPrologue: AtomicInteger,
+) : java.sql.PreparedStatement by delegate {
+    private val inPrologue = AtomicBoolean()
+
+    override fun cancel() {
+        if (inPrologue.get()) cancelsInPrologue.incrementAndGet()
+        delegate.cancel()
+    }
+
+    override fun executeQuery(): java.sql.ResultSet = prologue { delegate.executeQuery() }
+
+    override fun executeUpdate(): Int = prologue { delegate.executeUpdate() }
+
+    override fun execute(): Boolean = prologue { delegate.execute() }
+
+    private fun <T> prologue(driverCall: () -> T): T {
+        inPrologue.set(true)
+        try {
+            Thread.sleep(prologueMs)
+        } finally {
+            inPrologue.set(false)
+        }
+        return driverCall()
     }
 }
 
@@ -452,9 +565,85 @@ private fun h2Datasource(
 /** A [java.sql.Statement] that records `cancel()` calls; everything else is unsupported. */
 class RecordingStatement : Statement by NoopStatement() {
     val cancels = AtomicInteger()
+    val closes = AtomicInteger()
 
     override fun cancel() {
         cancels.incrementAndGet()
+    }
+
+    override fun close() {
+        closes.incrementAndGet()
+    }
+}
+
+/**
+ * A [java.sql.Statement] that drops a `cancel()` the way every measured driver does (086 A2).
+ *
+ * [StatementCancelDialectTest] measured it on all five bundled engines — H2, Postgres, MySQL,
+ * SQLite and DuckDB: a `cancel()` issued while the statement holds **no registered command** has
+ * no effect at all, and the query then runs its full length. That single behaviour is the whole
+ * of this double; everything else about a driver is irrelevant to the executor's cancel path, and
+ * modelling it faithfully is what lets a unit test reproduce the O7 flake in milliseconds instead
+ * of waiting on a real ~57s query.
+ *
+ * [blockingExecute] is the driver call: it spends [prologueMs] *registering* — the parse-and-plan
+ * window in which a cancel is dropped — and only then becomes cancellable.
+ */
+class DriverLikeStatement : Statement by NoopStatement() {
+    /** Every `cancel()` the executor issued, dropped or not — the re-issue assertion surface. */
+    val cancels = AtomicInteger()
+
+    val closes = AtomicInteger()
+
+    /** True once a `cancel()` arrived while a command was registered. */
+    val interrupted = AtomicBoolean()
+
+    /** Counts down as the driver call is entered, before the prologue — the race's start line. */
+    val entered = CountDownLatch(1)
+
+    private val executing = AtomicBoolean()
+
+    override fun cancel() {
+        cancels.incrementAndGet()
+        if (executing.get()) interrupted.set(true)
+    }
+
+    override fun close() {
+        closes.incrementAndGet()
+    }
+
+    /**
+     * Blocks like a driver would, and returns the millis it took.
+     *
+     * @param prologueMs the window in which a cancel is silently dropped.
+     * @param runtimeMs how long the "query" runs once cancellable. A test asserting that the
+     *   cancel landed makes this far longer than its own budget, so a dropped cancel fails loudly.
+     * @throws java.sql.SQLException with SQLState 57014 when a cancel landed — what H2, Postgres
+     *   and MySQL all raise on the thread blocked in `executeQuery`.
+     */
+    fun blockingExecute(
+        prologueMs: Long,
+        runtimeMs: Long,
+    ): Long {
+        val startedAt = System.nanoTime()
+        entered.countDown()
+        Thread.sleep(prologueMs)
+        executing.set(true)
+        try {
+            val deadline = System.nanoTime() + runtimeMs * NANOS_PER_MILLI
+            while (System.nanoTime() < deadline) {
+                if (interrupted.get()) throw SQLException("Statement was canceled or the session timed out", "57014", 57014)
+                Thread.sleep(POLL_MS)
+            }
+        } finally {
+            executing.set(false)
+        }
+        return (System.nanoTime() - startedAt) / NANOS_PER_MILLI
+    }
+
+    private companion object {
+        const val NANOS_PER_MILLI = 1_000_000L
+        const val POLL_MS = 1L
     }
 }
 

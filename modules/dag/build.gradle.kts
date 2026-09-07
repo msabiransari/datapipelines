@@ -41,4 +41,15 @@ dependencies {
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)
+
+    // 086 A2: `StatementCancelDialectTest` MEASURES `Statement.cancel()` — dag-executor.md
+    // §8.3.2's table is a measurement, and a claim about a driver read out of its documentation is
+    // worth nothing (the reason `datasources` takes these same engines' jars for its own dialect
+    // tests). Only the EMBEDDED engines are automated here: no container, no image pull, ~26 s.
+    // Postgres and MySQL are measured too, but not from this module — §8.3.2 records their rows
+    // with the runs that produced them and says so, because a server container is a poor trade for
+    // one table row in the round whose purpose was deleting a flaky gate. Both jars are already on
+    // this module's runtime classpath transitively; these two lines put them on testCompile.
+    testImplementation(libs.sqlite.jdbc)
+    testImplementation(libs.duckdb.jdbc)
 }
