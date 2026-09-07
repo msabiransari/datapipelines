@@ -54,8 +54,12 @@
             <span th:if="${ds.workspaceName} != null" th:text="${ds.workspaceName}">team</span>
             <span th:if="${ds.workspaceName} == null" title="Visible to every workspace">global</span>
           </td>
-          <td th:text="${ds.jdbcUrl}"></td>
-          <td th:text="${ds.username}"></td>
+          <!-- §3.3/§4.5: the JDBC URL and the username are the two mono columns on this
+               screen — both are machine strings a reader compares character by character
+               (a wrong host, a wrong port, a trailing space). They rendered in the body
+               face. -->
+          <td class="u-mono" th:text="${ds.jdbcUrl}"></td>
+          <td class="u-mono" th:text="${ds.username}"></td>
           <!-- §8.1B (061/T84): the outcome of the LAST connection test, on the screen that
                said "fine" on 2026-09-02 while every execution failed at connect — listing a
                datasource never connects to it, so without this column the row cannot be

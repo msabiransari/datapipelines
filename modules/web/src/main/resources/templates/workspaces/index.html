@@ -56,7 +56,9 @@
       <tbody>
         <tr th:each="membership : ${own}">
           <td>
-            <span th:text="${membership.workspaceName}">team</span>
+            <!-- §3.3/§4.13: the workspace name is a machine name (it travels in URLs and
+                 in the switch form) — mono. -->
+            <span class="u-mono" th:text="${membership.workspaceName}">team</span>
             <span th:if="${membership.workspaceName == activeWorkspace}"
                   class="ds-badge ds-badge-primary">active</span>
           </td>
