@@ -1085,6 +1085,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
 - **`private_key` / `service_account_json` credential kinds reaching a real dialect.** The kinds are catalogued and refused by every shipped adapter (§3.4); Snowflake key-pair auth and BigQuery service accounts are what will declare them.
+- **OAuth / IAM auth for cloud databases**: Snowflake, BigQuery (when those dialects are added).
 
 ---
 

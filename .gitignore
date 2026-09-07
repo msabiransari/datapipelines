@@ -81,6 +81,9 @@ gate-logs/
 # the .tools/ entry above already covers the pinned DuckDB CLI.
 scripts/sample-data/work/
 scripts/sample-data-trade/work/
+# The lake family's corpus is an order of magnitude larger (~11.6 GB of pinned
+# HVFHV Parquet plus ~7 GB of built tables) — the same rule, louder.
+scripts/sample-data-lake/work/
 
 # --- Agent worktrees checked out INSIDE the repo ---
 # A `git add -A` from the main checkout must never stage another lane's

@@ -1,0 +1,24 @@
+# scripts/sample-data-lake/data/hvfhs-companies.csv — the hvfhs_license_num -> company
+# mapping, transcribed BY HAND because the authority is a PDF: the TLC "Data Dictionary –
+# High Volume FHV Trip Records" (header dated March 18, 2025), linked from
+# https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page as "High Volume FHV Trips
+# Data Dictionary".
+#
+# Quoted verbatim from that dictionary's hvfhs_license_num row:
+#   "The TLC license number of the HVFHS base or business. As of September 2019, the
+#    HVFHS licensees are the following:
+#      • HV0002: Juno
+#      • HV0003: Uber
+#      • HV0004: Via
+#      • HV0005: Lyft"
+#
+# `company` is the lower-case token the published table carries; `display_name` is the
+# dictionary's own spelling. transform.sh FAILS the build if the window contains a
+# licence number with no row here — an unmapped code would otherwise become a silent
+# NULL company in every aggregate (the same guard ../sample-data/transform.sh applies to
+# the rate-code and payment-type lookups).
+hvfhs_license_num,company,display_name
+HV0002,juno,Juno
+HV0003,uber,Uber
+HV0004,via,Via
+HV0005,lyft,Lyft
