@@ -357,9 +357,13 @@ class CommonConventionsPlugin : Plugin<Project> {
                     throw GradleException(
                         "$modulePath produced $resultCount test result file(s) for $sourceCount test " +
                             "source file(s) in $resultsDir. The build would otherwise have reported " +
-                            "success while silently skipping tests. Re-run with --rerun-tasks; if it " +
-                            "persists, the test task is being skipped as NO-SOURCE, or a test class " +
-                            "died without reporting.",
+                            "success while silently skipping tests. " +
+                            "A FILTERED run (--tests …) ALWAYS fails this guard, by design — it ran " +
+                            "fewer classes than the module has, which is exactly what this counts. " +
+                            "That is not a red suite: read the XML in $resultsDir (or run " +
+                            "./scripts/test-recount.sh) for the verdict. " +
+                            "On an UNFILTERED run: re-run with --rerun-tasks; if it persists, the test " +
+                            "task is being skipped as NO-SOURCE, or a test class died without reporting.",
                     )
                 }
             }
@@ -398,7 +402,12 @@ class CommonConventionsPlugin : Plugin<Project> {
             ":modules:staging" to 93,
             ":modules:auth" to 95,
             // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
-            ":modules:application" to 84,
+            // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
+            // they were exercised only by the WEB module's suite, so this module earned no
+            // coverage for its own code and sat at 84.9 against 84, a margin thin enough that
+            // the next class added here would have tripped someone else's gate. The structural
+            // cause is fixed, so the floor follows the house rule again: baseline minus 2.
+            ":modules:application" to 94,
             ":modules:dag" to 90,
             ":modules:mcp-server" to 94,
             ":modules:web" to 72,
