@@ -57,18 +57,21 @@ class CancellationTest {
      * coroutine alone would unblock the JVM side and leave the query running on the source server,
      * which is precisely the "never hold a datasource for a caller that left" hole D7 closed.
      *
-     * ## The settle delay is the honest part of this test
+     * ## The settle delay here is deliberate, and it is the ONLY one left (086 B)
      *
-     * [SETTLE_MS] is not padding: measured against the pinned H2 driver, a `cancel()` issued in the
-     * first few milliseconds — after `node_started` but before the driver's command is actually
-     * registered as executing — is **silently dropped**, and the query then runs its full ~57s
-     * before the already-cancelled coroutine notices. Waiting until the statement is demonstrably
-     * in flight is what makes this a test of the cancel path rather than of that race.
+     * This case pins the half of the race where the driver already holds a registered command:
+     * [IN_FLIGHT_SETTLE_MS] waits until the statement is demonstrably executing, so what is
+     * measured is `Statement.cancel()` reaching the driver and nothing else. Every other case in
+     * this suite now cancels the instant the statement is *registered* — the other half, which
+     * until 086 the suite dodged with a 750 ms sleep on every test.
      *
-     * That race is real in production too, and it is the documented caveat, not a defect this
-     * module can close: §8.3.2 already states that statements which ignore `cancel()` "are not
-     * waited on — they finish or hit their own `queryTimeout`". `datapipelines.executor
-     * .node-query-timeout-seconds` is the backstop for exactly this window.
+     * That sleep was not padding, and calling it "the documented caveat" was wrong. A `cancel()`
+     * arriving before the driver registers a command is silently dropped by **all five** bundled
+     * drivers ([StatementCancelDialectTest] measures it), and the window it lands in is one the
+     * executor owns, not the driver: between `withStatement` registering the statement and the
+     * runner entering `executeQuery`, a descheduled thread can sit for hundreds of milliseconds
+     * under load. §8.3.2's cancel latch and cancel re-issue close it; this suite no longer waits
+     * for it to pass.
      */
     @Test
     fun `cancelling interrupts the in-flight statement rather than waiting for it`() =
@@ -76,7 +79,7 @@ class CancellationTest {
             harness().use { h ->
                 val elapsed =
                     kotlin.system.measureTimeMillis {
-                        cancelMidFlight(h, settleMs = SETTLE_MS) { id ->
+                        cancelMidFlight(h, settleMs = IN_FLIGHT_SETTLE_MS) { id ->
                             h.cancellations.cancel(id, AbortReason.CANCELLED)
                         }
                     }
@@ -86,6 +89,88 @@ class CancellationTest {
                 (elapsed < INTERRUPT_BUDGET_MS).shouldBeTrue()
             }
         }
+
+    /**
+     * 086 A1, the first half: the **cancel latch** refuses to enter the driver at all.
+     *
+     * This is the O7 flake, reproduced deterministically and in milliseconds. The cancel lands in
+     * the exact window the harness's `delay(750)` used to step over — the statement is registered,
+     * the driver holds no command — and [DriverLikeStatement] drops it exactly as all five real
+     * drivers were measured to. Before the latch, `body` ran regardless and the ~57 s query went
+     * ahead under an already-cancelled coroutine, until the harness's own `withTimeout` fired and
+     * reported a `TimeoutCancellationException` where an `ExecutionAbortedException` belonged.
+     *
+     * The driver call is `error(...)`: the guard is only a guard if entering the driver is fatal,
+     * not merely slower. Delete the latch and this goes red with an `IllegalStateException`.
+     */
+    @Test
+    fun `the cancel latch refuses the driver call for a statement registered before the cancel`() =
+        runBlocking<Unit> {
+            val registry = InMemoryCancellationRegistry()
+            val executionId = UUID.randomUUID()
+            val handle = registry.register(executionId)
+            val statement = DriverLikeStatement()
+
+            shouldThrow<ExecutionAbortedException> {
+                handle.withStatement("n", statement) {
+                    // Registered, not executing — the window. `cancel()` reaches the driver and is
+                    // dropped there, which is why the latch, not the driver, has to do the work.
+                    registry.cancel(executionId, AbortReason.CANCELLED)
+                    statement.interrupted.get().shouldBeFalse()
+                    handle.whileExecuting("n", statement) { error("the driver must never be entered") }
+                }
+            }.reason shouldBe AbortReason.CANCELLED
+
+            // "and closes the statement": a refused statement is left inert, not merely unused.
+            (statement.closes.get() >= 1).shouldBeTrue()
+            handle.registeredStatements shouldBe 0
+        }
+
+    /**
+     * 086 A1, the second half: the **re-issue** covers the window the latch cannot see.
+     *
+     * The latch is read on the executing thread, so it closes everything up to the driver call.
+     * What no check of ours can close is the driver's own prologue — `executeQuery` parses and
+     * plans before it registers a command — and a cancel landing there is dropped with the
+     * statement already past every guard the executor has. One `cancel()` is a hope; re-issuing it
+     * while the statement stays registered is the guarantee.
+     *
+     * Here the cancel is issued the moment the driver call is entered, so it lands squarely in a
+     * 300 ms prologue and is dropped. The "query" then runs [RUNAWAY_MS] — twenty times the
+     * budget — so only a *later* cancel can end it inside one. `cancels ≥ 2` is the load-bearing
+     * assertion: it says the re-issue, not the original cancel, is what stopped the statement.
+     */
+    @Test
+    fun `a cancel dropped inside the driver's prologue is re-issued until it lands`() {
+        val registry = InMemoryCancellationRegistry()
+        val executionId = UUID.randomUUID()
+        val handle = registry.register(executionId)
+        val statement = DriverLikeStatement()
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val run =
+                pool.submit {
+                    runBlocking {
+                        shouldThrow<ExecutionAbortedException> {
+                            handle.withStatement("n", statement) {
+                                handle.whileExecuting("n", statement) {
+                                    statement.blockingExecute(prologueMs = PROLOGUE_MS, runtimeMs = RUNAWAY_MS)
+                                }
+                            }
+                        }.reason shouldBe AbortReason.CANCELLED
+                    }
+                }
+
+            statement.entered.await(RACE_TIMEOUT_SECONDS, TimeUnit.SECONDS).shouldBeTrue()
+            registry.cancel(executionId, AbortReason.CANCELLED)
+
+            run.get(REISSUE_BUDGET_MS, TimeUnit.MILLISECONDS)
+            statement.interrupted.get().shouldBeTrue()
+            (statement.cancels.get() >= 2).shouldBeTrue()
+        } finally {
+            pool.shutdownNow()
+        }
+    }
 
     @Test
     fun `a running node reports ABORTED in the abort snapshot`() =
@@ -199,10 +284,12 @@ class CancellationTest {
                                     }
                                 }
                             val executionId = awaitNodeStarted(h, nodeId = "slow")
-                            delay(SETTLE_MS)
                             // A live registration is the whole fix — without it the cancel is a
                             // no-op and this test would pass only by the entry guard (F12/C5).
-                            (h.cancellations.registeredFor(executionId) >= 1).shouldBeTrue()
+                            // 086 B: awaited, not slept for. The old `delay(750)` was a guess at
+                            // how long registration takes on an unloaded box, and it also stepped
+                            // past the registered-but-not-executing window this now lands in.
+                            awaitRegisteredStatement(h, executionId)
                             h.cancellations.cancel(executionId, AbortReason.CANCELLED)
                             run.await()
                         }
@@ -276,8 +363,8 @@ class CancellationTest {
                                     }
                                 }
                             val executionId = awaitNodeStarted(h, nodeId = "slow")
-                            delay(SETTLE_MS)
-                            (h.cancellations.registeredFor(executionId) >= 1).shouldBeTrue()
+                            // 086 B: the registration is awaited, not slept for — see the sibling.
+                            awaitRegisteredStatement(h, executionId)
                             h.cancellations.cancel(executionId, AbortReason.CANCELLED)
                             run.await()
                         }
@@ -437,6 +524,21 @@ class CancellationTest {
             started
         }
 
+    /**
+     * Waits until [executionId] holds a live registered statement (086 B).
+     *
+     * The condition the two `mid-flight` cases actually need, rather than the interval the old
+     * `SETTLE_MS` guessed at: on a loaded box 750 ms was not enough to reach registration, and on
+     * an idle one it sailed past the window where a cancel is dropped. Polling the registry is
+     * both faster and strictly harder — the cancel now lands the instant the statement exists.
+     */
+    private suspend fun awaitRegisteredStatement(
+        h: ExecutorHarness,
+        executionId: UUID,
+    ) {
+        while (h.cancellations.registeredFor(executionId) < 1) delay(POLL_MS)
+    }
+
     private suspend fun awaitNodeStarted(
         h: ExecutorHarness,
         nodeId: String? = null,
@@ -464,8 +566,21 @@ class CancellationTest {
         const val RACE_HOLD_MS = 2L
         const val RACE_TIMEOUT_SECONDS = 10L
 
-        /** Long enough for the driver to have the statement genuinely executing — see the KDoc. */
-        const val SETTLE_MS = 750L
+        /**
+         * The ONE remaining settle, on the one case that wants the statement already executing —
+         * see `cancelling interrupts the in-flight statement`. Every other case cancels the
+         * instant the statement is registered (086 B).
+         */
+        const val IN_FLIGHT_SETTLE_MS = 750L
+
+        /** [DriverLikeStatement]'s dropped-cancel window: parse-and-plan before a command exists. */
+        const val PROLOGUE_MS = 300L
+
+        /** Twenty times [REISSUE_BUDGET_MS] — a dropped cancel cannot pass for a landed one. */
+        const val RUNAWAY_MS = 20_000L
+
+        /** ~2 s of re-issuing at 25 ms is the executor's window; this leaves room and no more. */
+        const val REISSUE_BUDGET_MS = 5_000L
 
         /** Generous, but far below SLOW_SQL's own ~57s runtime — the test still falsifies. */
         const val INTERRUPT_BUDGET_MS = 20_000L
