@@ -46,10 +46,15 @@ class TemplateValidator(
      * Runs §7 against [draft] and returns every failure. Imports resolve within
      * [workspaceId] (design 2026-08-16-workspaces §3 — cross-workspace references do not
      * exist in v1); no default, so validation without an explicit workspace does not compile.
+     *
+     * [trace] counts the work this call did — see [ValidationTrace] for why templates.md §12.3's
+     * "bounded work on adversarial input" is asserted as a step count and not as a stopwatch
+     * reading. Production callers pass nothing and nothing branches on it.
      */
     fun validate(
         draft: TemplateDraft,
         workspaceId: java.util.UUID,
+        trace: ValidationTrace = ValidationTrace(),
     ): TemplateValidationResult {
         val failures = mutableListOf<TemplateValidationFailure>()
 
@@ -74,8 +79,8 @@ class TemplateValidator(
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
         addTypeDialectFailures(draft, failures)
-        addBodyFailures(draft, failures)
-        libraryResolver.validate(workspaceId, draft.imports, failures)
+        addBodyFailures(draft, failures, trace)
+        libraryResolver.validate(workspaceId, draft.imports, failures, trace)
 
         return TemplateValidationResult(failures)
     }
@@ -191,6 +196,7 @@ class TemplateValidator(
     private fun addBodyFailures(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
+        trace: ValidationTrace,
     ) {
         if (draft.body.length > maxBodyChars) {
             failures +=
@@ -216,7 +222,7 @@ class TemplateValidator(
             return
         }
 
-        when (val parse = TemplateBodyParser.parse(draft.body)) {
+        when (val parse = TemplateBodyParser.parse(draft.body, trace)) {
             is BodyParse.SyntaxError -> {
                 failures +=
                     TemplateValidationFailure(

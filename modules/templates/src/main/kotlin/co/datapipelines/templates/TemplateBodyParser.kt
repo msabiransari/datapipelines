@@ -102,9 +102,19 @@ internal object TemplateBodyParser {
      * constant for why. A thread per save-time parse is a negligible cost next to the database
      * round-trips a save already performs, and it is what keeps an adversarial body from holding
      * the request thread for half a minute.
+     *
+     * [trace] records the work done — the pre-scan's length and whether a parse was attempted at
+     * all — so §12.3's "bounded work" can be asserted as a count rather than as a duration
+     * (083 §B). Callers that do not care supply nothing.
      */
-    fun parse(body: String): BodyParse {
+    fun parse(
+        body: String,
+        trace: ValidationTrace = ValidationTrace(),
+    ): BodyParse {
         val depth = maxBracketDepth(body)
+        // One pass, one character each: the pre-scan's cost IS the body's length, and saying so
+        // in a counter is what lets a test assert linearity without a stopwatch (083 §B).
+        trace.bracketScanChars += body.length
         if (depth > MAX_NESTING_DEPTH) {
             return BodyParse.SyntaxError(
                 message = "Expression nesting depth $depth exceeds the limit of $MAX_NESTING_DEPTH.",
@@ -112,6 +122,7 @@ internal object TemplateBodyParser {
                 column = 1,
             )
         }
+        trace.parseAttempts += 1
         var result: BodyParse? = null
         val worker = Thread(null, { result = parseHere(body) }, "template-parse", PARSE_STACK_BYTES)
         worker.isDaemon = true
