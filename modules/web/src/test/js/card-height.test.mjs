@@ -165,6 +165,21 @@ test("a card that measures zero is ignored rather than collapsing the node", () 
   assert.equal(nodes[0].style("height"), undefined, "and nothing is painted from a 0");
 });
 
+test("a DESTROYED graph measures nothing — the deferred pass can outlive its instance", () => {
+  // syncCardHeights runs a frame after layoutstop, and a boosted navigation can destroy
+  // Cytoscape in between: init.js's teardown nulls the COMPONENT's cy while this object
+  // still holds the destroyed one. Touching it throws "Cannot read properties of null
+  // (reading 'isHeadless')" out of Cytoscape's own headless() — seen once in the 082
+  // walk, as a console error on an otherwise clean run.
+  const { graph, nodes, layouts } = graphWith({ a: 191 });
+  graph.cy.destroyed = () => true;
+
+  assert.equal(graph.syncCardHeights(), false);
+  assert.equal(graph.refreshCardMetrics(), false);
+  assert.equal(nodes[0].data("cardH"), undefined, "nothing was read off a destroyed graph");
+  assert.equal(layouts.length, 0, "…and nothing was laid out on one");
+});
+
 test("the CSS gives the card a FLOOR, not a fixed height", () => {
   const css = require("node:fs").readFileSync(cssPath, "utf8");
   const rule = css.slice(css.indexOf("\n.pe-card {"), css.indexOf("\n.pe-card-hover {"));

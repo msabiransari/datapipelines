@@ -624,9 +624,23 @@
     else fn();
   }
 
+  /**
+   * A graph whose Cytoscape instance is gone, or destroyed and not yet dropped.
+   *
+   * The deferred measurement above runs a FRAME later, and a boosted navigation can
+   * destroy the instance in between: init.js's teardown nulls the component's `cy` but
+   * this object still holds the destroyed one, and touching it throws
+   * "Cannot read properties of null (reading 'isHeadless')" out of Cytoscape's own
+   * `headless()`. Seen once in the 082 walk, as a console error on a clean run.
+   */
+  function isGone(graph) {
+    if (!graph.cy) return true;
+    return typeof graph.cy.destroyed === "function" && graph.cy.destroyed();
+  }
+
   PipelineGraph.prototype.runLayout = function (onStop) {
     var self = this;
-    if (!self.cy) return;
+    if (isGone(self)) return;
     var layout = self.cy.elements().layout(layoutOptions());
     layout.one("layoutstop", function () {
       self.applyEdgeCurves();
@@ -656,7 +670,7 @@
    */
   PipelineGraph.prototype.syncCardHeights = function () {
     var self = this;
-    if (!self.cy || typeof document === "undefined") return false;
+    if (isGone(self) || typeof document === "undefined") return false;
     var changed = 0;
     self.cy.nodes().forEach(function (n) {
       self.cardElement(n.id(), function (el) {
@@ -1215,7 +1229,7 @@
    * why the node height is a plain token here and a per-element bypass there.
    */
   PipelineGraph.prototype.applyStylesheet = function () {
-    if (!this.cy) return;
+    if (isGone(this)) return;
     this.cy.style().fromJson(buildStylesheet(this.tokens)).update();
   };
 
@@ -1245,7 +1259,7 @@
    */
   PipelineGraph.prototype.refreshCardMetrics = function () {
     var self = this;
-    if (!self.cy) return false;
+    if (isGone(self)) return false;
     var next = readDesignTokens(self.containerId);
     if (next.cardW === self.tokens.cardW && next.cardH === self.tokens.cardH) return false;
     self.tokens = next;
