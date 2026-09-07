@@ -82,9 +82,10 @@
        hook; `shell.js` now also carries the aria-current and the breadcrumb
        across a boosted swap, since neither the rail nor the top bar is
        re-rendered by one. -->
-  <!-- 076 §B: the boosted-navigation progress signal — the white flash used to
-       say "loading"; a swap must not flash, so this 2px bar does (shell.js
-       drives it off htmx:beforeRequest/htmx:afterSettle for boosted requests). -->
+  <!-- 076 §B, widened by 085 §D: the progress signal — the white flash used to
+       say "loading"; a swap must not flash, so this 2px bar does. shell.js
+       drives it as an in-flight count off htmx:beforeRequest/htmx:afterRequest
+       for EVERY request, boosted or partial (ui-screens.md §5.1). -->
   <div id="app-progress" class="app-progress" aria-hidden="true"></div>
 
   <!-- The notification stack (ui-screens.md §5.1): htmx appends server-rendered

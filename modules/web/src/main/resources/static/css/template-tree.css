@@ -229,6 +229,38 @@ details[open] > .tpl-summary > .tpl-chevron {
   transform: rotate(90deg);
 }
 
+/* 085 §D — the folder summary's busy state. `.app-busy` is the SHELL's own
+   marker on the requesting element (shell.js, off beforeRequest/afterRequest —
+   htmx 2.0.10's own .htmx-request lands on the hx-indicator target instead
+   whenever the element carries hx-indicator, so it cannot be relied on here).
+   For the flight the chevron SPINS (the design system's ds-spin keyframes on
+   the house duration token).
+   Spinning the chevron itself, rather than swapping in a .ds-spinner element:
+   the guide geometry and the row height are drawn against this exact icon slot
+   (085 §A), and a replacement element would re-flow the row the level is about
+   to land under; the chevron is also the affordance the click just touched, so
+   the signal sits where the eye already is. The summary stays OPERABLE while
+   busy — collapse/re-expand mid-fetch is pinned behaviour
+   (ExplorerStressBrowserTest's hammer) — so there is no pointer-events rule
+   here; the button half of the busy contract (ring + non-interactive) lives in
+   app.css and deliberately excludes summaries. The open/closed rotation is
+   overridden by the animation for the duration and returns when it ends —
+   state is never lost, only deferred. */
+.tpl-summary.app-busy > .tpl-chevron {
+  animation: ds-spin var(--duration-slower) var(--ease-linear) infinite;
+}
+
+/* Reduced motion: NO spin anywhere (085 §D's rule). The busy fact stays — it
+   is information, the app-progress precedent — as a STATIC accent-coloured
+   chevron: same glyph, no motion, still distinguishable from the muted idle
+   and open states beside it. */
+@media (prefers-reduced-motion: reduce) {
+  .tpl-summary.app-busy > .tpl-chevron {
+    animation: none;
+    color: var(--accent-primary);
+  }
+}
+
 /* The row-type glyphs (085 §A): folder / folder-open on folder rows, file-code on
    leaves. Two icons in the markup, CSS picks one — a <use> href cannot be swapped by
    a details[open] rule, and both nodes are aria-hidden decoration either way. Muted,
