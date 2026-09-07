@@ -145,9 +145,26 @@ nav packs to the top; the free space below it is deliberate.
   `--border-focus` left bar**. The bar is not decoration: §2.8 is normative that
   `surface-selected` reaches only 1.5:1 and a tint alone cannot carry selection. The mock
   paints the tint only; the bar is the accessible half of the same signal.
-- **Icons** are inline SVG sized by the design system's `.ds-icon` utilities. The vendored
-  icon set (`lucide-static`, a 12-glyph subset) covers four of the ten rows, and one nav column
-  drawn from two sources at two stroke weights is worse than one drawn from one.
+- **Icons** (085 §B) all come from ONE source: the vendored sprite
+  `static/vendor/icons/lucide-sprite.svg` (lucide-static 1.39.0, ISC — the license text is
+  vendored beside it as `LICENSE.lucide`), referenced everywhere as
+  `<svg class="ds-icon ds-icon-{size}" aria-hidden="true"><use href="/vendor/icons/lucide-sprite.svg#NAME"/></svg>`.
+  The stroke is `currentColor`, so a glyph always inherits its context's text colour and no
+  use site carries a colour override; `.ds-icon` (icons.css) owns the size and
+  `pointer-events: none`. The subset is EXACTLY the referenced set — 40 glyphs, each
+  SHA-256-recorded per upstream file in `vendor-manifest.json`. `db`/`table`/`boxes`/
+  `workflow` keep their 059 ids because the editor's `TYPE_ICONS` map was born with them
+  (`db` is lucide's `database`; the other three coincide with lucide's names), and
+  CALCULATOR finally draws its own `calculator` glyph instead of the `file` stand-in.
+  Size maps by context, never by what looked right on the day: nav, top bar, menu rows and
+  action/close buttons are `ds-icon-sm` (16); the editor's canvas tiles and view controls
+  are `ds-icon-md` (20); tight inline glyphs — tree chevrons, the arrows inside text links —
+  are `ds-icon-xs` (12). The ad-hoc inline copies this replaces (sixteen shell glyphs at
+  two stroke weights), the `&times;` close glyphs and the `&larr;`/`&rarr;` arrows are
+  retired; `IconSpriteAuditTest` enforces referenced = vendored = manifest-subset in both
+  directions, so the app cannot drift back into two icon sources. The explorers' tree rows
+  (085 §A) draw from the same sprite: a rotating chevron-right, folder/folder-open on
+  folders, file-code on leaves.
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
 a search field **placeholder**, the light/dark toggle, and the avatar menu.
@@ -809,6 +826,7 @@ All error pages use the design system's `.ds-card` with appropriate `.ds-text--d
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-07 | v1.25 | shell polish — tree guides + one icon set (085) | **§A — the explorer trees draw real guide geometry** (owner: "connecting lines are not accurate"): the vertical guide was a `border-left` on the level CONTAINER that neither met the parent chevron nor stopped at the last child; it is now `::before`/`::after` on each row's `<li>` — the vertical starts at the parent row's chevron centre and stops at the LAST row's own centre even when that row is an expanded folder (the li wraps the subtree, so a bottom-anchored line would run down inside it), and every row carries a horizontal tick into its chevron/file icon. All lengths derive from tokens (`--tpl-indent`/`--tpl-row-h`/`--tpl-guide-x` on `.tplx-tree`); the unicode ▸ disclosure marker is the sprite's chevron-right rotated on `details[open]` (reduced-motion keeps the state, drops the transition), folder rows gain folder/folder-open (two icons, CSS picks one) and leaves file-code; the per-row border-bottom hairline is gone — the mock draws rows with whitespace and a hover tint, and no component boundary loses its line. Search results stay a flat, guide-free list. **§B — one icon source for the whole app** (owner: "probably we need different icons which can look more professional"): the sprite grows 12 → 40 glyphs, exactly the referenced set, per-icon SHA-256 in `vendor-manifest.json`, the ISC text vendored as `LICENSE.lucide`; the sixteen ad-hoc inline shell SVGs, the eight `&times;` close glyphs and the five `&larr;`/`&rarr;`/`→` arrows are all sprite references now (toast's client builder kept in parity — `ToastMarkupParityTest` + `toast.test.mjs`), and `graph.js`'s CALCULATOR draws `calculator` instead of the `file` stand-in. The size mapping (sm = chrome/actions, md = canvas, xs = tight inline) is recorded in §3.4; `IconSpriteAuditTest` enforces referenced = vendored = manifest-subset in both directions. |
 | 2026-09-04 | v1.21 | structural contrast floors (064) | §2 gains principle 8 — the WCAG 1.4.11 non-text floors: `border-default`/`hover`/`focus` at 3:1, `border-subtle` at 2:1, `surface-selected` at 1.5:1 with a `border-focus` accent bar; pane/card boundaries are `border-default` lines, never tints. Text floors unchanged. Enforced upstream by the design-system audit and on the vendored CSS by `VendoredNonTextContrastTest`. The explorer's pane split and the tree's selected-row bar follow the floors (§4.6). |
 | 2026-09-02 | v1.17 | template tree UI (047) | §4.6 rewritten as the template **tree**: the one-route/two-shape fragment contract (`/partials/templates` with and without `prefix`, plus `/partials/templates/versions`), levels as server-side prefix queries with no client-side tree assembly at any size, `<details>`-driven lazy expansion with no JS of our own, per-level paging through the shared §5 pager against each level's own derived id (the ROOT level's id stays `#template-list-wrapper`, so the existing swap contract carries over unchanged), and the decided **browse-vs-search** rule — a non-empty `q` is a FLAT list of full paths, not a pruned tree. The four §9.1 absences are recorded as absences and guarded by render assertions: no folder CRUD, no empty-folder state, no `type` control on the edit form, no rename affordance anywhere. The list screen gains a `type` filter (046's column) and a real Create modal (§5.1 Shape A) whose name `pattern`/`maxlength` are RENDERED FROM the server's grammar rather than retyped beside it, and whose `dialect` is disabled-and-absent for `type=html`. §4.7 records `type`/`dialect` as read-only values on the editor. §4.4 records the pipeline editor's read-only template reference (one-line truncation with the full path on `title`, at both call sites and in the `template-missing` state) **and the rule that a future template picker reuses §4.6's prefix fragment rather than building its own client-side tree** — written on the screen the picker would be built on. |
 | 2026-09-03 | v1.20 | graph node cards + explorer geometry (059) | §4.4 gains the card row: the pipeline editor's nodes are cards with the facts INSIDE (name/type/datasource·dialect/template@v/run line, HTML overlay, status dot, ports, fit controls) — the 2026-09-02 operator reversal of the 031 label-below look; full contract in Pipeline Editor §5.3 (v1.6). §4.6's layout paragraph records the two CSS corrections seen in 058's own 1920px screenshot: the explorer grid is the VIEWPORT's width (the centered app-canvas cap does not apply to this screen — the owner asked three times for the real estate), and the selected template TOP-ALIGNS with the tree's first row (`#template-detail` keeps the empty state's centered-flex classes for its whole life; the partial's root now stretches, cancelling both centres — the 300px inter-pane gap and the header at y=550 were this missing). The quiet empty/not-found states still centre. |

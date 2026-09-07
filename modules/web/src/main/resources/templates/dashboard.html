@@ -27,7 +27,7 @@
   <div class="ds-card app-card-table">
     <div class="app-card-h">
       <h2 class="ds-title">Recent executions</h2>
-      <a class="u-text-sm" th:href="@{/executions}">View all →</a>
+      <a class="u-text-sm" th:href="@{/executions}">View all <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
     </div>
     <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
       <div class="app-card-b">

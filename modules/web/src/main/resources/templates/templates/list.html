@@ -95,7 +95,7 @@
        is the only place a template name is ever typed. -->
   <div id="create-template-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-lg">
-      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateTemplateModal()">&times;</button>
+      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateTemplateModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
       <h2 class="ds-title u-m0 u-mb-md">Create Template</h2>
       <form th:attr="hx-post=@{/partials/templates}"
             hx-target="#template-create-result"

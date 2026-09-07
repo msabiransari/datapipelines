@@ -68,7 +68,7 @@
 
   <div id="create-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-sm">
-      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateModal()">&times;</button>
+      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideCreateModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
       <h2 class="ds-title u-m0 u-mb-md">Generate API Key</h2>
       <form id="createKeyForm"
             th:attr="hx-post=@{/partials/api-keys}"

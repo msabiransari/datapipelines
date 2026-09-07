@@ -5,7 +5,7 @@
   <link th:href="@{/css/docs.css}" rel="stylesheet">
   <div class="app-reading">
   <p class="u-mb-md">
-    <a th:href="@{/docs}" class="u-secondary u-text-sm">&larr; Documentation</a>
+    <a th:href="@{/docs}" class="u-secondary u-text-sm"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Documentation</a>
   </p>
   <!-- 033/B1: th:utext — the rendered markdown is DATA. A "${" inside it (13 packaged docs
        carry ${VAR} placeholders legitimately) is inserted literally; Thymeleaf never

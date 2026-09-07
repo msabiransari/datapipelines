@@ -45,6 +45,10 @@ class ToastMarkupParityTest {
                 .map { it.groupValues[1] }
                 .toList()
         order shouldBe listOf("close", "title", "body")
+        // 085 §B: the close glyph is the sprite's x — the &times; entity is retired,
+        // and toast.js's show() builds this exact shape (toast.test.mjs pins that half).
+        html shouldContain "<svg class=\"ds-icon ds-icon-sm\" aria-hidden=\"true\" focusable=\"false\">" +
+            "<use href=\"/vendor/icons/lucide-sprite.svg#x\"></use></svg>"
     }
 
     private fun render(

@@ -81,10 +81,10 @@
             <div class="context-row">
               <input type="text" placeholder="key">
               <input type="text" placeholder="value">
-              <button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)">&times;</button>
+              <button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
             </div>
           </div>
-          <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()">+ Add Row</button>
+          <button class="ds-button ds-button-ghost ds-button-sm" onclick="addContextRow()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#plus"></use></svg> Add Row</button>
         </div>
         <div id="context-json" class="u-hidden">
           <textarea id="contextJsonTextarea" class="ds-textarea" placeholder='{"key1": "value1", "key2": 42}'>{ }</textarea>
@@ -172,7 +172,7 @@
       row.className = 'context-row';
       row.innerHTML = '<input type="text" placeholder="key">' +
         '<input type="text" placeholder="value">' +
-        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)">&times;</button>';
+        '<button class="ds-button ds-button-ghost ds-button-sm" onclick="removeContextRow(this)"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>';
       document.getElementById('context-rows').appendChild(row);
     }
 

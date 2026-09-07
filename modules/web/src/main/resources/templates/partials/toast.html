@@ -9,7 +9,7 @@
        schedules the auto-dismiss and wires the close button — this markup carries
        no JS of its own. -->
   <div class="ds-toast" th:classappend="'ds-toast-' + ${variant}" role="status">
-    <button type="button" class="ds-toast-close" aria-label="Dismiss">&times;</button>
+    <button type="button" class="ds-toast-close" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
     <div class="ds-toast-title" th:text="${title}">Title</div>
     <div class="ds-toast-body" th:text="${message}">Message</div>
   </div>
