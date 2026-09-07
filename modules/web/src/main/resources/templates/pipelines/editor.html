@@ -45,7 +45,7 @@
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
          bold), version chip, run status, Execute. -->
     <div class="pe-topbar">
-      <a th:href="@{/pipelines}" class="pe-back">&larr; Pipelines</a>
+      <a th:href="@{/pipelines}" class="pe-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Pipelines</a>
       <div class="pe-crumb">
         <span class="pe-crumb-path" x-show="crumbPath()" x-text="crumbPath()"></span>
         <span class="pe-crumb-name" x-text="crumbName()"></span>
@@ -70,11 +70,14 @@
         <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
       </div>
       <button class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline()">
-        <svg class="ds-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <!-- 085 §B: the sprite's play, not a hand-drawn filled triangle — one icon
+             source, and the stroke glyph matches the canvas controls beside it. -->
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
         <span x-show="!isExecuting">Execute</span>
         <span x-show="isExecuting">Running…</span>
       </button>
       <button x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution()">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#square"></use></svg>
         Cancel
       </button>
     </div>
@@ -82,7 +85,7 @@
     <!-- Execution status banner (connection loss / recovery) -->
     <div x-show="banner.text" class="pe-banner" x-bind:class="banner.type" role="alert" x-cloak>
       <span x-text="banner.text"></span>
-      <button class="pe-banner-dismiss" @click="banner.text = ''" aria-label="Dismiss">&times;</button>
+      <button class="pe-banner-dismiss" @click="banner.text = ''" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
     </div>
 
     <div class="pe-body">
@@ -267,9 +270,9 @@
                 <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
                 <a x-show="selectedNode.template && selectedNode.template.id"
                    x-bind:href="'/templates/editor?name=' + encodeURIComponent(selectedNode.template ? selectedNode.template.id : '')"
-                   hx-boost="false">Open template &rarr;</a>
+                   hx-boost="false">Open template <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
                 <a x-show="selectedNode.type === 'PIPELINE' && selectedNode.pipeline"
-                   x-bind:href="'/pipelines?q=' + encodeURIComponent(selectedNode.pipeline ? selectedNode.pipeline.name : '')">Open child &rarr;</a>
+                   x-bind:href="'/pipelines?q=' + encodeURIComponent(selectedNode.pipeline ? selectedNode.pipeline.name : '')">Open child <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
               </div>
               <!-- Filled by htmx.ajax on selection change for SQL-backed node types;
                    the URL carries §6.3 wire parameters built by the page's own
@@ -399,7 +402,7 @@
       <div class="pe-modal" role="alertdialog" aria-label="Execution error">
         <div class="pe-modal-header">
           <h2>Execution Failed</h2>
-          <button @click="errorModal.hide()" aria-label="Close">&times;</button>
+          <button @click="errorModal.hide()" aria-label="Close"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
         </div>
         <div class="pe-modal-body">
           <p x-text="errorModal.message"></p>

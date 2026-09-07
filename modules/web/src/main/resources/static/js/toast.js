@@ -99,7 +99,17 @@
     close.setAttribute("type", "button");
     close.className = "ds-toast-close";
     close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "×";
+    /* 085 §B: the × glyph is the sprite icon, built with createElementNS so no
+       markup string is ever parsed — the same shape partials/toast.html renders
+       (ToastMarkupParityTest pins them together). */
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ds-icon ds-icon-sm");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "/vendor/icons/lucide-sprite.svg#x");
+    svg.appendChild(use);
+    close.appendChild(svg);
     var t = document.createElement("div");
     t.className = "ds-toast-title";
     t.textContent = title;

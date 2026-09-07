@@ -197,37 +197,40 @@ test("bridgeErrors never downgrades a successful swap", () => {
 
 /** Element double built by the fake document: the surfaces show() touches. */
 function fakeDocument() {
+  const make = (tag) => {
+    const el = {
+      tagName: tag.toUpperCase(),
+      nodeType: 1,
+      children: [],
+      parentNode: null,
+      textContent: "",
+      _attrs: {},
+      _classes: [],
+      setAttribute(k, v) { el._attrs[k] = String(v); },
+      getAttribute(k) { return k in el._attrs ? el._attrs[k] : null; },
+      appendChild(child) { el.children.push(child); child.parentNode = el; return child; },
+      removeChild(child) {
+        child.parentNode = null;
+        el.children = el.children.filter((c) => c !== child);
+      },
+      addEventListener() {},
+      querySelector() { return null; },
+      classList: {
+        add(c) { if (!el._classes.includes(c)) el._classes.push(c); },
+        contains(c) { return el._classes.includes(c); },
+        get value() { return el._classes.join(" "); },
+      },
+    };
+    Object.defineProperty(el, "className", {
+      get() { return el._classes.join(" "); },
+      set(v) { el._classes = v.split(" ").filter(Boolean); },
+    });
+    return el;
+  };
   return {
-    createElement(tag) {
-      const el = {
-        tagName: tag.toUpperCase(),
-        nodeType: 1,
-        children: [],
-        parentNode: null,
-        textContent: "",
-        _attrs: {},
-        _classes: [],
-        setAttribute(k, v) { el._attrs[k] = String(v); },
-        getAttribute(k) { return k in el._attrs ? el._attrs[k] : null; },
-        appendChild(child) { el.children.push(child); child.parentNode = el; return child; },
-        removeChild(child) {
-          child.parentNode = null;
-          el.children = el.children.filter((c) => c !== child);
-        },
-        addEventListener() {},
-        querySelector() { return null; },
-        classList: {
-          add(c) { if (!el._classes.includes(c)) el._classes.push(c); },
-          contains(c) { return el._classes.includes(c); },
-          get value() { return el._classes.join(" "); },
-        },
-      };
-      Object.defineProperty(el, "className", {
-        get() { return el._classes.join(" "); },
-        set(v) { el._classes = v.split(" ").filter(Boolean); },
-      });
-      return el;
-    },
+    createElement: (tag) => make(tag),
+    // 085 §B: the close glyph is an svg+use built namespaced — same double, no parsing.
+    createElementNS: (ns, tag) => make(tag),
     getElementById() { return null; },
   };
 }
@@ -255,6 +258,15 @@ test("show builds the server fragment's shape and appends it to the stack", () =
   assert.deepEqual(el.children.map((c) => c.className),
     ["ds-toast-close", "ds-toast-title", "ds-toast-body"]);
   assert.equal(el.children[1].textContent, "Pipeline completed");
+  // 085 §B: the close glyph is the sprite's x, the same shape partials/toast.html
+  // renders — svg sized by .ds-icon, one <use> into the sprite, nothing parsed.
+  const glyph = el.children[0].children[0];
+  assert.equal(glyph.tagName, "SVG");
+  assert.equal(glyph.getAttribute("class"), "ds-icon ds-icon-sm");
+  assert.equal(glyph.getAttribute("aria-hidden"), "true");
+  assert.equal(glyph.children[0].tagName, "USE");
+  assert.equal(glyph.children[0].getAttribute("href"), "/vendor/icons/lucide-sprite.svg#x");
+  assert.equal(el.children[0].textContent, "", "the × text glyph is gone");
   delete globalThis.document;
 });
 

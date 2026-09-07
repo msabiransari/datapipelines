@@ -22,10 +22,18 @@
  *    untouched.
  *
  * 2. THE PROGRESS INDICATOR. A document-per-click used to signal work with a
- *    white flash; a boosted swap must not flash, so something else has to say
- *    "loading". One 2px bar under the nav, shown between htmx:beforeRequest
- *    and htmx:afterSettle for boosted requests only (partials already carry
- *    their own htmx-indicator spinners).
+ *    white flash; a swap must not flash, so something else has to say
+ *    "loading". 085 §D widened the 076 rule — boosted requests only — to EVERY
+ *    htmx request (owner: "we need some kind of an indicator"): one 2px bar
+ *    under the nav, driven by an in-flight COUNT (show on 0→1, hide on →0) so
+ *    a tree expand and a detail load running together cannot hide it early.
+ *    The counting pair is htmx:beforeRequest / htmx:afterRequest — afterRequest
+ *    is the ONE terminal event htmx 2.0.10 fires on every outcome (success,
+ *    error status, network error, abort, timeout all pass through it; the
+ *    obvious afterSettle never fires for an aborted or unsent request, and
+ *    responseError/sendError/sendAbort/timeout all arrive AFTER afterRequest),
+ *    so it is the only decrement point that can never strand the bar on.
+ *    Nothing in this tree cancels beforeRequest, so the two always pair.
  *
  * 3. THE ACTIVE-SECTION STATE. The nav highlight is server-computed
  *    (currentPath) for the first paint; after a boosted swap the nav is NOT
@@ -60,6 +68,30 @@
  * 7. THE AVATAR MENU. Open on click, close on Escape / outside click, arrow
  *    keys move within it (focus only — its buttons are htmx triggers and must
  *    never be activated by a keyboard move), aria-expanded on the trigger.
+ *
+ * 085 §D added the rest of the every-request signal (§D owns the bar's count;
+ * these are its two companions):
+ *
+ * 8. THE BUSY ORIGINATING CONTROL. The requesting element carries .app-busy
+ *    for the flight — set HERE, not read off htmx's .htmx-request, because
+ *    htmx 2.0.10 applies that class to the hx-indicator TARGET instead when
+ *    the element carries hx-indicator (the tree leaves do), leaving the
+ *    control itself unmarked exactly where the affordance is wanted. A
+ *    <button> additionally gets aria-disabled="true" — the attribute, NOT the
+ *    disabled property: htmx already guards re-triggering, and a
+ *    really-disabled button loses focus mid-flight. <summary> and <input> get
+ *    the class only (the chevron spin keys off it): a folder's summary must
+ *    stay operable while its level loads (collapse / re-expand mid-fetch is
+ *    pinned behaviour — ExplorerStressBrowserTest's hammer), and a search
+ *    input must keep accepting keystrokes.
+ *
+ * 9. THE DELAYED SKELETON. A request still in flight 150ms after beforeRequest
+ *    marks its swap target aria-busy="true" and appends ONE .app-target-skeleton
+ *    row; a faster request never shows either (no flash on fast swaps). Timers
+ *    and skeletons are paired PER TARGET — concurrent requests into different
+ *    panes are normal — and the request's afterRequest cancels and removes
+ *    everything, which always runs BEFORE the swap, so a skeleton never
+ *    coexists with the content it was standing in for.
  *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
@@ -120,6 +152,119 @@
   function hideProgress(doc) {
     var bar = progressBar(doc);
     if (bar) bar.classList.remove("active");
+  }
+
+  /* ------------------------------------------------------------------ 085 §D
+     A signal for every server trip. One tracker instance counts the requests
+     in flight (the bar shows on 0→1, hides on →0), marks the originating
+     <button> aria-disabled for the duration, and arms the delayed skeleton on
+     the swap target. Written as a factory over injected timers so
+     `node --test` drives it with a fake clock and hand-rolled elements — the
+     module's pure-function-over-`doc` contract (shell.test.mjs).
+
+     The end() half is safe to call for a request that never began: the count
+     clamps at zero and every per-element cleanup is keyed on state begin()
+     recorded, so a stray terminal event can never hide a bar another request
+     is still holding open or strip a marker it did not set. */
+  var SKELETON_DELAY_MS = 150;
+  var SKELETON_CLASS = "app-target-skeleton";
+  /* Shell-owned, not htmx's .htmx-request: htmx 2.0.10 applies ITS class to
+     the hx-indicator target when the element carries hx-indicator
+     (addRequestIndicatorClasses), so the requesting control would go unmarked
+     exactly where it carries its own spinner — the tree leaves do. One marker
+     the shell sets and clears itself works for every element either way. */
+  var BUSY_CLASS = "app-busy";
+
+  function createBusyTracker(timers, delayMs) {
+    var delay = typeof delayMs === "number" ? delayMs : SKELETON_DELAY_MS;
+    var inFlight = 0;
+    var busyMarked = []; // elements WE classed — only those get unclassed
+    var ariaMarked = []; // buttons WE marked — only those get unmarked
+    var targets = []; // { target, count, timer, skeleton } — one entry per swap target
+
+    function targetEntry(target, create) {
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].target === target) return targets[i];
+      }
+      if (!create) return null;
+      var entry = { target: target, count: 0, timer: null, skeleton: null };
+      targets.push(entry);
+      return entry;
+    }
+
+    /* The 150ms arm: a fast request ends before this fires and never pays for
+       the skeleton (no flash); a slow one gets aria-busy + ONE skeleton row in
+       the pane it is about to replace. */
+    function armSkeleton(doc, entry) {
+      entry.timer = timers.setTimeout(function () {
+        entry.timer = null;
+        entry.target.setAttribute("aria-busy", "true");
+        var skeleton = doc.createElement("div");
+        skeleton.className = "ds-skeleton ds-skeleton-table-row " + SKELETON_CLASS;
+        skeleton.setAttribute("aria-hidden", "true");
+        entry.target.appendChild(skeleton);
+        entry.skeleton = skeleton;
+      }, delay);
+    }
+
+    function clearEntry(entry) {
+      if (entry.timer !== null) {
+        timers.clearTimeout(entry.timer);
+        entry.timer = null;
+      }
+      entry.target.removeAttribute("aria-busy");
+      if (entry.skeleton) {
+        if (entry.skeleton.parentNode) entry.skeleton.parentNode.removeChild(entry.skeleton);
+        entry.skeleton = null;
+      }
+      targets.splice(targets.indexOf(entry), 1);
+    }
+
+    function begin(doc, elt, target) {
+      inFlight += 1;
+      if (inFlight === 1) showProgress(doc);
+      if (elt && elt.classList) {
+        elt.classList.add(BUSY_CLASS);
+        busyMarked.push(elt);
+        if (elt.tagName === "BUTTON" && elt.getAttribute("aria-disabled") === null) {
+          elt.setAttribute("aria-disabled", "true");
+          ariaMarked.push(elt);
+        }
+      }
+      if (target && target.setAttribute) {
+        var entry = targetEntry(target, true);
+        entry.count += 1;
+        if (entry.count === 1) armSkeleton(doc, entry);
+      }
+    }
+
+    function end(doc, elt, target) {
+      inFlight = Math.max(0, inFlight - 1);
+      if (inFlight === 0) hideProgress(doc);
+      var classedAt = busyMarked.indexOf(elt);
+      if (classedAt !== -1) {
+        elt.classList.remove(BUSY_CLASS);
+        busyMarked.splice(classedAt, 1);
+      }
+      var markedAt = ariaMarked.indexOf(elt);
+      if (markedAt !== -1) {
+        elt.removeAttribute("aria-disabled");
+        ariaMarked.splice(markedAt, 1);
+      }
+      var entry = target && target.setAttribute ? targetEntry(target, false) : null;
+      if (entry) {
+        entry.count -= 1;
+        if (entry.count <= 0) clearEntry(entry);
+      }
+    }
+
+    return {
+      begin: begin,
+      end: end,
+      inFlight: function () {
+        return inFlight;
+      },
+    };
   }
 
 
@@ -291,15 +436,25 @@
       applyBoostSwap(evt.detail, doc.getElementById(MAIN_ID));
     });
 
+    /* 085 §D — every request shows the bar; the originating button goes busy;
+       a slow swap's target gets the delayed skeleton. The pair is
+       beforeRequest/afterRequest: afterRequest is htmx 2.0.10's ONE terminal
+       event that fires on every outcome — onload (any status), onerror,
+       onabort and ontimeout all pass through it, while afterSettle never
+       fires for an aborted or non-swapping request (verified against the
+       vendored dist: xhr.onabort → afterRequest + sendAbort; xhr.onerror →
+       afterRequest + sendError; only the swap path reaches afterSettle). One
+       decrement point, so the bar cannot stick on — a stuck-on bar is worse
+       than none. */
+    var busy = createBusyTracker(window, SKELETON_DELAY_MS);
     doc.body.addEventListener("htmx:beforeRequest", function (evt) {
-      if (evt.detail && evt.detail.boosted) showProgress(doc);
+      if (!evt.detail) return;
+      busy.begin(doc, evt.detail.elt, evt.detail.target);
     });
-    var settleOrFail = function (evt) {
-      if (evt.detail && evt.detail.boosted) hideProgress(doc);
-    };
-    doc.body.addEventListener("htmx:afterSettle", settleOrFail);
-    doc.body.addEventListener("htmx:responseError", settleOrFail);
-    doc.body.addEventListener("htmx:sendError", settleOrFail);
+    doc.body.addEventListener("htmx:afterRequest", function (evt) {
+      if (!evt.detail) return;
+      busy.end(doc, evt.detail.elt, evt.detail.target);
+    });
 
     var resync = function () {
       syncNavActive(doc, window.location.pathname);
@@ -381,6 +536,10 @@
     applyBoostSwap: applyBoostSwap,
     showProgress: showProgress,
     hideProgress: hideProgress,
+    createBusyTracker: createBusyTracker,
+    SKELETON_DELAY_MS: SKELETON_DELAY_MS,
+    SKELETON_CLASS: SKELETON_CLASS,
+    BUSY_CLASS: BUSY_CLASS,
     init: init,
     setRailCollapsed: setRailCollapsed,
     railCollapsed: railCollapsed,

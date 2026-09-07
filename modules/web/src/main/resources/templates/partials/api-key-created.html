@@ -6,7 +6,7 @@
     <p class="u-primary u-semibold u-m0 u-mb-xs">Your new API key (shown once):</p>
     <div class="u-flex u-items-center u-gap-xs">
       <input type="text" readonly th:value="${key}" class="app-secret-field u-mono u-text-sm u-primary">
-      <button class="ds-button ds-button-ghost ds-button-sm u-nowrap" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">Copy</button>
+      <button class="ds-button ds-button-ghost ds-button-sm u-nowrap" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#copy"></use></svg> Copy</button>
     </div>
     <p class="u-danger u-text-xs u-m0 u-mt-xs">Copy this key now. You won't see it again.</p>
   </div>

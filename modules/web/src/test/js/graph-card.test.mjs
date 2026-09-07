@@ -212,7 +212,7 @@ test("exactly ONE glyph svg per card, PLUS the open-details button's icon — fa
   assert.equal(g.iconForType("DML"), "table");
   assert.equal(g.iconForType("DDL"), "boxes");
   assert.equal(g.iconForType("PIPELINE"), "workflow");
-  assert.equal(g.iconForType("CALCULATOR"), "file");
+  assert.equal(g.iconForType("CALCULATOR"), "calculator");
 });
 
 test("card values are HTML-escaped — ids and template paths come from user-authored pipeline JSON", () => {
@@ -311,6 +311,8 @@ test("a CALCULATOR node's card facts are kind → context_key, and its eyebrow r
   assert.match(card, /class="pe-card-kind">calculator</);
   assert.match(card, /--type:var\(--type-calc\)/, "the calc accent pair");
   assert.match(card, /fiscal_quarter → run_fiscal_quarter/);
+  assert.match(card, /lucide-sprite\.svg#calculator/,
+    "085 §B: the honest glyph — the `file` stand-in is retired with the full icon set");
   assert.equal(card.includes("lucide-sprite.svg#db"), false,
     "a calculator touches no database; #db is iconForType's fallback and would be actively misleading");
 });

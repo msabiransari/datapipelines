@@ -363,6 +363,87 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
+   085 §D — the busy originating control (shell.js's companion to the
+   every-request progress bar above; ui-screens.md §5.1).
+
+   `.app-busy` is the SHELL's own marker: shell.js adds it to the requesting
+   element on htmx:beforeRequest and removes it on the terminal event. Not
+   htmx's `.htmx-request` — htmx 2.0.10 applies that class to the hx-indicator
+   TARGET instead when the element carries hx-indicator
+   (addRequestIndicatorClasses in the vendored dist), so the tree leaves, which
+   point at #template-detail-spinner, would never be marked on themselves.
+
+   A BUTTON in that state gets two things: non-interactive (pointer-events
+   off — shell.js adds aria-disabled="true" for the AT half of the same fact;
+   the disabled property is deliberately NOT used — htmx already guards
+   re-triggering, and a really-disabled button would drop focus mid-flight)
+   and a spinner affordance as an ::after ring drawn in the .ds-spinner idiom
+   (primitives.css:1196 — 2px ring, --accent-primary top, the ds-spin keyframes
+   from motion.css; the vendored literal 1s becomes the house duration token,
+   which is why this is a restatement and not the .ds-spinner class).
+
+   The ring is ABSOLUTELY positioned at the control's trailing edge, so the
+   control's box never changes — ui-screens.md §5.1's no-layout-shift rule. For
+   a .ds-button it lands inside the trailing padding; for a full-width tree row
+   (.tpl-leaf, whose trailing badges would sit under the ring) the badges are
+   visibility:hidden for the duration — visibility, not display, so their space
+   is kept and the row still does not shift.
+
+   <summary> is deliberately NOT in this rule: a folder summary must stay
+   operable while its level loads (collapse/re-expand mid-fetch is pinned
+   behaviour, ExplorerStressBrowserTest), and its busy signal is the spinning
+   chevron in template-tree.css. Elements that carry their own hx-indicator
+   spinner keep it — this state is additive, never a replacement.
+   --------------------------------------------------------------------------- */
+button.app-busy {
+  position: relative;
+  pointer-events: none;
+}
+
+button.app-busy::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: var(--gap-xs);
+  inset-block: 0;
+  margin-block: auto;
+  width: var(--space-4);
+  height: var(--space-4);
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  animation: ds-spin var(--duration-slower) var(--ease-linear) infinite;
+}
+
+.tpl-leaf.app-busy .ds-badge {
+  visibility: hidden;
+}
+
+/* Reduced motion, the .ds-spinner precedent (primitives.css:1451): the busy
+   state stays — it is information — the spin goes, and the ring reads as a
+   static dashed marker instead. */
+@media (prefers-reduced-motion: reduce) {
+  button.app-busy::after {
+    animation: none;
+    border-style: dashed;
+    opacity: 0.7;
+  }
+}
+
+/* 085 §D — the delayed swap-target skeleton (shell.js appends ONE of these to
+   a request's target still in flight after 150ms; a fast swap never sees it).
+   The look is entirely the design system's skeleton family
+   (primitives.css:345 — shimmer, and its own reduced-motion static surface);
+   these three declarations only seat ONE row inside a pane: .ds-skeleton-table-row's
+   width:100% would overflow these margins, and in a centering flex pane
+   (#template-detail's quiet state) an unstretched row would collapse to
+   content width — zero, since the row is empty. */
+.app-target-skeleton {
+  width: auto;
+  align-self: stretch;
+  margin: var(--gap-md);
+}
+
+/* ---------------------------------------------------------------------------
    076 §C — element defaults Bootstrap's reboot used to provide.
 
    Bootstrap 5.3.8 is removed from the app; base.css zeroes margins/padding

@@ -3,8 +3,9 @@
  *
  * Structure and truncation only: every colour, size, radius and gap is a design-system
  * token (CLAUDE.md rule 3 / §9.1's last row), and the rows themselves are built from the
- * existing .ds-badge / .ds-button primitives. Nothing here styles a folder as an object —
- * a folder is a name prefix with no identity (§3.1), so there is no folder chrome to own.
+ * existing .ds-badge / .ds-button primitives. A folder is still a name prefix with no
+ * identity (§3.1) — the folder/file glyphs below are ROW TYPE markers (085 §A), not
+ * folder chrome: they label what the row IS, never an object to act on.
  *
  * The layout follows the app's two-pane precedent (041's template editor): full height
  * below the sticky nav with --header-height math, a LEFT pane and a RIGHT remainder,
@@ -12,8 +13,10 @@
  * `resize` (the one cheap, dependency-free way to offer it); its floor and ceiling keep
  * the detail pane usable.
  *
- * Folder expansion is native <details>/<summary>; these rules only replace the default
- * marker with a rotating disclosure triangle and lay the summary out as one line.
+ * Folder expansion is native <details>/<summary>. 085 §A replaced the unicode ▸
+ * disclosure marker with the sprite's chevron-right (one icon source for the whole app —
+ * a hand-drawn triangle and a vendored chevron at two stroke weights read as a mistake,
+ * not a choice) and drew the classic ├─/└─ guide geometry around the real icons.
  */
 
 /* ------------------------------------------------------------------ the panes */
@@ -60,6 +63,19 @@
   min-height: 0;
   overflow: auto;
   resize: horizontal;
+
+  /* 085 §A — the guide geometry's three lengths, derived once so every level agrees.
+     --tpl-indent: one level's step right (~the mock's 18px; tokens only). --tpl-row-h:
+     the row height the guides are drawn against — rows are single-line by the truncation
+     rules below, so it is exactly padding-block + one text-sm line at the inherited
+     leading-normal, and the min-height on the rows guarantees it. --tpl-guide-x: the
+     vertical guide's x RELATIVE TO A ROW'S <li> — the PARENT row's chevron centre
+     (its --gap-xs left padding + half the xs chevron) minus this level's indent, which
+     lands the guide in the level's left padding, directly under the chevron that opened
+     it. Negative by construction. */
+  --tpl-indent: calc(var(--gap-md) + var(--gap-xs));
+  --tpl-row-h: calc(var(--gap-sm) * 2 + var(--text-sm) * var(--leading-normal));
+  --tpl-guide-x: calc(var(--gap-xs) + var(--icon-xs) / 2 - var(--tpl-indent));
 }
 
 /* The detail pane scrolls inside itself; the versions table can be long.
@@ -108,22 +124,88 @@
   padding: 0;
 }
 
-/* A nested level indents one step; the root level does not. */
+/* A nested level indents one step; the root level does not. 085 §A: the indent is
+   padding, not margin + border — the old border-left on this container never met the
+   parent's chevron and ran straight past the last child, which is exactly the
+   "connecting lines are not accurate" the owner flagged. The guides are drawn per row
+   below instead. */
 .tpl-level .tpl-level {
-  margin-left: var(--gap-md);
-  border-left: 1px solid var(--border-subtle);
-  padding-left: var(--gap-sm);
+  padding-left: var(--tpl-indent);
 }
 
-.tpl-node {
-  border-bottom: 1px solid var(--border-subtle);
+/* 085 §A — the ├─/└─ guides. Drawn as pseudo-elements on the ROW's <li>, never as a
+   border on the level container, because only the row knows whether it is last.
+   `.tpl-level .tpl-level` scopes them below the root: the root level's rows have no
+   parent row, hence no guide. The offset math is depth-independent — every level adds
+   the same --tpl-indent, so one rule serves every depth.
+
+   Geometry, per row:
+   - ::before, the vertical: every non-last row carries it full height (top of the row
+     through its EXPANDED SUBTREE to the next sibling — the li wraps the subtree, so
+     full height is correct even for an open folder). The LAST row's vertical stops at
+     its own row centre: height is half the token-derived row height, NOT bottom: 0,
+     which would run the guide down the inside of a last-but-expanded folder's subtree.
+   - ::after, the horizontal tick: from the guide to the row's own chevron/file icon
+     (both sit at the row's --gap-xs left padding, the same slot for folders and
+     leaves), at exactly the row centre. */
+.tpl-level .tpl-level .tpl-node {
+  position: relative;
 }
+
+.tpl-level .tpl-level .tpl-node::before {
+  content: "";
+  position: absolute;
+  left: var(--tpl-guide-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-subtle);
+}
+
+/* The FIRST row reaches its vertical half a row UP, into the parent summary's lower
+   half, so the guide starts at the parent's chevron centre rather than at the level's
+   top edge — the parent's tick and this line must be one continuous stroke. */
+.tpl-level .tpl-level .tpl-node:first-child::before {
+  top: calc(-1 * var(--tpl-row-h) / 2);
+}
+
+.tpl-level .tpl-level .tpl-node:last-child::before {
+  bottom: auto;
+  height: calc(var(--tpl-row-h) / 2);
+}
+
+/* A level with ONE row: from the parent's chevron centre to the row's own centre —
+   both overrides apply, so the height must cover the whole span. */
+.tpl-level .tpl-level .tpl-node:first-child:last-child::before {
+  height: var(--tpl-row-h);
+}
+
+.tpl-level .tpl-level .tpl-node::after {
+  content: "";
+  position: absolute;
+  left: var(--tpl-guide-x);
+  top: calc(var(--tpl-row-h) / 2);
+  width: calc(var(--gap-xs) - var(--tpl-guide-x));
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* 085 §A: the per-row border-bottom hairline is gone, deliberately — the mock
+   (design-records/mocks/2026-09-05-app-shell-v2.html) draws rows with whitespace and a
+   hover tint only, and the guides now carry the structure the hairlines were
+   apologising for. No WCAG 1.4.11 loss: sibling rows in a list are not component
+   boundaries; the pane split's border-default line below remains the one boundary that
+   earns a line. */
 
 .tpl-summary {
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
   padding: var(--gap-sm) var(--gap-xs);
+  /* The guides are drawn against --tpl-row-h; this makes the derivation a guarantee
+     rather than a hope (single-line rows: the label truncates, never wraps). */
+  min-height: var(--tpl-row-h);
+  box-sizing: border-box;
   cursor: pointer;
   list-style: none;
   font-size: var(--text-sm);
@@ -134,17 +216,77 @@
   display: none;
 }
 
-/* The disclosure marker, drawn from the summary rather than the default one so the row's
-   layout is ours and the rotation can animate with the shared duration token. */
-.tpl-summary::before {
-  content: "\25B8";
-  flex: 0 0 auto;
-  color: var(--text-secondary);
+/* The disclosure marker is the sprite's chevron-right (085 §A — the unicode ▸ it
+   replaces was a second, hand-drawn icon source at the wrong weight). It rotates on
+   open with the shared duration token; the svg markup lives in the tree partials so
+   screen readers get aria-hidden and the hit target stays the whole summary. */
+.tpl-chevron {
+  color: var(--text-muted);
   transition: transform var(--duration-fast) var(--ease-out);
 }
 
-details[open] > .tpl-summary::before {
+details[open] > .tpl-summary > .tpl-chevron {
   transform: rotate(90deg);
+}
+
+/* 085 §D — the folder summary's busy state. `.app-busy` is the SHELL's own
+   marker on the requesting element (shell.js, off beforeRequest/afterRequest —
+   htmx 2.0.10's own .htmx-request lands on the hx-indicator target instead
+   whenever the element carries hx-indicator, so it cannot be relied on here).
+   For the flight the chevron SPINS (the design system's ds-spin keyframes on
+   the house duration token).
+   Spinning the chevron itself, rather than swapping in a .ds-spinner element:
+   the guide geometry and the row height are drawn against this exact icon slot
+   (085 §A), and a replacement element would re-flow the row the level is about
+   to land under; the chevron is also the affordance the click just touched, so
+   the signal sits where the eye already is. The summary stays OPERABLE while
+   busy — collapse/re-expand mid-fetch is pinned behaviour
+   (ExplorerStressBrowserTest's hammer) — so there is no pointer-events rule
+   here; the button half of the busy contract (ring + non-interactive) lives in
+   app.css and deliberately excludes summaries. The open/closed rotation is
+   overridden by the animation for the duration and returns when it ends —
+   state is never lost, only deferred. */
+.tpl-summary.app-busy > .tpl-chevron {
+  animation: ds-spin var(--duration-slower) var(--ease-linear) infinite;
+}
+
+/* Reduced motion: NO spin anywhere (085 §D's rule). The busy fact stays — it
+   is information, the app-progress precedent — as a STATIC accent-coloured
+   chevron: same glyph, no motion, still distinguishable from the muted idle
+   and open states beside it. */
+@media (prefers-reduced-motion: reduce) {
+  .tpl-summary.app-busy > .tpl-chevron {
+    animation: none;
+    color: var(--accent-primary);
+  }
+}
+
+/* The row-type glyphs (085 §A): folder / folder-open on folder rows, file-code on
+   leaves. Two icons in the markup, CSS picks one — a <use> href cannot be swapped by
+   a details[open] rule, and both nodes are aria-hidden decoration either way. Muted,
+   per the mock's `.tree .row svg`. */
+.tpl-row-icon {
+  color: var(--text-muted);
+}
+
+.tpl-icon-folder-open {
+  display: none;
+}
+
+details[open] > .tpl-summary > .tpl-icon-folder {
+  display: none;
+}
+
+details[open] > .tpl-summary > .tpl-icon-folder-open {
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The chevron still rotates (open/closed is information, not decoration — the
+     app-progress rule's precedent); the transition between the two states goes. */
+  .tpl-chevron {
+    transition: none;
+  }
 }
 
 .tpl-summary:hover {
@@ -167,6 +309,13 @@ details[open] > .tpl-summary::before {
   font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
+}
+
+/* Tree leaves stand on the same row height the guides are drawn against (folders get
+   it from .tpl-summary). Search results are a FLAT list — no guides, no row contract. */
+.tpl-leaf {
+  min-height: var(--tpl-row-h);
+  box-sizing: border-box;
 }
 
 .tpl-leaf:hover,

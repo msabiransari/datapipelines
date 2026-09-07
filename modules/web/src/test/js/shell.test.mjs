@@ -381,3 +381,199 @@ test("arrow keys move focus inside the menu, wrapping at both ends", () => {
   // by a keyboard move.
   assert.equal(items.every((i) => i.focused), true);
 });
+
+// ---------------------------------------------------------------------------
+// 085 §D — the every-request busy signal: createBusyTracker counts requests in
+// flight (bar shows on 0→1, hides on →0), marks the originating <button>
+// aria-disabled, and arms the delayed skeleton on the swap target. Driven here
+// with a fake clock and hand-rolled elements — same harness as above.
+// ---------------------------------------------------------------------------
+
+/** A fake clock: setTimeout records, fire() runs, clearTimeout drops. */
+function mkClock() {
+  const pending = [];
+  return {
+    setTimeout: (fn) => (pending.push(fn), fn),
+    clearTimeout: (fn) => {
+      const at = pending.indexOf(fn);
+      if (at !== -1) pending.splice(at, 1);
+    },
+    fireNext: () => pending.shift()(),
+    pendingCount: () => pending.length,
+  };
+}
+
+/** An element double with the surface the tracker touches. */
+function mkBusyEl(tagName) {
+  const attrs = {};
+  const classes = new Set();
+  const el = {
+    tagName,
+    className: "",
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
+    hasClass: (c) => classes.has(c),
+    children: [],
+    parentNode: null,
+    getAttribute: (k) => (k in attrs ? attrs[k] : null),
+    setAttribute: (k, v) => { attrs[k] = v; },
+    removeAttribute: (k) => { delete attrs[k]; },
+    appendChild: (child) => { el.children.push(child); child.parentNode = el; },
+    removeChild: (child) => {
+      const at = el.children.indexOf(child);
+      if (at !== -1) el.children.splice(at, 1);
+      child.parentNode = null;
+    },
+    attr: (k) => attrs[k],
+  };
+  return el;
+}
+
+/** A doc double: the progress bar by id plus createElement for the skeleton. */
+function mkBusyDoc() {
+  const classes = new Set();
+  const bar = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } };
+  return {
+    barActive: () => classes.has("active"),
+    getElementById: (id) => (id === "app-progress" ? bar : null),
+    createElement: (tag) => mkBusyEl(tag.toUpperCase()),
+  };
+}
+
+test("the bar shows on the first request and hides only when the LAST one ends", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkBusyDoc();
+  const tracker = shell.createBusyTracker(clock, shell.SKELETON_DELAY_MS);
+
+  // Interleaved: a tree expand (A) and a detail load (B) overlap; A ending
+  // first must not hide the bar B is still holding.
+  tracker.begin(doc, mkBusyEl("SUMMARY"), mkBusyEl("DIV"));
+  assert.equal(doc.barActive(), true);
+  assert.equal(tracker.inFlight(), 1);
+  tracker.begin(doc, mkBusyEl("BUTTON"), mkBusyEl("DIV"));
+  assert.equal(tracker.inFlight(), 2);
+
+  tracker.end(doc, mkBusyEl("SUMMARY"), mkBusyEl("DIV"));
+  assert.equal(doc.barActive(), true, "B still in flight — the bar stays");
+  tracker.end(doc, mkBusyEl("BUTTON"), mkBusyEl("DIV"));
+  assert.equal(doc.barActive(), false);
+  assert.equal(tracker.inFlight(), 0);
+
+  // A stray end (a terminal event with no matching begin) clamps at zero and
+  // never errors — the one guard against a bar stuck on by bookkeeping drift.
+  assert.doesNotThrow(() => tracker.end(doc, mkBusyEl("BUTTON"), mkBusyEl("DIV")));
+  assert.equal(tracker.inFlight(), 0);
+  assert.equal(doc.barActive(), false);
+});
+
+test("the originating button is busy-classed and aria-disabled for the flight; summaries and inputs get the class only", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkBusyDoc();
+  const tracker = shell.createBusyTracker(clock, shell.SKELETON_DELAY_MS);
+  const button = mkBusyEl("BUTTON");
+  const summary = mkBusyEl("SUMMARY");
+  const input = mkBusyEl("INPUT");
+
+  tracker.begin(doc, button, null);
+  assert.equal(button.hasClass(shell.BUSY_CLASS), true);
+  assert.equal(button.attr("aria-disabled"), "true");
+  tracker.end(doc, button, null);
+  assert.equal(button.hasClass(shell.BUSY_CLASS), false);
+  assert.equal(button.attr("aria-disabled"), undefined);
+
+  // The marker is the SHELL's own, not htmx's .htmx-request — htmx 2.0.10 puts
+  // its class on the hx-indicator target instead when the element carries
+  // hx-indicator, so the control itself would go unmarked. Every requesting
+  // element gets the class (the chevron spin keys off it on summaries); only
+  // buttons get aria-disabled — a folder's summary must stay operable while
+  // its level loads (the §C hammer pins collapse/re-expand mid-fetch), and a
+  // search input must keep accepting keystrokes.
+  tracker.begin(doc, summary, null);
+  tracker.begin(doc, input, null);
+  assert.equal(summary.hasClass(shell.BUSY_CLASS), true);
+  assert.equal(input.hasClass(shell.BUSY_CLASS), true);
+  assert.equal(summary.attr("aria-disabled"), undefined);
+  assert.equal(input.attr("aria-disabled"), undefined);
+  tracker.end(doc, summary, null);
+  tracker.end(doc, input, null);
+  assert.equal(summary.hasClass(shell.BUSY_CLASS), false);
+  assert.equal(input.hasClass(shell.BUSY_CLASS), false);
+
+  // A button that was ALREADY aria-disabled is not one we marked — end must
+  // not strip a state it did not set.
+  const preset = mkBusyEl("BUTTON");
+  preset.setAttribute("aria-disabled", "true");
+  tracker.begin(doc, preset, null);
+  tracker.end(doc, preset, null);
+  assert.equal(preset.attr("aria-disabled"), "true");
+});
+
+test("the skeleton appears only after the delay, and a fast swap never flashes it", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkBusyDoc();
+  const tracker = shell.createBusyTracker(clock, shell.SKELETON_DELAY_MS);
+  const target = mkBusyEl("DIV");
+
+  // Fast: the request ends before the timer fires — timer cancelled, no
+  // aria-busy, no skeleton, nothing left behind.
+  tracker.begin(doc, mkBusyEl("BUTTON"), target);
+  assert.equal(clock.pendingCount(), 1);
+  tracker.end(doc, mkBusyEl("BUTTON"), target);
+  assert.equal(clock.pendingCount(), 0);
+  assert.equal(target.attr("aria-busy"), undefined);
+  assert.equal(target.children.length, 0);
+
+  // Slow: the timer fires in flight — aria-busy plus ONE design-system
+  // skeleton row; the request's end removes both.
+  tracker.begin(doc, mkBusyEl("BUTTON"), target);
+  clock.fireNext();
+  assert.equal(target.attr("aria-busy"), "true");
+  assert.equal(target.children.length, 1);
+  assert.equal(
+    target.children[0].className,
+    "ds-skeleton ds-skeleton-table-row " + shell.SKELETON_CLASS,
+  );
+  assert.equal(target.children[0].attr("aria-hidden"), "true");
+  tracker.end(doc, mkBusyEl("BUTTON"), target);
+  assert.equal(target.attr("aria-busy"), undefined);
+  assert.equal(target.children.length, 0);
+});
+
+test("concurrent requests into the same target share one skeleton; different targets get their own", () => {
+  const shell = loadShell();
+  const clock = mkClock();
+  const doc = mkBusyDoc();
+  const tracker = shell.createBusyTracker(clock, shell.SKELETON_DELAY_MS);
+  const pane = mkBusyEl("DIV");
+  const other = mkBusyEl("DIV");
+
+  // Two selections into #template-detail (the hx-sync abort pair): one timer,
+  // one skeleton; the FIRST request's end leaves both alone because the second
+  // is still in flight.
+  tracker.begin(doc, mkBusyEl("BUTTON"), pane);
+  tracker.begin(doc, mkBusyEl("BUTTON"), pane);
+  assert.equal(clock.pendingCount(), 1, "one timer per target, not per request");
+  clock.fireNext();
+  assert.equal(pane.children.length, 1);
+  tracker.end(doc, mkBusyEl("BUTTON"), pane);
+  assert.equal(pane.attr("aria-busy"), "true", "the second request still holds the pane");
+  assert.equal(pane.children.length, 1);
+  tracker.end(doc, mkBusyEl("BUTTON"), pane);
+  assert.equal(pane.attr("aria-busy"), undefined);
+  assert.equal(pane.children.length, 0);
+
+  // Different panes are independent: clearing one never touches the other.
+  tracker.begin(doc, mkBusyEl("BUTTON"), pane);
+  tracker.begin(doc, mkBusyEl("BUTTON"), other);
+  assert.equal(clock.pendingCount(), 2);
+  clock.fireNext(); // pane's timer
+  clock.fireNext(); // other's timer
+  tracker.end(doc, mkBusyEl("BUTTON"), pane);
+  assert.equal(pane.children.length, 0);
+  assert.equal(other.attr("aria-busy"), "true");
+  assert.equal(other.children.length, 1);
+  tracker.end(doc, mkBusyEl("BUTTON"), other);
+  assert.equal(other.children.length, 0);
+});

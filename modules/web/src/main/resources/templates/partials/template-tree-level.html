@@ -68,6 +68,14 @@
                  th:attr="hx-get=@{/partials/templates(prefix=${f.path}, dialect=${selectedDialect}, type=${selectedType})}"
                  hx-trigger="click once"
                  hx-target="next .tpl-level" hx-swap="outerHTML">
+          <!-- 085 §A: the disclosure marker is the sprite's chevron-right (the unicode
+               ▸ was a second icon source at the wrong weight), rotated by CSS on
+               details[open]; then the folder state glyph — folder-open swaps in via
+               CSS on the same selector, so expansion needs no JS. All three are
+               aria-hidden decoration: the summary's text and role carry the meaning. -->
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
           <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">finance</span>
           <span class="ds-badge ds-badge-default tpl-count" th:text="${f.templateCount}">12</span>
         </summary>
@@ -90,11 +98,14 @@
               hx-sync="#template-detail:replace"
               hx-indicator="#template-detail-spinner">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
-             (§9.4's rule for every surface that shows a template name).
+             (§9.4's rule for every surface that shows a template name). The file-code
+             glyph (085 §A) sits in the same slot as a folder's chevron, so the guide's
+             horizontal tick meets folders and leaves at the same x.
 
              There is no "at the root" branch here any more (077): §4.1 requires a folder, so
              a leaf always sits under a non-empty prefix and the substring is always the right
              label. TemplateBrowseModel does not even query the root's leaves. -->
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#file-code"></use></svg>
         <span class="tpl-label"
               th:text="${t.id.substring(prefix.length() + 1)}"
               th:title="${t.id}">monthly_revenue</span>

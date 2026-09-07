@@ -7,9 +7,11 @@
    * TILE — a rounded square washed in the node type's accent pair (--type-* /
    * --type-*-bg, app tokens 080) — not on the bare card. ONE glyph per card (059b):
    * the engine's identity is the source fact line's TEXT, never a second icon.
-   * CALCULATOR keeps `file`: the honest glyph is a `calculator`, and adding it means
-   * extending the vendored sprite, which this round is fenced out of (072). */
-  var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow", CALCULATOR: "file" };
+   * db/table/boxes/workflow are the sprite's 059 LEGACY ids (db = lucide's database);
+   * 085 §B gave CALCULATOR its honest glyph — the sprite's `calculator`, added when
+   * the icon set was unfenced — retiring the `file` stand-in this comment used to
+   * apologise for. */
+  var TYPE_ICONS = { DQL: "db", DML: "table", DDL: "boxes", PIPELINE: "workflow", CALCULATOR: "calculator" };
 
   /* The tile's accent pair per node type, as the CSS custom-property suffixes of the
    * 080 app-token block. The card sets `--type`/`--type-bg` from these and every
@@ -989,7 +991,7 @@
       // The fact the 072 brief asks for: `kind → context_key`. It answers the same
       // question a SQL node's source line does — what does this node work on, and
       // what does it leave behind.
-      data.facts.push({ kind: "source", icon: "file", text: (n.kind || "?") + " → " + (n.context_key || "?") });
+      data.facts.push({ kind: "source", icon: "calculator", text: (n.kind || "?") + " → " + (n.context_key || "?") });
       var inputs = n.inputs ? Object.keys(n.inputs) : [];
       if (inputs.length) {
         data.facts.push({ kind: "inputs", icon: "db", text: inputs.slice(0, 3).join(" · ") });

@@ -172,7 +172,9 @@ class PipelineEditorRenderTest {
         val html = render()
 
         html shouldContain "class=\"pe-topbar\""
-        html shouldContain "&larr; Pipelines"
+        // 085 §B: the &larr; entity is the sprite's arrow-left now (xs — a text-link glyph).
+        html shouldContain "lucide-sprite.svg#arrow-left"
+        html shouldContain " Pipelines</a>"
         html shouldContain "crumbPath()"
         html shouldContain "crumbName()"
         html shouldContain "pe-vchip"

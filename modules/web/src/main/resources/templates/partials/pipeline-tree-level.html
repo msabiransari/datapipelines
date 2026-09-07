@@ -70,6 +70,12 @@
                  th:attr="hx-get=@{/partials/pipelines(prefix=${f.path})}"
                  hx-trigger="click once"
                  hx-target="next .tpl-level" hx-swap="outerHTML">
+          <!-- 085 §A: the same row chrome as the templates tree — sprite chevron
+               (rotated on details[open]), then the folder state glyph swapped by CSS.
+               One stylesheet dresses both trees, so both partials carry the same icons. -->
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
           <!-- The label is the folder's own segment; the FULL prefix always rides on `title`,
                which is also what a browser test selects on. -->
           <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">mobility</span>
@@ -93,12 +99,15 @@
               hx-sync="#pipeline-detail:replace"
               hx-indicator="#pipeline-detail-spinner">
         <!-- The label is the leaf's own segment; the full path always rides on `title`
-             (§9.4's rule for every surface that shows a path-shaped name).
+             (§9.4's rule for every surface that shows a path-shaped name). The
+             file-code glyph (085 §A) sits in the same slot as a folder's chevron, so
+             the guide's horizontal tick meets folders and leaves at the same x.
 
              There is no "at the root" branch here any more (077): §4.1 requires a folder, so
              a leaf always sits under a non-empty prefix. PipelineBrowseModel drops the root
              level's leaves outright, which is what makes that true of a pre-077 flat row too
              — it stays reachable by search and by its UUID URL. -->
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#file-code"></use></svg>
         <span class="tpl-label"
               th:text="${p.name.substring(prefix.length() + 1)}"
               th:title="${p.name}">revenue_by_borough</span>
