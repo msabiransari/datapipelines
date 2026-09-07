@@ -29,7 +29,8 @@ Three rules are worth learning once:
 
 1. **`$name` is a reference, anything else is a literal.** `"fiscal_start": "$org_fiscal_start_date"`
    reads the deployment's setting; `"fiscal_start": "09-15"` pins this pipeline's own. The literal is
-   type-checked against the input at save time.
+   type-checked against the input at save time, and so is a reference whose type is knowable at
+   save (org/platform key, declared parameter, another calculator's typed output).
 2. **Ordering is `depends_on`, not array position.** A reference to another calculator's
    `context_key`, or a SQL node binding one, is valid only if the reader depends on the writer.
    Otherwise the save is refused with `pipeline.validation.calculator_input_unordered` — the node

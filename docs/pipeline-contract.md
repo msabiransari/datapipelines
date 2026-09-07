@@ -795,7 +795,7 @@ The `CALCULATOR`-node rules (§4.10, calculators design §0.3). Every one of the
 | `pipeline.validation.calculator_unknown` | `kind` names a kind in the registry ([Calculators §2](calculators.md)) |
 | `pipeline.validation.calculator_input_missing` | Every input the kind declares `required` is present |
 | `pipeline.validation.calculator_input_unknown` | Every supplied input name is one the kind declares, and every `$reference` names a Context key something provides — an org or platform key, a declared parameter, or another node's `context_key` |
-| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding; a `LIST` input takes a JSON array |
+| `pipeline.validation.calculator_input_type_mismatch` | Literal inputs obey the kind's declared input type and §6.3's wire encoding, and a `$reference` whose type the body decides (org/platform key, declared parameter, another calculator's output) must match it as well; a `LIST` input takes a JSON array |
 | `pipeline.validation.calculator_input_unordered` | A `$reference` to another node's `context_key` — and a SQL node binding `:that_key` — comes from a node that `depends_on` the producer, directly or transitively. Sequencing is topology, never array order |
 | `pipeline.validation.calculator_output_collision` | `context_key` collides with nothing: not a declared parameter (a calculator may shadow an org or platform key, never a parameter), and not another node's `context_key` — one writer per key per pipeline |
 | `pipeline.validation.calculator_output_name_invalid` | `context_key` matches §6.1's `[a-z_][a-z0-9_]*` |

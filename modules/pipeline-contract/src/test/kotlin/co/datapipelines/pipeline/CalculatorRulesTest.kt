@@ -236,6 +236,179 @@ class CalculatorRulesTest {
         array.failures.shouldBeEmpty()
     }
 
+    // ---- reference typing: a `$reference` is type-checked like a literal ----
+
+    @Test
+    fun `a platform key of the wrong type feeding a typed input is refused at save`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("current_timestamp")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["declared_type"] shouldBe "DATE"
+        failure.details["reference"] shouldBe "current_timestamp"
+        failure.message shouldContain "\$current_timestamp"
+    }
+
+    @Test
+    fun `an org key of the wrong type feeding a typed input is refused - org values are STRING`() {
+        // `org_fiscal_start_date` is an `MM-DD` STRING on purpose (§0.2): quarter_of_year's `date`
+        // input wants a DATE, and the run would be the first to notice.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("org_fiscal_start_date")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["declared_type"] shouldBe "DATE"
+        failure.details["reference"] shouldBe "org_fiscal_start_date"
+    }
+
+    @Test
+    fun `a declared parameter of the wrong type feeding a typed input is refused at save`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    parameters = mapOf("as_of" to Parameter(LogicalType.TIMESTAMP)),
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("as_of")),
+                                contextKey = "run_quarter",
+                            ),
+                        ),
+                ),
+            )
+
+        result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single().details["reference"] shouldBe "as_of"
+    }
+
+    @Test
+    fun `another calculator's output of the wrong type is refused even when the ordering is right`() {
+        // fiscal_quarter outputs INTEGER; quarter_of_year's `date` input takes DATE. The depends_on
+        // edge is present, so before reference typing this body saved and failed at run.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(id = "fiscal_q"),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_fiscal_quarter")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("fiscal_q"),
+                            ),
+                        ),
+                ),
+            )
+
+        val failure = result.withCode(PipelineErrorCodes.Validation.CALCULATOR_INPUT_TYPE_MISMATCH).single()
+        failure.details["reference"] shouldBe "run_fiscal_quarter"
+        failure.message shouldContain "INTEGER"
+    }
+
+    @Test
+    fun `correctly-typed references pass for every tier - parameter, platform and calculator output`() {
+        // period_start outputs DATE, so its key can feed quarter_of_year's DATE input through the
+        // edge; the DATE parameter feeding period_start's own `date` input is the same happy path
+        // the suite's first test pins for the platform and org tiers.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    parameters = mapOf("as_of" to Parameter(LogicalType.DATE)),
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                id = "period",
+                                kind = "period_start",
+                                inputs = mapOf("date" to Fixtures.ref("as_of"), "unit" to Fixtures.literal("month")),
+                                contextKey = "run_period_start",
+                            ),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_period_start")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("period"),
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
+    @Test
+    fun `an ANY-typed input takes a reference of any type - the kind does not look at the value`() {
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                kind = "if_null",
+                                inputs =
+                                    mapOf("value" to Fixtures.ref("current_timestamp"), "default" to Fixtures.literal("fallback")),
+                                contextKey = "run_value",
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a reference to an ANY-output calculator feeding a typed input is accepted - unknowable at save`() {
+        // if_null's output type is null (ANY): what `$run_date` holds is the run's answer, so the
+        // save-time check skips rather than guesses.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(
+                                id = "fallback",
+                                kind = "if_null",
+                                inputs = mapOf("value" to Fixtures.ref("current_date"), "default" to Fixtures.ref("current_date")),
+                                contextKey = "run_date",
+                            ),
+                            Fixtures.calculatorNode(
+                                id = "classify",
+                                kind = "quarter_of_year",
+                                inputs = mapOf("date" to Fixtures.ref("run_date")),
+                                contextKey = "run_quarter",
+                                dependsOn = listOf("fallback"),
+                            ),
+                        ),
+                ),
+            )
+
+        result.failures.shouldBeEmpty()
+    }
+
     // ---- ordering: the rule with two sides ----
 
     @Test
@@ -247,8 +420,8 @@ class CalculatorRulesTest {
                         Fixtures.calculatorNode(id = "fiscal_q"),
                         Fixtures.calculatorNode(
                             id = "label",
-                            kind = "date_format",
-                            inputs = mapOf("date" to Fixtures.ref("current_date"), "format" to Fixtures.ref("run_fiscal_quarter")),
+                            kind = "add_days",
+                            inputs = mapOf("date" to Fixtures.ref("current_date"), "days" to Fixtures.ref("run_fiscal_quarter")),
                             contextKey = "run_label",
                             dependsOn = dependsOn,
                         ),
@@ -276,9 +449,9 @@ class CalculatorRulesTest {
                             Fixtures.node("middle", dependsOn = listOf("fiscal_q"), output = null),
                             Fixtures.calculatorNode(
                                 id = "label",
-                                kind = "date_format",
+                                kind = "add_days",
                                 inputs =
-                                    mapOf("date" to Fixtures.ref("current_date"), "format" to Fixtures.ref("run_fiscal_quarter")),
+                                    mapOf("date" to Fixtures.ref("current_date"), "days" to Fixtures.ref("run_fiscal_quarter")),
                                 contextKey = "run_label",
                                 dependsOn = listOf("middle"),
                             ),
