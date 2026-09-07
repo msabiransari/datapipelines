@@ -49,6 +49,12 @@ data class NodeResult(
      */
     val contextKey: String? = null,
     val contextValue: String? = null,
+    /**
+     * CALCULATOR nodes only (078 A5): `"caller"` when the caller supplied the `context_key` at
+     * execute time and the node was SKIPPED — the value travelled in the request, not from the
+     * kind's evaluation. Null on a calculator that ran and on every other node type.
+     */
+    val providedBy: String? = null,
 ) {
     companion object {
         /** A successful node's result; the duration is computed from [startedAt] to now. */
@@ -62,6 +68,7 @@ data class NodeResult(
             childExecutionId: UUID? = null,
             contextKey: String? = null,
             contextValue: String? = null,
+            providedBy: String? = null,
         ): NodeResult =
             NodeResult(
                 nodeId = nodeId,
@@ -75,10 +82,14 @@ data class NodeResult(
                 childExecutionId = childExecutionId,
                 contextKey = contextKey,
                 contextValue = contextValue,
+                providedBy = providedBy,
             )
 
         /** The sentinel for a quantity that was not measured — §7.1's `-1`. */
         const val NOT_MEASURED = -1L
+
+        /** The only [providedBy] value v1 writes: the caller supplied the calculator key. */
+        const val PROVIDED_BY_CALLER = "caller"
     }
 }
 
@@ -133,6 +144,13 @@ data class NodeStats(
     val contextKey: String? = null,
     @field:JsonProperty("context_value") @get:JsonProperty("context_value") @param:JsonProperty("context_value")
     val contextValue: String? = null,
+    /**
+     * CALCULATOR nodes only (078 A5): `"caller"` when the caller supplied the `context_key` at
+     * execute time and the node was skipped. Absent from the JSON otherwise (NON_NULL
+     * inclusion), so existing consumers see no shape change.
+     */
+    @field:JsonProperty("provided_by") @get:JsonProperty("provided_by") @param:JsonProperty("provided_by")
+    val providedBy: String? = null,
 ) {
     companion object {
         /** Projects a succeeded node (§7.2 row 1). */
@@ -148,6 +166,7 @@ data class NodeStats(
                 childExecutionId = result.childExecutionId,
                 contextKey = result.contextKey,
                 contextValue = result.contextValue,
+                providedBy = result.providedBy,
             )
 
         /** Synthesizes a failed node (§7.2 row 2). */

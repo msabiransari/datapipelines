@@ -248,8 +248,11 @@ The executor asserts **nothing** about DAG position: the caller node may be a si
    is legal). The acyclicity check §5.1 asks for is performed by DagBuilder.build()
    itself (§3.1), so it cannot be skipped.
 5. Bind parameters into the ExecutionContext (defaults + coercion, pipeline-contract §7.1).
-   A rejected parameter is a 400-class failure with NO execution stream at all — §8.2
-   catalogues no executor code for it.
+   The pipeline's calculator `context_key`s bind here too, as implicit OPTIONAL inputs
+   (078, owner ruling 2026-09-05): a supplied key is coerced against its kind's output type
+   and marks the node for skipping (§7.3); unsupplied, the node computes it later. A rejected
+   value — parameter or calculator key — is a 400-class failure with NO execution stream at
+   all — §8.2 catalogues no executor code for it.
    -------- the stream opens here --------
 6. Emit execution_started event
 7. Register the execution in the cancellation registry (§8.3) so DELETE /executions/{id},
@@ -761,7 +764,7 @@ Failure modes:
 
 When a downstream node's SQL references upstream tables (e.g., `SELECT * FROM stg_orders`), it runs against the per-execution tempdb instance. The table exists because the upstream DQL node created it in §6.4.1.
 
-**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and (future) calculator outputs.
+**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and calculator outputs.
 
 ### 6.6 Pipeline composition: `direct` delivery, slots, and cancellation
 
@@ -863,7 +866,7 @@ The pipeline aggregates these into the response:
 
 ### 7.3 The Context snapshot — `pipeline_executions.parameters_json`
 
-072 (calculators design §0.5). The terminal UPDATE writes the **fully resolved execution Context** into `parameters_json`: org config, the platform keys, the declared parameters after defaulting, the execute-time inputs, and every `CALCULATOR` node's output — everything the nodes actually saw.
+072 (calculators design §0.5). The terminal UPDATE writes the **fully resolved execution Context** into `parameters_json`: org config, the platform keys, the declared parameters after defaulting, the execute-time inputs (declared parameters and caller-supplied calculator keys), and every `CALCULATOR` node's output — everything the nodes actually saw.
 
 **The column name is historical.** It held the request's `parameters` object as the caller sent it, which was the whole Context when the Context was only parameters. It is not renamed because a rename is a migration, a re-read of every consumer and a break for anything already querying it, in exchange for a better name — and this sentence is cheaper. [Metadata DB §4.6](metadata-db.md#46-pipeline_executions) says the same thing beside the column.
 
@@ -872,6 +875,8 @@ Why the snapshot is worth a column at all: without it a completed execution cann
 Written from the terminal event (`pipeline_completed` / `pipeline_failed` / `execution_aborted`), each of which carries the snapshot, so the executor stays free of the database. A serialization failure leaves the insert-time value in place rather than losing the terminal UPDATE with it.
 
 Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2), so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
+
+**A calculator the caller supplied the key for is SKIPPED, not evaluated** (078, owner ruling 2026-09-05 — tier order org < platform < parameters < caller-supplied calculator keys < calculator outputs). Its stats row still carries `context_key` and `context_value` — the SUPPLIED value, read from the live Context — plus `"provided_by": "caller"` (absent otherwise, never null), so a run record distinguishes "the caller said 7" from "the kind computed 7". A calculator that RUNS `put()`s its key and wins over everything below tier 5, exactly as before.
 
 ---
 

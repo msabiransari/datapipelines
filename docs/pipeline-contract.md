@@ -330,6 +330,8 @@ Field rules:
 
 At run time the node evaluates at its DAG position, writes its value, and reports through SSE and history like any other node — `rows_out: 0`, plus `context_key` and `context_value` on its stats so the run detail page and `executions_get` show what it produced. A failure is the standard node failure record with `pipeline.node.calculator_failed` (§13.4).
 
+**The `context_key` is also an implicit optional execute input** (078, owner ruling 2026-09-05). A caller may supply it in the execute request's `parameters` object, typed by the kind's output — an ANY-output kind (`coalesce`, `if_null`, `map`) accepts any JSON scalar. Supplied, the node is **skipped**: it does not evaluate, the supplied value is what downstream nodes bind, and the node's stats carry `provided_by: "caller"` beside `context_key`/`context_value` so a run record shows where the value came from. Unsupplied (an explicit JSON `null` reads as unsupplied), the node runs and computes the value exactly as before. A supplied value that fails coercion is refused with `pipeline.execution.invalid_parameter_type` (§13.3), exactly like a declared parameter — to the caller there is no second kind of execute input.
+
 ## 5. Settings
 
 ### 5.1 `settings.tempdb` — staging engine configuration
@@ -445,14 +447,16 @@ them spell a key the same way. Lowest precedence first:
 | 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
 | 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
 | 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
-| 4 | **execute-time inputs** | declared parameters only (§6.3) | the caller's `parameters` object |
+| 4 | **execute-time inputs** | declared parameters (§6.3), and each `CALCULATOR` node's `context_key` as an implicit **optional** input (§4.10 — supplied → the node is skipped; unsupplied → the node runs) | the caller's `parameters` object |
 | 5 | **calculator outputs** | each `CALCULATOR` node's `context_key` (§4.10) | the node, at its DAG position |
 
 A calculator output may shadow an org or platform key; it may **never** shadow a declared
 parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
-(§12.10). Org and platform keys are deployment constants, so the save-time dry render knows them:
-a template binding `:org_currency_symbol` validates without the pipeline declaring anything.
-None of them is a secret.
+(§12.10). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
+value for a *different* key — but a key the caller supplied skips its node (§4.10), so the two
+never contest the same key in one run. Org and platform keys are deployment constants, so the
+save-time dry render knows them: a template binding `:org_currency_symbol` validates without the
+pipeline declaring anything. None of them is a secret.
 
 ### 7.3 What's NOT in the Context
 
@@ -826,7 +830,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 |---|---|---|
 | `pipeline.execution.not_found` | 404 | Pipeline id or version not found |
 | `pipeline.execution.parameter_required` | 400 | Required parameter missing from execution request |
-| `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type |
+| `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type — also a calculator `context_key` supplied at execute time that fails coercion against its kind's output type (§4.10; an ANY-output key accepts any JSON scalar, a container is refused with this same code) |
 | `pipeline.execution.aborted` | 500 | Execution aborted unexpectedly (executor error) |
 | `pipeline.execution.timeout` | 504 | Execution exceeded timeout |
 | `pipeline.execution.concurrency_limit` | 429 | Too many concurrent executions for this user |
@@ -1273,6 +1277,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-06 | v1.11 | 078 calculator input ruling | A calculator `context_key` is an implicit **optional execute input** (owner ruling 2026-09-05): supplied in the execute request's `parameters` object → the node is skipped and the supplied value (coerced against the kind's output type; an ANY-output key takes any JSON scalar, refusal = `pipeline.execution.invalid_parameter_type`, §13.3) is what downstream nodes bind, marked `provided_by: "caller"` on the node's stats; unsupplied (JSON `null` included) → the node runs and computes it. §7.2's tier 4 widened accordingly (org < platform < parameters < execute-time inputs — now including calculator keys < calculator outputs). The parent→child mapping half of the ruling — a parent maps a calculator key into a child execution explicitly — ships as its own row with the composition change. Additive per §15.2. |
 | 2026-09-06 | v1.10 | 078 contract gaps | §12.6's interpolation refusal set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type): `${calc_key}` now fails save with `template.validation.parameter_interpolated` instead of the dry render's wrong code, the `${calc_key!}` shape no longer slips past the scan, and a calculator key is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) as well — a derived value gating SQL structure is the same hole. Additive per §15.2. |
 | 2026-09-02 | v1.9 | 040 template used-by | §13.9 gains `template.in_use` (409) — template delete refused while any pipeline version pins any version of the template; the refusal carries the reverse scan's rows (pipeline, node, pipeline version, pinned version). Additive per §15.2. |
 | 2026-09-02 | v1.8 | 046 typed templates | §12.6 gains `pipeline.validation.template_type_mismatch` — a DQL/DML/DDL node referencing a `type='html'` template is refused at pipeline save (template-hierarchy-design §7). §13.9 gains `template.validation.type_invalid` (unknown `type` wire value), `template.validation.dialect_not_allowed` (a `dialect` present on an `html` template) and `template.validation.type_immutable` (a payload attempting to change a template's type). Additive per §15.2. |

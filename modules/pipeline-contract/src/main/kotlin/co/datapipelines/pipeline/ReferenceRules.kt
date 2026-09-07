@@ -1,10 +1,8 @@
 package co.datapipelines.pipeline
 
-import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
-import co.datapipelines.typesystem.LogicalType
 
 /**
  * pipeline-contract §12.5 (datasources) and §12.6 (templates) — the rules that need the
@@ -31,9 +29,9 @@ internal object ReferenceRules {
         // output keys come LAST (078 A1): tier 5 wins over everything at run, and a key that
         // collided with a declared parameter is already a §12.10 refusal, so the order can
         // never mask a legitimate failure.
-        val calculatorKeys = calculatorSamples(pipeline)
+        val calculatorKeys = pipeline.calculatorOutputs()
         val sampleContext =
-            ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters).sampleContext() + calculatorKeys
+            ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters, calculatorKeys).sampleContext()
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.CALCULATOR) {
                 // 072 §4.10: a CALCULATOR node has no `source`, no `template` and no `output`, so
@@ -54,27 +52,6 @@ internal object ReferenceRules {
             checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, calculatorKeys.keys, into)
         }
     }
-
-    /**
-     * Every CALCULATOR node's `context_key` with a type-appropriate sample value (078 A1).
-     *
-     * Without these in the declared set, §12.6's interpolation scan never saw a calculator key:
-     * a bare `${run_fiscal_quarter}` failed with the wrong code (the dry render's undeclared-
-     * variable path), and `${run_fiscal_quarter!}` / `<#if run_fiscal_quarter??>` passed save
-     * and put a derived value — one that can originate from a caller STRING through `coalesce`
-     * or `if_null` — into SQL structure at run. A node whose `kind` is unknown contributes no
-     * key: §12.10 already refuses it, and a second failure here would only add noise. An
-     * ANY-typed output (`coalesce`/`if_null`/`map`) samples as STRING — the dry render needs a
-     * value of *some* defined type, never a particular one.
-     */
-    private fun calculatorSamples(pipeline: Pipeline): Map<String, Any?> =
-        pipeline.nodes
-            .filter { it.type == NodeType.CALCULATOR }
-            .mapNotNull { node ->
-                val key = node.contextKey?.takeUnless { it.isBlank() } ?: return@mapNotNull null
-                val kind = node.kind?.let(CalculatorRegistry::find) ?: return@mapNotNull null
-                key to ParameterBinder.sampleValue(kind.output ?: LogicalType.STRING)
-            }.toMap()
 
     /**
      * §12.5 over `nodes[].source`, returning the dialect the node's SQL runs against — which

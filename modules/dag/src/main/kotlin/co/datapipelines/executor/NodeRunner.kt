@@ -155,6 +155,12 @@ class NodeRunner(
      * A CALCULATOR node (§4.10, calculators design §0.3): resolve the inputs from the live
      * Context, evaluate the kind, write the value back under `context_key`.
      *
+     * Except when the caller already supplied the key (078 A5): a calculator `context_key` is
+     * an implicit optional execute input, and a supplied value SKIPS the evaluation entirely —
+     * the stats then carry the supplied value with `provided_by: "caller"`. A calculator that
+     * RUNS still `put()`s and wins over everything (tier order org < platform < params <
+     * caller-supplied calculator keys < calculator outputs).
+     *
      * The write is the whole point, and it is why [NodeExecutionContext.values] is a live
      * [RunContext] rather than a snapshot: nodes scheduled after this one render and bind against
      * the same map, so a downstream `:run_fiscal_quarter` resolves by topology with nothing
@@ -172,6 +178,20 @@ class NodeRunner(
     ): NodeResult {
         val kindName = node.kind.orEmpty()
         val contextKey = node.contextKey.orEmpty()
+        // 078 A5 (owner ruling 2026-09-05): the caller supplied this key at execute time, so the
+        // node does NOT evaluate — the value is already in the live Context, bound and coerced
+        // by ParameterBinder. The stats still carry the key and the SUPPLIED value, marked
+        // provided_by: "caller", so the run detail page shows where the number came from.
+        if (contextKey in ctx.values.callerSupplied) {
+            return NodeResult.of(
+                nodeId = node.id,
+                rowsOut = 0,
+                startedAt = startedAt,
+                contextKey = contextKey,
+                contextValue = ctx.values[contextKey]?.toString(),
+                providedBy = NodeResult.PROVIDED_BY_CALLER,
+            )
+        }
         val value =
             try {
                 val kind = CalculatorRegistry.require(kindName)

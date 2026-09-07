@@ -88,8 +88,11 @@ object CalculatorInputResolver {
      * `BigDecimal` for every JSON number, not `Int` for the integral ones: the three ANY kinds
      * (`coalesce`, `if_null`, `map`) compare and return values, and `map`'s `from` list matching
      * on `1` but not on `1.0` would be a lookup that depends on how the author typed a number.
+     *
+     * Internal, not private: an ANY-OUTPUT calculator key supplied at execute time (078 A5) is
+     * read through this same table, so "any scalar" has one meaning on both sides of the node.
      */
-    private fun natural(node: JsonNode): Any? =
+    internal fun natural(node: JsonNode): Any? =
         when {
             node.isTextual -> node.asText()
             node.isBoolean -> node.asBoolean()

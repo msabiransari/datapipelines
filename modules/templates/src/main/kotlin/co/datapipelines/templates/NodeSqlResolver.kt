@@ -155,7 +155,11 @@ class NodeSqlResolver(
             return NodeSqlResolution.ChildPipeline(detail, node.pipeline?.name ?: "", node.pipeline?.version ?: 0)
         }
 
-        val binder = ParameterBinder(pipeline.parameters)
+        // The calculator outputs ride the binder too (078 A5): a supplied `context_key` binds
+        // here exactly as it does at execute time, and the sample context the rejected path
+        // renders with covers the calculator keys by output type — one derivation, so the
+        // debug panel and the executor cannot disagree about which keys are legal inputs.
+        val binder = ParameterBinder(pipeline.parameters, pipeline.calculatorOutputs())
         return when (val binding = binder.bind(parameterInputs ?: emptyMap())) {
             is ParameterBindingResult.Bound -> render(workspaceId, detail, node, binding.context.asMap(), sampled = emptyList())
             is ParameterBindingResult.Rejected -> rejected(workspaceId, detail, node, binder, binding.failures)

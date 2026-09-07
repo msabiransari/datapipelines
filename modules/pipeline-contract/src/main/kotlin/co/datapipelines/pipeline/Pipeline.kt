@@ -1,5 +1,7 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.calculators.CalculatorRegistry
+import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -49,6 +51,30 @@ data class Pipeline(
 ) {
     /** The node with this id, or null. */
     fun node(id: String): Node? = nodes.firstOrNull { it.id == id }
+
+    /**
+     * Every CALCULATOR node's `context_key`, typed by the kind's output — the pipeline's
+     * **calculator output declared set** (078 A5, owner ruling 2026-09-05).
+     *
+     * A calculator `context_key` is an implicit OPTIONAL execute input: a caller who supplies it
+     * skips the node and provides the value; a caller who does not lets the node run and compute
+     * it. The value type is the kind's output; `null` marks an ANY-output kind (coalesce,
+     * if_null, map), whose supplied value may be any JSON scalar. One derivation, shared by the
+     * execute path (`RunContext`, `ExecutionLauncher`), the save-time declared set
+     * (`ReferenceRules`) and the node-run debug path (`NodeSqlResolver`) — the three must agree,
+     * or a key one accepts another refuses.
+     *
+     * A node whose `kind` is unknown contributes no key: §12.10 already refuses it, and a second
+     * opinion here would only fork the verdict.
+     */
+    fun calculatorOutputs(): Map<String, LogicalType?> =
+        nodes
+            .filter { it.type == NodeType.CALCULATOR }
+            .mapNotNull { node ->
+                val key = node.contextKey?.takeUnless { it.isBlank() } ?: return@mapNotNull null
+                val kind = node.kind?.let(CalculatorRegistry::find) ?: return@mapNotNull null
+                key to kind.output
+            }.toMap()
 
     companion object {
         /** The only pipeline-JSON schema version v1 accepts (§3.2, §12.1). */

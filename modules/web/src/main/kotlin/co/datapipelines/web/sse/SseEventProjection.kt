@@ -96,6 +96,9 @@ class SseEventProjection(
             // value, and an author debugging a wrong quarter has nothing on screen to read.
             event.stats.contextKey?.let { put("context_key", it) }
             event.stats.contextValue?.let { put("context_value", it) }
+            // 078 A5: a calculator whose key the caller supplied was SKIPPED, not evaluated —
+            // the payload says so, same conditional discipline (absent on every other node).
+            event.stats.providedBy?.let { put("provided_by", it) }
         }
 
     private fun nodeFailedPayload(event: NodeFailed) =

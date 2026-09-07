@@ -116,8 +116,10 @@ class ExecutionLauncher(
      */
     fun decide(launch: ExecutionLaunch): LaunchDecision {
         // pipeline-contract §7.1: deterministic, and a rejected parameter costs nothing —
-        // no execution, no reservation, no stream.
-        ParameterBinder(launch.pipeline.parameters).bindOrThrow(launch.parameters)
+        // no execution, no reservation, no stream. The calculator outputs ride the same bind
+        // (078 A5): a supplied `context_key` is an implicit optional input, coerced — and
+        // refused on a type failure — exactly like a declared parameter.
+        ParameterBinder(launch.pipeline.parameters, launch.pipeline.calculatorOutputs()).bindOrThrow(launch.parameters)
 
         val key = launch.idempotencyKey ?: return LaunchDecision.Start(null)
         return when (val outcome = reserve(key, launch)) {
