@@ -3,6 +3,11 @@
 **Status:** design note, researched 2026-09-05; every fact below carries its source and the
 date it was read. Items the sources did not settle are listed in §7 as spike work — they are
 NOT design decisions. Awaiting the owner's ruling on §6.
+**Amended 2026-09-07 (round 087, connector seams).** Three corrections, marked inline:
+§2 gains Databricks as a fourth reference target (F14–F17, read 2026-09-07); §3.1's row-cap
+sentence said "LIMIT/OFFSET", which the adapter has never modelled; and §4's Round B was
+**impossible as written** against the shipped DuckDB adapter — it now names the lake-mode
+adapter 087 built, and says why.
 **Not packaged into the product** (`docs/superpowers/` is excluded from the jar).
 
 ## 1. Why
@@ -36,6 +41,10 @@ Two rounds, in that order. Both are post-announcement.
 | F10 | `org.duckdb:duckdb_jdbc` current release **1.5.5.1** (2026-08-03) — exactly what the repo pins | Maven Central; `gradle/libs.versions.toml:97` |
 | F11 | DuckDB `iceberg` extension attaches **Amazon S3 Tables** (`ATTACH '<arn>' … (TYPE iceberg, ENDPOINT_TYPE s3_tables)`) and **AWS Glue** (`ATTACH '<account_id>' … (TYPE ICEBERG, ENDPOINT_TYPE 'glue')`), plus Polaris, Lakekeeper, R2 and any Iceberg REST catalog; requires `httpfs`, `iceberg`, `aws`; credentials via `CREATE SECRET (TYPE s3, PROVIDER credential_chain)` or explicit `KEY_ID`/`SECRET`; catalog-attached tables support writes | duckdb.org `core_extensions/iceberg/catalogs` and `overview` |
 | F12 | The product refuses secret-valued keys in `properties.jdbc` (stored plaintext) and credentials in the URL; `username`/`password` are the only credential carriers, encrypted (068: versioned AES-GCM under a `KeyProvider`) | datasources.md §5.6, §7.1 |
+| F14 | **Databricks ships TWO drivers under the same Maven coordinates, under DIFFERENT licences.** `com.databricks:databricks-jdbc` **3.4.2** (latest release; `maven-metadata.xml` `lastUpdated` 20260720105516) declares **Apache-2.0** in its POM and points at github.com/databricks/databricks-jdbc — the OSS driver. The SAME coordinates at **2.7.5** declare "**Databricks JDBC Driver License**" (databricks.com/jdbc-odbc-driver-license) — the Simba-based legacy driver. **A version range or a `+` would silently change the licence**, which is exactly why this repo pins exact versions (MISTAKES.md). Ships-in-the-image is a 3.x-only question. | Maven Central `maven-metadata.xml` + the 3.4.2 and 2.7.5 POMs, read 2026-09-07 |
+| F15 | PAT auth: `AuthMech=3;UID=token;PWD=<token>` — `UID` is the LITERAL string `token`, the PAT goes in `PWD`. OAuth M2M: `AuthMech=11;Auth_Flow=1;OAuth2ClientId=…;OAuth2Secret=…`; token passthrough is `Auth_Flow=0;Auth_AccessToken=…`. Connection URL: `jdbc:databricks://<host>:443;transportMode=http;ssl=1;AuthMech=3;httpPath=<path>` | github.com/databricks/databricks-jdbc README + docs.databricks.com `integrations/jdbc-oss/authentication`, read 2026-09-07 |
+| F16 | Unity Catalog objects "follow a three-level namespace (`catalog.schema.object`)"; `ConnCatalog`/`ConnSchema` set the connection's default catalog and schema (default catalog `hive_metastore`) | docs.databricks.com `data-governance/unity-catalog/`, read 2026-09-07 |
+| F17 | `Auth_AccessToken` and BigQuery's `OAuthPvtKey` / `OAuthAccessToken` / `OAuthRefreshToken` are secret-valued property names that end in neither `password`/`pwd`/`secret`/`clientkey` — the product's §5.6 suffix predicate misses all four. 087 enumerates them (`SECRET_VALUED_KEYS`) rather than widening the suffixes. BigQuery's driver is `com.google.cloud:google-cloud-bigquery-jdbc` | docs.cloud.google.com `bigquery/docs/jdbc-for-bigquery` + the Databricks README, read 2026-09-07 |
 | F13 | The Athena JDBC driver is **not on Maven Central** (`com/amazon/athena/` absent) — AWS distributes it from its own site; no Athena/Glue/Redshift MCP search demand measured | Maven Central listing; DataForSEO 2026-09-05 |
 
 ## 3. Round A — Snowflake (dialect + PAT credential, no schema change)
@@ -47,9 +56,14 @@ PAT), encrypted exactly as today; the Snowflake role is fixed on the token.
 
 Scope:
 1. `Dialect.SNOWFLAKE` (enums.md catalogue, drift-tested), the adapter per datasources.md §4.2
-   (identifier quoting, `LIMIT`/`OFFSET`, `information_schema` introspection — Snowflake's is
-   ANSI, but VERIFY the column-metadata shapes in the spike), the driver **4.3.4** pinned in
-   `libs.versions.toml`, shipped in the image (Apache-2.0, F1), with F2's driver class name.
+   (identifier quoting, a **row cap** — `RowLimitStyle`, the adapter models a cap and nothing
+   else; **corrected 2026-09-07: this line said "LIMIT/OFFSET" and OFFSET is not a thing here**,
+   `applyRowLimit` caps a module-built preview SELECT and never paginates — `information_schema`
+   introspection: Snowflake's is ANSI, but VERIFY the column-metadata shapes in the spike), the
+   driver **4.3.4** pinned in `libs.versions.toml`, shipped in the image (Apache-2.0, F1), with
+   F2's driver class name. Its `NamespaceShape` is `[database, schema]` with TWO browsable
+   levels (087, datasources.md §4.2), and its credential is `credential.kind: token` — the PAT
+   in the password slot — with `private_key` as the A2 kind, both already in the contract.
 2. **Type mapping — measured, not asserted** (§7.1). Snowflake `NUMBER(38,0)` is its integer
    default; `VARIANT`/`OBJECT`/`ARRAY` come back as strings in JDBC; the three `TIMESTAMP_*`
    variants differ in zone semantics. The spike prints `getColumnTypeName`/`getColumnType` for
@@ -79,18 +93,40 @@ Scope:
 8. **Site:** `/mcp-server/snowflake` on the 073 engine template the day the dialect ships.
 
 **Deferred to Round A2 — key-pair auth (F6):** a second credential kind, `private_key` (PEM,
-optionally passphrase-protected), encrypted through the 068 path, surfaced as
-`credential.kind = password | private_key` on `POST /api/v1/datasources`, `datasources_create`,
-the bootstrap file, and the datasource form. Worth it once one customer will not accept a
-365-day token rotation — and the same seam carries BigQuery (service-account JSON) and
-Databricks (OAuth M2M) later.
+optionally passphrase-protected), encrypted through the 068 path. **The SEAM shipped in 087**:
+`credential.kind ∈ {password, token, private_key, service_account_json, none}` is live on
+`POST /api/v1/datasources`, `datasources_create`, the bootstrap file and the datasource form,
+and `private_key` is refused today only because no shipped adapter declares it in
+`supportedCredentialKinds`. Round A2 is now one line in the Snowflake adapter plus its
+`applyCredential` override — and the same seam carries BigQuery (service-account JSON) and
+Databricks (OAuth M2M, F15) with no further contract change.
 
 ## 4. Round B — the AWS lake through DuckDB (Parquet / Iceberg on the customer's S3)
 
-- A "lake" datasource is a DuckDB database (file or `:memory:`) whose connections run a setup
-  block: `INSTALL/LOAD httpfs, aws, iceberg; CREATE SECRET (TYPE s3, PROVIDER credential_chain);
-  ATTACH … ENDPOINT_TYPE 'glue' | s3_tables` (F11). Pipelines then query the attached catalog's
-  tables like any DuckDB table; results stage into tempdb as today.
+> **Correction, 2026-09-07 (087).** As originally written this round was **impossible against the
+> shipped `DUCKDB` adapter**, and the note did not say so. That adapter sets
+> `enable_external_access = false` in `defaultProperties`, and DuckDB **runtime-locks** the
+> setting — it cannot be turned back on once the database is running. With it on there is no
+> filesystem and no network, so `INSTALL`, `LOAD`, `ATTACH`, `read_parquet` and `CREATE SECRET`
+> all fail (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: `ATTACH` of a local file fails with
+> *"Permission Error: … file system operations are disabled by configuration"*). That lock is
+> the load-bearing control that stops author SQL loading native code inside the app's own
+> process, and it STAYS.
+>
+> **Round B therefore runs on the lake-mode adapter, which 087 shipped**: `Dialect.LAKE`, a
+> distinct dialect rather than a mode on `DUCKDB` (a mode would make the §5.6 refusal set a
+> function of row data, which the enum-total lookup exists to prevent). It omits
+> `enable_external_access` so the engine default applies, keeps `allow_unsigned_extensions` and
+> `allow_community_extensions` at `false`, refuses the same key set in `properties.jdbc`, and
+> generates its setup block from typed `properties.dialect.*` fields through
+> `DialectAdapter.connectionInit` (datasources.md §4.2A). What is left for this round is the
+> lake CONNECTOR — the registry, the query path, the S3 proof — not the adapter seam.
+
+- A "lake" datasource is a `Dialect.LAKE` datasource (DuckDB underneath, file or `:memory:`)
+  whose connections run a setup block: `INSTALL/LOAD httpfs, aws, iceberg; CREATE SECRET (TYPE
+  s3, PROVIDER credential_chain); ATTACH … ENDPOINT_TYPE 'glue' | s3_tables` (F11). Pipelines
+  then query the attached catalog's tables like any DuckDB table; results stage into tempdb as
+  today. Its `NamespaceShape` is `[catalog, schema]` with two browsable levels (087).
 - **Credentials: the pod's IAM role, not keys in our database.** `credential_chain` (F11) reads
   the instance/task role — the self-hosted answer with nothing to encrypt or rotate. Explicit
   `KEY_ID`/`SECRET` would have to travel through an encrypted credential kind (§3 A2), because
@@ -100,9 +136,32 @@ Databricks (OAuth M2M) later.
   extensions into the image or document the egress. Decide in the spike (§7.3).
 - The setup block is per-connection SQL; it must NOT be user-supplied free text (that is a SQL
   surface inside the app's own process). It is generated from typed datasource fields
-  (`catalog.kind = glue | s3_tables | rest`, `catalog.ref`, `region`) — the same "config, not
-  code" rule as everything else here.
+  (`catalog.kind = s3 | glue | s3_tables | rest`, `catalog.ref`, `region`, `endpoint`,
+  `url_style`, `attach`) — the same "config, not code" rule as everything else here. **Shipped in
+  087** as `properties.dialect.*` + `LakeDialectAdapter.connectionInit`, with the local (ATTACH)
+  path proven end to end and the S3 path proven only at the level of the SQL generated.
 - Athena as a dialect (F13: driver off-Maven, no measured demand) only when a customer asks.
+
+## 4A. Databricks — a reference target, not a round (added 2026-09-07)
+
+Not scoped as a round here; it is the fourth target the 087 contract was designed against, so
+its shape is recorded while the facts are fresh.
+
+- **Driver:** `com.databricks:databricks-jdbc` 3.4.2, **Apache-2.0** — may ship in the image.
+  Pin the exact version and never a range: 2.x under the same coordinates is the Simba driver
+  under a proprietary Databricks licence (F14). A licence audit that reads only the coordinates
+  would get the wrong answer.
+- **Credential:** `credential.kind: token` — the adapter puts the PAT where the driver wants it
+  (`UID=token`, the PAT in `PWD`, `AuthMech=3`), which is exactly the case `applyCredential`
+  exists for: the CALLER says "token", not "`PWD`" (F15). OAuth M2M is a later kind or a
+  `dialect.*`-configured flow (`OAuth2ClientId` + `OAuth2Secret`, the latter already caught by
+  the §5.6 suffix predicate).
+- **Namespace:** `[catalog, schema]`, two browsable levels — Unity Catalog's three-level
+  `catalog.schema.object` (F16). `ConnCatalog`/`ConnSchema` set the connection default, which is
+  the same "outer level fixed by the connection unless the driver lists them" question every
+  two-level dialect answers.
+- **Typed config:** `dialect.http_path` (required — the SQL warehouse's HTTP path) and
+  `dialect.catalog`.
 
 ## 5. Cost of a wrong guess, named
 

@@ -267,14 +267,32 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
   scope is too low.
 
 - **Registering a datasource from an agent — read this before using `datasources_create`.**
-  A password passed through an agent transits the agent's context, its transcript, and any
+  A secret passed through an agent transits the agent's context, its transcript, and any
   logging the client does. That is a property of handing a secret to an agent; the server
   cannot undo it, and the tool does not refuse. **Prefer registering a datasource that has a
-  real password in the UI or over REST.** Use `datasources_create` from an agent only with a
+  real credential in the UI or over REST.** Use `datasources_create` from an agent only with a
   credential the user is willing to have in that transcript — a read-only role, or a
-  short-lived password they will rotate afterwards. Say so before you ask for one. The
-  password never comes back: the result carries `password_set: true` and no password field.
-  Follow a create with `datasources_test` on the new name.
+  short-lived token they will rotate afterwards. Say so before you ask for one. The
+  secret never comes back: the result carries `credential.kind` and `password_set`, and no
+  secret field at any depth. Follow a create with `datasources_test` on the new name.
+
+- **The credential block.** `credential: {kind, username?, secret?}` says WHAT the credential is:
+  `password` (a login — username and secret both required), `token` (a bearer or personal access
+  token — secret required, username optional), `private_key` and `service_account_json` (in the
+  contract for the warehouse connectors; no shipped dialect accepts them yet), and `none` — an
+  IAM role, OS auth, or a FILE database with no authentication at all, which carries neither
+  field. The legacy top-level `username`/`password` pair still works and means `kind: password`;
+  sending both shapes is refused. A kind the dialect's driver cannot use is refused at save with
+  the dialect's accepted kinds named — so read the error rather than retrying with a guess.
+
+- **Namespaces, not just schemas.** `datasources_get_schemas` returns `entries: [{namespace,
+  label}]`. `namespace` is the ordered path (outermost first) and `label` is its last segment. On
+  a two-level engine — `catalog.schema`, `project.dataset` — two entries can share a label and
+  differ only by their outer segment, so **pass the whole `namespace` array back** to
+  `datasources_get_tables`/`_get_columns`, not the label. The legacy `schemas` array of bare
+  labels and the `schema` argument still work; they cannot express the difference. An unqualified
+  `datasources_get_columns` on a two-level engine can merge same-named tables from different
+  catalogs, which is why the namespace is worth passing.
 
 ## The golden path (authoring a new pipeline)
 
@@ -284,9 +302,10 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
    below goes under the prefix you settle on here — and it cannot be moved later.
 1. **Verify the source.** `datasources_test` (or `datasources_list`/`datasources_get`)
    to confirm name + dialect + connectivity, then introspect the schema:
-   `datasources_get_schemas` → `datasources_get_tables(schema)` →
-   `datasources_get_columns(table)` for every table the SQL will touch. Never write
-   SQL against recalled column names.
+   `datasources_get_schemas` → `datasources_get_tables(namespace)` →
+   `datasources_get_columns(table, namespace)` for every table the SQL will touch, passing
+   each table's reported `namespace` array through. Never write SQL against recalled column
+   names.
 2. **Write the template.** `templates_create` with `dialect` matching the source, a
    Freemarker body, and a `description` that names every parameter the body expects
    (the description is the only discoverability mechanism for parameters).
@@ -476,7 +495,7 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
 
 Three facts, and where to go for the rest:
 
-- **Datasource passwords are write-only.** They are stored AES-256-GCM encrypted, bound to the
+- **Datasource credentials are write-only** — whatever kind they are. They are stored AES-256-GCM encrypted, bound to the
   datasource name, and no endpoint, tool or resource ever returns one — reads carry
   `password_set: true` instead. Never try to read a password back, and never echo one you were
   given into a pipeline body, a template, a commit message or a chat summary.

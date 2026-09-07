@@ -1,6 +1,6 @@
 # Type System Specification
 
-**Status:** v1.1 (frozen contract — additive-only changes after this point)
+**Status:** v1.2 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** none (foundational spec — other specs depend on this)
 **Last updated:** 2026-08-07
