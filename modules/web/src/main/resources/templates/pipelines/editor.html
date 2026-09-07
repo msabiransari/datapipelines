@@ -246,7 +246,7 @@
               </div>
               <dl class="pe-kv">
                 <template x-for="row in detailsMeta(selectedNode)" :key="row[0]">
-                  <div style="display:contents">
+                  <div class="pe-kv-row">
                     <dt x-text="row[0]"></dt>
                     <dd x-text="row[1]" x-bind:title="row[1]"></dd>
                   </div>

@@ -128,7 +128,13 @@ class InlineWidthAuditTest {
     }
 
     private companion object {
-        val STYLE_ATTR = Regex("""\bstyle="([^"]*)"""")
+        /**
+         * A STATIC `style="…"` attribute. `x-bind:style` / `:style` / `th:style` are excluded by
+         * the look-behind: those are DYNAMIC bindings (080's cards set a `--type` custom property
+         * per node that way, as the approved mock did), and a CSP forbids the static attribute,
+         * not a script setting `element.style`.
+         */
+        val STYLE_ATTR = Regex("""(?<![:\w-])style="([^"]*)"""")
 
         /**
          * Empty, and asserted empty above. An entry here would be a template that may keep an

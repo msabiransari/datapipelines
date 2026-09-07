@@ -1042,6 +1042,10 @@
   font-weight: var(--weight-semibold, 600);
 }
 
+/* the x-for row wrapper must not break the dl's grid — a class, because the inline-style
+   ban (079) is total */
+.pe-kv-row { display: contents; }
+
 .pe-kv {
   display: grid;
   grid-template-columns: 96px 1fr;

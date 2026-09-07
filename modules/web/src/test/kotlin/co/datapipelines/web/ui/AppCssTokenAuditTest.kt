@@ -77,6 +77,10 @@ class AppCssTokenAuditTest {
                 .withIndex()
                 .filter { (_, line) -> LITERAL_COLOUR.containsMatchIn(line) }
                 .filterNot { (_, line) -> line.contains("--node-") || line.contains("--edge-") }
+                // 080's app-token block: the two node-type CATEGORY hues (ddl slate, calc violet)
+                // have no design-system counterpart and stay constant across themes — the block's
+                // own comment explains the contrast argument. Every other token there bridges.
+                .filterNot { (_, line) -> line.contains("--type-ddl") || line.contains("--type-calc") }
                 .filterNot { (_, line) -> SWATCH_RULE.containsMatchIn(line) }
                 .filterNot { (_, line) -> line.trimStart().startsWith("*") || line.trimStart().startsWith("/*") }
                 .map { (index, line) -> "app.css:${index + 1} carries a literal colour: ${line.trim()}" }
