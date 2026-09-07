@@ -24,34 +24,103 @@
     return TYPE_TOKEN[String(type || "").toUpperCase()] || "dql";
   }
 
-  function readDesignTokens() {
+  /**
+   * COLOUR RESOLUTION (082 addendum P1) — the canvas needs a COLOUR, not a token's
+   * declaration text.
+   *
+   * `getComputedStyle(...).getPropertyValue('--edge')` returns a custom property's
+   * TOKEN STREAM verbatim, and four of 080's canvas tokens are `color-mix()`
+   * expressions bridged off theme tokens (`app.css`: `--brand-soft`, `--border-faint`,
+   * `--grid-dot`, `--edge`). Cytoscape parses colours itself and cannot read
+   * `color-mix(in srgb, …)`: it logs `The style property `line-color: color-mix(…)` is
+   * invalid` and falls back, which is why the dark theme's edges collapsed into thick
+   * grey bands the moment `updateTheme()` re-applied the stylesheet.
+   *
+   * A PROBE resolves them at the source. Assigning `color: var(--edge)` to a real,
+   * in-document element makes the browser do the whole computation — `var()`
+   * substitution, `color-mix()`, the theme currently in force — and `getComputedStyle`
+   * hands back an `rgb(…)`/`rgba(…)` string every colour consumer understands. One
+   * probe serves every token in a read; it is removed before returning, so nothing
+   * outlives the call.
+   *
+   * The fallback contract is unchanged: a token that is NOT DECLARED at all still
+   * yields the mock's light hex, so a stale theme file cannot blank the graph.
+   */
+  function colourResolver() {
+    if (typeof document === "undefined" || !document.createElement || !document.body) {
+      return { resolve: function (_n, raw) { return raw; }, done: function () {} };
+    }
+    var probe = document.createElement("span");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.position = "absolute";
+    probe.style.width = "0";
+    probe.style.height = "0";
+    probe.style.visibility = "hidden";
+    probe.style.pointerEvents = "none";
+    document.body.appendChild(probe);
+    return {
+      resolve: function (name, raw) {
+        probe.style.color = "";
+        probe.style.color = "var(" + name + ")";
+        var resolved = getComputedStyle(probe).color;
+        // An `rgb(`/`rgba(` answer is the browser's own computation and always wins.
+        // Anything else (a browser that refused the assignment) leaves the raw token,
+        // which is exactly the pre-082 behaviour rather than a blank canvas.
+        return resolved && resolved.indexOf("rgb") === 0 ? resolved : raw;
+      },
+      done: function () {
+        if (probe.parentNode) probe.parentNode.removeChild(probe);
+      },
+    };
+  }
+
+  /**
+   * `containerId` is the graph's own container. 082 §A put the card's geometry behind
+   * a CONTAINER query on the stage (a wide stage gets a bigger card), and a container
+   * query's result is only visible on elements INSIDE the container — reading
+   * documentElement would have returned the 236px base for ever, so the Cytoscape node
+   * box and the HTML overlay would have disagreed on every wide screen. Colours are
+   * :root-level and still come from documentElement, resolved through the probe above.
+   */
+  function readDesignTokens(containerId) {
     var styles = getComputedStyle(document.documentElement);
+    var host = (containerId && document.getElementById(containerId)) || document.documentElement;
+    var boxStyles = host === document.documentElement ? styles : getComputedStyle(host);
     // The card's geometry rides the same custom-property bridge as the colours: the
     // HTML card (pipeline-editor.css) and the Cytoscape node box MUST agree on a box,
     // and one token read is the only way they do. Numeric fallbacks match the CSS.
-    var cardW = parseInt(styles.getPropertyValue("--pe-card-w"), 10) || 236;
-    var cardH = parseInt(styles.getPropertyValue("--pe-card-h"), 10) || 148;
+    var cardW = parseInt(boxStyles.getPropertyValue("--pe-card-w"), 10) || 236;
+    var cardH = parseInt(boxStyles.getPropertyValue("--pe-card-h"), 10) || 148;
     var cardRadius = styles.getPropertyValue("--radius-lg").trim() || "12px";
-    return {
-      // 080 §A: the canvas reads the mock's tokens straight from the 080 app-token
-      // block. Hard hexes stay in the fallback slot so a stale theme file cannot
-      // blank the graph; the fallbacks are the mock's light values.
-      brand: styles.getPropertyValue("--brand").trim() || "#2563eb",
-      brandSoft: styles.getPropertyValue("--brand-soft").trim() || "#dbeafe",
-      edgeIdle: styles.getPropertyValue("--edge").trim() || "#94a3b8",
-      edgeActive: styles.getPropertyValue("--edge-active").trim() || "#2563eb",
-      edgeDone: styles.getPropertyValue("--edge-done").trim() || "#15803d",
-      nodeSurface: styles.getPropertyValue("--surface-raised").trim() || "#ffffff",
-      nodeBorder: styles.getPropertyValue("--border-subtle").trim() || "#b2b7bf",
-      nodeSuccess: styles.getPropertyValue("--accent-success").trim() || "#15803d",
-      nodeFailed: styles.getPropertyValue("--accent-danger").trim() || "#dc2626",
-      nodeAborted: styles.getPropertyValue("--accent-warning").trim() || "#a16207",
-      edgeLabelText: styles.getPropertyValue("--text-muted").trim() || "#64748b",
-      edgeLabelBg: styles.getPropertyValue("--surface-page").trim() || "#f8f9fb",
+
+    // 080 §A: the canvas reads the mock's tokens straight from the 080 app-token
+    // block. Hard hexes stay in the fallback slot so a stale theme file cannot
+    // blank the graph; the fallbacks are the mock's light values.
+    var probe = colourResolver();
+    function colour(name, fallback) {
+      var raw = styles.getPropertyValue(name).trim();
+      if (!raw) return fallback;
+      return probe.resolve(name, raw);
+    }
+    var tokens = {
+      brand: colour("--brand", "#2563eb"),
+      brandSoft: colour("--brand-soft", "#dbeafe"),
+      edgeIdle: colour("--edge", "#94a3b8"),
+      edgeActive: colour("--edge-active", "#2563eb"),
+      edgeDone: colour("--edge-done", "#15803d"),
+      nodeSurface: colour("--surface-raised", "#ffffff"),
+      nodeBorder: colour("--border-subtle", "#b2b7bf"),
+      nodeSuccess: colour("--accent-success", "#15803d"),
+      nodeFailed: colour("--accent-danger", "#dc2626"),
+      nodeAborted: colour("--accent-warning", "#a16207"),
+      edgeLabelText: colour("--text-muted", "#64748b"),
+      edgeLabelBg: colour("--surface-page", "#f8f9fb"),
       cardW: cardW,
       cardH: cardH,
       cardRadius: cardRadius,
     };
+    probe.done();
+    return tokens;
   }
 
   function buildStylesheet(tokens) {
@@ -72,7 +141,14 @@
         style: {
           "background-color": tokens.nodeSurface,
           width: cardW,
-          height: tokens.cardH || 148,
+          // 082 addendum P1: the card sizes to its content (CSS `min-height`), so the
+          // painted box is PER NODE — a three-fact card is taller than a one-fact one,
+          // and a fixed height left the footer hanging outside the border. syncCardHeights
+          // measures each rendered card and writes `cardH` onto its node; the token is the
+          // floor used until the first measurement (and by the pure node --test callers).
+          height: function (ele) {
+            return (ele && ele.data && ele.data("cardH")) || tokens.cardH || 148;
+          },
           shape: "round-rectangle",
           "border-width": 1,
           "border-color": tokens.nodeBorder,
@@ -334,7 +410,7 @@
     this.nodes = nodes;
     this.editor = editor;
     this.cy = null;
-    this.tokens = readDesignTokens();
+    this.tokens = readDesignTokens(containerId);
     this._flowRunning = false;
     this._mm = null;
   }
@@ -364,7 +440,10 @@
       container: document.getElementById(this.containerId),
       elements: elements,
       style: buildStylesheet(this.tokens),
-      wheelSensitivity: 0.3,
+      // 082 addendum: 080's `wheelSensitivity: 0.3` is gone. Cytoscape warns on EVERY
+      // init that a non-default sensitivity is unsupported ("You have set a custom
+      // wheel sensitivity… disable this warning"), the owner sees it in the console on
+      // every editor open, and the ± controls are the honest place to adjust the feel.
       minZoom: 0.2,
       maxZoom: 3,
     });
@@ -428,14 +507,12 @@
     // Layout runs EXPLICITLY (not via the cytoscape config) so the layoutstop binding
     // is guaranteed to precede it — cy.ready can fire before dagre has applied
     // positions. One pass after layout: the edge curve (horizontal leave/enter), the
-    // fit with floor AND ceiling, and the minimap's first paint.
-    var layout = this.cy.elements().layout(layoutOptions());
-    layout.one("layoutstop", function () {
-      self.applyEdgeCurves();
-      self.fitToView();
-      self.renderMinimap();
+    // fit with floor AND ceiling, and the minimap's first paint — then the card
+    // measurement (082 addendum P1), which may ask for one more pass.
+    this._heightPasses = 0;
+    this.runLayout(function () {
+      afterPaint(function () { self.syncCardHeights(); });
     });
-    layout.run();
 
     // Live re-theme (§5.3): no page element calls updateTheme() — a theme swap reaches
     // the page as an htmx OOB replacement of #theme-link (partials/theme-swap.html).
@@ -454,7 +531,99 @@
       }
     }
 
+    // 082 §A: the stage's width decides the card box (the container query), so a
+    // resize that crosses its threshold has to reach the Cytoscape side too.
+    // ResizeObserver watches the STAGE, which is the box the query measures — a
+    // window resize listener would miss the rail collapsing, which changes the stage
+    // and not the window. refreshCardMetrics is a no-op unless the box really moved.
+    if (typeof ResizeObserver !== "undefined" && typeof document !== "undefined") {
+      var stage = container && container.closest ? container.closest(".pe-stage") : null;
+      if (stage) {
+        self._stageWatch = new ResizeObserver(function () {
+          self.refreshCardMetrics();
+        });
+        self._stageWatch.observe(stage);
+      }
+    }
+
     this.loadDialects();
+  };
+
+  /** Teardown for the stage watcher (init.js teardown, before cy.destroy()). */
+  PipelineGraph.prototype.stopStageWatch = function () {
+    if (this._stageWatch) {
+      this._stageWatch.disconnect();
+      this._stageWatch = null;
+    }
+  };
+
+  /**
+   * One dagre pass and the three things that must follow it, in order. Factored out of
+   * render() by 082 addendum P1 because the card measurement can need a SECOND pass:
+   * dagre's rank separation is tuned to the card box, so a node that turns out taller
+   * than the floor has to be re-laid-out, not merely re-painted.
+   */
+  /**
+   * Run `fn` once the browser has laid the frame out. `layoutstop` fires while the
+   * html-label overlay may still be mid-write, and a card measured then can report 0.
+   * Under node --test there is no rAF and the call is synchronous, which is what the
+   * pure tests want.
+   */
+  function afterPaint(fn) {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(fn);
+    else fn();
+  }
+
+  PipelineGraph.prototype.runLayout = function (onStop) {
+    var self = this;
+    if (!self.cy) return;
+    var layout = self.cy.elements().layout(layoutOptions());
+    layout.one("layoutstop", function () {
+      self.applyEdgeCurves();
+      self.fitToView();
+      self.renderMinimap();
+      if (onStop) onStop();
+    });
+    layout.run();
+  };
+
+  /**
+   * 082 addendum P1 — the painted box is the CARD, not an assumption about it.
+   *
+   * `--pe-card-h` was a fixed height, and a card with three fact lines overflowed it:
+   * the footer painted below the node's own border. The card is `min-height` now, so
+   * its rendered height is whatever its content needs — and Cytoscape has to be told,
+   * or the chrome it paints is the wrong size and the ports (which sit at the node
+   * box's vertical centre) stop meeting the card's own port dots.
+   *
+   * `offsetHeight` is deliberate: the html-label container carries the canvas's
+   * pan/zoom TRANSFORM, so `getBoundingClientRect()` returns a scaled number and would
+   * feed the zoom back into the model. `offsetHeight` is layout, before transforms.
+   *
+   * Returns whether a re-layout was started. Bounded at two passes: the second one
+   * re-measures the same content and finds nothing to change, and a pathological
+   * oscillation stops rather than spinning.
+   */
+  PipelineGraph.prototype.syncCardHeights = function () {
+    var self = this;
+    if (!self.cy || typeof document === "undefined") return false;
+    var changed = 0;
+    self.cy.nodes().forEach(function (n) {
+      self.cardElement(n.id(), function (el) {
+        var h = Math.ceil(el.offsetHeight);
+        if (h > 0 && h !== n.data("cardH")) {
+          n.data("cardH", h);
+          changed++;
+        }
+      });
+    });
+    if (!changed) return false;
+    self._heightPasses = (self._heightPasses || 0) + 1;
+    if (self._heightPasses > 2) return false;
+    self.runLayout(function () {
+      afterPaint(function () { self.syncCardHeights(); });
+    });
+    return true;
   };
 
   /** The live HTML card element for a node id (the html-label overlay's output). */
@@ -630,8 +799,11 @@
       ys.push(n.position().y);
     });
     if (!xs.length) return;
+    // 082 addendum P1: each node carries its OWN height now, so the extent uses the
+    // tallest card rather than one assumed box.
     var halfW = self.tokens.cardW / 2;
-    var halfH = self.tokens.cardH / 2;
+    var nodeH = function (n) { return n.data("cardH") || self.tokens.cardH; };
+    var halfH = Math.max.apply(null, self.cy.nodes().map(function (n) { return nodeH(n) / 2; }));
     var minX = Math.min.apply(null, xs) - halfW;
     var maxX = Math.max.apply(null, xs) + halfW;
     var minY = Math.min.apply(null, ys) - halfH;
@@ -644,9 +816,9 @@
       bar.className = "pe-mm-node" + (n.data("state") && n.data("state") !== "idle" ? " pe-mm-" + n.data("state") : "");
       bar.setAttribute("data-id", n.id());
       bar.style.left = (self._mm.pad + (n.position().x - halfW - minX) * scale) + "px";
-      bar.style.top = (self._mm.pad + (n.position().y - halfH - minY) * scale) + "px";
+      bar.style.top = (self._mm.pad + (n.position().y - nodeH(n) / 2 - minY) * scale) + "px";
       bar.style.width = Math.max(8, self.tokens.cardW * scale) + "px";
-      bar.style.height = Math.max(5, self.tokens.cardH * scale) + "px";
+      bar.style.height = Math.max(5, nodeH(n) * scale) + "px";
       el.appendChild(bar);
     });
 
@@ -975,10 +1147,43 @@
   };
 
   PipelineGraph.prototype.updateTheme = function () {
-    this.tokens = readDesignTokens();
-    if (this.cy) {
-      this.cy.style(buildStylesheet(this.tokens));
-    }
+    var self = this;
+    self.tokens = readDesignTokens(self.containerId);
+    if (!self.cy) return;
+    self.cy.style(buildStylesheet(self.tokens));
+    // A theme can move a metric (a font stack that failed to load, a different border
+    // width), and the measured heights would then be stale. Re-measuring is a no-op
+    // unless a card really moved (082 addendum P1).
+    self._heightPasses = 0;
+    afterPaint(function () { self.syncCardHeights(); });
+  };
+
+  /**
+   * 082 §A — the wide-stage step-up crossed while the page is open.
+   *
+   * The card box is read ONCE per graph, so a window resized across the container
+   * query's threshold would grow the HTML card while the Cytoscape node it sits on
+   * kept the old box: cards overlapping their own edges until a reload. This re-reads
+   * the geometry and, only when it actually changed, re-applies the stylesheet and
+   * re-runs the layout — dagre's separation is tuned to the card width, so a new box
+   * needs new positions, not just a new size.
+   *
+   * Returns whether it did anything, so a caller (and a test) can tell.
+   */
+  PipelineGraph.prototype.refreshCardMetrics = function () {
+    var self = this;
+    if (!self.cy) return false;
+    var next = readDesignTokens(self.containerId);
+    if (next.cardW === self.tokens.cardW && next.cardH === self.tokens.cardH) return false;
+    self.tokens = next;
+    self.cy.style(buildStylesheet(next));
+    // The floor moved, so the measured heights are stale: re-measure after the pass
+    // (082 addendum P1) exactly as the first render does.
+    self._heightPasses = 0;
+    self.runLayout(function () {
+      afterPaint(function () { self.syncCardHeights(); });
+    });
+    return true;
   };
 
   var api = {

@@ -18,6 +18,14 @@
      mock's three-fact card. */
   --pe-card-w: 236px;
   --pe-card-h: 148px;
+  /* The card's type scale, tokenised for the same reason the box is (082 §A): a wide
+     stage steps the WHOLE card up one notch, and a step that had to be repeated in six
+     rules would drift on the first edit. Values are 080's literals verbatim. */
+  --pe-card-fs: 13px;
+  --pe-card-fs-id: 13.5px;
+  --pe-card-fs-kind: 11px;
+  --pe-card-fs-fact: 12px;
+  --pe-card-fs-sm: 11.5px;
   /* The dock: the mock's 38px tab strip over a 232px pane. */
   --pe-dock-tabs-h: 38px;
   --pe-dock-pane-h: 232px;
@@ -332,6 +340,13 @@
 .pe-stage {
   position: relative;
   overflow: hidden;
+  /* 082 §A: the stage is the query container for the card's wide step-up. The STAGE,
+     not the viewport — the same 2560px window shows a wider or narrower stage
+     depending on the rail and the settings sidebar, and it is the stage the cards are
+     small in. `.pe-stage` is already `position: relative`, so the inline-size
+     containment this adds changes no descendant's containing block. */
+  container-type: inline-size;
+  container-name: pe-stage;
   display: flex;
   flex-direction: column;
   /* The dotted grid: radial-gradient on --grid-dot at 22px, drawn on the stage so it
@@ -352,6 +367,32 @@
      (absolute, z-index 10, pointer-events none) — it must position against the
      canvas's own box, not whichever ancestor happens to be positioned. */
   position: relative;
+}
+
+/* 082 §A — the card steps up one notch on a wide stage.
+ *
+ * The complaint was "at 2560 the cards read small". Fit CANNOT answer it: the owner's
+ * ruling caps fit at 1.0 and forbids zooming IN (graph.js FIT_MAX_ZOOM), so a wide
+ * window can only ever show the same card with more empty canvas around it. The card
+ * is therefore the thing that scales.
+ *
+ * The declarations land on #cy-canvas, not on .pe-stage: a container cannot be styled
+ * by its OWN container query, and the canvas is the one ancestor every card shares —
+ * which is also where graph.js reads the geometry back, so the Cytoscape node box and
+ * the HTML overlay step together (readDesignTokens). One threshold, measured: a
+ * 1440x900 window's stage is ~880px and a 1920x1080 one's ~1360px with the rail
+ * expanded, so 1200px separates them with room on both sides for the rail's collapse.
+ */
+@container pe-stage (min-width: 1200px) {
+  #cy-canvas {
+    --pe-card-w: 272px;
+    --pe-card-h: 170px;
+    --pe-card-fs: 14px;
+    --pe-card-fs-id: 14.5px;
+    --pe-card-fs-kind: 12px;
+    --pe-card-fs-fact: 13px;
+    --pe-card-fs-sm: 12.5px;
+  }
 }
 
 /* Keyboard hint, top-left pill. */
@@ -519,12 +560,19 @@
   position: relative;
   box-sizing: border-box;
   width: var(--pe-card-w);
-  height: var(--pe-card-h);
+  /* 082 addendum P1: the card sizes to its CONTENT, with the mock's box as a FLOOR.
+     `height` was fixed at --pe-card-h, so a three-fact card overflowed it and the
+     footer painted below the card's own border (owner's screenshot). A PIPELINE node
+     with three parameter lines, a long template path that wraps, or a bigger type
+     scale on a wide stage all cross the same edge. graph.js measures the rendered
+     height per node and hands it to Cytoscape (syncCardHeights), so the painted box
+     is the card, not an assumption about it. */
+  min-height: var(--pe-card-h);
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-lg, 12px);
   color: var(--text-primary, #0f172a);
-  font-size: 13px;
+  font-size: var(--pe-card-fs, 13px);
   line-height: 1.45;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
@@ -566,7 +614,7 @@
 
 .pe-card-id {
   font-weight: var(--weight-semibold, 600);
-  font-size: 13.5px;
+  font-size: var(--pe-card-fs-id, 13.5px);
   letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
@@ -574,7 +622,7 @@
 }
 
 .pe-card-kind {
-  font-size: 11px;
+  font-size: var(--pe-card-fs-kind, 11px);
   font-weight: var(--weight-semibold, 600);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -591,7 +639,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--pe-card-fs-fact, 12px);
   color: var(--text-secondary, #334155);
   white-space: nowrap;
   overflow: hidden;
@@ -613,7 +661,7 @@
 
 .pe-card-mono {
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: var(--pe-card-fs-sm, 11.5px);
   color: var(--text-secondary, #334155);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -628,7 +676,7 @@
   border-top: 1px solid var(--border-faint, #e6e9ee);
   border-radius: 0 0 var(--radius-lg, 12px) var(--radius-lg, 12px);
   background: var(--surface-default, #fff);
-  font-size: 11.5px;
+  font-size: var(--pe-card-fs-sm, 11.5px);
   color: var(--text-muted, #64748b);
   font-variant-numeric: tabular-nums;
 }

@@ -263,6 +263,7 @@
           self.resultPanel.ttlInterval = null;
         }
         self.stopRunClock("idle");
+        if (self.graph && self.graph.stopStageWatch) self.graph.stopStageWatch();
         if (self.cy) {
           self.cy.destroy();
           self.cy = null;
