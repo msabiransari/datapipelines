@@ -31,6 +31,24 @@ import java.util.Base64
  * The flow is driven with a cookie-carrying HTTP client that follows redirects
  * manually — exactly what a browser does: kick off `/oauth2/authorization/keycloak`,
  * authenticate at Keycloak, come back on the callback, receive `dp_session`.
+ *
+ * ## Why the network hop is real, and what that costs the test's clock (083 §C)
+ *
+ * auth.md §5 makes the *real* provider normative: real issuer discovery, the real
+ * authorization-code exchange, the real JWKS fetch. Every one of those is an HTTP round
+ * trip from this JVM to a container and back, and the callback hop is three of them behind
+ * one request. Spring Security's token-exchange and JWK clients are the shipped defaults,
+ * which carry **no** timeouts of their own — so the only clock on the flow is this test's
+ * own [HttpRequest.timeout], and when it fires the failure is an `HttpTimeoutException`
+ * from the driver rather than any statement about the product.
+ *
+ * That is exactly what happened: at a 30 s per-request budget the suite failed
+ * intermittently during loaded full gates while passing in isolation every time. The
+ * budget is now [REQUEST_TIMEOUT], deliberately generous — **the waits are generous, the
+ * assertions are exact**. A slow box must make this test slower, never red; a broken login
+ * flow is caught by the assertions on the status codes, the cookie, the claims, the user
+ * row and the audit events, none of which a longer wait can paper over. If the flow ever
+ * genuinely hangs, [followUntilSession]'s trail names the hop it died on.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
@@ -46,7 +64,7 @@ class OidcLoginIntegrationTest {
         HttpClient
             .newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
-            .connectTimeout(Duration.ofSeconds(20))
+            .connectTimeout(CONNECT_TIMEOUT)
             .build()
 
     @Test
@@ -135,7 +153,7 @@ class OidcLoginIntegrationTest {
         url: String,
         body: String? = null,
     ): HttpResponse<String> {
-        val builder = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
+        val builder = HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT)
         if (jar.isNotEmpty()) builder.header("Cookie", jar.entries.joinToString("; ") { "${it.key}=${it.value}" })
         when (method) {
             "POST" -> {
@@ -172,6 +190,22 @@ class OidcLoginIntegrationTest {
     }
 
     private companion object {
+        /**
+         * How long ONE hop of the flow may take before the driver gives up (083 §C).
+         *
+         * A ceiling, not a budget: nothing here is asserting that login is fast. The callback
+         * hop makes three real HTTP round trips to a Keycloak container behind a single request
+         * of ours, on a box that may be running several other suites' containers at the same
+         * time, and the previous 30 s ceiling turned that contention into `HttpTimeoutException`
+         * during loaded gates. Two minutes is far past anything a working flow reaches and far
+         * short of letting a genuinely hung flow stall a gate — `MAX_HOPS` bounds the chain, so
+         * the worst case is bounded too.
+         */
+        val REQUEST_TIMEOUT: Duration = Duration.ofMinutes(2)
+
+        /** Connecting is to loopback and to a mapped container port; slow here means down. */
+        val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(20)
+
         const val MAX_HOPS = 10
         const val KEYCLOAK_PORT = 8080
         const val SECRET_BYTES = 32
