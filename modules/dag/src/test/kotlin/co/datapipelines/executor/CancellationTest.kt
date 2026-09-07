@@ -127,6 +127,45 @@ class CancellationTest {
         }
 
     /**
+     * 086 A1, the corollary: a **cancellation** caught inside a registered statement is passed
+     * through, not converted.
+     *
+     * `withStatement`'s catch converts a driver error raised BY a cancel into an abort and carries
+     * the original as a suppressed exception, so §7.2 can still record what the node hit (F8) —
+     * `PipelineExecutor.recordSuppressedFailure` reads exactly that field and maps it through
+     * `ErrorCodeMapper`, whose fallback row is a real code. That is right for an `SQLException`
+     * and wrong for a cancellation: a node the latch refused before the driver was ever entered
+     * would report `pipeline.node.query_execution_failed` in the abort snapshot, against §8.3's
+     * "cancellation carries no error code at all". An operator reading `ABORTED` with a
+     * fabricated cause goes looking for a query failure that never happened.
+     *
+     * The latch made this reachable on the common path — before 086 it needed a cancellation
+     * observed during the caller drain — so it is pinned here rather than left to inference.
+     * Nothing suppressed is the whole assertion; delete the passthrough and it is one.
+     */
+    @Test
+    fun `a cancellation caught inside a registered statement carries no suppressed cause`() =
+        runBlocking<Unit> {
+            val registry = InMemoryCancellationRegistry()
+            val executionId = UUID.randomUUID()
+            val handle = registry.register(executionId)
+            val statement = RecordingStatement()
+
+            val thrown =
+                shouldThrow<ExecutionAbortedException> {
+                    handle.withStatement("n", statement) {
+                        registry.cancel(executionId, AbortReason.CANCELLED)
+                        // What the latch raises, and what a suspend hop raises once the root job
+                        // is cancelled — the two ways a cancellation reaches that catch.
+                        throw ExecutionAbortedException(AbortReason.CANCELLED)
+                    }
+                }
+
+            thrown.suppressed.size shouldBe 0
+            thrown.reason shouldBe AbortReason.CANCELLED
+        }
+
+    /**
      * 086 A1, the second half: the **re-issue** covers the window the latch cannot see.
      *
      * The latch is read on the executing thread, so it closes everything up to the driver call.

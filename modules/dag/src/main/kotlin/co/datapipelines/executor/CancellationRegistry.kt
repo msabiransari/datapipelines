@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -207,6 +208,16 @@ class InMemoryCancellationRegistry : CancellationRegistry {
             }
             try {
                 return body()
+            } catch (e: CancellationException) {
+                // Already the right shape — passed through untouched, and BEFORE the conversion
+                // below. Wrapping it would attach it as the *suppressed cause* of a second
+                // `ExecutionAbortedException`, and `PipelineExecutor.recordSuppressedFailure`
+                // reads exactly that field to answer "what did this node hit before the abort?".
+                // It would then map a cancellation through `ErrorCodeMapper`, whose fallback row
+                // is a real code — so a node the cancel latch refused cleanly would report
+                // `query_execution_failed` in the abort snapshot, against §8.3's "cancellation
+                // carries no error code at all". Only a DRIVER error needs converting.
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
