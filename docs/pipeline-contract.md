@@ -741,7 +741,11 @@ refused with `template.validation.parameter_interpolated` (§13.9, HTTP 400) —
 parameters are values and bind as `:name` (Templates §4.5); the message names both forms. The
 scan is AST-based (Templates §4.2 reasoning), honours macro-parameter and loop-variable
 shadowing, and no spelling hides a live interpolation from it (pinned against Freemarker
-2.3.34).
+2.3.34). The declared set is the pipeline's `parameters` block **including every calculator
+output key** (078 A1): a CALCULATOR node's `context_key` joins the set typed by its kind's
+output type, and is refused in one more position a plain parameter is not — a conditional's
+test (`<#if x??>`, `<#elseif x>`) — because a derived value gating SQL structure is the same
+hole as an interpolated one, one directive earlier.
 
 ### 12.7 Parameter validations
 
@@ -932,7 +936,7 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.import_cycle` | 400 | Import graph contains a cycle |
 | `template.validation.import_depth_exceeded` | 400 | Transitive import depth > 10 |
 | `template.validation.duplicate_alias` | 400 | Two `imports` entries share an alias |
-| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The message names the parameter and shows the `:name` form |
+| `template.validation.parameter_interpolated` | 400 | A declared pipeline parameter name appears inside a `${}` interpolation: declared parameters are values and must be referenced as `:name`, bound as SQL parameters (042; Templates §7.2). The declared set includes every calculator output key (078 A1), which is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) too. The message names the parameter and shows the `:name` form |
 | `template.validation.duplicate_name` | 409 | Template name already exists in this workspace — `UNIQUE(workspace_id, name)`, soft-deleted included (the `pipeline.validation.duplicate_name` shape, for templates; added 2026-08-28, T23) |
 | `template.not_found` | 404 | Template id (or id+version) unknown — or soft-deleted on a read/mutate path (added 2026-08-11, gate C) |
 | `template.in_use` | 409 | Template delete refused while any pipeline version pins any version of the template (040: the any-version reverse scan; `details.referencing_pipelines` names who blocks, `details.references` carries pipeline/node/pipeline-version/pinned-version rows). Deleting is otherwise soft and existing pins keep resolving — the refusal makes "who still uses this?" unmissable, it does not change delete semantics |
@@ -1269,6 +1273,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-06 | v1.10 | 078 contract gaps | §12.6's interpolation refusal set gains every calculator output key (a CALCULATOR node's `context_key`, typed by its kind's output type): `${calc_key}` now fails save with `template.validation.parameter_interpolated` instead of the dry render's wrong code, the `${calc_key!}` shape no longer slips past the scan, and a calculator key is refused in a conditional's test (`<#if x??>`, `<#elseif x>`) as well — a derived value gating SQL structure is the same hole. Additive per §15.2. |
 | 2026-09-02 | v1.9 | 040 template used-by | §13.9 gains `template.in_use` (409) — template delete refused while any pipeline version pins any version of the template; the refusal carries the reverse scan's rows (pipeline, node, pipeline version, pinned version). Additive per §15.2. |
 | 2026-09-02 | v1.8 | 046 typed templates | §12.6 gains `pipeline.validation.template_type_mismatch` — a DQL/DML/DDL node referencing a `type='html'` template is refused at pipeline save (template-hierarchy-design §7). §13.9 gains `template.validation.type_invalid` (unknown `type` wire value), `template.validation.dialect_not_allowed` (a `dialect` present on an `html` template) and `template.validation.type_immutable` (a payload attempting to change a template's type). Additive per §15.2. |
 | 2026-09-01 | v1.7 | 037 agent data visibility | §13.4 gains `pipeline.node.not_found` (404) and `pipeline.node.standalone_execution_refused` (400) — the refusals of the `pipelines_execute_node` node-run debug query (MCP §6.2.20): an unknown node id, a `tempdb` source (staging exists only inside a full execution), or a PIPELINE node (it runs a child pipeline, not SQL). Node runs are agent debug queries, not executions — no history rows, no SSE, no idempotency (ratified, 037 §A). Additive per §15.2. |

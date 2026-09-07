@@ -5,6 +5,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -400,4 +401,75 @@ class CalculatorRulesTest {
         val extended = OrgContext.ofValues(OrgContext.DEFAULTS.values + ("org_region" to "EU"))
         validate(body, orgContext = extended).failures.shouldBeEmpty()
     }
+
+    // ---- 078 A1: a calculator output key is in §12.6's declared set ----
+
+    @Test
+    fun `a template interpolating a calculator output key is refused exactly like a declared parameter`() {
+        // Before A1 the declared set was org + platform + parameters, so the scan never saw a
+        // calculator key: the bare shape failed with the WRONG code (template_render_failed) and
+        // the `${x!}` shape passed save and interpolated a derived value at run.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(),
+                            Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                        ),
+                ),
+                templates = StubTemplates(interpolated = mapOf(SQL_TEMPLATE to setOf("run_fiscal_quarter"))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+        val failure = result.withCode(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED).single()
+        failure.details["parameter"] shouldBe "run_fiscal_quarter"
+        failure.details["bind_form"] shouldBe ":run_fiscal_quarter"
+        failure.message shouldContain "\${run_fiscal_quarter}"
+        failure.message shouldContain ":run_fiscal_quarter"
+    }
+
+    @Test
+    fun `a calculator output key gating a template conditional is refused at save`() {
+        // `<#if run_fiscal_quarter??>` writes no value, but it gates SQL STRUCTURE on a derived
+        // value — the interpolation hole one directive earlier. A declared parameter in the
+        // same position stays legal (042 B1); the calculator key is refused with the same code.
+        val result =
+            validate(
+                Fixtures.pipeline(
+                    nodes =
+                        listOf(
+                            Fixtures.calculatorNode(),
+                            Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                        ),
+                ),
+                templates = StubTemplates(conditioned = mapOf(SQL_TEMPLATE to setOf("run_fiscal_quarter"))),
+            )
+
+        result.codes shouldContainExactlyInAnyOrder listOf(PipelineErrorCodes.Template.PARAMETER_INTERPOLATED)
+    }
+
+    @Test
+    fun `the dry render's context carries every calculator output key typed by the kind's output`() {
+        // fiscal_quarter's output is INTEGER, so the sample is 1 — the same table §7.4's
+        // parameter samples come from. This is the line A1's falsification reverts: without it
+        // the key never reaches the declared set and the two refusals above go silent.
+        val templates = StubTemplates()
+        validate(
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        Fixtures.calculatorNode(),
+                        Fixtures.node("report", dependsOn = listOf("fiscal_q")),
+                    ),
+            ),
+            templates = templates,
+        )
+
+        templates.renderedContexts.getValue(SQL_TEMPLATE)["run_fiscal_quarter"] shouldBe 1
+    }
+
+    // `:run_fiscal_quarter` as a bind stays valid — pinned by the suite's first test
+    // ("a well-formed calculator feeding a SQL node that depends on it is valid"), which stubs
+    // exactly that bind and expects a clean save. The A1 set tightens `${}` and `<#if>` only.
 }

@@ -84,6 +84,12 @@ internal object FreemarkerAst {
     /** `<#list … as x>` — the loop node that binds a loop variable (042 B2 scope tracking). */
     const val ITERATOR_BLOCK = "freemarker.core.IteratorBlock"
 
+    /** `<#if …>…</#if>` — the whole conditional chain; its branches are [CONDITIONAL_BLOCK] children. */
+    const val IF_BLOCK = "freemarker.core.IfBlock"
+
+    /** One `<#if …>` / `<#elseif …>` / `<#else>` branch; its description prints the branch's condition. */
+    const val CONDITIONAL_BLOCK = "freemarker.core.ConditionalBlock"
+
     /** [element]'s own class name — the node-identity check every caller uses. */
     fun typeOf(element: TemplateElement): String = element.javaClass.name
 

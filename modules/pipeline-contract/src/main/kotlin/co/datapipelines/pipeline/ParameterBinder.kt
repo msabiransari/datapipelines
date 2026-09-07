@@ -110,10 +110,13 @@ class ParameterBinder(
             details = mapOf("parameter" to name.truncateForError()),
         )
 
-    private companion object {
+    internal companion object {
         /**
          * One representative value per canonical type. Fixed, never random: a dry render that
          * passes on Tuesday and fails on Wednesday is worse than one that never ran.
+         *
+         * Internal, not private: §12.6's declared set includes CALCULATOR output keys (078 A1),
+         * and those sample by the kind's output type through this same table.
          */
         fun sampleValue(type: LogicalType): Any =
             when (type) {
