@@ -16,6 +16,11 @@ import org.junit.jupiter.api.Test
  * no template, and its Details pane content is entirely client-side.
  */
 class PipelineEditorDetailsBrowserTest : BrowserSuite() {
+    private companion object {
+        /** What Cytoscape says when it cannot parse a style value it was handed. */
+        val CYTOSCAPE_COMPLAINTS = listOf("style property", "color-mix", "wheelSensitivity", "is invalid")
+    }
+
     private fun loginReadyUser() {
         val user =
             seedLocalUser(
@@ -163,9 +168,9 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         val complaints = mutableListOf<String>()
         page.onConsoleMessage { message ->
             val text = message.text()
-            if (text.contains("style property") || text.contains("color-mix") ||
-                text.contains("wheelSensitivity") || text.contains("is invalid")
-            ) {
+            // Cytoscape's own complaints are WARNINGS, so an error-only filter reports a
+            // clean walk while the canvas is silently degraded.
+            if (CYTOSCAPE_COMPLAINTS.any { text.contains(it) }) {
                 complaints += "${message.type()}: $text"
             }
         }
@@ -209,21 +214,19 @@ class PipelineEditorDetailsBrowserTest : BrowserSuite() {
         // parseable colour, so the assertions above pass on the broken code. Comparing
         // three properties with distinctive defaults against the TOKENS the graph is
         // holding is what actually proves the sheet applied.
-        val applied =
-            page.evaluate(
-                """() => {
-                     const ed = window.__peInstance;
-                     const e = ed.cy.edges()[0], n = ed.cy.nodes()[0];
-                     const f = (v) => (Array.isArray(v) ? 'rgb(' + v.join(', ') + ')' : String(v));
-                     const norm = (s) => String(s).replace(/\s+/g, '');
-                     return [
-                       norm(f(e.style('line-color'))) === norm(ed.graph.tokens.edgeIdle),
-                       norm(f(n.style('background-color'))) === norm(ed.graph.tokens.nodeSurface),
-                       String(e.style('width')) === '2px',
-                     ].join(',');
-                   }""",
-            ).toString()
-        applied shouldBe "true,true,true"
+        val appliedProbe =
+            """() => {
+                 const ed = window.__peInstance;
+                 const e = ed.cy.edges()[0], n = ed.cy.nodes()[0];
+                 const f = (v) => (Array.isArray(v) ? 'rgb(' + v.join(', ') + ')' : String(v));
+                 const norm = (s) => String(s).replace(/\s+/g, '');
+                 return [
+                   norm(f(e.style('line-color'))) === norm(ed.graph.tokens.edgeIdle),
+                   norm(f(n.style('background-color'))) === norm(ed.graph.tokens.nodeSurface),
+                   String(e.style('width')) === '2px',
+                 ].join(',');
+               }"""
+        page.evaluate(appliedProbe).toString() shouldBe "true,true,true"
     }
 
     /**
