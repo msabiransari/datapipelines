@@ -8,6 +8,7 @@ import co.datapipelines.auth.WorkspaceContext
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -23,8 +24,9 @@ import java.util.UUID
 
 /**
  * The shared per-user limiter filter (rest-api §12): headers on every response, 429 with
- * `Retry-After` and `rate_limit.exceeded` when the budget is gone, and — the row mcp-server §13
- * explicitly leaves to this module — coverage of `/mcp` as well as `/api/v1`.
+ * `Retry-After` when the request is refused — `rate_limit.exceeded` when the budget is gone and
+ * `rate_limit.unavailable` when the limiter itself is down (083) — and, the row mcp-server §13
+ * explicitly leaves to this module, coverage of `/mcp` as well as `/api/v1`.
  */
 class RateLimitFilterTest {
     private val principal =
@@ -84,6 +86,46 @@ class RateLimitFilterTest {
         response.status shouldBe 429
         response.getHeader("Retry-After") shouldBe "42"
         response.contentAsString shouldContain "\"code\":\"rate_limit.exceeded\""
+        verify(exactly = 0) { chain.doFilter(any(), any()) }
+    }
+
+    @Test
+    fun `a limiter that could not decide is a 429 with the DISTINCT unavailable code`() {
+        authenticate()
+        val request = MockHttpServletRequest("GET", "/api/v1/executions")
+        val response = MockHttpServletResponse()
+        val chain = mockk<FilterChain>(relaxed = true)
+
+        val unavailable =
+            allowed(remaining = 0).copy(allowed = false, retryAfterSeconds = 1, reason = "DataAccessResourceFailureException")
+        filter(unavailable).doFilter(request, response, chain)
+
+        response.status shouldBe 429
+        response.getHeader("Retry-After") shouldBe "1"
+        // The whole point of the ruling: a client can tell "you are throttled" from "the limiter
+        // is down". Asserting the ABSENCE of the throttle code is what makes that testable.
+        response.contentAsString shouldContain "\"code\":\"rate_limit.unavailable\""
+        response.contentAsString shouldNotContain "rate_limit.exceeded"
+        // The fault's class name is log material, not response material (observability §9.2).
+        response.contentAsString shouldNotContain "DataAccessResourceFailureException"
+        // Fail CLOSED: the chain never runs.
+        verify(exactly = 0) { chain.doFilter(any(), any()) }
+    }
+
+    @Test
+    fun `the mcp surface returns the unavailable code in the same shape`() {
+        // mcp-server ships no limiter of its own (mcp-server §13), so an agent's view of a
+        // limiter outage is whatever THIS filter writes — it must be the same code, not a
+        // transport-level surprise.
+        authenticate()
+        val response = MockHttpServletResponse()
+        val chain = mockk<FilterChain>(relaxed = true)
+
+        filter(allowed(remaining = 0).copy(allowed = false, reason = "no reply"))
+            .doFilter(MockHttpServletRequest("POST", "/mcp"), response, chain)
+
+        response.status shouldBe 429
+        response.contentAsString shouldContain "\"code\":\"rate_limit.unavailable\""
         verify(exactly = 0) { chain.doFilter(any(), any()) }
     }
 

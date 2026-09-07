@@ -1246,6 +1246,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
 - HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
+- HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
 
 ---

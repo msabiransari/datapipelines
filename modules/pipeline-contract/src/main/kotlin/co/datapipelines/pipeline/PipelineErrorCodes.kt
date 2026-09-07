@@ -530,6 +530,18 @@ object PipelineErrorCodes {
     object Limits {
         /** Single code for every layer — REST, MCP, login (D5). */
         const val RATE_LIMIT_EXCEEDED = "rate_limit.exceeded"
+
+        /**
+         * §13.11 (083, owner ruling 2026-09-06) — the limiter itself could not decide, so the
+         * request is refused rather than admitted.
+         *
+         * Deliberately a DIFFERENT code from [RATE_LIMIT_EXCEEDED] at the same 429: a client that
+         * cannot tell "you are over your budget" from "the limiter is down" backs off identically
+         * to both, and only one of them is its own doing. The distinct code is what lets an agent
+         * retry an outage while honouring a real throttle, and what lets an operator alert on the
+         * second without drowning in the first.
+         */
+        const val RATE_LIMIT_UNAVAILABLE = "rate_limit.unavailable"
         const val IDEMPOTENCY_KEY_REUSED = "idempotency.key_reused_for_different_request"
     }
 

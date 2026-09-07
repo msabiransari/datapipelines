@@ -64,7 +64,7 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 | Level | When used |
 |---|---|
 | `ERROR` | Failures requiring operator attention (H2 cleanup failed, datasource pool exhausted, uncaught exception). |
-| `WARN` | Degraded operation (rate-limited request, retry attempted, type-mapping fallback to STRING). |
+| `WARN` | Degraded operation (rate-limited request, retry attempted, type-mapping fallback to STRING). The rate limiter's own unavailability is logged **once per outage per instance** — on the healthy → unavailable transition, with an `INFO` when Redis answers again — never once per refused request: at the full request rate that line is a second outage, in the log pipeline. Requests refused meanwhile answer `429 rate_limit.unavailable` ([REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). |
 | `INFO` | Noteworthy events (pipeline execution started/completed, datasource registered). |
 | `DEBUG` | Diagnostic detail (template rendered SQL, H2 table created). Disabled in production. |
 | `TRACE` | Very fine-grained (per-row processing). Disabled in production. |

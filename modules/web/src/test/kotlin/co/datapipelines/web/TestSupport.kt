@@ -131,6 +131,38 @@ object TestRedis {
         template.connectionFactory?.getConnection()?.use { it.serverCommands().flushAll() }
     }
 
+    /**
+     * A THROWAWAY container plus a template on it, for the one kind of test whose subject is
+     * Redis **going away** (083 §A: the limiter's fail-closed refusal).
+     *
+     * Deliberately NOT the shared container: stopping that one would take every other suite in
+     * this test JVM down with it, and a fixture that can break its neighbours is worse than the
+     * flake it was meant to remove. The caller stops it — [Disposable.close] is idempotent, so a
+     * test that already stopped it to provoke the outage can still close it in a `finally`.
+     */
+    fun disposable(): Disposable {
+        val container =
+            GenericContainer(DockerImageName.parse(IMAGE))
+                .withExposedPorts(PORT)
+                .also { it.start() }
+        val config = RedisStandaloneConfiguration(container.host, container.getMappedPort(PORT))
+        val factory = LettuceConnectionFactory(config).apply { afterPropertiesSet() }
+        return Disposable(container, StringRedisTemplate(factory).apply { afterPropertiesSet() })
+    }
+
+    /** A private Redis and the template on it; [close] stops the container. */
+    class Disposable(
+        private val container: GenericContainer<*>,
+        val template: StringRedisTemplate,
+    ) : AutoCloseable {
+        /** Stops the server under the template — what makes the next command a `DataAccessException`. */
+        fun stopServer() {
+            if (container.isRunning) container.stop()
+        }
+
+        override fun close() = stopServer()
+    }
+
     private const val IMAGE = "redis:7-alpine"
     private const val PORT = 6379
 }

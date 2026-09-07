@@ -356,7 +356,7 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `template.not_found`, `rate_limit.exceeded`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `template.not_found`, `rate_limit.exceeded`, `rate_limit.unavailable`). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -371,6 +371,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `template.*` (incl. `template.validation.*`) | Template CRUD, validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation-rules)) |
 | `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
 | `rate_limit.exceeded` | Rate limit hit (single code for all layers) | pipeline-contract §13.11 |
+| `rate_limit.unavailable` | The limiter could not decide; the request is refused (fail closed) | pipeline-contract §13.11 |
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 | `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
@@ -396,7 +397,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `404 Not Found` | Resource doesn't exist | `pipeline.execution.not_found`, `result.execution_not_found`, etc. |
 | `409 Conflict` | State conflict | `pipeline.import.version_conflict`, `result.execution_incomplete`, `idempotency.key_reused_for_different_request` |
 | `410 Gone` | Resource expired / terminally unavailable | `result.expired`, `result.execution_failed` |
-| `429 Too Many Requests` | Rate limited | `rate_limit.exceeded`, `pipeline.execution.concurrency_limit` |
+| `429 Too Many Requests` | Rate limited | `rate_limit.exceeded`, `rate_limit.unavailable`, `pipeline.execution.concurrency_limit` |
 | `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*`, `result.storage_unavailable` |
 | `502 Bad Gateway` | Upstream failure | `pipeline.node.datasource_connection_failed`, `pipeline.node.query_execution_failed` |
 | `503 Service Unavailable` | Service not ready | Readiness check failure |

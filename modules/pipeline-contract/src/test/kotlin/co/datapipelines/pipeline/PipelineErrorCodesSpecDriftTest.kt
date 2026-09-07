@@ -148,6 +148,7 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
+                PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
                 PipelineErrorCodes.Result.EXECUTION_FAILED,

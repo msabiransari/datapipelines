@@ -147,6 +147,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Result.EXPIRED to HttpStatus.GONE,
             PipelineErrorCodes.Result.FORMAT_UNSUPPORTED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
+            // 083 — the fail-closed refusal shares the 429 and differs only in the code, so a
+            // client back-off written against `rate_limit.*` needs no change to honour it.
+            PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
             // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
@@ -311,6 +314,8 @@ object ApiErrorCatalog {
                 "This result is too large to return. Write it back to a database instead and return a summary.",
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to
                 "You're sending requests faster than we allow. Wait a moment and try again.",
+            PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE to
+                "We couldn't check your request against our limits just now, so it wasn't run. Try again shortly.",
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to
                 "That idempotency key was already used with a different request. Use a new key.",
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,

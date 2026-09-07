@@ -132,6 +132,8 @@ Limits are **per user** (an API key inherits its owner's budget — minting more
 | `datapipelines.rate-limit.requests-per-second` | `100` | Per-user requests per second |
 | `datapipelines.rate-limit.requests-per-minute` | `1000` | Per-user requests per minute |
 
+There is deliberately **no fail-open key**. When the limiter's Redis is unreachable the limiter refuses the request (`429 rate_limit.unavailable`, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)); a per-deployment toggle would only ever be reached for at exactly the moment the refusal is the correct answer.
+
 ### 3.8 Idempotency
 
 | YAML path | Default | Description |
