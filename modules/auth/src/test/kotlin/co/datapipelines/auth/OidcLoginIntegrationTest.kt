@@ -245,9 +245,17 @@ class OidcLoginIntegrationTest {
                         .forHttp("/realms/datapipelines/.well-known/openid-configuration")
                         .forPort(KEYCLOAK_PORT)
                         .forStatusCode(200)
-                        // Generous: Keycloak's Quarkus augmentation is CPU-heavy and this
-                        // suite may run alongside other Testcontainers on a loaded machine.
-                        .withStartupTimeout(Duration.ofMinutes(10)),
+                        // Generous, and raised from 10 minutes in 083 §C because 10 was not
+                        // generous enough: this container's boot is set by the BOX, not by us
+                        // — Quarkus augmentation plus a realm import, CPU-heavy, while other
+                        // lanes' Testcontainers compete for the same cores. Measured on a
+                        // loaded box: ~11 minutes, which timed out here and turned a green
+                        // suite into `initializationError`. Twenty minutes is roughly twice
+                        // the worst boot observed. The cost of the ceiling being high is that
+                        // a genuinely broken container stalls a gate for 20 minutes; the cost
+                        // of it being low is a red gate every time the box is busy, which is
+                        // the failure this round exists to remove.
+                        .withStartupTimeout(Duration.ofMinutes(20)),
                 )
 
         init {
