@@ -377,14 +377,27 @@
   padding: 0 5px;
 }
 
-/* Legend chips, bottom-left: one per node type present, the type accent as the swatch. */
-.pe-legend {
+/* The stage's bottom-left stack (082 §B): the keyboard node picker sits ABOVE the
+   legend in one anchored column. Before this the two were separately anchored to the
+   same corner, so revealing the picker floated it over the legend — visible in 080's
+   dark Details shot. The column is pinned by its BOTTOM edge, so the legend does not
+   move when the picker opens; the picker grows upward into empty canvas. */
+.pe-stage-bl {
   position: absolute;
   left: var(--gap-md, 16px);
   bottom: var(--gap-md, 16px);
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-sm, 8px);
+  max-width: calc(100% - var(--gap-md, 16px) * 2);
   z-index: var(--z-dropdown, 100);
+}
+
+/* Legend chips, bottom-left: one per node type present, the type accent as the swatch. */
+.pe-legend {
+  display: flex;
+  gap: 6px;
 }
 
 .pe-legend-chip {
@@ -782,7 +795,10 @@
 
 .pe-node-list:focus,
 .pe-node-list:focus-within {
-  /* Undo the visually-hidden clip above. */
+  /* Undo the visually-hidden clip above. 082 §B: the revealed list takes its place in
+     the .pe-stage-bl column (static, not absolute) — that is what puts it ABOVE the
+     legend instead of on top of it. While clipped it stays absolute, so it occupies
+     no space in the column and the legend sits where it always did. */
   display: block;
   width: auto;
   height: auto;
@@ -790,9 +806,7 @@
   overflow-y: auto;
   clip: auto;
   white-space: normal;
-  position: absolute;
-  bottom: var(--pe-gap);
-  left: var(--pe-gap);
+  position: static;
   max-height: 200px;
   background: var(--surface-overlay, #fff);
   border: 1px solid var(--border-default, #8e94a1);

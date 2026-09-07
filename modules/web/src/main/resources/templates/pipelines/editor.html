@@ -140,12 +140,6 @@
         <div class="pe-hint">Drag to pan · Scroll to zoom · <kbd>F</kbd> fit</div>
         <div id="cy-canvas" role="img" aria-label="Pipeline DAG visualization"></div>
 
-        <div class="pe-legend" aria-hidden="true">
-          <template x-for="chip in legendChips()" :key="chip.label">
-            <span class="pe-legend-chip"><i x-bind:style="'--type:var(' + chip.token + ')'"></i><span x-text="chip.label"></span></span>
-          </template>
-        </div>
-
         <div class="pe-minimap" id="pe-minimap" aria-hidden="true"></div>
 
         <!-- View controls (080 §A): fit (floor AND ceiling), reset, zoom in/out.
@@ -170,8 +164,22 @@
           </button>
         </div>
 
-        <!-- Accessible node list -->
-        <ul id="pe-node-list" role="listbox" class="pe-node-list" aria-label="Pipeline nodes" tabindex="0"></ul>
+        <!-- 082 §B — ONE bottom-left stack. The keyboard node picker and the legend were
+             two separately-anchored bottom-left boxes, so a revealed picker floated OVER
+             the legend (080's dark Details shot). Sharing an anchored column makes the
+             overlap structurally impossible: the picker stacks above the legend, and the
+             legend never moves because the column is pinned by its bottom edge. -->
+        <div class="pe-stage-bl">
+          <!-- Accessible node list. Visually clipped until focus reaches it — a POINTER
+               never brings it up (init.js selects with moveFocus=false). -->
+          <ul id="pe-node-list" role="listbox" class="pe-node-list" aria-label="Pipeline nodes" tabindex="0"></ul>
+
+          <div class="pe-legend" aria-hidden="true">
+            <template x-for="chip in legendChips()" :key="chip.label">
+              <span class="pe-legend-chip"><i x-bind:style="'--type:var(' + chip.token + ')'"></i><span x-text="chip.label"></span></span>
+            </template>
+          </div>
+        </div>
         <div id="pe-live-region" class="sr-only" aria-live="polite" role="status"></div>
       </section>
     </div>
