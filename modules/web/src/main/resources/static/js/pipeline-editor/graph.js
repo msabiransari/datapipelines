@@ -816,27 +816,59 @@
   /* ------------------------------------------------------- view controls (§B) */
 
   var FIT_PADDING = 48;
-  // 059 §B's floor ("three nodes should fill the pane, not sit in one corner") and
-  // 080 §A's ceiling ("default zoom too big"): fit may not zoom below the floor and
-  // never zooms IN past 1.0 — a one-node pipeline used to fit to 3x.
-  var FIT_MIN_ZOOM = 0.75;
+  // 080 §A's ceiling ("default zoom too big"): fit never zooms IN past 1.0 — a one-node
+  // pipeline used to fit to 3x. That ruling (and 085's) stands; the FLOOR that used to sit
+  // beside it does not.
+  //
+  // 098 §B — why there is no lower bound any more, measured rather than argued.
+  // `FIT_MIN_ZOOM = 0.75` was read as 059 §B's "three nodes should fill the pane, not sit in
+  // one corner". But a floor can only ever BIND when the natural fit zoom is BELOW it, which
+  // is exactly the case where the content is bigger than the canvas — so it never helped the
+  // three-node case (whose natural zoom is above 1 and is capped by the ceiling) and it broke
+  // every graph that needed to shrink. Measured on the demo stack, 2026-09-08,
+  // nyc/mobility/weather_sensitivity_by_borough at 1440x900 with the dock open, after Fit:
+  //
+  //     canvas box   y 136..604   (h 468, w 880)      cy.zoom() 0.75  ← the floor, exactly
+  //     content bb   638 x 828 model units            natural fit zoom (468-96)/828 = 0.449
+  //     card stage_daily_by_zone  y  61..178          75 px ABOVE the canvas, clipped
+  //     card stage_calendar       y 562..679          75 px BELOW  the canvas
+  //
+  // 828 * 0.75 = 621 in a 468-tall canvas is 153 px of overflow, centred: 76 each side. The
+  // clamp then called `cy.center()`, which is what made the overhang symmetric and looks so
+  // much like a padding bug that 093 filed it as one.
+  //
+  // It is NOT a padding bug, and the two addends the report proposed are both zero here:
+  //   - the HTML card overlay does NOT overhang the Cytoscape node box. 082 addendum P1's
+  //     `syncCardHeights` measures each card's `offsetHeight` and writes it onto the node, so
+  //     the same run reads node w/h = 236x156 and card w/h = 236x156 (177x117 rendered at
+  //     0.75). The node box IS the card;
+  //   - the canvas does not start under the top bar: `.pe-topbar` ends at y 136 and
+  //     `#cy-canvas` begins at y 136, measured in the same evaluate().
+  // So FIT_PADDING stays 48 rendered px on every side, and the fix is to let fit fit.
   var FIT_MAX_ZOOM = 1.0;
 
-  /** The clamp, pure so node --test owns both ends of it. */
-  function clampFitZoom(z) {
-    if (z < FIT_MIN_ZOOM) return FIT_MIN_ZOOM;
-    if (z > FIT_MAX_ZOOM) return FIT_MAX_ZOOM;
-    return z;
+  /**
+   * The zoom at which `content` (model units) fits inside `viewport` (rendered px) with
+   * [padding] rendered px on all four sides, never magnified past [FIT_MAX_ZOOM].
+   *
+   * Pure, and the whole of the decision — `fitToView` no longer asks Cytoscape for a zoom and
+   * then argues with it — so `node --test` owns the invariant directly: the returned z always
+   * satisfies `content * z + 2 * padding <= viewport` whenever the viewport has room for the
+   * padding at all. A viewport too small to hold its own padding, or an empty graph, has no
+   * meaningful fit; both answer FIT_MAX_ZOOM rather than 0 or Infinity.
+   */
+  function fitZoomFor(viewportW, viewportH, contentW, contentH, padding) {
+    var availW = viewportW - padding * 2;
+    var availH = viewportH - padding * 2;
+    if (!(availW > 0) || !(availH > 0) || !(contentW > 0) || !(contentH > 0)) return FIT_MAX_ZOOM;
+    return Math.min(FIT_MAX_ZOOM, availW / contentW, availH / contentH);
   }
 
   PipelineGraph.prototype.fitToView = function () {
     if (!this.cy) return;
-    this.cy.fit(undefined, FIT_PADDING);
-    var clamped = clampFitZoom(this.cy.zoom());
-    if (clamped !== this.cy.zoom()) {
-      this.cy.zoom(clamped);
-      this.cy.center();
-    }
+    var bb = this.cy.elements().boundingBox();
+    this.cy.zoom(fitZoomFor(this.cy.width(), this.cy.height(), bb.w, bb.h, FIT_PADDING));
+    this.cy.center();
   };
 
   PipelineGraph.prototype.resetView = function () {
@@ -1293,7 +1325,7 @@
     toLegacyRgb: toLegacyRgb,
     layoutOptions: layoutOptions,
     pulseEnabled: pulseEnabled,
-    clampFitZoom: clampFitZoom,
+    fitZoomFor: fitZoomFor,
     formatRunLine: formatRunLine,
     truncateLeft: truncateLeft,
     templateLine: templateLine,
@@ -1301,7 +1333,7 @@
     iconForType: iconForType,
     typeToken: typeToken,
     escapeHtml: escapeHtml,
-    FIT_MIN_ZOOM: FIT_MIN_ZOOM,
+    FIT_PADDING: FIT_PADDING,
     FIT_MAX_ZOOM: FIT_MAX_ZOOM,
   };
   // node --test requires this file directly (the 027b harness); the browser keeps
