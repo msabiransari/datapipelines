@@ -149,7 +149,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 28 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 31 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -193,6 +193,9 @@ Tools are named `{domain}_{action}`:
 - `endpoints_list`
 - `endpoints_get`
 - `endpoints_delete`
+- `lake_tables_register`
+- `lake_tables_import`
+- `lake_tables_unregister`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -1060,6 +1063,184 @@ One kind's full definition — the same entry `calculators_list` returns, for a 
 
 **Errors:** an unknown kind is `pipeline.validation.calculator_unknown` with `known_kinds` in the detail — deliberately the SAME code a rejected `pipelines_create` returns for a bad `kind`, so an agent sees one fact about the world rather than two unrelated failures.
 
+#### 6.2.29 `lake_tables_register`
+
+Register one table in a LAKE datasource's catalog — the dp-lake registry ([metadata-db §4.15](metadata-db.md#415-lake_tables), [Datasources §4.1](datasources.md)). A LAKE datasource's tables are exactly the registered rows: the engine cannot list a bucket, so this catalog is what introspection and query resolution read. Mirrors `POST /api/v1/datasources/{name}/tables` ([REST §9.8](rest-api.md#98-lake-tables-the-dp-lake-catalog)) — the SAME application service, so validation, the duplicate refusal and the pool invalidation are identical on both surfaces.
+
+```json
+{
+  "name": "lake_tables_register",
+  "description": "Register one table in a LAKE datasource's catalog (the dp-lake registry). Mirrors POST /api/v1/datasources/{name}/tables: namespace (array of segments or the dotted 'nyc.mobility' shorthand), table, format (parquet | iceberg) and location are required; partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or glob; iceberg: the table root holding metadata/) or a file:// path — no other scheme, and no quotes, backslashes, whitespace or control characters (it is interpolated into the engine's CREATE VIEW, so the refusal is total). Segments follow the pipeline/template segment grammar without dots. Registering an already-registered (namespace, table) is the 409 datasource.lake_table_duplicate; a non-LAKE datasource is refused. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "name",
+      "namespace",
+      "table",
+      "format",
+      "location"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Datasource name. A LAKE datasource visible in the key's pinned workspace."
+      },
+      "namespace": {
+        "description": "Namespace — a segments array or the dotted shorthand. 1-9 segments, the segment grammar without dots.",
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "table": {
+        "type": "string",
+        "description": "The table's name — one segment of the same grammar, e.g. hvfhv_zone_day."
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "parquet",
+          "iceberg"
+        ]
+      },
+      "location": {
+        "type": "string",
+        "description": "s3://bucket/prefix/ (parquet dir/glob; iceberg root) or file:// path. Nothing else; no injection chars."
+      },
+      "partition_column": {
+        "type": "string",
+        "description": "Optional. The hive-style partition column, e.g. pickup_date."
+      }
+    }
+  }
+}
+```
+
+**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
+
+**Mutating.** Declared `mutating` in the tool catalog: every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
+
+**Errors:** `datasource.not_found` (unknown or invisible datasource), `datasource.validation.lake_dialect_required` (not a LAKE datasource), `lake_namespace_invalid` / `lake_name_invalid` / `lake_format_invalid` / `lake_location_invalid` (the grammar and the injection refusal), `datasource.lake_table_duplicate` (409 — the triple is taken).
+
+**Response:** the stored row — `namespace`, `name`, `qualified_name`, `format`, `location`, `partition_column`, `registered_at`.
+
+#### 6.2.30 `lake_tables_import`
+
+Bulk-register from a `manifest.json` `tables[]` block (088's sample-data-lake shape), inline or by URL. Mirrors `POST /api/v1/datasources/{name}/tables/import`. A manifest URL is fetched **server-side, and only from the datasource's own bucket/endpoint** — derived from its declared `dialect.endpoint` / `catalog.ref`, or AWS S3 when neither is set; anything else is refused. There is no arbitrary URL fetch (SSRF).
+
+```json
+{
+  "name": "lake_tables_import",
+  "description": "Bulk-register lake tables from a manifest.json tables[] block (the sample-data-lake shape). Mirrors POST /api/v1/datasources/{name}/tables/import: pass EITHER tables (an array of {name, format, location|path, partition_column?, namespace?}, with publish_prefix for relative paths and an optional shared namespace) OR manifest_url. A manifest URL is fetched server-side ONLY from the datasource's own endpoint/bucket — derived from its declared dialect.endpoint / catalog.ref, or AWS S3 when neither is set; anything else is refused with datasource.validation.lake_manifest_url_forbidden (no arbitrary URL fetch — SSRF). Import is idempotent: already-registered tables are reported in already_registered, not errors. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "name"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Datasource name. A LAKE datasource visible in the key's pinned workspace."
+      },
+      "tables": {
+        "type": "array",
+        "description": "Inline form: manifest entries {name, format, location|path, partition_column?, namespace?}.",
+        "items": {
+          "type": "object"
+        }
+      },
+      "namespace": {
+        "description": "Shared namespace applied to entries that carry none — an array of segments or the dotted shorthand.",
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "publish_prefix": {
+        "type": "string",
+        "description": "Base URI resolving relative entry paths, e.g. s3://bucket/lake/v1."
+      },
+      "manifest_url": {
+        "type": "string",
+        "description": "URL of a manifest.json. Fetched ONLY from the datasource's own endpoint/bucket or AWS S3; else refused."
+      }
+    }
+  }
+}
+```
+
+**Scope:** `author`. **Mutating** — same audit pair as `lake_tables_register`.
+
+**Errors:** the register set, plus `datasource.validation.lake_manifest_url_forbidden` (a URL outside the datasource's own roots) and `pipeline.execution.datasource_unreachable` (502 — the manifest could not be fetched from the datasource's own storage).
+
+**Response:** `registered` (the stored rows), `registered_count`, `already_registered` (dotted qualified names skipped as already present — import is idempotent, so bootstrap can re-run it), `already_registered_count`.
+
+#### 6.2.31 `lake_tables_unregister`
+
+Unregister one table. The objects in the bucket are untouched — the table stops being served by the datasource. Mirrors `DELETE /api/v1/datasources/{name}/tables/{namespace}/{table}`.
+
+```json
+{
+  "name": "lake_tables_unregister",
+  "description": "Unregister one table from a LAKE datasource's catalog. Mirrors DELETE /api/v1/datasources/{name}/tables/{namespace}/{table}: the objects in the bucket are untouched — the table stops being served by the datasource. Unregistering a table that is not registered is the 404 datasource.lake_table_not_found, never a silent no-op. Mutating.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "name",
+      "namespace",
+      "table"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Datasource name. A LAKE datasource visible in the key's pinned workspace."
+      },
+      "namespace": {
+        "description": "The table's namespace, outermost first — an array of segments or the dotted shorthand ('nyc.mobility').",
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "table": {
+        "type": "string",
+        "description": "The table to unregister."
+      }
+    }
+  }
+}
+```
+
+**Scope:** `author`. **Mutating** — same audit pair as `lake_tables_register`.
+
+**Errors:** `datasource.not_found`, `datasource.validation.lake_dialect_required`, the grammar codes for a malformed `namespace`/`table`, and `datasource.lake_table_not_found` (404 — an absent triple, never a silent no-op).
+
+**Response:** `{datasource, table, deleted: true}` with `table` the dotted qualified name.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1168,7 +1349,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 28 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 31 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -1421,3 +1602,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-05 | v1.19 | published endpoints (074) | Tool surface 24 → **28**: `endpoints_create` / `endpoints_list` / `endpoints_get` / `endpoints_delete` (§6.2) — publish a released, side-effect-free pipeline as `GET /api/x/…` and bind endpoint-kind keys to it. `create`/`delete` are `author`, the reads `read` (auth.md §7.6). **An endpoint-kind key cannot reach `/mcp` at all** (refused at `McpAuthFilter`; `/mcp` is a servlet outside `ScopeInterceptor`'s reach — security pass). No `api_keys_create` tool: a credential must not transit an agent's transcript. |
 | 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |
 | 2026-09-07 | v1.21 | 087 connector seams | No new tools. §6.2.22 `datasources_create` gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) and drops `username`/`password` from `required` — either shape is accepted, both together are refused; the dialect enum gains `LAKE`; the result carries `credential.kind` and a derived `password_set`. §6.2.16 `datasources_get_schemas` returns `entries: [{namespace, label}]` beside the legacy `schemas` array — two catalogs' same-named schemas are two entries, which a list of bare labels could not express. §6.2.17/§6.2.18 gain a `namespace` array argument beside `schema` (which now also accepts the dotted form), and every table row carries `namespace` beside `schema`. |
+| 2026-09-07 | v1.20 | dp-lake registry (089 §A) | Tool surface 28 → **31**: `lake_tables_register` / `lake_tables_import` / `lake_tables_unregister` (§6.2.29–31) — the dp-lake catalog (metadata-db §4.15): register one table, bulk-import a manifest.json `tables[]` block (inline or fetched server-side from the datasource's OWN endpoint/bucket only — the SSRF boundary), unregister. All three are `author` (auth.md §7.6) and declared `mutating`. |

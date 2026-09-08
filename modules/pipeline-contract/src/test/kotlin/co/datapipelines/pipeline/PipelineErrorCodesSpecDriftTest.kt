@@ -145,6 +145,9 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Datasource.DRIVER_NOT_LOADED,
                 // 056 §E.2 — the datasource domain has no entity dimension, same shape as its siblings.
                 PipelineErrorCodes.Datasource.LEASE_IN_TRANSACTION,
+                // 089 §A — the dp-lake registry's duplicate/not-found, same two-segment shape.
+                PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE,
+                PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,

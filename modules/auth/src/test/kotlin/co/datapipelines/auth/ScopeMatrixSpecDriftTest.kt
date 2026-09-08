@@ -43,17 +43,22 @@ class ScopeMatrixSpecDriftTest {
             "Change own password" to ScopeMatrix.RestOperation.CHANGE_OWN_PASSWORD,
             "Serve a published endpoint" to ScopeMatrix.RestOperation.SERVE_PUBLISHED_ENDPOINT,
             "Manage published endpoints" to ScopeMatrix.RestOperation.MANAGE_ENDPOINTS,
+            // 089 §A — the dp-lake catalog writes sit on the datasource-mutation floor. Listed
+            // LAST, matching the row's position at the end of the §7.6 REST table.
+            "Register / import / unregister lake tables of a datasource (the dp-lake catalog)" to
+                ScopeMatrix.RestOperation.MUTATE_LAKE_TABLES,
         )
 
     @Test
     fun `every MCP tool minimum scope matches auth-md §7-6`() {
         val fromDoc = parseMcpTable(RepoFiles.read(RepoFiles.AUTH_SPEC_PATH))
 
-        // All 28 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
+        // All 31 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
         // data-visibility pair, 20 → 21 with 040's `templates_used_by`, 21 → 22 with 068's
         // `datasources_create`, 22 → 24 with 072's `calculators_list` / `calculators_get`,
-        // 24 → 28 with 074's four `endpoints_*` tools.
-        fromDoc.size shouldBe 28
+        // 24 → 28 with 074's four `endpoints_*` tools, 28 → 31 with 089's three
+        // `lake_tables_*` tools.
+        fromDoc.size shouldBe 31
         ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
     }
 

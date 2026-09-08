@@ -1,0 +1,118 @@
+package co.datapipelines.application.datasources
+
+import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.DatasourceProperties
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
+
+/**
+ * [LakeManifestUrl] — the SSRF boundary of the lake-table import (089 §A): a manifest URL is
+ * fetched server-side ONLY from the datasource's own endpoint/bucket. Every refusal below must
+ * be able to FAIL — a suite that passes while `https://169.254.169.254/` resolves is an open
+ * SSRF hole wearing a green badge.
+ */
+class LakeManifestUrlTest {
+    private fun lake(dialect: Map<String, Any?> = emptyMap()) =
+        Datasource(
+            name = "sample-lake",
+            displayName = "Sample lake",
+            dialect = Dialect.LAKE,
+            jdbcUrl = "jdbc:duckdb:",
+            properties = DatasourceProperties(dialect = dialect),
+        )
+
+    // ---------------------------------------------------------- accepted forms
+
+    @Test
+    fun `an endpoint-declared datasource accepts URLs under that endpoint, http and https`() {
+        val ds = lake(mapOf("catalog.kind" to "s3", "endpoint" to "minio.internal:9000"))
+        assertAll(
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "http://minio.internal:9000/lake/v1/manifest.json") shouldBe
+                    "http://minio.internal:9000/lake/v1/manifest.json"
+            },
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "https://minio.internal:9000/lake/v1/manifest.json") shouldBe
+                    "https://minio.internal:9000/lake/v1/manifest.json"
+            },
+            // s3:// translates to path-style against the endpoint.
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "s3://lake/v1/manifest.json") shouldBe
+                    "https://minio.internal:9000/lake/v1/manifest.json"
+            },
+        )
+    }
+
+    @Test
+    fun `a plain AWS datasource accepts only AWS S3 hosts over https, both styles`() {
+        val ds = lake(mapOf("catalog.kind" to "s3", "region" to "us-east-1"))
+        assertAll(
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "https://datapipelines-co.s3.amazonaws.com/sample-data/lake/v1/manifest.json") shouldBe
+                    "https://datapipelines-co.s3.amazonaws.com/sample-data/lake/v1/manifest.json"
+            },
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "https://datapipelines-co.s3.us-east-1.amazonaws.com/lake/v1/manifest.json") shouldBe
+                    "https://datapipelines-co.s3.us-east-1.amazonaws.com/lake/v1/manifest.json"
+            },
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "https://s3.us-east-1.amazonaws.com/datapipelines-co/lake/v1/manifest.json") shouldBe
+                    "https://s3.us-east-1.amazonaws.com/datapipelines-co/lake/v1/manifest.json"
+            },
+            // s3:// translates to virtual-hosted style, with the declared region.
+            {
+                LakeManifestUrl.resolveFetchUrl(ds, "s3://datapipelines-co/sample-data/lake/v1/manifest.json") shouldBe
+                    "https://datapipelines-co.s3.us-east-1.amazonaws.com/sample-data/lake/v1/manifest.json"
+            },
+        )
+    }
+
+    @Test
+    fun `a REST catalog ref is an allowed root of its own`() {
+        val ds = lake(mapOf("catalog.kind" to "rest", "catalog.ref" to "https://iceberg.internal:8181/catalog"))
+        LakeManifestUrl.resolveFetchUrl(ds, "https://iceberg.internal:8181/manifest.json") shouldBe
+            "https://iceberg.internal:8181/manifest.json"
+    }
+
+    // ---------------------------------------------------------- refusals — each one must throw
+
+    @Test
+    fun `anything outside the datasource's own roots is refused`() {
+        val withEndpoint = lake(mapOf("endpoint" to "minio.internal:9000"))
+        val plainAws = lake(mapOf("region" to "us-east-1"))
+        val noConfig = lake()
+
+        val cases =
+            listOf(
+                withEndpoint to "http://minio.internal:9001/x/manifest.json", // wrong port
+                withEndpoint to "https://other-host:9000/x/manifest.json", // wrong host
+                withEndpoint to "https://minio.internal.evil.test/x", // suffix lookalike
+                plainAws to "http://datapipelines-co.s3.amazonaws.com/x", // http downgrade
+                plainAws to "https://example.com/manifest.json", // arbitrary host
+                plainAws to "https://s3.amazonaws.com.evil.test/x", // suffix lookalike
+                plainAws to "https://169.254.169.254/latest/meta-data", // cloud metadata
+                plainAws to "http://localhost:8080/actuator/env", // loopback
+                plainAws to "http://10.0.0.4/internal", // private network
+                noConfig to "https://example.com/manifest.json", // no declared roots at all
+                noConfig to "file:///etc/passwd", // not a fetch scheme
+                plainAws to "ftp://datapipelines-co/x",
+                plainAws to "javascript:alert(1)",
+                plainAws to "not a url",
+                plainAws to "s3://bucket-only", // no object key
+                plainAws to "s3://bucket/x y", // whitespace
+                plainAws to "https://datapipelines-co.s3.amazonaws.com/x'OR'1'='1", // injection characters
+            )
+        cases.forEach { (ds, url) ->
+            withClue(url) {
+                shouldThrow<DatapipelinesException> { LakeManifestUrl.resolveFetchUrl(ds, url) }
+                    .code shouldBe PipelineErrorCodes.Datasource.LAKE_MANIFEST_URL_FORBIDDEN
+            }
+        }
+    }
+}

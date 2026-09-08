@@ -126,6 +126,11 @@ object ApiErrorCatalog {
             // caller sends can produce it — it means a service annotated @Transactional grew a
             // datasource lease, so it is a server fault, loudly, rather than a silent lock hold.
             PipelineErrorCodes.Datasource.LEASE_IN_TRANSACTION to HttpStatus.INTERNAL_SERVER_ERROR,
+            // 089 §A — the dp-lake registry's two non-validation codes: a re-registered triple
+            // is a conflict (the named UNIQUE's mapping, metadata-db §4.15) and unregistering an
+            // absent table is a not-found. The validation family covers the five 400s.
+            PipelineErrorCodes.Datasource.LAKE_TABLE_DUPLICATE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Datasource.LAKE_TABLE_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Template.NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.9 (040 D4) — the in-use delete refusal, against any template-family default:
             // it is a conflict with live references, not a validation failure.

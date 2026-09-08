@@ -51,5 +51,6 @@ fun realShippedTools(): List<McpTool> {
         launcher = launcher,
         datasourceCreateService = mockk<DatasourceCreateService>(),
         endpointPublishService = mockk<EndpointPublishService>(),
+        lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
     )
 }

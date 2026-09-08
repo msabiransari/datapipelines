@@ -106,6 +106,17 @@ object PipelineNameGrammar {
      */
     fun matches(name: String): Boolean = isValidPipelineName(name)
 
+    /**
+     * True when [segment] is exactly ONE legal §4.1 segment — `[a-z0-9][a-z0-9_.-]{0,63}`.
+     *
+     * Published for the dp-lake registry (089 §A): a lake table's namespace segments and name
+     * are individual segments of this same grammar (datasources.md §4.1's lake row, metadata-db
+     * §4.15), and a second copy of the production in another module is exactly the drift the
+     * spec-drift guards exist to prevent. Read from the validator's own [SINGLE_SEGMENT], so
+     * changing the grammar changes every consumer in one edit.
+     */
+    fun matchesSegment(segment: String): Boolean = SINGLE_SEGMENT.matches(segment)
+
     /** A human rendering of the rule, for a hint and for a refusal message. */
     const val DESCRIPTION: String =
         "A folder path: 2 to 10 lower-case segments separated by `/` — each segment starts with a letter or " +

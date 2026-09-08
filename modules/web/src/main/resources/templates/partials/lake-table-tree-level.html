@@ -1,0 +1,89 @@
+<!-- ONE level of a LAKE datasource's registered-tables tree (089 §A, metadata-db §4.15), the
+     058/067 explorer pattern narrowed to READ-ONLY: this fragment renders the direct
+     sub-folders and the direct table children of one namespace prefix, and expanding a folder
+     issues ONE more request for ONE more level — nothing ships the whole registry to the
+     browser and nothing assembles a tree in JS.
+
+     Namespace folders are virtual (the template-hierarchy §3.1 rule): a folder is a namespace
+     prefix with no identity, derived per request from the registered tables beneath it, so an
+     empty folder is unrepresentable rather than merely unrendered.
+
+     There is deliberately NO selection, no detail pane and no CRUD here: registration is
+     REST/MCP-only (R10). A leaf is a static row carrying its format and partition-column
+     badges — not a button — so template-explorer.js's keyboard selection simply finds nothing
+     to select, which is what read-only means mechanically.
+
+     The root level's id is the detail page's stable swap root #lake-table-tree; nested levels
+     get a derived id from LakeTableBrowseModel.levelId so a placeholder and the fragment that
+     replaces it cannot disagree. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="level"
+     th:id="${levelId}" class="tpl-level"
+     th:attr="role=${#strings.isEmpty(prefix)} ? null : 'group'">
+
+  <!-- The empty state belongs to the ROOT level only: a nested level always has at least one
+       child, because its folder was derived from that child. -->
+  <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(tables)}">
+    <div class="ds-empty">
+      <p class="ds-empty-title">No tables registered</p>
+      <p class="ds-empty-description">
+        Register tables through your agent (<code>lake_tables_register</code> /
+        <code>lake_tables_import</code>) or the REST <code>/tables</code> endpoints.
+      </p>
+    </div>
+  </th:block>
+
+  <ul class="tpl-tree"
+      th:unless="${#lists.isEmpty(folders) and #lists.isEmpty(tables)}"
+      th:attr="role=${#strings.isEmpty(prefix)} ? 'tree' : null,
+               aria-label=${#strings.isEmpty(prefix)} ? 'Registered lake tables' : null">
+
+    <!-- NAMESPACE FOLDERS. The count is the live registered tables in the subtree. Expansion
+         rides on the SUMMARY's own click, `once` — the template tree's measured rule: the
+         `toggle from:` alternative silently never fires for a swapped-in folder. -->
+    <li class="tpl-node" role="none" th:each="f : ${folders}">
+      <details class="tpl-folder">
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false"
+                 th:attr="hx-get=@{/partials/datasources/{name}/lake-tables(name=${datasource.name}, prefix=${f.path})}"
+                 hx-trigger="click once"
+                 hx-target="next .tpl-level" hx-swap="outerHTML">
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+          <span class="tpl-label" th:text="${f.segment}" th:title="${f.path}">nyc</span>
+          <span class="ds-badge ds-badge-default tpl-count" th:text="${f.tableCount}">4</span>
+        </summary>
+        <!-- Replaced whole by the child level, which carries this same derived id. -->
+        <div class="tpl-level tpl-level-pending" th:id="${f.levelId}">
+          <span class="ds-spinner htmx-indicator" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+
+    <!-- LEAVES — static rows, not buttons: a registered table has no action on this screen.
+         The full dotted name and the location ride on `title`, so the row stays narrow while
+         the address stays one hover away. -->
+    <li class="tpl-node" role="none" th:each="t : ${tables}">
+      <div class="tpl-leaf tpl-leaf-static" th:title="${t.qualifiedName + ' — ' + t.location}">
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#table"></use></svg>
+        <span class="tpl-label" th:text="${t.name}">hvfhv_zone_day</span>
+        <span class="ds-badge ds-badge-default" th:text="${t.format.wire}">parquet</span>
+        <span class="ds-badge ds-badge-default" th:if="${t.partitionColumn} != null"
+              th:text="${t.partitionColumn}">pickup_date</span>
+      </div>
+    </li>
+  </ul>
+
+  <!-- Honest overflow rather than a silent cut: sub-folders are a GROUP BY over one namespace
+       segment and are not paged. -->
+  <p class="tpl-overflow" th:if="${foldersTruncated}">
+    Only the first 200 sub-folders of this level are shown.
+  </p>
+
+  <!-- The level's own leaves page through the one shared pager, targeting this level's own
+       root; rendered only when it can DO something (the template tree's rule). -->
+  <th:block th:if="${!#lists.isEmpty(tables) and (offset > 0 or hasMore)}"
+            th:with="prevUrl=@{/partials/datasources/{name}/lake-tables(name=${datasource.name}, prefix=${prefix}, offset=${offset - 25})},
+                     nextUrl=@{/partials/datasources/{name}/lake-tables(name=${datasource.name}, prefix=${prefix}, offset=${offset + 25})}">
+    <div th:replace="~{partials/pager :: pager('#' + ${levelId}, ${prevUrl}, ${nextUrl}, ${offset}, ${hasMore}, ${tables.size()}, ${total})}"></div>
+  </th:block>
+</div>

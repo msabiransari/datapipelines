@@ -75,6 +75,11 @@ object McpToolCatalog {
             Entry("endpoints_list", mutating = false),
             Entry("endpoints_get", mutating = false),
             Entry("endpoints_delete", mutating = true),
+            // 089 §A — the dp-lake catalog. All three write the registry (and evict the pool
+            // beside it), so all three are the `mcp.tool.write` audit's business.
+            Entry("lake_tables_register", mutating = true),
+            Entry("lake_tables_import", mutating = true),
+            Entry("lake_tables_unregister", mutating = true),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

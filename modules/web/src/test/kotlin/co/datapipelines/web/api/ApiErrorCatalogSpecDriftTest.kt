@@ -119,8 +119,13 @@ class ApiErrorCatalogSpecDriftTest {
          * 129 → 130 with 083 (the limiter fails closed): §13.11 gains
          * `rate_limit.unavailable`, landed in the SAME commit as its constant and its 429
          * catalog row. Re-derived from the document's own parse.
+         *
+         * 130 → 138 with 089 §A (the dp-lake registry): §13.8 gains the eight lake-table codes
+         * (six `datasource.validation.lake_*` 400s, the 409 duplicate and the 404 not-found),
+         * landed in the SAME commit as their constants and catalog rows. Re-derived from the
+         * document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 130
+        const val SECTION_13_ROW_COUNT = 138
 
         /**
          * §12's distinct validation codes.
