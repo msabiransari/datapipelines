@@ -19,7 +19,7 @@
     "api_key": {
       "type": "string",
       "title": "API key",
-      "description": "A user-kind API key from Settings -> API keys, of the form dpk_<id>.<secret>. Ask for the LOWEST scope that covers your work: read to inspect, execute to run, author to create or change. No MCP tool needs admin.",
+      "description": "A user-kind API key from your deployment's /settings/api-keys page, of the form dpk_<id>.<secret>. Ask for the LOWEST scope that covers your work: read to inspect, execute to run, author to create or change. No MCP tool needs admin.",
       "sensitive": true,
       "required": true
     }

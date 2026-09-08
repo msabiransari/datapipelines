@@ -13,7 +13,7 @@ The install asks for two values:
 | Setting | What to enter |
 |---|---|
 | **Deployment URL** | The base URL of *your* deployment, no trailing slash — `https://dp.example.com`, or `http://localhost:8080` for a local `./app.sh --start`. This product is self-hosted; there is no default endpoint. |
-| **API key** | A `user`-kind key from **Settings → API keys**, shaped `dpk_<id>.<secret>`. Ask for the lowest scope that covers your work — `read` to inspect, `execute` to run, `author` to create or change. No MCP tool needs `admin`. |
+| **API key** | A `user`-kind key from your deployment's **`/settings/api-keys`** page, shaped `dpk_<id>.<secret>`. Ask for the lowest scope that covers your work — `read` to inspect, `execute` to run, `author` to create or change. No MCP tool needs `admin`. |
 
 Both are stored by Claude Code as plugin user config and substituted into the MCP server
 entry (`${user_config.url}` / `${user_config.api_key}`); the key never enters the repository
