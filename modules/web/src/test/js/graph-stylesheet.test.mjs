@@ -172,13 +172,17 @@ test("the pulse/flow gate honours the reduced-motion preference", () => {
   assert.equal(graph.pulseEnabled({ matches: false }), true);
 });
 
-test("fit never zooms below the 0.75 floor and never IN past the 1.0 ceiling", () => {
+// 098 §B retired `FIT_MIN_ZOOM` and `clampFitZoom`, and this case with them: a zoom FLOOR
+// on a FIT can only bind when the content does not fit, so it turned Fit into a no-op that
+// then centred the overflow (093 §4 measured the first and last card 75px off the canvas).
+// The 080 ceiling is unchanged and is asserted here; everything else fit now decides lives
+// in `fitZoomFor`, whose invariant graph-fit.test.mjs owns from the token geometry.
+test("fit never zooms IN past the 1.0 ceiling", () => {
   const g = loadGraph();
-  assert.equal(g.FIT_MIN_ZOOM, 0.75, "the 059 floor keeps three nodes filling the pane");
   assert.equal(g.FIT_MAX_ZOOM, 1.0, "the 080 ceiling — a one-node pipeline used to fit to 3x");
-  assert.equal(g.clampFitZoom(0.3), 0.75, "below the floor clamps UP");
-  assert.equal(g.clampFitZoom(2.4), 1.0, "above the ceiling clamps DOWN — fit never zooms in");
-  assert.equal(g.clampFitZoom(0.85), 0.85, "between floor and ceiling, fit is untouched");
+  assert.equal(g.FIT_PADDING, 48, "rendered px on every side, the fit's only padding");
+  // A single card in a big canvas: the natural fit is well above 1 and must be refused.
+  assert.equal(g.fitZoomFor(880, 468, 236, 156, g.FIT_PADDING), 1.0);
 });
 
 test("the layout gives the graph room, and counts labels as part of a node", () => {

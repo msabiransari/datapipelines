@@ -321,7 +321,7 @@ class AppShellBrowserTest : BrowserSuite() {
         startTrace()
         signedIn("dsovf")
 
-        seedDatasources(8) shouldBe 8
+        seedDatasources(8) shouldBe emptyList()
 
         val offenders = mutableListOf<String>()
         listOf(1440 to 900, 2560 to 1440).forEach { (w, h) ->
@@ -344,46 +344,51 @@ class AppShellBrowserTest : BrowserSuite() {
      * `DP-CSRF-Token` header the layout carries both apply. Returns how many were accepted.
      *
      * Registration does not connect, so the hosts and ports need not exist; the point of the
-     * fixture is the WIDTH of what a real row renders.
+     * fixture is the WIDTH of what a real row renders. The DRIVER does have to be loaded,
+     * though, and MySQL Connector/J is deliberately absent from the default build (GPL + FOSS
+     * exception, datasources.md §10.2) — a first cut using MYSQL rows had exactly half of them
+     * refused with `datasource.driver_not_loaded`. Postgres and H2 are both on this suite's
+     * classpath, so the shapes below are theirs, with URLs as long as a deployment's.
+     *
+     * Returns the refusals, so a future failure names its own cause instead of counting.
      */
-    private fun seedDatasources(count: Int): Int {
+    private fun seedDatasources(count: Int): List<String> {
         page.navigate("$baseUrl/datasources")
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
-        return (
-            page.evaluate(
-                """async (count) => {
-                  const headers = JSON.parse(document.body.getAttribute('hx-headers') || '{}');
-                  const shapes = [
-                    ['POSTGRES', 'jdbc:postgresql://analytics-primary.internal.example.com:5432/dp_sample_trips'],
-                    ['MYSQL', 'jdbc:mysql://warehouse-replica.internal.example.com:3306/dp_sample_weather'],
-                    ['POSTGRES', 'jdbc:postgresql://reporting-standby.internal.example.com:5432/dp_reporting'],
-                    ['MYSQL', 'jdbc:mysql://trade-archive.internal.example.com:3306/dp_sample_trade'],
-                  ];
-                  let accepted = 0;
-                  for (let i = 0; i < count; i++) {
-                    const [dialect, url] = shapes[i % shapes.length];
-                    const body = new URLSearchParams({
-                      name: 'seeded-datasource-' + i,
-                      displayName: 'Seeded datasource ' + i,
-                      dialect,
-                      jdbcUrl: url,
-                      credentialKind: 'password',
-                      username: 'dp_demo_readonly',
-                      password: 'not-a-real-secret-' + i,
-                      description: 'A seeded row whose JDBC URL is as long as a real one.',
-                    });
-                    const res = await fetch('/partials/datasources', {
-                      method: 'POST',
-                      credentials: 'same-origin',
-                      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-                      body,
-                    });
-                    if (res.ok) accepted++;
-                  }
-                  return accepted;
-                }""",
-                count,
-            ) as Number
-        ).toInt()
+        @Suppress("UNCHECKED_CAST")
+        return page.evaluate(
+            """async (count) => {
+              const headers = JSON.parse(document.body.getAttribute('hx-headers') || '{}');
+              const shapes = [
+                ['POSTGRES', 'jdbc:postgresql://analytics-primary.internal.example.com:5432/dp_sample_trips'],
+                ['H2', 'jdbc:h2:mem:analytics_primary_internal_example_com_dp_sample_trips'],
+                ['POSTGRES', 'jdbc:postgresql://reporting-standby.internal.example.com:5432/dp_reporting'],
+                ['H2', 'jdbc:h2:mem:reporting_standby_internal_example_com_dp_reporting'],
+              ];
+              const refusals = [];
+              for (let i = 0; i < count; i++) {
+                const [dialect, url] = shapes[i % shapes.length];
+                const body = new URLSearchParams({
+                  name: 'seeded-datasource-' + i,
+                  displayName: 'Seeded datasource ' + i,
+                  dialect,
+                  jdbcUrl: url + '_' + i,
+                  credentialKind: 'password',
+                  username: 'dp_demo_readonly',
+                  password: 'not-a-real-secret-' + i,
+                  description: 'A seeded row whose JDBC URL is as long as a real one.',
+                });
+                const res = await fetch('/partials/datasources', {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body,
+                });
+                if (!res.ok) refusals.push(dialect + ' ' + res.status + ' ' + (await res.text()).slice(0, 200));
+              }
+              return refusals;
+            }""",
+            count,
+        ) as List<String>
     }
 }
