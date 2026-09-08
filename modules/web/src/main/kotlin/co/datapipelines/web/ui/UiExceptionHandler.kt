@@ -12,6 +12,9 @@ import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.validation.BindException
+import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.server.ResponseStatusException
@@ -109,6 +112,45 @@ class UiExceptionHandler {
         return refusal(status, error.reason ?: status.reasonPhrase, INTERNAL_STAND_IN_CODE, request)
     }
 
+    /**
+     * 098 §C — a request whose FORM could not be bound: a missing `@RequestParam`, a failed
+     * `@Valid` bind. The caller sent something wrong; nothing here broke.
+     *
+     * Without this case the three exception types fell to [onUnexpected], which answers 500,
+     * renders "Something went wrong on our side" and writes an ERROR line WITH A STACK TRACE.
+     * Measured on the demo stack, 2026-09-08: `POST /login` with `username=` instead of
+     * `email=` answered **500** and logged `500 POST /login: unhandled …` with a trace (093 §5,
+     * 095 §5.3). `ApiExceptionHandler` has had the same case at 400 since it was written; this
+     * advice wins for the `web.ui` package (see the `@Order` note above) and did not.
+     *
+     * 400 and a DEBUG line, no trace — rules/02 and the logging discipline
+     * `ApiExceptionHandler`'s own KDoc states: a caller's malformed request is not an
+     * operator's incident, and logging it at ERROR with a trace makes the real ones unfindable.
+     *
+     * [LocalLoginController] carries its OWN handler for these types, because the login
+     * ceremony's answer to a bad form is the ceremony's generic failure — the same
+     * `302 /login?error=credentials` a wrong password gets, never an error page. A handler
+     * method on the controller itself is matched before any advice, which is what keeps that
+     * screen's answer out of this general rule.
+     */
+    @ExceptionHandler(
+        MissingServletRequestParameterException::class,
+        MethodArgumentNotValidException::class,
+        BindException::class,
+    )
+    fun onUnbindableRequest(
+        error: Exception,
+        request: HttpServletRequest,
+    ): Any {
+        log.debug("400 {} {}: {}", request.method, request.requestURI, error.message)
+        return refusal(
+            HttpStatus.BAD_REQUEST,
+            "That request couldn't be read. Check the form and try again.",
+            INTERNAL_STAND_IN_CODE,
+            request,
+        )
+    }
+
     @ExceptionHandler(Throwable::class)
     fun onUnexpected(
         error: Throwable,
@@ -142,6 +184,12 @@ class UiExceptionHandler {
 
             HttpStatus.FORBIDDEN -> {
                 errorModel("error/403", status)
+            }
+
+            // 098 §C: a caller's malformed request has its own page. Without this branch a 400
+            // rendered `error/500` — the right STATUS with the wrong story on it.
+            HttpStatus.BAD_REQUEST -> {
+                errorModel("error/400", status)
             }
 
             else -> {

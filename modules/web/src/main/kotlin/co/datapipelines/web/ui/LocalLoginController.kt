@@ -11,8 +11,13 @@ import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.sessionCookie
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
+import org.springframework.validation.BindException
+import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.server.ResponseStatusException
@@ -95,5 +100,39 @@ class LocalLoginController(
                 "redirect:/login?error=inactive"
             }
         }
+    }
+
+    /**
+     * 098 §C — a login POST whose form does not bind.
+     *
+     * `POST /login` with `username=` instead of `email=` (095 §5.3 found it by accident while
+     * minting a key) raised [MissingServletRequestParameterException]. `UiExceptionHandler` had
+     * no case for it, so it reached the `Throwable` backstop and answered **500** with an ERROR
+     * line and a stack trace, on an unauthenticated public route. Measured on the demo stack,
+     * 2026-09-08, both halves in the same run: the malformed post answered `500`, the wrong
+     * PASSWORD answered `302 Location: /login?error=credentials`.
+     *
+     * The answer here is the wrong-password answer, exactly. A form that arrives without its
+     * email field is a failed sign-in attempt, and §5A.5's no-oracle rule is the reason to give
+     * it the SAME reply as every other failed attempt: a distinguishable answer (a 400 page, a
+     * different banner) tells an unauthenticated caller something about how far their request
+     * got. The advice's generic 400 page is right for every other UI form and wrong for this
+     * one, and a handler method on the controller is matched ahead of any `@ControllerAdvice` —
+     * which is what lets both rules hold at once.
+     *
+     * DEBUG, not ERROR, and no stack: rules/02's caller-error discipline.
+     */
+    @ExceptionHandler(
+        MissingServletRequestParameterException::class,
+        MethodArgumentNotValidException::class,
+        BindException::class,
+    )
+    fun onUnbindableLoginForm(error: Exception): String {
+        log.debug("400 POST /login: the form did not bind: {}", error.message)
+        return "redirect:/login?error=credentials"
+    }
+
+    private companion object {
+        private val log = LoggerFactory.getLogger(LocalLoginController::class.java)
     }
 }
