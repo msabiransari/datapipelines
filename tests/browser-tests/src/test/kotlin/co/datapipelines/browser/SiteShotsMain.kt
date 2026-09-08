@@ -1143,32 +1143,12 @@ object SiteShotsMain {
         }
 
         /**
-         * Like [shoot], but captures the VISIBLE VIEWPORT rather than the top of the document.
-         * `setClip` takes PAGE coordinates, so a clip of (0,0,w,h) photographs the top of the
-         * page however far it has been scrolled — which made the scrolled API-section shot a
-         * byte-identical copy of the un-scrolled one (measured 2026-09-08). Playwright's own
-         * default, no clip and no fullPage, is the viewport.
-         */
-        private fun shootViewport(file: String) {
-            settle()
-            val target = outDir.resolve(file)
-            page.screenshot(
-                Page
-                    .ScreenshotOptions()
-                    .setPath(target)
-                    .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
-                    .setScale(com.microsoft.playwright.options.ScreenshotScale.CSS),
-            )
-            written += file
-        }
-
-        /**
          * `document.fonts.ready` is NOT enough since 090 §B put the vendored faces behind
          * `font-display: optional`: "optional" lets the browser decide, at first paint, that a
          * face did not arrive in time and then NEVER use it for that page load. Two runs of this
          * command then render the same screen in two different typefaces, and every text line in
-         * the capture differs by a pixel or two while every border and background matches
-         * exactly — which is precisely what the 093 twice-run diff measured (`datasource-lake.png`
+         * the capture differs by a pixel or two while every border and background matches exactly
+         * — which is precisely what the 093 twice-run diff measured (`datasource-lake.png`
          * differed ONLY on its two BOLD folder labels; every regular-weight leaf row was
          * byte-identical).
          *
