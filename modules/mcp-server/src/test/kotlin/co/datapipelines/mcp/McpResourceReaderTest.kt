@@ -109,7 +109,9 @@ class McpResourceReaderTest {
 
     @Test
     fun `a template reads as its Freemarker body`() {
-        every { templates.findLatest(any(), "test/revenue.sql") } returns McpFixtures.template()
+        // D55: the version-less template resource serves the WORKING version, so that a template
+        // nobody has released yet is readable at all (§7.1).
+        every { templates.findWorking(any(), "test/revenue.sql") } returns McpFixtures.template()
 
         val contents = contents(McpResourceUri.template("test/revenue.sql"))
 
@@ -230,7 +232,7 @@ class McpResourceReaderTest {
 
     @Test
     fun `an unknown entity is a resource-not-found protocol error`() {
-        every { templates.findLatest(any(), "nope") } returns null
+        every { templates.findWorking(any(), "nope") } returns null
 
         shouldThrow<McpError> { reader.read(McpResourceUri.template("nope"), ctx) }
     }
@@ -248,7 +250,7 @@ class McpResourceReaderTest {
                 McpFixtures.template(id = "acme/versions/report.sql"),
                 McpFixtures.template(id = "a/b/c/d/e/deep.sql"),
             )
-        advertised.forEach { template -> every { templates.findLatest(any(), template.id) } returns template }
+        advertised.forEach { template -> every { templates.findWorking(any(), template.id) } returns template }
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns advertised
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()

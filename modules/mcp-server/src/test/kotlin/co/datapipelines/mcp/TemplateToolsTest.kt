@@ -250,8 +250,10 @@ class TemplateToolsTest {
     }
 
     @Test
-    fun `render previews the SQL of the latest version without storing anything`() {
-        every { templates.findLatest(any(), "test/revenue.sql") } returns McpFixtures.template(version = 3)
+    fun `render previews the SQL of the working version without storing anything`() {
+        // D55: the default version to render is the WORKING one — a template created and not yet
+        // released has only a draft, and rendering it is the whole point of the preview step.
+        every { templates.findWorking(any(), "test/revenue.sql") } returns McpFixtures.template(version = 3)
         val ref = slot<TemplateRef>()
         every { engine.render(capture(ref), any(), any()) } returns "SELECT 1 WHERE month = '2026-07'"
 

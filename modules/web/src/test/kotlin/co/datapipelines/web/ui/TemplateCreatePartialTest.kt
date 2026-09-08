@@ -185,7 +185,7 @@ class TemplateCreatePartialTest {
     fun `the versions fragment derives DRAFT from the one draft pointer`() {
         authenticate()
         every { repository.listVersions(any(), "acme/x") } returns emptyList()
-        every { repository.findLatest(any(), "acme/x") } returns null
+        every { repository.findWorking(any(), "acme/x") } returns null
         every { repository.findDraftDetail(any(), "acme/x") } returns null
         every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), "acme/x") } returns emptyMap()
 

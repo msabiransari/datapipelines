@@ -123,7 +123,9 @@ class TemplatePartialControllerTest {
                 co.datapipelines.templates.TemplateVersionSummary("acme/rev", 3, java.time.Instant.EPOCH, userId),
                 co.datapipelines.templates.TemplateVersionSummary("acme/rev", 2, java.time.Instant.EPOCH, userId),
             )
-        every { templates.findLatest(workspaceId, "acme/rev") } returns template
+        // D55/§7.1: the detail pane reads the WORKING version — a never-released template has
+        // no released projection, and the pane must show its draft rather than an empty card.
+        every { templates.findWorking(workspaceId, "acme/rev") } returns template
         every { templates.listVersions(workspaceId, "acme/rev") } returns versions
         every { templates.findDraftDetail(workspaceId, "acme/rev") } returns null
         every { usage.inUseCounts(workspaceId, "acme/rev") } returns mapOf(3 to 4)
