@@ -13,6 +13,8 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
+import co.datapipelines.datasources.LakeIntrospectionCache
+import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
@@ -204,6 +206,8 @@ class DomainConfiguration {
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
+        lakeTables: LakeTableCatalog,
+        environment: Environment,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -213,6 +217,12 @@ class DomainConfiguration {
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
+            lakeTables = lakeTables,
+            // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
+            // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`
+            // has nothing bundled); the shipped image sets it via the Dockerfile's ENV.
+            duckdbExtensionDirectory =
+                environment.getProperty("datapipelines.duckdb.extension-directory")?.ifBlank { null },
         )
 
     /**
@@ -289,9 +299,17 @@ class DomainConfiguration {
         const val UNBOUNDED = Int.MAX_VALUE
     }
 
-    /** The §7A introspector — reads JDBC metadata through the same registry pool (§5.2). */
+    /**
+     * The §7A introspector — reads JDBC metadata through the same registry pool (§5.2), except
+     * LAKE datasources, whose schema IS the dp-lake registry (089 §C): [lakeTables] supplies
+     * the rows and [lakeCache] the 60 s serving cache the registry service invalidates.
+     */
     @Bean
-    fun schemaIntrospector(registry: DatasourceRegistry): SchemaIntrospector = SchemaIntrospector(registry)
+    fun schemaIntrospector(
+        registry: DatasourceRegistry,
+        lakeTables: LakeTableCatalog,
+        lakeCache: LakeIntrospectionCache,
+    ): SchemaIntrospector = SchemaIntrospector(registry, lakeTables, lakeCache)
 
     /**
      * The repository-backed [PipelineResolver] composition validation resolves pinned references

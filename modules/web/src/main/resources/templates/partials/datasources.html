@@ -87,6 +87,11 @@
             </th:block>
           </td>
           <td class="num u-nowrap">
+            <!-- 089 §A: a LAKE datasource has a catalog to show — its registered tables live
+                 on the read-only detail page. Discovered-schema dialects have nothing there. -->
+            <a th:if="${ds.dialect.wire == 'LAKE'}"
+               class="ds-button ds-button-secondary ds-button-sm"
+               th:href="@{/datasources/{name}(name=${ds.name})}">Tables</a>
             <th:block th:if="${#sets.contains(scopes, 'AUTHOR') or #sets.contains(scopes, 'ADMIN')}">
               <!-- Result goes to the #toast stack; the row and table are never
                    touched, so the table layout cannot break. hx-disabled-elt

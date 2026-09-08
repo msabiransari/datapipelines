@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
 import co.datapipelines.application.datasources.DatasourceCreateService
+import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
@@ -33,7 +34,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 20 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 31 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -46,7 +47,7 @@ import org.springframework.context.annotation.Bean
 @AutoConfiguration
 @ConditionalOnBean(PipelineExecutor::class)
 class McpServerAutoConfiguration {
-    /** The 22 tools of §6.1, in `tools/list` order. */
+    /** The 31 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -80,6 +81,9 @@ class McpServerAutoConfiguration {
         // 074 — the SAME publish service POST /api/v1/endpoints calls, so a publish cannot skip
         // the read-only rule by arriving over MCP.
         endpointPublishService: EndpointPublishService,
+        // 089 §A — the SAME lake-table registry the REST /tables endpoints call, so a
+        // registration over MCP crosses the same validation, D8 gate and pool invalidation.
+        lakeTableRegistryService: LakeTableRegistryService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -130,7 +134,7 @@ class McpServerAutoConfiguration {
             // exactly why these two need no workspace, no repository and no registry.
             CalculatorsListTool(),
             CalculatorsGetTool(),
-        ) + EndpointsTools.all(endpointPublishService, pipelines)
+        ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService)
     }
 
     @Bean

@@ -101,6 +101,10 @@ class McpServerAutoConfigurationTest {
         // 074 — the publish service the endpoints_* tools call.
         @Bean fun endpointPublishService(): co.datapipelines.application.endpoints.EndpointPublishService = mockk()
 
+        // 089 §A — the shared lake-table registry `web`'s DomainConfiguration declares in the
+        // assembled application; the lake_tables_* tools take it.
+        @Bean fun lakeTableRegistryService(): co.datapipelines.application.datasources.LakeTableRegistryService = mockk()
+
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()

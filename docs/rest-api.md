@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.5 (frozen contract — additive-only changes after this point)
+**Status:** v2.6 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-05
@@ -1053,6 +1053,57 @@ Notes:
 - An unknown `schema`/table filter matches nothing and returns an empty list. An unknown datasource name is `404 datasource.not_found`. A connection failure against the datasource is `502 pipeline.execution.datasource_unreachable` (the customer's database being down is not a server error).
 - No pagination: the tables and schemas listings are bounded by their 2000-row cap (`truncated` flags the drop), and per-table listings are naturally bounded.
 
+### 9.8 Lake tables (the dp-lake catalog)
+
+```
+POST   /datasources/{name}/tables
+DELETE /datasources/{name}/tables/{namespace}/{table}
+POST   /datasources/{name}/tables/import
+GET    /datasources/{name}/lake-tables
+```
+
+The registry of tables a **LAKE**-dialect datasource serves ([metadata-db §4.15](metadata-db.md#415-lake_tables), the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — these rows are its catalog. Scope: `author` for the three writes ([Auth §7.6](auth.md#76-scope--operation-matrix-authoritative)); mutating a GLOBAL datasource's registry additionally requires admin (workspaces D8, enforced in-handler). The listing is `read`. Every operation refuses a non-LAKE datasource with `400 datasource.validation.lake_dialect_required`.
+
+**Register one table** — `POST /datasources/{name}/tables`, 201:
+
+```json
+{
+  "namespace": ["nyc", "mobility"],
+  "name": "hvfhv_zone_day",
+  "format": "parquet",
+  "location": "s3://datapipelines-co/sample-data/lake/v1/hvfhv_zone_day/part-0.parquet",
+  "partition_column": null
+}
+```
+
+- `namespace` — required, 1–9 segments; an array of segments or the dotted shorthand `"nyc.mobility"`. Each segment follows the pipeline/template segment grammar (`[a-z0-9][a-z0-9_.-]{0,63}`) **without `.`** (the dotted form must round-trip). Violations are `400 datasource.validation.lake_namespace_invalid`.
+- `name` — required, one segment of the same grammar; `400 datasource.validation.lake_name_invalid`.
+- `format` — `parquet` | `iceberg`; `400 datasource.validation.lake_format_invalid`.
+- `location` — `s3://bucket/prefix[/glob]` or a `file://` path. For `format: iceberg` the location is the table's **current metadata FILE** (`…/metadata/00042-<uuid>.metadata.json`), not the table root — the measured rule of [Datasources §8C.7](datasources.md#8c7-the-iceberg-location-rule--register-the-metadata-file). **No other schemes**, and no quotes, backslashes, whitespace or control characters anywhere — the value is later interpolated into the engine's `CREATE VIEW`, so the refusal is total (`400 datasource.validation.lake_location_invalid`).
+- `partition_column` — optional; a plain column identifier.
+- Re-registering a taken (namespace, name) triple is `409 datasource.lake_table_duplicate`.
+
+**Unregister** — `DELETE /datasources/{name}/tables/{namespace}/{table}`, 204; `{namespace}` is the dot-joined form (`nyc.mobility`). An absent triple is `404 datasource.lake_table_not_found`, never a silent no-op. The bucket's objects are untouched.
+
+**Bulk import** — `POST /datasources/{name}/tables/import`. The body is EITHER a 088-style manifest block inline:
+
+```json
+{
+  "namespace": ["nyc", "mobility"],
+  "publish_prefix": "s3://datapipelines-co/sample-data/lake/v1",
+  "tables": [
+    {"name": "hvfhv_zone_day", "format": "parquet", "path": "hvfhv_zone_day/part-0.parquet"},
+    {"name": "hvfhv_trips", "format": "parquet", "location": "s3://datapipelines-co/sample-data/lake/v1/hvfhv_trips/pickup_date=*/part-*.parquet", "partition_column": "pickup_date"}
+  ]
+}
+```
+
+OR `{"manifest_url": "https://…", "namespace": "nyc.mobility"}` — a URL fetched **server-side, and only from the datasource's own bucket/endpoint** (derived from its declared `dialect.endpoint` / `catalog.ref`; an `s3://` URL is translated to the matching https form; with neither declared, only AWS S3 hosts over https). Anything else is `400 datasource.validation.lake_manifest_url_forbidden` — there is no arbitrary URL fetch (SSRF). A failed fetch is `502 pipeline.execution.datasource_unreachable`. Entry fields follow register's rules (`path` is resolved against `publish_prefix` / `access.https_base`; an entry's own `namespace` beats the shared one; an entry with neither is a 400). Import is **idempotent**: already-registered triples come back in `already_registered`, not as errors, so bootstrap can re-run it. The response is `{registered: [...], registered_count, already_registered: [...], already_registered_count}`.
+
+**List the registry** — `GET /datasources/{name}/lake-tables` (`read`): the catalog's own rows, `{datasource, tables: [...], count}`. This is deliberately a separate route from §9.7's `GET /{name}/tables`, the introspection listing — which for a LAKE datasource is itself served from this registry (tables reported as `VIEW` with the format in remarks; [Datasources §8C.3](datasources.md#8c3-introspection-reads-the-registry-not-jdbc-metadata)), so the two routes agree by construction.
+
+Every successful write evicts the datasource's connection pool and publishes the §5.7 invalidation, so per-connection state is rebuilt on the next lease ([Datasources §5.7](datasources.md)).
+
 ---
 
 ## 10. Execution History
@@ -1642,3 +1693,4 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 | 2026-09-05 | v2.3 | 074 published endpoints | New **§19**: a released, side-effect-free pipeline served as `GET /api/x/…`, answering the `data_ready` payload verbatim. One catch-all handler over a registry — never runtime route registration (R-EP1). Ambiguous paths are refused at publish (`endpoint.path_conflict`) rather than resolved by precedence, so at request time at most one pattern matches. Validation reports every defect at once and is strict about unknown query parameters. `202` on timeout with the execution still running (R-EP3), never `504`. §3.6's registry gains `DP-Result-Page-Rows` (R-EP4 — one contract, honoured by §6's execute too) and the `DP-Execution-Id` response header. Management is `/api/v1/endpoints`, addressed by `?path=` for the same measured reason §8's templates are. |
 | 2026-09-05 | v2.4 | 077 mandatory folders | §5.1: a pipeline `name` needs a **folder** — 2–10 segments, not 1–10 ([Pipeline Contract §3.2](pipeline-contract.md#32-field-reference)). `POST /api/v1/pipelines` and `POST /api/v1/templates` answer `400` with the existing codes (`pipeline.validation.name_invalid`, `template.validation.id_invalid`) for a flat name, and `details.reason` now separates `folder_required` from `grammar`. **A narrowing, not an addition** — the one kind of change §11 forbids after the freeze — taken pre-release on the owner ruling of 2026-09-05: with no rename (Template Hierarchy §4.5), a root-level name created after the tag is permanent, and the root would accrete scratch with no way to tidy it. No route changes. |
 | 2026-09-07 | v2.5 | 087 connector seams | §9.1 gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) — `{kind, username?, secret?}`; the legacy top-level `username`/`password` pair still works and means `kind: password`, and a body carrying both is `400 datasource.validation.properties_invalid`. §9.3's response gains `credential: {kind, username?}` and derives `password_set` from the kind (`false` for `none`); top-level `username` is now nullable. §9.4: `credential.kind` is part of the body — moving to `none` clears the stored credential. §9.7's `/tables` and `/tables/{table}/columns` accept `?namespace=` (repeated or dotted) beside `?schema=`, and every table row gains a `namespace` array beside `schema`; `/schemas` gains `entries: [{namespace, label}]` beside the legacy `schemas`. All additive. |
+| 2026-09-08 | v2.6 | 089 dp-lake registry (recorded with the §G corrections) | New **§9.8 Lake tables (the dp-lake catalog)** — `POST /datasources/{name}/tables`, `DELETE …/tables/{namespace}/{table}`, `POST …/tables/import` (inline `tables[]`, or a `manifest_url` fetched server-side and restricted to the datasource's own bucket/endpoint — the SSRF boundary), and `GET …/lake-tables` (`read`). The writes are `author`, with a GLOBAL datasource's registry admin-only as a workspaces D8 rule; every write evicts the pool and publishes the §5.7 invalidation. Two corrections landed with this row: the Iceberg `location` is the table's current metadata FILE, not its root (the measured rule, datasources.md §8C.7), and §9.7's introspection listing is registry-backed for LAKE as shipped (datasources.md §8C.3) — §9.8's "a later phase" sentence was written before 089 §C landed. All additive. |

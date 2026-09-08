@@ -44,7 +44,7 @@ create.
 **Template** — Freemarker SQL: `id` — always a folder path, e.g.
 `nyc/mobility/daily_by_zone.sql` (2–10 `/`-separated segments, each starting `[a-z0-9]`,
 ≤ 64 chars per segment, ≤ 200 total; a bare `fetch_orders.sql` is refused), `dialect` (one of
-`POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`), `display_name`,
+`POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`, `LAKE`), `display_name`,
 `description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,
 `is_library`. **There is no params_schema field** — the variables a body may reference
 are exactly the calling pipeline's `parameters` keys (defaults applied). A declared
@@ -79,8 +79,9 @@ refuses the old form with `template.validation.parameter_interpolated`. `${}` st
 safe yourself (never interpolate a caller-supplied value there). Bound values need no
 quoting: `BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
 
-**Dialects** — seven: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE. Templates are
-dialect-specific; a node's template dialect must match what its `source` can execute.
+**Dialects** — eight: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE. Templates are
+dialect-specific; a node's template dialect must match what its `source` can execute. `LAKE`
+is object storage read in place — see **dp-lake** below.
 
 ## Folders — how you NAME a pipeline or a template
 
@@ -245,13 +246,15 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
   `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
   envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
 
-- **22 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
+- **31 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
   `pipelines_execute_node`, `pipelines_create`, `pipelines_update`, `templates_list`,
   `templates_get`, `templates_used_by`, `templates_create`, `templates_render`,
   `datasources_list`, `datasources_get`, `datasources_test`,
   `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`,
   `datasources_preview_rows`, `datasources_create`, `executions_list`,
-  `executions_get`, `executions_get_result`.
+  `executions_get`, `executions_get_result`, `endpoints_create`, `endpoints_list`,
+  `endpoints_get`, `endpoints_delete`, `calculators_list`, `calculators_get`,
+  `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`.
 
 - **3 prompts:** `analyze_pipeline` (read-only structural review of a pipeline),
   `create_pipeline_for_question` (ground a new pipeline's SQL in the introspection
@@ -260,11 +263,12 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
 
 - **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
   `execute` = run; `author` = create/update pipelines + templates (also template render,
-  datasource test, schema introspection, datasource REGISTRATION, and workspace-bound
-  datasource mutation). Update and delete of a datasource are REST/UI only; `datasources_create`
-  is the one datasource WRITE on the MCP surface. Binding a datasource `global: true` needs
-  `admin` either way. A tool or endpoint rejects with `auth.scope.insufficient` when the key's
-  scope is too low.
+  datasource test, schema introspection, datasource REGISTRATION, the three `lake_tables_*`
+  dp-lake registry writes, and workspace-bound datasource mutation). Update and delete of a
+  datasource are REST/UI only; `datasources_create` is the one datasource WRITE on the MCP
+  surface. Binding a datasource `global: true` — or mutating a GLOBAL datasource's lake
+  registry — needs `admin` either way. A tool or endpoint rejects with
+  `auth.scope.insufficient` when the key's scope is too low.
 
 - **Registering a datasource from an agent — read this before using `datasources_create`.**
   A secret passed through an agent transits the agent's context, its transcript, and any
@@ -293,6 +297,59 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
   labels and the `schema` argument still work; they cannot express the difference. An unqualified
   `datasources_get_columns` on a two-level engine can merge same-named tables from different
   catalogs, which is why the namespace is worth passing.
+
+## dp-lake — register your bucket, register tables, ask
+
+A **LAKE** datasource reads Parquet and Apache Iceberg tables on S3 or S3-compatible object
+storage **in place** — no warehouse, no load step, nothing copied — and it is **read-only**.
+DuckDB is the engine; the catalog is the server's own registry (dp-catalog), because the
+engine cannot list a bucket: a LAKE datasource's tables are exactly the rows you register.
+
+The workflow is three steps:
+
+1. **Register the bucket.** `datasources_create` with `dialect: "LAKE"`,
+   `jdbc_url: "jdbc:duckdb::memory:"`, and `properties.dialect` naming how the data is
+   addressed — `catalog.kind: "s3"` + `region` for AWS, plus `endpoint` (and
+   `url_style: "path"`) for an S3-compatible store like MinIO. Credentials:
+   `credential: {"kind": "none"}` is the IAM credential chain; `{"kind": "password",
+   "username": "<key-id>", "secret": "<secret>"}` is an explicit key pair; and a PUBLIC
+   bucket adds `unsigned: "true"` — NO S3 secret at all, because the credential chain
+   validates at create time and fails on a credentials-free box. Follow with
+   `datasources_test`.
+2. **Register the tables.** `lake_tables_register` for one (`namespace`, `table`, `format`,
+   `location`, optional `partition_column`), or `lake_tables_import` for a manifest's
+   `tables[]` — inline, or a `manifest_url` fetched server-side from the datasource's OWN
+   bucket/endpoint only (arbitrary URLs are refused). Import is idempotent; re-running it is
+   safe.
+3. **Ask.** `datasources_get_tables` lists the registered tables (reported as type `VIEW`,
+   with the format in remarks) — then author a template with `dialect: "LAKE"` and a normal
+   pipeline over it. A lake node stages into tempdb and joins Postgres/MySQL/SQLite nodes in
+   the same pipeline like any other source.
+
+**Bare vs qualified table names.** When ALL of the datasource's registered tables share
+exactly ONE namespace, the server sets the search path at connect, so a template reads
+`FROM hvfhv_zone_day` bare (the demo's choice). With several namespaces there is no default —
+use the full three-part name, `FROM nyc.mobility.hvfhv_zone_day`.
+
+**Iceberg: register the metadata FILE, not the table root.** DuckDB 1.5.5 cannot
+`iceberg_scan` a pyiceberg table by its root (its version-hint filenames never match the
+`%05d-<uuid>.metadata.json` files pyiceberg writes), so `location` is the table's CURRENT
+metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still
+receives commits gets a new metadata file per commit: re-register to follow it.
+
+**Every query prunes on the partition column — egress is real.** A lake table's bytes cross
+the network from S3 when the engine scans them, and you pay for what you scan: a predicate on
+the partition column (`WHERE pickup_date = DATE '2024-06-01'` or
+`WHERE pickup_date BETWEEN :start_date AND :end_date`) makes the engine read only the
+matching partitions, while an unfiltered `SELECT *` over a partitioned table downloads every
+partition. Write the predicate into the template by default, not as an afterthought:
+
+```sql
+SELECT pickup_date, pu_location_id, SUM(trip_count) AS trips
+FROM hvfhv_zone_day
+WHERE pickup_date BETWEEN :start_date AND :end_date
+GROUP BY pickup_date, pu_location_id
+```
 
 ## The golden path (authoring a new pipeline)
 
@@ -612,10 +669,10 @@ endpoints; error codes are identical.
 - `docs/rest-api.md` §19 — published endpoints: the path grammar, the read-only rule, the status table
 - `docs/auth.md` §7.7 — key kinds and the hierarchical binding rule
 - `docs/templates.md` — Freemarker rules, versioning, library templates
-- `docs/datasources.md` — dialects, connection properties, credential storage (§7)
+- `docs/datasources.md` — dialects, connection properties, credential storage (§7), dp-lake (§8C)
 - `docs/key-providers.md` — implementing a KMS-backed credential key provider (the contract, the step list, the AWS recipe)
 - `docs/enums.md` — every wire value (types, dialects, statuses, scopes)
-- `docs/mcp-server.md` — the MCP surface (22 tools, 3 prompts, transport)
+- `docs/mcp-server.md` — the MCP surface (31 tools, 3 prompts, transport)
 - `docs/rest-api.md` — REST endpoints, SSE, result cursor
 - `docs/auth.md` — scopes, API keys, the scope↔operation matrix (§7.6)
 - `docs/type-system.md` — canonical types and wire encodings

@@ -54,6 +54,10 @@ dependencies {
     // reproduce the exact closed-connection shape (state 90007) the classifier matches
     // name-based; main never compiles against the driver.
     testImplementation(libs.h2)
+    // The 089 §F LAKE connectivity probe's MinIO upload client (same pin and
+    // rationale as tests/integration-tests — see the toml note).
+    testImplementation(libs.awssdk.s3)
+    testImplementation(libs.awssdk.url.connection.client)
     testRuntimeOnly(libs.mysql.connector.j)
 }
 

@@ -190,6 +190,98 @@ class BootstrapDatasourceRegistrarIntegrationTest {
         repository.existsIncludingDeleted("bootstrap-never-reached") shouldBe false
     }
 
+    // ------------------------------------------------------------------- 089 §E — the lake seed
+
+    private val lakeEntry =
+        """
+        datasources:
+          - name: bootstrap-lake
+            dialect: LAKE
+            jdbc_url: "jdbc:duckdb::memory:"
+            credential:
+              kind: none
+            properties:
+              dialect:
+                catalog.kind: s3
+                region: us-east-1
+            readonly: true
+            global: true
+            import_manifest: s3://datapipelines-co/sample-data/lake/v1/manifest.json
+            namespace: [nyc, mobility]
+        """.trimIndent()
+
+    private fun recordingRegistrar(): Pair<BootstrapDatasourceRegistrar, MutableList<Triple<String, BootstrapLakeImport, UUID>>> {
+        val calls = mutableListOf<Triple<String, BootstrapLakeImport, UUID>>()
+        val registrar =
+            BootstrapDatasourceRegistrar(
+                registry = DefaultDatasourceRegistry(repository, testEncryptor()),
+                repository = repository,
+                reader = BootstrapDatasourceFileReader(environment = ENV::get),
+                lakeSeeder =
+                    BootstrapLakeTableSeeder { datasource, import, actor ->
+                        calls += Triple(datasource.name, import, actor)
+                    },
+            )
+        return registrar to calls
+    }
+
+    @Test
+    fun `a LAKE entry's seed runs after the row registers, attributed to the bootstrap actor`() {
+        val (registrar, calls) = recordingRegistrar()
+
+        val summary = registrar.register(file(lakeEntry), actor)
+
+        summary.registered shouldContainExactly listOf("bootstrap-lake")
+        summary.lakeSeeded shouldContainExactly listOf("bootstrap-lake")
+        calls shouldContainExactly
+            listOf(
+                Triple(
+                    "bootstrap-lake",
+                    BootstrapLakeImport(
+                        tables = null,
+                        manifestUrl = "s3://datapipelines-co/sample-data/lake/v1/manifest.json",
+                        namespace = listOf("nyc", "mobility"),
+                        onlyTables = null,
+                    ),
+                    actor,
+                ),
+            )
+    }
+
+    @Test
+    fun `the seed re-runs on the restart - the import's idempotency, not the registrar's skip, is the guard`() {
+        val (registrar, calls) = recordingRegistrar()
+        registrar.register(file(lakeEntry), actor)
+
+        val summary = registrar.register(file(lakeEntry), actor)
+
+        summary.skipped shouldContainExactly listOf("bootstrap-lake")
+        summary.lakeSeeded shouldContainExactly listOf("bootstrap-lake")
+        calls.size shouldBe 2
+    }
+
+    @Test
+    fun `a soft-deleted datasource is never seeded - the deletion promise covers its tables`() {
+        val (registrar, calls) = recordingRegistrar()
+        registrar.register(file(lakeEntry), actor)
+        repository.softDelete("bootstrap-lake") shouldBe true
+
+        val summary = registrar.register(file(lakeEntry), actor)
+
+        summary.skipped shouldContainExactly listOf("bootstrap-lake")
+        summary.lakeSeeded shouldContainExactly emptyList()
+        calls.size shouldBe 1 // the first boot's; nothing after the delete
+    }
+
+    @Test
+    fun `ordinary entries never touch the seeder`() {
+        val (registrar, calls) = recordingRegistrar()
+
+        registrar.register(file(TWO_ENTRIES), actor)
+
+        calls shouldContainExactly emptyList()
+    }
+
     // ------------------------------------------------------------------- secrets
 
     @Test

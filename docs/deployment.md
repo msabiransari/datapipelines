@@ -34,6 +34,7 @@ Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/data
 
 - **Base image**: `eclipse-temurin:21-jre-jammy` (LTS JDK 21, Ubuntu Jammy).
 - **Layers**: multi-stage build (`gradle:8.7-jdk21` builder → `eclipse-temurin:21-jre-jammy` runtime).
+- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build).
 - **Size target**: < 250 MB compressed.
 - **User**: non-root (`datapipelines` user, UID 1000).
 - **Entrypoint**: `java $JAVA_OPTS -Duser.timezone=UTC -jar /app/app.jar`.
@@ -793,11 +794,15 @@ egress prices, per run. Set a bucket request-rate or budget alarm before the lak
 demo is announced.
 
 Because there is no loader, the consuming side of this family is a datasource
-registration, and that is round 089
-([Datasources §14](datasources.md#14-open-questions--future-additions)). Until it
-lands, the published objects are inert: nothing in the app reads them, and the
-showcase pipeline that would use them ships in its own examples file
-(`scripts/sample-data/content/examples-lake.json`) that no deployment loads yet.
+registration — shipped in round 089 as the `lake` demo family: the `sample-lake`
+LAKE datasource is registered create-if-absent from
+`deploy/sample-data/bootstrap-datasources-lake.yml`, which also imports the
+published `manifest.json`'s `tables[]` into the dp-catalog registry
+([Datasources §8A.1](datasources.md#8a1-file-shape), §8C). The showcase pipeline
+ships in its own examples file (`scripts/sample-data/content/examples-lake.json`)
+and the seeder loads it exactly when `sample-lake` is registered (the
+`requires_datasources` gate — [environments.md §5](environments.md#5-demo)).
+It needs egress to S3 (or a configured mirror) whenever a lake query runs.
 
 ### Resetting an engine volume desyncs the demo login
 
@@ -893,6 +898,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-07 | v1.16 | 089 dp-lake §D extension bundling | **§3.1 gains the bundled DuckDB extensions bullet**: the image now downloads `httpfs`/`aws`/`iceberg`/`avro` for DuckDB core v1.5.5 at build (+108 MB uncompressed, ~39 MB downloaded), gunzips them into `/opt/duckdb/extensions/v1.5.5/<linux_amd64|linux_arm64>/` (the build's `TARGETARCH`), and exports `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions` — a LAKE datasource then LOADs from disk and never INSTALLs, so a hardened dp-lake deployment needs no egress to `extensions.duckdb.org` (the 089 §7.3 spike's CAN verdict, verified on this exact base image with `--network none`). `deploy/compose.yml` defaults the variable to the same path (declared in `compose-env-audit.sh`'s new `IMAGE_DEFAULT_VARS`, the first compose default that mirrors the image rather than application.yml). The operator key itself is [Configuration §3.25](configuration.md). |
 | 2026-09-07 | v1.15 | 088 dp-lake data | **Appendix B gains a third sample-data family, `dp-lake`** — NYC TLC High Volume FHV (Uber/Lyft/Via/Juno) trips published at `s3://datapipelines-co/sample-data/lake/<version>/` as Parquet partitioned by `pickup_date`, a 1-in-16 sample, a zone/day pre-aggregate and an Apache Iceberg copy of the sample. New section "**dp-lake — the family with no loader**": it is **read in place**, so there is no compose profile, no loader service and no `--demo` flag — the datasource that reads it (dialect `lake`, `sample-lake`) is round 089, and the showcase pipeline ships in its own `scripts/sample-data/content/examples-lake.json` that no deployment loads yet. The drift-guards section gains `scripts/sample-data-lake/check-published.sh --family lake <version>` and says why it is a separate script (no `examples.json`; it checks object hashes, the licence gate and the Iceberg metadata's recorded locations). Egress is stated as the operating cost: bounded by a query's date predicate, unbounded for an unfiltered scan of the ~7 GB table. No application code, no deployment change. |
 | 2026-09-07 | v1.15 | dp-lake v1 published (088) | `s3://datapipelines-co/sample-data/lake/v1/` — 855 objects, 7.57 GB: `hvfhv_trips` (471,851,707 NYC rideshare trips, day-partitioned Parquet), `hvfhv_trips_sample` (1-in-16), `hvfhv_zone_day`, `hvfhs_companies`, `hvfhv_trips_iceberg` (the sample as an Iceberg table). Read in place by the dp-lake datasource (round 089) — no loader, no download at demo start; licence verified 2026-09-07 (NYC Open Data, FHV disclaimer quoted in the manifest). `check-published.sh v1` in the lake family is the proof. |
 | 2026-09-07 | v1.14 | mobility v6 (082) | The demo briefing gains a CALCULATOR node (`fiscal_quarter` → `run_fiscal_quarter`, bound as the first caller column) so the feature is visible out of the box; data files unchanged; baselines re-keyed. Pin → `SAMPLE_VERSION=v6` in `deploy/env/defaults.env`; `check-published.sh v6` byte-identical. |
@@ -916,3 +922,4 @@ operator.
 | 2026-08-07 | v1.2 | consistency campaign | Applied [SPEC-REVIEW-2026-08 §2.15](SPEC-REVIEW-2026-08.md#215-deploymentmd): §5 env-var tables replaced by the startup-requirements list + pointer to configuration.md; the inline-vs-claim-check threshold key (superseded by the D9 result keys) and every other key configuration.md does not define were deleted [D8]; §4.2 rewritten as the result store with required `maxmemory-policy noeviction` and a sizing model [D9]; §8.3.1/§8.3.2 graceful-shutdown mechanism (readiness fail → drain to `execution-timeout-seconds` → `cancelAll(shutdown)` → exit) with k8s `preStop` + `terminationGracePeriodSeconds`, accepted loss stated [D7]; §6.2 instance-local story updated to cancel-on-disconnect + cross-instance cancel via Redis flag [D7]; Appendix A compose made bootable (OIDC provider env vars, Redis password wired to `requirepass`, noeviction, mounted provider YAML); new §3.5 JDBC driver matrix (bundled vs `-Poracle`/`-Pmysql` vs `lib/` drop-in); new §6.6 resource sizing (heap, container limit, `-XX:MaxRAMPercentage`); `-Duser.timezone=UTC` made normative in the image and bare-JVM entrypoints ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)); §6.2 diagram residue and §11 malformed bullet fixed |
 | 2026-08-29 | v1.3 | local password auth | §5.1 item 5 becomes "at least one authentication method": OIDC provider OR local accounts (auth.md §5A), with the operator's first-admin story for the no-IdP case (hash-seeded one-time credential, forced first-login change, admin resets — no SMTP, no self-registration). Appendix A compose comment and Appendix B quickstart updated: the demo now logs in with a local account (`demo-admin@demo.local` / `demo-admin`, one-time) and needs no OIDC client. |
 | 2026-09-07 | v1.8 | 087 connector seams | §3.5 driver matrix gains **`LAKE`** — bundled, and the same `duckdb_jdbc` jar as `DUCKDB`. It is a distinct dialect rather than a mode because the two need opposite §5.6 postures ([Datasources §4.1](datasources.md#41-dialect-catalog)); nothing about packaging changes, since there is no second driver to ship. |
+| 2026-09-08 | v1.17 | 089 dp-lake consuming side shipped | Appendix B's dp-lake section: the "that is round 089 / until it lands, the published objects are inert" paragraph rewritten as shipped — the `lake` demo family registers `sample-lake` from `deploy/sample-data/bootstrap-datasources-lake.yml` (which imports the published manifest's `tables[]` into the dp-catalog registry), and the seeder loads `examples-lake.json` exactly when `sample-lake` is present (the `requires_datasources` gate, environments.md §5). |

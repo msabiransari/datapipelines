@@ -10,6 +10,42 @@ FROM eclipse-temurin:21-jre
 
 RUN groupadd --system datapipelines && useradd --system --gid datapipelines datapipelines
 
+# dp-lake (089 §D): bundle the DuckDB extensions a LAKE datasource loads, so the runtime
+# never INSTALLs and a hardened deployment needs no egress to extensions.duckdb.org
+# (configuration.md §3.25). The version is the CORE version the pinned duckdb_jdbc reports
+# (`PRAGMA version` -> v1.5.5 for duckdb_jdbc 1.5.5.1), NOT the JDBC patch version — the
+# repository path 404s on the latter. A duckdb_jdbc upgrade must re-pin this ARG and the
+# `v<ver>` directory with it; the binaries are valid for exactly one core version.
+# `avro` is bundled because `LOAD iceberg` auto-loads it from the directory. The four add
+# ~108 MB uncompressed to the image (~39 MB downloaded at build). The extension repository
+# publishes no checksums for these artifacts, so the pin is the versioned URL itself.
+# The platform directory follows the build's TARGETARCH (BuildKit fills it): `docker build`
+# on Apple Silicon produces a linux/arm64 image, whose DuckDB looks for linux_arm64
+# extensions — hard-coding linux_amd64 here made the runtime LOAD-only against an EMPTY
+# directory on arm64 (found by the 089 live gate: pool init failed with
+# ".../v1.5.5/linux_arm64/httpfs.duckdb_extension not found"). The layout
+# (<dir>/v<ver>/<platform>/<name>) is what a custom extension_directory still requires,
+# verified by the 089 §7.3 spike on this exact base image with --network none.
+# `|| exit 1` because /bin/sh runs this loop without `set -e`: a failed curl must fail the
+# build, not just one iteration.
+ARG DUCKDB_CORE_VERSION=1.5.5
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) dp=linux_amd64 ;; \
+      arm64) dp=linux_arm64 ;; \
+      *) echo "unsupported TARGETARCH for the DuckDB extension bundle: '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp && \
+    for ext in httpfs aws iceberg avro; do \
+      curl -fsSL "https://extensions.duckdb.org/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension.gz" \
+        | gunzip > "/opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension" || exit 1; \
+    done
+
+# The knob the lake adapter reads (application.yml datapipelines.duckdb.extension-directory):
+# present here so a bare `docker run` of this image is LOAD-only out of the box. Compose's
+# pass-through defaults to the same path (deploy/compose.yml).
+ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
+
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 
 USER datapipelines

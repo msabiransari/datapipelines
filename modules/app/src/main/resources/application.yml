@@ -356,3 +356,12 @@ datapipelines:
   env: ${DATAPIPELINES_ENV:local}
   posture: ${DATAPIPELINES_POSTURE:}
   demo: ${DATAPIPELINES_DEMO:}
+
+  # §3.25 (089 §D) — the LAKE engine's bundled extension directory. EMPTY default: a bare
+  # `java -jar` has nothing bundled, so the lake adapter keeps its explicit INSTALL+LOAD pairs
+  # (first INSTALL per extension needs egress to extensions.duckdb.org). The shipped IMAGE
+  # exports this variable from the Dockerfile (ENV ...=/opt/duckdb/extensions), where the four
+  # extensions are pre-populated; the adapter then SETs extension_directory and emits bare
+  # LOADs — never an INSTALL, so a lake pool connects with zero egress.
+  duckdb:
+    extension-directory: ${DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY:}

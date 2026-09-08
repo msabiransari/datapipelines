@@ -70,6 +70,11 @@ class FlywayMigrationIntegrationTest {
                 "13|datasource credential kind|true",
                 // 087 §C — LAKE joins chk_datasource_dialect. No data change.
                 "14|lake dialect|true",
+                // 089 §A — the dp-lake catalog: one table, one named UNIQUE, one CHECK.
+                "15|lake tables|true",
+                // 089 §F — LAKE joins template_versions.chk_dialect (the 088 showcase's
+                // LAKE template insert, and every LAKE DQL template, violated the V8 set).
+                "16|lake template dialect|true",
             )
     }
 
@@ -157,7 +162,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the fourteen tables of metadata-db §4`() {
+    fun `creates exactly the fifteen tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -175,6 +180,8 @@ class FlywayMigrationIntegrationTest {
                 // 074 (V11) — the published-endpoint registry and its key bindings.
                 "endpoint_key_bindings",
                 "execution_events",
+                // 089 §A (V15) — the dp-lake catalog.
+                "lake_tables",
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
@@ -222,6 +229,8 @@ class FlywayMigrationIntegrationTest {
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
+                "lake_tables.lake_tables_pkey",
+                "lake_tables.uq_lake_tables_datasource_namespace_name",
                 "pipeline_executions.idx_executions_correlation",
                 "pipeline_executions.idx_executions_pipeline",
                 "pipeline_executions.idx_executions_root",
@@ -295,6 +304,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
                 "chk_dialect",
+                // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
+                // generate bad view SQL later, and the database is the last place to catch it.
+                "chk_lake_table_format",
                 "chk_pipeline_versions_status",
                 "chk_status",
                 "chk_template_type",

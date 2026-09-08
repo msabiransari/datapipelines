@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.18 (frozen contract — additive-only changes after this point)
+**Status:** v2.20 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-08-09
@@ -176,7 +176,7 @@ The `Dialect` value set is owned by [Type System §5](type-system.md#5-source-to
 | `H2` | `com.h2database:h2` | MPL 2.0 / EPL 1.0 | Clean license, ships in core (also used for staging). |
 | `DUCKDB` | `org.duckdb:duckdb_jdbc` | MIT | Clean license, ships in core. |
 | `SQLITE` | `org.xerial:sqlite-jdbc` | Apache 2.0 (with SQLite public-domain bundled) | Clean license, ships in core. |
-| `LAKE` | `org.duckdb:duckdb_jdbc` | MIT | Object storage read in place — Parquet and Iceberg on S3 — with DuckDB as the engine. **The same driver as `DUCKDB`, a different §5.6 posture**: the embedded adapter locks `enable_external_access = false` and a lake cannot read S3 with that lock on, so the two are separate dialects rather than one dialect with a mode — a mode would make the refusal set a function of row data, which §5.6's enum-total lookup exists to prevent. Its typed configuration is `properties.dialect.*` (§12.1) and its connect-time setup is §4.2A. |
+| `LAKE` | `org.duckdb:duckdb_jdbc` | MIT | Object storage read in place — Parquet and Iceberg on S3 — with DuckDB as the engine. **The same driver as `DUCKDB`, a different §5.6 posture**: the embedded adapter locks `enable_external_access = false` and a lake cannot read S3 with that lock on, so the two are separate dialects rather than one dialect with a mode — a mode would make the refusal set a function of row data, which §5.6's enum-total lookup exists to prevent. Its typed configuration is `properties.dialect.*` and its connect-time setup is §4.2A; the offering built on it is **dp-lake** — the dp-catalog registry, per-table views, registry introspection, engine limits and bundled extensions are §8C. |
 
 ### 4.2 Dialect adapter interface
 
@@ -239,6 +239,7 @@ Each dialect has an implementation:
 - `H2DialectAdapter`
 - `DuckdbDialectAdapter`
 - `SqliteDialectAdapter`
+- `LakeDialectAdapter` — §4.1's `LAKE`: the DuckDB driver without the embedded lock, plus the §4.2A connect-time setup (extensions, the S3 secret, ATTACHes, the §8C.4 limits).
 
 ### 4.2A Connect-time setup and typed dialect configuration
 
@@ -253,7 +254,7 @@ Two rules make it safe:
 
 **`properties.dialect.*`** — a third reserved namespace beside `hikari` and `jdbc` (§12.1's frozen shape, amended additively). Unlike those two it is **typed and adapter-validated**: `DialectAdapter.validateDialectProperties` refuses unknown keys and bad values key by key, and the DEFAULT implementation refuses the whole namespace. A dialect gains `dialect.*` keys by declaring them, never by an adapter forgetting to look — silently ignoring an unrecognized key would let a typo look like a working setting, which is the failure this namespace exists to avoid.
 
-Reference uses, none of them implemented: Snowflake `dialect.warehouse` / `dialect.role`, Databricks `dialect.http_path` / `dialect.catalog`, and the shipped lake adapter's `dialect.catalog.kind` / `catalog.ref` / `region` / `endpoint` / `url_style` / `attach`.
+Reference uses, none of them implemented: Snowflake `dialect.warehouse` / `dialect.role`, Databricks `dialect.http_path` / `dialect.catalog`, and the shipped lake adapter's `dialect.catalog.kind` / `catalog.ref` / `region` / `endpoint` / `url_style` / `unsigned` / `attach`.
 
 **The `LAKE` adapter's setup**, in the order it runs:
 
@@ -837,6 +838,28 @@ does a non-global entry bind to". `global: false` and a missing `global` are bot
 refusals, with different messages; requiring the word means a file written for a later version
 cannot be silently read as global by this one.
 
+**A LAKE entry's registry seed (089 §E).** A `dialect: LAKE` entry may additionally declare the
+dp-catalog rows its datasource serves (§8C.1), in ONE of two forms:
+
+- **`tables:`** — inline registry rows, each the [rest-api §9.8](rest-api.md#98-lake-tables-the-dp-lake-catalog)
+  register shape: `{namespace?, name, format, location, partition_column?}`.
+- **`import_manifest:`** — the URL of an 088 `manifest.json` whose `tables[]` the bootstrap
+  imports through the registry service's IDEMPOTENT path, so a re-boot re-asserts the registry
+  instead of duplicating it. The fetch is server-side and passes the same SSRF boundary as
+  `POST …/tables/import`: restricted to the datasource's own `dialect.endpoint` /
+  `catalog.ref`, or a plain AWS S3 host — never an arbitrary URL.
+
+Two qualifiers: **`namespace:`** is the shared namespace a seed row without its own lands in
+(the demo's manifest carries no namespaces; its tables land in `[nyc, mobility]`), and
+**`only_tables:`** filters an import to the named tables — the demo uses it to exclude the
+manifest's Iceberg copy as demo scope, the Iceberg read path being proven by the integration
+suite rather than the demo datasource. The parse-time refusals: both seed forms together
+(they can disagree — the credential-shape rule); either form on a non-LAKE entry (a JDBC
+database's tables are discovered, never registered — a `tables:` block under a Postgres entry
+is a paste error); `namespace:` / `only_tables:` with no seed (they qualify a seed, they are
+not one); and an explicitly EMPTY `tables:` block (a seed of zero tables is a mistake, not a
+policy). The demo entry is [`deploy/sample-data/bootstrap-datasources-lake.yml`](../deploy/sample-data/bootstrap-datasources-lake.yml).
+
 ### 8A.2 `${ENV_VAR}` resolution
 
 Secrets never live in the file. Every string in the tree — not just `password`; a passphrase is as
@@ -926,6 +949,213 @@ against the pinned driver `org.duckdb:duckdb_jdbc:1.5.5.1` (2026-09-04), two pro
 `access_mode` is not in the DUCKDB §5.6 refusal set (only the five extension keys are), so the
 bootstrap entry may set it. The demo additionally mounts the sample volume read-only into the
 app container — the filesystem-level backstop under the driver lock and the §5.7 flag.
+
+---
+
+## 8C. dp-lake — the catalog, the per-table views, and registry introspection
+
+**dp-lake** is the offering built on the `LAKE` dialect (§4.1): Parquet and Apache Iceberg
+tables on S3 or S3-compatible object storage, queried **in place** — no warehouse, no load
+step, nothing copied. DuckDB is the engine underneath (an in-memory instance per pooled
+connection); the catalog is **dp-catalog**, our own minimal registry, because the engine
+cannot LIST a bucket. A LAKE datasource is a READ connector: nothing here writes to the
+object store.
+
+### 8C.1 dp-catalog — the registry
+
+A LAKE datasource's tables are exactly the rows of `lake_tables` (V15; [metadata-db §4.15](metadata-db.md#415-lake_tables))
+— the registry IS the catalog. `datasource_id` holds the datasource **name**, which is the
+`datasources` primary key; there is no surrogate id to point at.
+
+- **`namespace`** — 1–9 segments, each following the pipeline/template segment grammar
+  **without `.`** (the dotted shorthand on the wire must round-trip). The view mapping
+  (§8C.2) supports one or two segments today; deeper namespaces are registered but fail the
+  pool build loudly rather than being silently flattened.
+- **`name`** — one segment of the same grammar. **`format`** — `parquet` | `iceberg`
+  (CHECK-constrained: a third value would generate bad view SQL later).
+- **`location`** — `s3://bucket/prefix[/glob]` or a `file://` path; **no other schemes**, and
+  no quotes, backslashes, whitespace or control characters anywhere — the value is later
+  interpolated into the engine's `CREATE VIEW`, so the refusal is total (a value that would
+  need escaping is refused, never escaped). Iceberg tables are registered by their current
+  metadata FILE — the measured rule is §8C.7.
+- **`partition_column`** — optional; the column the engine's partition pruning keys on.
+
+The surface:
+
+- **REST** ([rest-api §9.8](rest-api.md#98-lake-tables-the-dp-lake-catalog)):
+  `POST /api/v1/datasources/{name}/tables` (register one), `DELETE …/tables/{ns}/{table}`,
+  `POST …/tables/import` (an inline `tables[]` block, or a `manifest_url` fetched server-side
+  and restricted to the datasource's OWN bucket/endpoint — the SSRF boundary), and
+  `GET …/lake-tables` (the registry's own rows, `read` scope). The writes are `author`;
+  mutating a GLOBAL datasource's registry is admin-only as a workspaces D8 rule.
+- **MCP**: `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`
+  ([mcp-server §6.2.29–31](mcp-server.md#6229-lake_tables_register)) over the same
+  application service, so validation, the duplicate refusal and the pool invalidation are
+  identical on both surfaces.
+- **UI**: a LAKE datasource's detail page shows the registry as a READ-ONLY namespace tree
+  with each table's format and partition column. Registration stays REST/MCP — authoring is
+  agent-first by design.
+
+Every successful registry write **evicts the datasource's connection pool and publishes the
+§5.7 invalidation** (Redis channel `dp:datasource-invalidated`): every instance rebuilds the
+pool on the next lease — so a table registered on instance A is visible on instance B's next
+execution — and registry-backed introspection (§8C.3) catches up within its 60 s cache TTL.
+
+### 8C.2 A view per registered table, built at connect
+
+A pooled connection on `jdbc:duckdb:` / `jdbc:duckdb::memory:` is its OWN in-memory DuckDB
+instance (verified 2026-09-07 against duckdb_jdbc 1.5.5.1: objects created on one connection
+are invisible to a second, while both are open). HikariCP runs the adapter's `connectionInit`
+(§4.2A) on every new physical connection, and the dp-lake seam appends, after the extension,
+secret and limit statements, the statements that turn the registry into queryable objects —
+which is also why nothing here can leak across datasources.
+
+The **namespace mapping** follows DuckDB's exact three-level object space
+(`catalog.schema.object`; its parser refuses a deeper `CREATE SCHEMA` outright):
+
+- **two segments** `["nyc", "mobility"]` — the head becomes an in-memory ATTACHed catalog
+  (`ATTACH IF NOT EXISTS ':memory:' AS "nyc"`, the one writable catalog a view needs to live
+  in) and the rest a schema inside it.
+- **one segment** `["nyc"]` — a schema in the connection's default catalog; no ATTACH.
+- **three or more** — refused at pool build with
+  `datasource.validation.lake_namespace_invalid`: the engine cannot name the place, and
+  flattening would alias two different registry namespaces onto one schema.
+
+Then one view per registered row:
+
+```sql
+CREATE OR REPLACE VIEW "nyc"."mobility"."hvfhv_trips" AS
+SELECT * FROM read_parquet('s3://bucket/hvfhv_trips/pickup_date=*/part-*.parquet', hive_partitioning = true);
+-- format = iceberg instead:
+CREATE OR REPLACE VIEW "nyc"."mobility"."trips_iceberg" AS
+SELECT * FROM iceberg_scan('s3://bucket/iceberg/trips/metadata/00002-….metadata.json');
+```
+
+`hive_partitioning = true` is emitted UNCONDITIONALLY for Parquet: it is harmless on a
+non-partitioned layout (a plain file reads normally), and making it conditional on
+`partition_column` would let a registered-but-wrong partition column silently disable pruning
+for a table that IS partitioned. The engine's partition pruning then applies to the
+underlying `read_parquet` scan unchanged — a predicate on the partition column reads only the
+partitions it names.
+
+**The search-path rule — when bare table names resolve.** When ALL of the datasource's
+registered tables share EXACTLY ONE distinct namespace, the last statement is
+`SET search_path = '<catalog>.<schema>'` (verified to resolve bare table names on duckdb_jdbc
+1.5.5.1; the catalog-qualified spelling cannot drift into a same-named schema elsewhere).
+**This is the documented choice, and the demo uses it**: the `sample-lake` datasource's four
+tables all live in `[nyc, mobility]`, so templates read `FROM hvfhv_zone_day` bare. With ZERO
+or MULTIPLE distinct namespaces nothing is set — there is no defensible default — and queries
+must use the fully qualified `catalog.schema.table` form.
+
+### 8C.3 Introspection reads the registry, not JDBC metadata
+
+For a LAKE datasource the §7A operations are served from dp-catalog (round 089 §C), with no
+new wire fields — 087's `namespace` carries everything:
+
+- **schemas** = the registry's distinct namespaces.
+- **tables** = the registry's rows, each reported as JDBC type `VIEW` (what the engine made
+  it — §8C.2) with its `format` in `remarks`.
+- **columns** = a zero-row `SELECT * FROM <view> LIMIT 0` read through `ResultSetMetaData`
+  and mapped by the adapter's DuckDB mapper exactly like a JDBC `getColumns` row — nested
+  LIST/STRUCT/MAP arrive as STRING with the mapper's warning. (`DESCRIBE SELECT …` reports
+  the same schema as STRINGS, so the mapper's DECIMAL precision/scale inputs would have to be
+  re-parsed; the structured read is the faithful one.) With MULTIPLE registered namespaces an
+  unfiltered columns read cannot pick one and fails with the §7A current-schema-unknown rule
+  — pass the table's `namespace`, the same recovery as the JDBC path.
+
+All three are cached per datasource for the §6.3 60 s TTL; on S3 the zero-row columns scan is
+a footer read over the network, which is what the cache is for.
+
+### 8C.4 Engine limits — compute is on the app's box
+
+Every lake connection gets the engine limits as `SET` statements ([configuration.md §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
+is the operator paragraph): `dialect.memory_limit` (default **25 % of the container's memory
+as the cgroup-aware JVM reports it**, floored at 64 MiB and hard-capped at 4 GiB — an
+explicit value is the operator's own number and is not capped), `dialect.threads`,
+`dialect.temp_directory` when declared, and `preserve_insertion_order = false` ALWAYS —
+insertion order costs memory and temp-file discipline the engine would otherwise spend on a
+guarantee a read-only lake never asks for. DuckDB shares the box with the JVM, which is what
+the default's cap exists for. The existing row cap and `node-query-timeout-seconds` apply
+unchanged.
+
+### 8C.5 Extensions, bundled in the image
+
+A `LAKE` datasource whose data is on S3 needs DuckDB's `httpfs` and `aws` extensions, and the
+Iceberg catalog kinds additionally need `iceberg` (which requires `avro`). Where the binaries
+come from is the operator key `datapipelines.duckdb.extension-directory`
+([configuration.md §3.25](configuration.md#325-duckdb-extension-directory-dp-lake)):
+
+- **Set — the shipped image**: the published image bundles the four extensions for DuckDB
+  core **v1.5.5** under `/opt/duckdb/extensions/v1.5.5/<platform>/` (+108 MB uncompressed),
+  the `<platform>` following the image build's architecture (`linux_amd64` or `linux_arm64`
+  via the Dockerfile's `TARGETARCH` mapping), and
+  exports the variable from the Dockerfile. Every lake connection then runs
+  `SET extension_directory` plus BARE `LOAD`s and **never an `INSTALL`** — in DuckDB v1.5.5
+  `LOAD` strictly loads already-present files (no download code path runs at all, measured in
+  the 089 §7.3 spike with `--network none`), so **a hardened dp-lake deployment needs no
+  egress to `extensions.duckdb.org` at all**.
+- **Unset**: the explicit `INSTALL`+`LOAD` pairs developer machines rely on — which requires
+  egress to DuckDB's extension repository at connect time.
+
+Independently of the declared `catalog.kind`, the view seam (§8C.2) loads the `iceberg`
+extension **whenever the registry holds an iceberg-format table**, in either mode — a bare
+`LOAD avro` then `LOAD iceberg` against the bundled directory, or `INSTALL iceberg` (which
+pulls `avro` in as a dependency over the network) without one. `catalog.kind: s3` loads only
+`httpfs`+`aws` on its own, and an Iceberg view would otherwise fail the pool build at
+connect. Parquet-only registries load nothing extra: an extension nothing will call is
+surface for nothing.
+
+### 8C.6 Credentials and addressing
+
+The S3 credential comes from the datasource's §3.4 credential, never from `properties.*`:
+
+- **`credential.kind: none`** — the engine's `credential_chain` provider (IAM role,
+  environment, shared config/profile). The self-hosted answer, with nothing to encrypt or
+  rotate.
+- **`credential.kind: password`** — an explicit key pair: the access key id as `username`,
+  the secret as the stored credential, emitted as `KEY_ID`/`SECRET` in the connect-time
+  `CREATE OR REPLACE SECRET`.
+- **A PUBLIC bucket declares `dialect.unsigned: "true"`** and gets **no S3 secret at all** —
+  the engine's reads go unsigned. This is not optional decoration: `credential_chain`
+  VALIDATES at create time, so on a credentials-free box the `CREATE SECRET` fails and takes
+  the pool down with it (found by the 089 live gate). `unsigned` beats every credential
+  kind; the demo's `sample-lake` sets it.
+
+`dialect.region` sets the secret's region; `dialect.endpoint` (host[:port], no scheme) points
+at an S3-compatible store — MinIO, on-prem — and a declared endpoint always emits
+`USE_SSL false` (MinIO and most on-prem S3 endpoints are plain HTTP; a declared endpoint is a
+deliberate non-AWS target, so TLS is not assumed for it); `dialect.url_style` is `path` or
+`vhost` for those endpoints. `dialect.catalog.kind` accepts
+`s3` (what the demo and this round's suites use) and — accepted by the adapter since 087 —
+`glue` | `s3_tables` | `rest`, which the registry does NOT read (§8C.8).
+
+### 8C.7 The Iceberg location rule — register the metadata FILE
+
+Measured 2026-09-08 against duckdb_jdbc 1.5.5.1 (the 089 §F MinIO suite): DuckDB resolves an
+`iceberg_scan` location through `version-hint.text` by CONSTRUCTING `v<n>.metadata.json` /
+`<n>.metadata.json` filenames, which never match the Iceberg spec's
+`%05d-<uuid>.metadata.json` names pyiceberg actually writes — so scanning a table by its
+**root** (the directory holding `metadata/`) fails, and only the explicit metadata file
+scans. **Register the table's CURRENT metadata FILE as `location`**
+(`s3://bucket/table/metadata/00042-<uuid>.metadata.json`). This contradicts the design
+record's "the table root holding `metadata/`" — the tree won. The corollary for an Iceberg
+table that still receives commits: every commit writes a new metadata file, so the registry
+row must be re-registered to follow the table.
+
+### 8C.8 Not in this round
+
+- **External catalogs as a registry source.** `catalog.kind glue | s3_tables | rest` is
+  accepted by the adapter (087) but dp-catalog does not read AWS Glue, S3 Tables or a REST
+  catalog — a LAKE datasource's tables are exactly the registered rows (§8C.1). External
+  catalogs remain a later, optional source.
+- **Writes to the lake.** dp-lake is a read connector; there is no write path to the object
+  store.
+- **Scheduler, dashboards.** Pipelines run when executed (or when a published endpoint is
+  called); nothing schedules them and no dashboard surface ships.
+- **Nested types.** LIST/STRUCT/MAP columns introspect as STRING with the mapper's warning
+  (§8C.3); they are queryable in SQL but not type-mapped.
+- **Athena / Glue as engines.** Out by thesis — paid services; DuckDB on the app's box is the
+  engine.
 
 ---
 
@@ -1085,7 +1315,7 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 - **Read-only enforcement**: some datasources should be read-only by contract (we never write to sources, but enforcing at the datasource level adds defense).
 - **SSH tunnel / bastion host support**: for datasources reachable only via bastion. Common in enterprise.
 - **`private_key` / `service_account_json` credential kinds reaching a real dialect.** The kinds are catalogued and refused by every shipped adapter (§3.4); Snowflake key-pair auth and BigQuery service accounts are what will declare them.
-- **`LAKE` dialect — an object store read in place (the dialect and adapter shipped in 087; the registry, per-table views and the demo datasource are round 089)**: a datasource whose "database" is a set of Parquet and Apache Iceberg objects in a bucket, queried without a server and without a load step. The demo data for it is already published (`s3://datapipelines-co/sample-data/lake/<version>/`, built by [`scripts/sample-data-lake/`](../scripts/sample-data-lake/README.md) — 088); the dialect, the `sample-lake` bootstrap entry and the registry seed that reads the artifact's `manifest.json` `tables[]` block are **round 089**.
+- **`LAKE` dialect — an object store read in place: SHIPPED.** The dialect and adapter landed in 087; round 089 added **dp-lake** (§8C): the dp-catalog registry, per-table views on connect, registry-backed introspection, engine limits, image-bundled extensions, and the `sample-lake` demo datasource reading the published `s3://datapipelines-co/sample-data/lake/<version>/` objects in place (built by [`scripts/sample-data-lake/`](../scripts/sample-data-lake/README.md) — 088). What stays future: external catalogs as a registry source (§8C.8).
 
 ---
 
@@ -1126,3 +1356,4 @@ Out of scope for v1 (v1.1 candidates are tracked in [ROADMAP §2](ROADMAP.md#2-v
 | 2026-09-02 | v2.16 | 020 fix-cycle (044) — the backstop goes fail-closed | §5.7: the executor backstop's **null semantics made normative** — no live row refuses as `pipeline.node.datasource_not_found` (the D10 soft-delete channel), a metadata-DB failure during the live read refuses as `pipeline.execution.aborted` naming the METADATA database (never the healthy target), both replacing 020's "null = no signal" fail-open. **Layer 1 reads live** (`getVisibleLive`/`getLive`, past the §6.3 cache — 020 F4's both-directions stale-save window closed); **layer 2's read is flag-only** (`isReadonlyLive`, one indexed `SELECT is_readonly` — no ciphertext, no properties parse; 020 F7) and a readonly write-back target is refused at CONNECT, before the source query (020 F9); **layer 3's pool-staleness window documented** (no TTL; row-level flips leave the pre-flip pool — M3's within-one-JVM twin, fix deferred to M3's owner decision; 020 F5). §6.1: the interface sketch gains the three live reads; `getLive`/`isReadonlyLive` are abstract (020 F6 — a cached default was the hole). §6.1's registry KDoc wiring example corrected to the `describe`/`DatasourceFacts` SAM (020 F10 — the old `dialectOf` example no longer compiled, verified). |
 | 2026-09-03 | v2.17 | 061 — datasource credentials and references | **§8A.3 gains rule 3** (T84): a bootstrap entry whose FILE credential differs from the STORED one is reconciled by connection-testing both — stored-works keeps the row byte-untouched (rule 1 intact), stored-fails-and-file-works replaces the credential ALONE with a WARN, neither-works and undecryptable both leave the row and log ERROR naming the env key / the encryption key, and a soft-deleted row is never touched. Startup never fails on it. **New §8.1B** (T84): the last connection test's outcome is stored (`last_test_at`/`last_test_ok`/`last_test_message`, V9) and surfaced as the additive `last_test` field (§3.2) and a datasources-screen column — because listing never connects, and on 2026-09-02 the screen said "fine" while every execution failed at CONNECT. That write touches the three columns only and does NOT move `updated_at` (the one documented exception to metadata-db §2), which is what keeps rule 1's byte-untouched guarantee checkable. **§6.2 rewritten** (T79): the delete guard reads the ANY-VERSION reference scan, not the current-version one — a released v1 pinning a datasource that v2 dropped is a live reference (immutable, executable by explicit version) and used to be invisible, so the delete succeeded and v1's next execution failed at connect; the 409 now carries the referencing nodes with their pipeline versions, the way `template.in_use` does. |
 | 2026-09-07 | v2.18 | 087 connector seams | **New §3.4 credential kinds** — `credential: {kind, username?, secret?}` with `kind ∈ password \| token \| private_key \| service_account_json \| none`; the legacy top-level `username`/`password` pair stays accepted and means `kind: password` (§12.1), and a payload carrying both is refused. Which kinds a dialect accepts is its adapter's declaration (`supportedCredentialKinds`), enforced fail-closed; `private_key`/`service_account_json` are catalogued for the reference targets and refused by every shipped adapter. §3.1/§3.2/§3.3 updated; `password_set` is now DERIVED from the kind (V13's CHECK makes `kind = 'none'` ⟺ no stored ciphertext); §8A.1's dummy SQLite password is gone. **§4.2 gains `NamespaceShape`** (`labels`, `levels`, `innermostArrivesInCatalog`) replacing the boolean `schemaArrivesInCatalog`, with the four reference targets' shapes written in as the contract; §7A's listings and filters speak NAMESPACES — `entries: [{namespace, label}]` beside the legacy `schemas`, `namespace` beside `schema` on every table row and filter, dotted `introspection_include_schemas` entries. The catalog argument reaching `getTables`/`getColumns` closes a MEASURED merge (two ATTACHed DuckDB catalogs' same-named schemas listed as one, and an unqualified `getColumns` returned both tables' columns). **New §4.2A**: `connectionInit` wired to HikariCP's previously-unreferenced `connectionInitSql`, and a third reserved `properties` namespace `dialect.*` — TYPED and adapter-validated, refused wholesale by default. `connectionInitSql` joins the §5.6 server-managed set (DS-SEC-22); §5.6 also gains named secret-valued keys the suffix predicate cannot catch (`OAuthPvtKey`, `Auth_AccessToken`, …) and the one-line credential-carrier rule. **New `LAKE` dialect** (§4.1): object storage read in place, DuckDB underneath, without the embedded adapter's `enable_external_access` lock — a distinct dialect, not a mode, because a mode would make the §5.6 refusal set a function of row data. §7B: write-back identifiers quote in the TARGET dialect's vocabulary. |
+| 2026-09-08 | v2.20 | 089 dp-lake (§G docs) | **New §8C dp-lake** — the shipped lake, documented to the tree: **§8C.1 dp-catalog** (the `lake_tables` registry; `datasource_id` holds the datasource NAME; the 1–9-segment namespace grammar, the `s3://`/`file://`-only total location refusal, the REST surface of rest-api §9.8 and the three `lake_tables_*` MCP tools, the read-only detail tree, pool eviction + the §5.7 invalidation on every write), **§8C.2 the per-table views on connect** (the catalog/schema mapping for one- and two-segment namespaces, the refusal of deeper ones, unconditional `hive_partitioning = true` for Parquet, and the **search-path rule**: `SET search_path` only when ALL tables share exactly ONE namespace — the demo's bare-name choice, documented here and in the SKILL), **§8C.3 registry-backed introspection** (namespaces as schemas, registry rows reported as VIEW with format in remarks, columns as a zero-row select over the view through the DuckDB mapper, nested → STRING + warning, 60 s cache), **§8C.4 the engine limits** (`dialect.memory_limit` defaulting to 25 % of container memory clamped to 64 MiB – 4 GiB, `dialect.threads`, `dialect.temp_directory`, always-on `preserve_insertion_order = false`), **§8C.5 the image-bundled extensions** (`httpfs`/`aws`/`iceberg`/`avro` at `/opt/duckdb/extensions`; LOAD-only with the directory present — no egress — INSTALL+LOAD without it; the iceberg extension loads whenever the registry holds an iceberg table, under any catalog kind), **§8C.6 credentials and addressing** (`none` = `credential_chain`, `password` = KEY_ID/SECRET; `region`/`endpoint`/`url_style`), **§8C.7 the measured Iceberg location rule** (DuckDB 1.5.5.1 cannot `iceberg_scan` a pyiceberg table by its ROOT — register the current metadata FILE; this contradicts the design record, and the tree won), and **§8C.8 the not-in-this-round list** (external catalogs as a registry source, writes, scheduler, dashboards, nested types, Athena). §8A.1 documents the LAKE bootstrap seed (`tables:` / `import_manifest:` / `namespace:` / `only_tables:` and the four parse-time refusals); §4.1's LAKE row gains the §8C pointer and its typed-config reference corrected to §4.2A; §4.2's adapter list gains `LakeDialectAdapter`; §14's LAKE bullet rewritten as shipped. |

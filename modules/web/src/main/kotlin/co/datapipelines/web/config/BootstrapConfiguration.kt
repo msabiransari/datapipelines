@@ -1,6 +1,8 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.auth.PersonalWorkspaceSeeder
+import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.UserService
 import co.datapipelines.datasources.BootstrapDatasourceRegistrar
 import co.datapipelines.datasources.DatasourceRegistry
@@ -8,6 +10,7 @@ import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.web.bootstrap.BootstrapDatasourceStartup
 import co.datapipelines.web.bootstrap.BootstrapProperties
 import co.datapipelines.web.bootstrap.ExampleContentSeeder
+import co.datapipelines.web.bootstrap.LakeBootstrapSeeder
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -26,11 +29,19 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 @EnableConfigurationProperties(BootstrapProperties::class)
 class BootstrapConfiguration {
+    /**
+     * The lake seeder is `web`'s answer to the registrar's port (089 §E): the registry service's
+     * one validated import path, with the bootstrap actor read back through [UserRepository] for
+     * the principal. Inert for every file without a LAKE seed entry.
+     */
     @Bean
     fun bootstrapDatasourceRegistrar(
         registry: DatasourceRegistry,
         repository: DatasourceRepository,
-    ): BootstrapDatasourceRegistrar = BootstrapDatasourceRegistrar(registry, repository)
+        lakeTables: LakeTableRegistryService,
+        users: UserRepository,
+    ): BootstrapDatasourceRegistrar =
+        BootstrapDatasourceRegistrar(registry, repository, lakeSeeder = LakeBootstrapSeeder(lakeTables, users))
 
     @Bean
     fun bootstrapDatasourceStartup(
@@ -48,5 +59,6 @@ class BootstrapConfiguration {
         properties: BootstrapProperties,
         pipelineImportService: PipelineImportService,
         templateImportService: TemplateImportService,
-    ): PersonalWorkspaceSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService)
+        datasources: DatasourceRegistry,
+    ): PersonalWorkspaceSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService, datasources)
 }

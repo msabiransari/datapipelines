@@ -96,7 +96,7 @@ while (($#)); do
   case "$1" in
     --env) shift; [[ ${1:-} ]] || die "--env needs a value (your org's name for this deployment)"; DP_ENV="$1" ;;
     --posture) shift; [[ ${1:-} ]] || die "--posture needs a value: development or hardened"; DP_POSTURE="$1"; POSTURE_FROM_FLAG=1 ;;
-    --demo) shift; [[ ${1:-} ]] || die "--demo needs a family list, e.g. --demo nyc or --demo nyc,trade"; DP_DEMO="$1" ;;
+    --demo) shift; [[ ${1:-} ]] || die "--demo needs a family list, e.g. --demo nyc or --demo nyc,trade,lake"; DP_DEMO="$1" ;;
     --demo-nyc|--demo-trade)
       die "$1 is gone (075). Demo is a FLAG now, one variable for every loader:
     ./app.sh --start --demo nyc
@@ -131,14 +131,19 @@ esac
 DEMO_FAMILIES=$(printf '%s' "$DP_DEMO" | tr -d '[:space:]')
 DEMO_NYC=0
 DEMO_TRADE=0
+DEMO_LAKE=0
 if [[ -n $DEMO_FAMILIES ]]; then
   IFS=',' read -r -a _families <<<"$DEMO_FAMILIES"
   for f in "${_families[@]}"; do
     case "$f" in
       nyc) DEMO_NYC=1 ;;
       trade) DEMO_TRADE=1 ;;
+      # 089 §E: the lake family has NO loader — nothing downloads; the app reads
+      # the published objects in place. The token only flips the profile and the
+      # bootstrap-list markers on.
+      lake) DEMO_LAKE=1 ;;
       "") ;;
-      *) die "--demo: unknown sample-data family '$f'. The families are nyc and trade." ;;
+      *) die "--demo: unknown sample-data family '$f'. The families are nyc, trade and lake." ;;
     esac
   done
   if [[ $DP_POSTURE == hardened ]]; then
@@ -201,6 +206,7 @@ assemble_compose() {
   [[ -f $SECRETS_ENV ]] && COMPOSE+=(--env-file "$SECRETS_ENV")
   ((DEMO_NYC)) && COMPOSE+=(--profile demo-nyc)
   ((DEMO_TRADE)) && COMPOSE+=(--profile demo-trade)
+  ((DEMO_LAKE)) && COMPOSE+=(--profile demo-lake)
   return 0
 }
 assemble_compose
@@ -214,6 +220,7 @@ export DATAPIPELINES_POSTURE="$DP_POSTURE"
 export DATAPIPELINES_DEMO="$DEMO_FAMILIES"
 export SAMPLE_NYC_ON=$([[ $DEMO_NYC == 1 ]] && echo 1 || echo "")
 export SAMPLE_TRADE_ON=$([[ $DEMO_TRADE == 1 ]] && echo 1 || echo "")
+export SAMPLE_LAKE_ON=$([[ $DEMO_LAKE == 1 ]] && echo 1 || echo "")
 
 # The EFFECTIVE value of a key across the env-file list, in compose's own precedence
 # (later file wins), with the process environment winning over all of them — which is
@@ -525,7 +532,7 @@ start() {
   wait_until_healthy
   echo "==> UP — ${APP_URL}"
   print_login
-  if ((DEMO_NYC || DEMO_TRADE)); then
+  if ((DEMO_NYC || DEMO_TRADE || DEMO_LAKE)); then
     cat <<EOM
 ==> demo data loaded (${DEMO_FAMILIES}). Your personal workspace is provisioned with
     the example pipelines. To point an agent at it: log in -> mint an API key in the
@@ -538,7 +545,7 @@ EOM
 stop() {
   echo "==> stopping the stack (data volumes kept; '${COMPOSE[*]} down -v' resets them)"
   "${COMPOSE[@]}" stop
-  ((DEMO_NYC || DEMO_TRADE)) && return 0 # --stop --demo … already sees the demo services
+  ((DEMO_NYC || DEMO_TRADE || DEMO_LAKE)) && return 0 # --stop --demo … already sees the demo services
   # 045 §C.1 (023 review): the invocation above has no demo profile, so demo
   # containers are invisible to it and a plain --stop used to leave this project's
   # demo MySQL running — verified live on a scratch stack (2026-09-02): `stop`
@@ -546,7 +553,7 @@ stop() {
   # Detection is by compose LABEL, not by the compose model: loading the model needs
   # the demo env file, which a machine that never ran --demo must not be forced to have.
   local svc running=""
-  for svc in mysql sample-data sample-data-mysql sample-data-trade sample-data-trade-mysql; do
+  for svc in mysql sample-data sample-data-mysql sample-data-trade sample-data-trade-mysql sample-data-lake; do
     if [ -n "$(docker ps -q \
         --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
         --filter "label=com.docker.compose.service=$svc" 2>/dev/null)" ]; then
@@ -558,7 +565,7 @@ stop() {
     docker compose -p "$COMPOSE_PROJECT" \
       -f deploy/compose.yml -f deploy/compose.local-build.yml \
       --env-file "$DEFAULTS_ENV" --env-file "$SECRETS_ENV" \
-      --profile demo-nyc --profile demo-trade stop
+      --profile demo-nyc --profile demo-trade --profile demo-lake stop
     echo "==> demo services stopped too (a plain --stop covers the demo profiles)"
   fi
 }

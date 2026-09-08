@@ -160,6 +160,22 @@ object SitePages {
             view = "site/federated-query",
         )
 
+    /**
+     * dp-lake (089 §G) — the product page written from the thesis note
+     * (`notes/2026-09-07-dp-lake-thesis.md`): the headline IS the note's marketing line.
+     * It states exactly what ships — Parquet/Iceberg on S3 read in place, read-only, DuckDB
+     * as the engine, our own catalog — and nothing more: no dashboards, no scheduler.
+     */
+    val DP_LAKE =
+        SitePage(
+            path = "/dp-lake",
+            title = "dp-lake — query Parquet and Iceberg on S3 with SQL",
+            description =
+                "Your data is already in S3. Ask it a question: Parquet and Iceberg tables read in " +
+                    "place, no warehouse, joined to your databases and served as an API.",
+            view = "site/dp-lake",
+        )
+
     /** The route prefix the six engine pages share. */
     const val ENGINE_PREFIX: String = "/mcp-server/"
 
@@ -271,6 +287,7 @@ object SitePages {
                 COMPARE_AIRFLOW,
                 COMPARE_DBT,
                 FEDERATED_QUERY,
+                DP_LAKE,
             )
 
     /** The cluster pages the homepage links, in nav order (the homepage links to itself nowhere). */

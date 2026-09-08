@@ -91,6 +91,10 @@ object SitePageRenderer {
                     pagesController.federatedQuery(model, response)
                 }
 
+                page.path == SitePages.DP_LAKE.path -> {
+                    pagesController.dpLake(model, response)
+                }
+
                 else -> {
                     error("SitePageRenderer has no handler for ${page.path} — add it beside the controller's")
                 }

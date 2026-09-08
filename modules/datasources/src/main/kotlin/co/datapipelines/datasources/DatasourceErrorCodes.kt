@@ -90,4 +90,28 @@ object DatasourceErrorCodes {
      * defect the guard turns into a loud, catalogued refusal instead of a silent lock-holder.
      */
     const val LEASE_IN_TRANSACTION = "datasource.lease_in_transaction"
+
+    /** A lake-table operation was attempted on a datasource whose dialect is not `LAKE` (089 §A). */
+    const val LAKE_DIALECT_REQUIRED = "datasource.validation.lake_dialect_required"
+
+    /** A lake table's `namespace` fails the segment grammar (the pipeline/template §4.1 segment, minus `.`). */
+    const val LAKE_NAMESPACE_INVALID = "datasource.validation.lake_namespace_invalid"
+
+    /** A lake table's `name` fails the segment grammar. */
+    const val LAKE_NAME_INVALID = "datasource.validation.lake_name_invalid"
+
+    /** A lake table's `format` is not `parquet` or `iceberg` (metadata-db §4.15's closed set). */
+    const val LAKE_FORMAT_INVALID = "datasource.validation.lake_format_invalid"
+
+    /** A lake table's `location` fails the scheme allowlist or the total injection refusal. */
+    const val LAKE_LOCATION_INVALID = "datasource.validation.lake_location_invalid"
+
+    /** An import manifest URL outside the datasource's own endpoint/bucket (the SSRF boundary). */
+    const val LAKE_MANIFEST_URL_FORBIDDEN = "datasource.validation.lake_manifest_url_forbidden"
+
+    /** The (datasource, namespace, name) triple is already registered — 409. */
+    const val LAKE_TABLE_DUPLICATE = "datasource.lake_table_duplicate"
+
+    /** Unregister named a lake table that is not registered — 404. */
+    const val LAKE_TABLE_NOT_FOUND = "datasource.lake_table_not_found"
 }

@@ -1,6 +1,7 @@
 package co.datapipelines.web.bootstrap
 
 import co.datapipelines.auth.PersonalWorkspaceSeeder
+import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
@@ -44,11 +45,23 @@ class ExampleContentFileException(
  * references a datasource this deployment lacks fails workspace provisioning, and the login with
  * it. That is deliberate (see [PersonalWorkspaceSeeder]): a personal workspace silently missing
  * its examples is indistinguishable from a seeded one, so it must never be handed out.
+ *
+ * ## The `requires_datasources` gate (089 §E)
+ * A file may declare top-level `"requires_datasources": ["sample-lake", …]`: the seeder then
+ * seeds that file's content for a workspace ONLY when every named datasource is registered and
+ * visible to it (a global datasource is visible to every workspace). An absent key is no gate —
+ * the pre-089 behaviour, which the two original families keep. The gate exists because the fail
+ * above is REAL: 088 found that a lake pipeline in a file the deployment mounts without the
+ * lake family would fail every first login, so the file travels with the demo profile that
+ * registers its datasource and the gate makes a partial family selection (`--demo nyc` alone)
+ * skip the file instead of breaking on it. A skipped file is logged, never silent — and a file
+ * whose gate PASSES still fails loudly on any genuinely broken reference, exactly as before.
  */
 class ExampleContentSeeder(
     properties: BootstrapProperties,
     private val pipelineImportService: PipelineImportService,
     private val templateImportService: TemplateImportService,
+    private val datasources: DatasourceRegistry,
 ) : PersonalWorkspaceSeeder {
     private val log = LoggerFactory.getLogger(ExampleContentSeeder::class.java)
 
@@ -65,17 +78,34 @@ class ExampleContentSeeder(
         userId: UUID,
     ) {
         if (contents.isEmpty()) return
+        // The requires_datasources gate (089 §E), evaluated per workspace at SEED time — a
+        // datasource registered after boot still counts for the next workspace provisioned.
+        val eligible =
+            contents.filter { examples ->
+                val missing = examples.requiresDatasources.filter { datasources.getVisible(it, workspaceId) == null }
+                if (missing.isNotEmpty()) {
+                    log.info(
+                        "event=workspace.examples_gate_skipped workspace_id={} file={} missing_datasources={} " +
+                            "message=\"the file declares requires_datasources and not every named datasource is " +
+                            "registered and visible; its content is not seeded\"",
+                        workspaceId,
+                        examples.source,
+                        missing.joinToString(","),
+                    )
+                }
+                missing.isEmpty()
+            }
         // All templates across all files first, then all pipelines: a pipeline in the second
         // family may reference a template seeded from the first, and §12 resolves templates at
         // save time. File order is the configured order (BootstrapProperties).
-        contents.forEach { examples ->
+        eligible.forEach { examples ->
             examples.templatesBody?.let { body ->
                 reporting(workspaceId, userId, kind = "templates", fixture = examples.templateIds.joinToString(",")) {
                     templateImportService.import(body, workspaceId, userId)
                 }
             }
         }
-        contents.forEach { examples ->
+        eligible.forEach { examples ->
             examples.pipelines.forEach { fixture ->
                 reporting(workspaceId, userId, kind = "pipeline", fixture = fixture.name) {
                     pipelineImportService.import(fixture.body, workspaceId, userId)
@@ -85,9 +115,9 @@ class ExampleContentSeeder(
         log.info(
             "event=workspace.examples_seeded workspace_id={} files={} templates={} pipelines={}",
             workspaceId,
-            contents.size,
-            contents.sumOf { it.templateIds.size },
-            contents.sumOf { it.pipelines.size },
+            eligible.size,
+            eligible.sumOf { it.templateIds.size },
+            eligible.sumOf { it.pipelines.size },
         )
     }
 
@@ -169,6 +199,8 @@ class ExampleContentSeeder(
             )
         }
         return Content(
+            source = path.toString(),
+            requiresDatasources = requiresDatasourcesAt(tree, path),
             // PRESENT-but-empty is a deployment saying "seed no templates", and is why the
             // refusal above tests presence, not size (021/F7: an explicitly empty array was
             // normalized to absent and then reported as a file declaring neither array — a
@@ -197,6 +229,27 @@ class ExampleContentSeeder(
         return node
     }
 
+    /**
+     * The 089 §E gate's datasource names, or an empty list when the file declares none (absent
+     * key = no gate — the pre-089 behaviour). A declared-but-empty array is a gate nothing can
+     * fail, which is what the file literally says, so it is kept rather than refused. A
+     * non-array, or an entry that is not a string, is a malformed file — refused at startup.
+     */
+    private fun requiresDatasourcesAt(
+        tree: ObjectNode,
+        path: Path,
+    ): List<String> {
+        val node = arrayAt(tree, "requires_datasources", path) ?: return emptyList()
+        return node.map { element ->
+            if (!element.isTextual) {
+                throw ExampleContentFileException(
+                    "Bootstrap examples file '$path' field 'requires_datasources' entries must be strings.",
+                )
+            }
+            element.asText()
+        }
+    }
+
     /** One pipeline fixture: the body handed to the import service, and the name a failure names. */
     private class Fixture(
         val name: String,
@@ -205,6 +258,10 @@ class ExampleContentSeeder(
 
     /** The import request bodies, derived once at startup so seeding is pure string handoff. */
     private class Content(
+        /** The file this content came from — the gate's skip line names it. */
+        val source: String,
+        /** The 089 §E gate: datasource names that must all be registered and visible to seed. */
+        val requiresDatasources: List<String>,
         val templatesBody: String?,
         val templateIds: List<String>,
         val pipelines: List<Fixture>,

@@ -150,8 +150,8 @@ class SiteSeoMetaTest {
             ?.let { CONTENT.find(it)?.groupValues?.get(1) }
 
     private companion object {
-        /** Two pillars + six engines + six one-off cluster pages, the measured plan. */
-        const val EXPECTED_PAGES = 14
+        /** Two pillars + six engines + seven one-off cluster pages (089 added dp-lake). */
+        const val EXPECTED_PAGES = 15
         const val TITLE_MAX = 70
         const val DESCRIPTION_MAX = 155
         const val MIN_ALT_CHARS = 20

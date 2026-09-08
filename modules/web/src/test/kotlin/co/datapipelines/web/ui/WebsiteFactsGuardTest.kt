@@ -63,17 +63,18 @@ class WebsiteFactsGuardTest {
 
     /**
      * 076 — the demo pipeline names the site QUOTES are derived, never transcribed: every
-     * name mentioned by the homepage, the federated-query page and the engine pages' `demo`
-     * facts must be one of the pipelines the shipped demo content seeds
-     * (`scripts/sample-data/content/examples.json` and
-     * `scripts/sample-data-trade/content/examples.json` — what `./app.sh --start --demo-nyc`
-     * and `--demo-trade` load). The 067 folder-named rename left the site quoting the old
-     * flat names; this guard is what makes that the last time.
+     * name mentioned by the homepage, the federated-query page, the dp-lake page and the
+     * engine pages' `demo` facts must be one of the pipelines the shipped demo content seeds
+     * (`scripts/sample-data/content/examples.json`,
+     * `scripts/sample-data-trade/content/examples.json` and — 089 — the lake family's
+     * `scripts/sample-data/content/examples-lake.json`, what `./app.sh --start --demo nyc`,
+     * `--demo trade` and `--demo lake` load). The 067 folder-named rename left the site
+     * quoting the old flat names; this guard is what makes that the last time.
      *
      * Extraction, same regex-over-source style as [renderedSiteCount]:
-     * - Demo names: the `"name"` of each `"pipelines"` entry in both JSON files, anchored on
+     * - Demo names: the `"name"` of each `"pipelines"` entry in the JSON files, anchored on
      *   the preceding `"schema_version"` so nothing else named "name" is collected.
-     * - Site mentions: every lowercase-underscore token in the two template SOURCES (read
+     * - Site mentions: every lowercase-underscore token in the three template SOURCES (read
      *   from disk via [TestRepoFiles], never the build output) whose LAST `/`-separated
      *   segment equals a demo leaf name. A full path (`nyc/mobility/revenue_by_borough`)
      *   matches on its leaf; a flat regression (`revenue_by_borough`) matches too — and then
@@ -90,6 +91,7 @@ class WebsiteFactsGuardTest {
 
         val indexMentions = quotedPipelineMentions(SITE_INDEX, leafNames)
         val federatedMentions = quotedPipelineMentions(SITE_FEDERATED_QUERY, leafNames)
+        val dpLakeMentions = quotedPipelineMentions(SITE_DP_LAKE, leafNames)
         val engineDemos = SitePages.ENGINES.mapNotNull { it.demo }
 
         assertAll(
@@ -97,18 +99,19 @@ class WebsiteFactsGuardTest {
             { demoNames.size shouldBeGreaterThan 3 },
             { indexMentions.shouldNotBeEmpty() },
             { federatedMentions.shouldNotBeEmpty() },
+            { dpLakeMentions.shouldNotBeEmpty() },
             { engineDemos.shouldNotBeEmpty() },
             {
-                (indexMentions + federatedMentions + engineDemos).forEach { name ->
+                (indexMentions + federatedMentions + dpLakeMentions + engineDemos).forEach { name ->
                     demoNames shouldContain name
                 }
             },
         )
     }
 
-    /** The pipeline names of both demo families, parsed from the content files themselves. */
+    /** The pipeline names of all three demo families, parsed from the content files themselves. */
     private fun demoPipelineNames(): Set<String> =
-        listOf(DEMO_NYC, DEMO_TRADE)
+        listOf(DEMO_NYC, DEMO_TRADE, DEMO_LAKE)
             .flatMap { path ->
                 PIPELINE_NAME
                     .findAll(TestRepoFiles.read(path))
@@ -197,6 +200,7 @@ class WebsiteFactsGuardTest {
                 launcher = launcher,
                 datasourceCreateService = mockk<co.datapipelines.application.datasources.DatasourceCreateService>(),
                 endpointPublishService = mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
+                lakeTableRegistryService = mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
             ).size
     }
 
@@ -205,8 +209,10 @@ class WebsiteFactsGuardTest {
 
         const val SITE_INDEX = "modules/web/src/main/resources/templates/site/index.html"
         const val SITE_FEDERATED_QUERY = "modules/web/src/main/resources/templates/site/federated-query.html"
+        const val SITE_DP_LAKE = "modules/web/src/main/resources/templates/site/dp-lake.html"
         const val DEMO_NYC = "scripts/sample-data/content/examples.json"
         const val DEMO_TRADE = "scripts/sample-data-trade/content/examples.json"
+        const val DEMO_LAKE = "scripts/sample-data/content/examples-lake.json"
 
         /** A `"pipelines"` entry's name — anchored on the schema version that precedes it. */
         val PIPELINE_NAME = Regex(""""schema_version":\s*\d+,\s*"name":\s*"([^"]+)"""")

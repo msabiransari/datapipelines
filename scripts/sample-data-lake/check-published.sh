@@ -71,9 +71,9 @@ done
   examples.json byte-identity)"
 
 # The base URL and the pinned version come from the TRACKED settings file — the same
-# file the running deployment loads (075/T117). SAMPLE_LAKE_BASE_URL is the key 089
-# will add; until then the manifest's own https_base is the fallback, derived from
-# the lock rather than typed twice.
+# file the running deployment loads (075/T117; the lake pair was pinned there by 089
+# §E). The manifest's own https_base stays the fallback, derived from the lock rather
+# than typed twice, for a checkout whose defaults.env predates the pins.
 BASE="${SAMPLE_LAKE_BASE_URL:-$(demo_env_get SAMPLE_LAKE_BASE_URL)}"
 if [ -z "$BASE" ]; then
   bucket=$(lake_publish_bucket)

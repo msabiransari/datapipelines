@@ -34,6 +34,10 @@ class UiConfig {
     @Bean
     fun templateBrowseModel(templates: TemplateRepository): TemplateBrowseModel = TemplateBrowseModel(templates)
 
+    /** 089 §A: the LAKE datasource detail's read-only tree model — stateless, one shared instance. */
+    @Bean
+    fun lakeTableBrowseModel(): LakeTableBrowseModel = LakeTableBrowseModel()
+
     /** 079 §A: the rail's Pipelines/Templates badges, behind a 60s TTL (see [NavCounts]). */
     @Bean
     fun navCounts(

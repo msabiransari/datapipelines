@@ -91,6 +91,12 @@ class SitePagesController {
         response: HttpServletResponse,
     ): String = PublicPage.render(model, response, SitePages.FEDERATED_QUERY, toolCount())
 
+    @GetMapping("/dp-lake")
+    fun dpLake(
+        model: Model,
+        response: HttpServletResponse,
+    ): String = PublicPage.render(model, response, SitePages.DP_LAKE, toolCount())
+
     /**
      * The tool count, from the compile-time catalog rather than an injected `List<McpTool>`:
      * the tool bean is `@ConditionalOnBean(PipelineExecutor::class)` (033/C4), so an injected

@@ -39,7 +39,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [templates.md](templates.md) | v1.6 frozen | Freemarker SQL templates: versioning, library imports (`{id, version, alias}`), SSTI hardening, parse-only save validation |
-| [datasources.md](datasources.md) | v1.8 | Named connections, 7 dialects, Hikari/JDBC property passthrough (§5.6 refusal sets), AES-GCM credential storage |
+| [datasources.md](datasources.md) | v1.8 | Named connections, 8 dialects (incl. `LAKE` — dp-lake, §8C), Hikari/JDBC property passthrough (§5.6 refusal sets), AES-GCM credential storage |
 | [staging.md](staging.md) | v1.10 frozen | Per-execution in-memory H2: lifecycle, identifier safety, mutex-guarded connection behind `withConnection`, memory limits |
 | [dag-executor.md](dag-executor.md) | v1.3 | Coroutine executor: topological execution, fail-fast, cancellation (Redis flag), result materialization |
 | [calculators.md](calculators.md) | v1.0 | The calculator catalogue: 23 pure `kind`s a `CALCULATOR` node can run (calendar/fiscal periods, date arithmetic, rounding, percent change, coalesce/map), the eight always-present Context keys (`org_*`, `current_date`, …), `$name` references vs literals, the topology rule. `calculators_list` returns the same catalogue live; drift-guarded against the registry. |
@@ -49,7 +49,7 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | Doc | Status | One line |
 |---|---|---|
 | [rest-api.md](rest-api.md) | v1.4 frozen | Endpoints, envelopes, SSE execution stream, **uniform result-delivery cursor (§7)**, auth/user-admin endpoints (§16) |
-| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 15 tools, resources, prompts — a thin adapter over REST |
+| [mcp-server.md](mcp-server.md) | v1.3 frozen | Streamable HTTP MCP: 31 tools, resources, prompts — a thin adapter over REST |
 | [ui-screens.md](ui-screens.md) | v1.1 | 12 CRUD screens: Thymeleaf + htmx, `/partials/**` convention, standard states |
 | [pipeline-editor.md](pipeline-editor.md) | v1.2 | Cytoscape execution/visualization surface: vendored assets, SSE wiring, canvas a11y model |
 | [versioning.md](versioning.md) | v1.4 ratified | Draft/release lifecycle (copy-on-write drafts in the version tables, content-hash preconditions, UI-only release), version numbers as cross-env identities, UI-driven promotion with two-sided guards |

@@ -2,9 +2,11 @@ package co.datapipelines.datasources
 
 import co.datapipelines.datasources.Namespaces.toExactMatch
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.IngressTypeMapper
 import java.sql.Connection
 import java.sql.DatabaseMetaData
+import java.sql.ResultSetMetaData
 import java.sql.SQLException
 import java.sql.SQLFeatureNotSupportedException
 
@@ -38,6 +40,8 @@ import java.sql.SQLFeatureNotSupportedException
  */
 class SchemaIntrospector(
     private val registry: DatasourceRegistry,
+    private val lakeTables: LakeTableCatalog = LakeTableCatalog.NONE,
+    private val lakeCache: LakeIntrospectionCache = LakeIntrospectionCache.NONE,
 ) {
     /**
      * §7A — the namespace listing, the entry point of the introspection flow (schemas → tables →
@@ -69,8 +73,9 @@ class SchemaIntrospector(
     fun schemas(
         datasource: Datasource,
         maxSchemas: Int = MAX_LISTING_ROWS,
-    ): SchemasPage =
-        withMetaData(datasource) { _, meta, _ ->
+    ): SchemasPage {
+        if (datasource.dialect == Dialect.LAKE) return lakeSchemas(datasource, maxSchemas)
+        return withMetaData(datasource) { _, meta, _ ->
             val shape = DialectAdapters.forDialect(datasource.dialect).namespaceShape
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val rs = if (shape.innermostArrivesInCatalog) meta.catalogs else meta.schemas
@@ -100,6 +105,26 @@ class SchemaIntrospector(
                 SchemasPage(out, truncated)
             }
         }
+    }
+
+    /**
+     * §7A for a LAKE datasource — the dp-lake registry IS the schema listing (089 §C): the
+     * engine cannot LIST a bucket, so the distinct namespaces of the registered tables are the
+     * whole answer, labeled per the adapter's [NamespaceShape.CATALOG_AND_SCHEMA] (first segment
+     * the catalog, second the schema — `SchemaEntry`'s label is the innermost). Served from
+     * [lakeCache]; `LakeTableRegistryService.refreshConnections` invalidates on every mutation.
+     */
+    private fun lakeSchemas(
+        datasource: Datasource,
+        maxSchemas: Int,
+    ): SchemasPage =
+        lakeCache.get(datasource.name, "schemas", "") {
+            val namespaces = lakeTables.registeredTables(datasource.name).map { it.namespace }.distinct()
+            SchemasPage(
+                namespaces.take(maxSchemas).map { SchemaEntry(it, it.last()) },
+                truncated = namespaces.size > maxSchemas,
+            )
+        }
 
     /**
      * §7A — live tables/views, optionally narrowed to one schema, capped at [maxTables].
@@ -123,13 +148,14 @@ class SchemaIntrospector(
         schemaFilter: String? = null,
         maxTables: Int = MAX_LISTING_ROWS,
         namespaceFilter: List<String>? = null,
-    ): TablesPage =
-        withMetaData(datasource) { _, meta, _ ->
+    ): TablesPage {
+        // The caller's filter goes through the same blank-sentinel rule as driver-reported
+        // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
+        // namespaces — never the JDBC '' sentinel, which matches nothing on any dialect.
+        val filter = Namespaces.filterOf(namespaceFilter, schemaFilter)
+        if (datasource.dialect == Dialect.LAKE) return lakeTablesPage(datasource, filter, maxTables)
+        return withMetaData(datasource) { _, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
-            // The caller's filter goes through the same blank-sentinel rule as driver-reported
-            // values (Spring binds `?schema=` to non-null ""): blank means ABSENT — spans
-            // namespaces — never the JDBC '' sentinel, which matches nothing on any dialect.
-            val filter = Namespaces.filterOf(namespaceFilter, schemaFilter)
             // A filter deeper than the dialect's namespace names no real place: empty, not an
             // error, exactly like an unknown schema (Namespaces.route returns null for it).
             val routed = Namespaces.route(adapter.namespaceShape, filter, meta) ?: return@withMetaData TablesPage(emptyList(), false)
@@ -141,6 +167,36 @@ class SchemaIntrospector(
                 maxTables,
                 datasource.introspectionIncludeSchemas.toSet(),
             )
+        }
+    }
+
+    /**
+     * §7A for a LAKE datasource — the registry's rows in the requested namespace (089 §C). The
+     * filter matches a namespace EXACTLY: `["nyc"]` names the one-segment namespace, not every
+     * namespace under a `nyc` head — a prefix match would silently merge `nyc` and
+     * `nyc.mobility` into one listing. A filter deeper than the two-segment shape names no real
+     * place (empty, the [Namespaces.route] rule). Each row reports type `VIEW` — that is what
+     * the engine object IS (089 §B) — with the registry's format (`parquet`/`iceberg`) in
+     * `remarks`, so `datasources_get_tables` shows both without a new wire field.
+     */
+    private fun lakeTablesPage(
+        datasource: Datasource,
+        filter: List<String>,
+        maxTables: Int,
+    ): TablesPage =
+        lakeCache.get(datasource.name, "tables", filter.joinToString(Namespaces.SEPARATOR.toString())) {
+            if (filter.size > MAX_LAKE_NAMESPACE_SEGMENTS) {
+                TablesPage(emptyList(), false)
+            } else {
+                val rows =
+                    lakeTables
+                        .registeredTables(datasource.name)
+                        .filter { filter.isEmpty() || it.namespace == filter }
+                TablesPage(
+                    rows.take(maxTables).map { TableInfo(it.namespace, it.name, LAKE_TABLE_TYPE, it.format) },
+                    truncated = rows.size > maxTables,
+                )
+            }
         }
 
     /**
@@ -175,19 +231,20 @@ class SchemaIntrospector(
         table: String,
         schemaFilter: String? = null,
         namespaceFilter: List<String>? = null,
-    ): List<ColumnInfo> =
-        withMetaData(datasource) { connection, meta, _ ->
+    ): List<ColumnInfo> {
+        // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
+        val supplied = Namespaces.filterOf(namespaceFilter, schemaFilter)
+        if (datasource.dialect == Dialect.LAKE) return lakeColumns(datasource, table, supplied)
+        return withMetaData(datasource) { connection, meta, _ ->
             val adapter = DialectAdapters.forDialect(datasource.dialect)
             val shape = adapter.namespaceShape
             val exempt = datasource.introspectionIncludeSchemas.toSet()
-            // A blank caller filter is absent (the same blank-sentinel rule tables() applies).
             // The flat-dialect exemption is STRUCTURAL, not driver-dependent: a flat dialect
             // never consults the connection's current schema at all (R5 F3 — the old order was
             // safe only because the vendored sqlite-jdbc hardcodes getSchema() = null; a future
             // flat driver whose getSchema()/getCatalog() throws would have turned a working
             // unfiltered read into a classified failure), so the current-namespace default —
             // never the JDBC '' sentinel — applies only to dialects that HAVE a namespace.
-            val supplied = Namespaces.filterOf(namespaceFilter, schemaFilter)
             val effectiveFilter =
                 supplied.ifEmpty { if (shape.isFlat) emptyList() else connection.currentNamespace(adapter, datasource.name) }
             if (effectiveFilter.isEmpty() && !shape.isFlat) {
@@ -202,6 +259,82 @@ class SchemaIntrospector(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * §7A for a LAKE datasource — the columns of the registered table's VIEW (089 §C): a
+     * zero-row `SELECT *` over the view, read through [ResultSetMetaData] and mapped by the
+     * adapter's DuckDB mapper exactly like a JDBC `getColumns` row (nested LIST/STRUCT/MAP
+     * arrive as STRING with the mapper's warning). `DESCRIBE SELECT * FROM <view>` reports the
+     * same schema, but as STRINGS — the mapper's DECIMAL precision/scale inputs would have to
+     * be re-parsed out of them, so the structured metadata read is the faithful one.
+     *
+     * The unfiltered default is the search-path rule's twin ([LakeViewStatements]): with
+     * EXACTLY ONE registered namespace the table is resolved there; with several, the read
+     * cannot pick one and fails with [CurrentSchemaUnknownException] — the caller passes an
+     * explicit namespace, the same recovery as the JDBC path. An unregistered table is empty,
+     * never an error (the §7A rule). Cached per (namespace, table) in [lakeCache] — on S3 the
+     * zero-row scan is a footer read over the network.
+     */
+    private fun lakeColumns(
+        datasource: Datasource,
+        table: String,
+        filter: List<String>,
+    ): List<ColumnInfo> {
+        val effective =
+            filter.ifEmpty {
+                val namespaces = lakeTables.registeredTables(datasource.name).map { it.namespace }.distinct()
+                when (namespaces.size) {
+                    // No registered tables: the table cannot exist — empty, like an unknown table.
+                    0 -> return emptyList()
+
+                    1 -> namespaces.single()
+
+                    else -> throw CurrentSchemaUnknownException(datasource.name)
+                }
+            }
+        val registered =
+            lakeTables
+                .registeredTables(datasource.name)
+                .firstOrNull { it.namespace == effective && it.name == table }
+                ?: return emptyList()
+        val qualifier = (effective + table).joinToString(Namespaces.SEPARATOR.toString())
+        return lakeCache.get(datasource.name, "columns", qualifier) {
+            ConnectionLease.lease(registry, datasource) { connection ->
+                val adapter = DialectAdapters.forDialect(datasource.dialect)
+                val path = (registered.namespace + registered.name).joinToString(".") { adapter.quoteIdentifier(it) }
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT * FROM $path LIMIT 0").use { rs ->
+                        mapResultSetColumns(rs.metaData, adapter.typeMapper)
+                    }
+                }
+            }
+        }
+    }
+
+    /** One [ResultSetMetaData] row set, mapped exactly like [mapColumnRow] maps a `getColumns` row. */
+    private fun mapResultSetColumns(
+        meta: ResultSetMetaData,
+        mapper: IngressTypeMapper,
+    ): List<ColumnInfo> =
+        (1..meta.columnCount).map { index ->
+            val sourceTypeName = meta.getColumnTypeName(index) ?: ""
+            val mapped =
+                mapper.mapColumn(
+                    name = meta.getColumnName(index),
+                    sqlType = meta.getColumnType(index),
+                    precision = meta.getPrecision(index),
+                    scale = meta.getScale(index),
+                    typeName = sourceTypeName,
+                    nullable =
+                        when (meta.isNullable(index)) {
+                            ResultSetMetaData.columnNoNulls -> false
+                            ResultSetMetaData.columnNullable -> true
+                            else -> null
+                        },
+                )
+            ColumnInfo(mapped.column, sourceTypeName, mapped.warnings)
         }
 
     /**
@@ -434,5 +567,11 @@ class SchemaIntrospector(
 
         /** SQLState "feature not supported" — the untyped sibling of [SQLFeatureNotSupportedException]. */
         const val FEATURE_UNSUPPORTED_STATE = "0A000"
+
+        /** The engine object a registered lake table IS (089 §B's per-table view) — TableInfo.type. */
+        const val LAKE_TABLE_TYPE = "VIEW"
+
+        /** DuckDB's catalog.schema namespace depth — a deeper filter names no real place (089 §B). */
+        const val MAX_LAKE_NAMESPACE_SEGMENTS = 2
     }
 }

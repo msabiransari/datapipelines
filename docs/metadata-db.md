@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.10 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.12 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-05
@@ -65,6 +65,8 @@ pipeline_versions ──1:N── pipeline_executions   (composite FK on (pipeli
 pipeline_executions ──1:N── execution_events
 
 templates ──1:N── template_versions
+
+datasources ──1:N── lake_tables (datasource_id references the datasources NAME primary key — §4.15)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -564,6 +566,35 @@ CREATE INDEX idx_endpoint_key_bindings_key ON endpoint_key_bindings(api_key_id);
 - The primary key `(path_prefix, api_key_id)` says one key binds a node once and several keys may bind the same node.
 - No `updated_at`: a binding is inserted and deleted, never edited.
 
+### 4.15 `lake_tables`
+
+The dp-lake catalog: which tables a LAKE-dialect datasource serves (V15, round 089 §A; the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — this registry is the catalog introspection and (in a later phase) per-table view creation read. Rows are written by `LakeTableRegistryService` alone (REST `POST /api/v1/datasources/{name}/tables`, the `lake_tables_*` MCP tools).
+
+```sql
+CREATE TABLE lake_tables (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    datasource_id    TEXT        NOT NULL REFERENCES datasources(name),
+    namespace        TEXT[]      NOT NULL,    -- 087's List<String>: {"nyc","mobility"}
+    name             TEXT        NOT NULL,
+    format           TEXT        NOT NULL,    -- 'parquet' | 'iceberg' (CHECK)
+    location         TEXT        NOT NULL,    -- s3://bucket/prefix[/glob] or file:// path
+    partition_column TEXT,                    -- NULL = unpartitioned
+    registered_by    UUID        NOT NULL REFERENCES users(id),
+    registered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_lake_table_format CHECK (format IN ('parquet', 'iceberg')),
+    CONSTRAINT uq_lake_tables_datasource_namespace_name UNIQUE (datasource_id, namespace, name)
+);
+```
+
+**Notes:**
+- **`datasource_id` is TEXT referencing `datasources(name)`** — the datasource table's primary key IS its name ([§4.10](#410-datasources): PK, GCM AAD anchor, cross-env contract); there is no surrogate id to point at. The column keeps the design record's name; what it holds is the datasource NAME. No `ON DELETE` clause: datasources are soft-deleted, the row stays, and its tables stay registered with it — a datasource name is never reused, so the reference can never silently repoint.
+- `namespace` is 087's `List<String>` (the [NamespaceShape](datasources.md) world) as a Postgres `TEXT[]`: `{"nyc","mobility"}` is the table a template reads as `nyc.mobility.hvfhv_zone_day`. NOT NULL with one to nine segments. The segment grammar — the pipeline/template §4.1 production, minus `.` inside a segment (the dotted wire form `nyc.mobility` must round-trip) — is enforced by the application validator, not a CHECK: a per-element array CHECK is expressible but unreadable, and this table's only writer is that validating service.
+- `format`'s CHECK duplicates the application enum on purpose, the `chk_datasource_dialect` precedent (§4.10): a third value here generates bad SQL later — the view-creation phase maps `parquet` to `read_parquet(...)` and `iceberg` to `iceberg_scan(...)`, and the database is the last place to catch it.
+- `location` is the object-storage address: `s3://bucket/prefix/` (Parquet: a directory or glob; Iceberg: the table's **current metadata FILE** — `…/metadata/00042-<uuid>.metadata.json`, not the table root, which DuckDB 1.5.5 cannot resolve for pyiceberg tables; the measured rule, [datasources.md §8C.7](datasources.md#8c7-the-iceberg-location-rule--register-the-metadata-file)) or a `file://` path for an on-prem volume. The scheme allowlist and the injection refusal — no quotes, no backslash, no control characters, no whitespace, because the value is later interpolated into `CREATE VIEW` statements — are the application validator's, and they are TOTAL: there is no escaping rule, because a value that would need one is refused at registration instead.
+- `partition_column` is nullable with no default: an unpartitioned table has none, and NULL is the truthful spelling of that (the `description` precedent, D4/2.9.4).
+- `registered_by` / `registered_at` follow the house `created_by`/`created_at` shape — a real FK to `users(id)` (`ON DELETE RESTRICT`, the §2 default) and a DB-defaulted TIMESTAMPTZ. There is no `updated_at`: a row is inserted and deleted, never edited — re-registration is delete + insert, so the registration audit columns always name the actor of the row that exists.
+- `uq_lake_tables_datasource_namespace_name` is the one rule beyond the CHECK: a table is its (datasource, namespace, name) triple, registered once. It is NAMED so the service maps its violation to the catalogued `datasource.lake_table_duplicate` (the `uq_pipelines_workspace_name` precedent, §4.4), and its index doubles as the access path for the registry's hot read — "list the tables of one datasource" — which is why §5 creates no separate index on `datasource_id`.
+
 ---
 
 ## 5. Index Strategy Summary
@@ -616,6 +647,8 @@ CREATE INDEX idx_endpoint_key_bindings_key ON endpoint_key_bindings(api_key_id);
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
 | `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
+| `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
+| `lake_tables` | `uq_lake_tables_datasource_namespace_name` | via UNIQUE | One registration per (datasource, namespace, name); doubles as the list-by-datasource access path ([§4.15](#415-lake_tables)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -658,6 +691,7 @@ table and the test's expected-table list in the same commit.
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
+| `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
 
 ---
 
@@ -918,3 +952,5 @@ Three pieces of execution state that a reader might reasonably expect to find he
 | 2026-09-05 | v1.8 | V11 migration (074) | New **§4.13 `published_endpoints`** and **§4.14 `endpoint_key_bindings`** (migration V11, [REST API §19](rest-api.md#19-published-endpoints)) — a released pipeline served as `GET /api/x/…`, and which API keys authorise which node of that tree. §4.2 `api_keys` gains `kind` (`user` \| `endpoint`, CHECK-constrained, `DEFAULT 'user'` so the whole pre-V11 table backfills correctly) plus the partial index `idx_api_keys_endpoint_kind`. `pipeline_executions.chk_triggered_via` widens to admit `'ENDPOINT'` — a closed set since V1, so without this the first serve would fail on the constraint rather than on anything the design describes. §5 index table and §5A's classification updated: both new tables are **promotable** (a URL contract is authored, and bindings travel by key NAME because `api_keys` itself is environment-local — a target missing that name refuses the batch with `endpoint.promotion.key_missing`). |
 | 2026-09-05 | v1.9 | V12 migration (077) | §4.8 `templates`: `name` requires a **folder** ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) and migration **V12** carries the deploy gate for stored names — a `DO`-block pre-check that aborts naming every flat offender, active and soft-deleted, and **no DDL at all**. No table, column, index, constraint or classification changes, which is why every other section of this document is untouched. The gate deliberately ignores `pipelines`: that name is validated at save only, so a legacy flat pipeline still runs and an abort over it would be a false alarm ([Template Hierarchy §14.2](template-hierarchy-design.md)). |
 | 2026-09-07 | v1.10 | V13 + V14 migrations (087) | §4.10 `datasources`: `password_encrypted` → **`credential_encrypted`, now NULLABLE**, plus **`credential_kind TEXT NOT NULL DEFAULT 'password'`** and a nullable `username` (V13, [Datasources §3.4](datasources.md#34-credential-kinds)). Three CHECKs: the kind is one of the enums.md §5A set, `kind = 'none'` ⟺ no ciphertext (which is what makes `password_set` derivable rather than a stored flag), and `username` is present exactly when the kind allows it. The backfill is TRUE rather than a guess — every pre-087 row went through a save path that required a username and a password. The credential blob stays kind-agnostic under the V10 versioned envelope, so rotation is untouched. **V14** widens `chk_datasource_dialect` to admit `'LAKE'` (dropped and recreated — Postgres has no ALTER for a CHECK expression); no data changes, since no existing row can hold a value that did not exist. |
+| 2026-09-07 | v1.11 | V15 migration (089 §A) | New **§4.15 `lake_tables`** — the dp-lake catalog: which Parquet/Iceberg tables a LAKE-dialect datasource serves (the 2026-09-07 lake-datasource design record §2). `datasource_id` is TEXT referencing `datasources(name)` — the datasource PK IS its name; there is no surrogate id to point at. `namespace` is 087's segment list as a Postgres `TEXT[]`; `format` is CHECKed (`parquet` \| `iceberg`) because a third value would generate bad view SQL later; the named `uq_lake_tables_datasource_namespace_name` lets the service map a re-registration to the catalogued `datasource.lake_table_duplicate`, and its index doubles as the list-by-datasource access path, so §5 gains no separate FK index. §3 ERD, §5 index table and §5A's classification updated: the table is **environment-local** — it points at an environment-local datasource row and at bucket locations whose credentials never leave the deployment. |
+| 2026-09-08 | v1.12 | V16 migration (089 §F) | **V16 widens `template_versions.chk_dialect` to admit `'LAKE'`** — dropped and recreated, the V14 shape, since Postgres has no ALTER for a CHECK expression; additive in effect, no data changes (no existing row can hold a value the CHECK has refused since V1). The dialect itself joined the datasource CHECK in V14; this is its template twin, found by the MinIO suite going red on the first `dialect: LAKE` template insert — the 088 showcase content (`nyc/lake/rideshare_zone_day.sql`) declares exactly one. The §4.9 sketch keeps the V1 constraint, the same convention §4.10 follows for V14 — this row is the record of the widening. |

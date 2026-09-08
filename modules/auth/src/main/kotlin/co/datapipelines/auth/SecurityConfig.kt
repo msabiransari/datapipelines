@@ -129,6 +129,9 @@ class SecurityConfig(
                         "/text-to-sql-agent",
                         "/compare/*",
                         "/federated-query",
+                        // 089: the dp-lake product page — same shape and same reasoning as the
+                        // 073 cluster pages above.
+                        "/dp-lake",
                         // 073: the in-product spec set, public. The viewer renders the
                         // Markdown packaged in the jar — DocsCatalog's only collaborator is a
                         // ClassLoader, the controller reads no principal and no workspace, and

@@ -131,10 +131,20 @@ object ScopeMatrix {
          * additionally require owner-or-admin, which is not a scope and lives in the handler.
          */
         MANAGE_ENDPOINTS(Scope.AUTHOR),
+
+        /**
+         * "Register / import / unregister lake tables of a datasource" (§7.6, 089 §A): the
+         * dp-lake catalog writes. `author` — the datasource-mutation floor, the same privilege
+         * class as [MUTATE_WORKSPACE_DATASOURCES], but a DISTINCT constant because the §7.6
+         * drift guard claims each constant by exactly one documented row. Mutating a GLOBAL
+         * datasource's registry additionally requires admin — a workspaces D8 rule enforced in
+         * the shared registry service, not a scope.
+         */
+        MUTATE_LAKE_TABLES(Scope.AUTHOR),
     }
 
     /**
-     * All 21 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
+     * All 31 MCP tools → minimum scope (auth.md §7.6 MCP table, mcp-server §6.2).
      * The dispatcher looks a tool's requirement up here via [requiredScopeForTool].
      *
      * `datasources_preview_rows` and `pipelines_execute_node` are `author` (037 F), matching
@@ -183,6 +193,12 @@ object ScopeMatrix {
             "endpoints_list" to Scope.READ,
             "endpoints_get" to Scope.READ,
             "endpoints_delete" to Scope.AUTHOR,
+            // 089 §A — the dp-lake catalog writes sit on the datasource-mutation floor, like
+            // `datasources_create`; mutating a GLOBAL datasource's registry additionally
+            // requires admin, a D8 rule inside the shared registry service, not a scope.
+            "lake_tables_register" to Scope.AUTHOR,
+            "lake_tables_import" to Scope.AUTHOR,
+            "lake_tables_unregister" to Scope.AUTHOR,
         )
 
     /** Minimum scope for an MCP tool, or `null` if the tool name is unknown. */

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<!-- The LAKE datasource detail (089 §A): the dp-lake catalog as a READ-ONLY namespace tree
+     (metadata-db §4.15), on the 058/067 explorer pattern — one tree level per request, no
+     client-side tree assembly. Registration stays REST/MCP-only (R10): there is deliberately
+     no form, no selection and no detail pane here. The shared tpl-* classes are what make the
+     existing explorer CSS and template-explorer.js apply to this tree unchanged. -->
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline" th:text="${datasource.displayName}">sample-lake</h1>
+      <p class="app-page-sub">
+        <span class="ds-badge ds-badge-default" th:text="${datasource.dialect.wire}">LAKE</span>
+        <span class="u-mono" th:text="${datasource.name}">sample-lake</span>
+        <span th:if="${datasource.description} != null" th:text="${datasource.description}"></span>
+      </p>
+    </div>
+    <div class="app-page-actions">
+      <a class="ds-button ds-button-secondary" th:href="@{/datasources}">Back to datasources</a>
+    </div>
+  </div>
+
+  <p class="u-secondary u-text-sm u-mb-md">
+    The tables registered in this datasource's catalog, as a read-only tree — each leaf shows its
+    format and partition column. Registration and import are agent-first:
+    <code>POST /api/v1/datasources/<span th:text="${datasource.name}">name</span>/tables[/import]</code>
+    or the <code>lake_tables_*</code> MCP tools.
+  </p>
+
+  <div class="tplx-body">
+    <div class="tplx-tree" id="lake-table-tree-pane" data-explorer-pane>
+      <!-- The fragment's own root carries id="lake-table-tree", so the swap target survives
+           every refresh — this div is only a placeholder. -->
+      <div th:replace="~{partials/lake-table-tree-level :: level}"></div>
+    </div>
+  </div>
+</th:block>
+</html>
