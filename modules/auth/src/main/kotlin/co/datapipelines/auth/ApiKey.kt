@@ -31,6 +31,9 @@ data class ApiKey(
 ) {
     /** True when this key's authority is its endpoint bindings rather than its scopes (§7.7). */
     val isEndpointKey: Boolean get() = kind == ApiKeyKind.ENDPOINT
+
+    /** True when this key's authority is the promotion route family rather than scopes (§7.7). */
+    val isServerKey: Boolean get() = kind == ApiKeyKind.SERVER
 }
 
 /**

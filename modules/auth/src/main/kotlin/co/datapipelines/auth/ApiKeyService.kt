@@ -55,14 +55,23 @@ class ApiKeyService(
         expiresAt: Instant? = null,
         kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     ): IssuedApiKey {
-        // §7.7 — an ENDPOINT key carries no scopes by design, so the default-scopes fallback
-        // must not apply to it: falling back would hand it `read` across the whole API and make
-        // "its authority is its bindings" false. Caught by the 074 E2E, which asserted the
-        // minted key's scope set was empty and found `[read]`.
-        val requested = if (kind == ApiKeyKind.ENDPOINT) emptySet() else scopes.ifEmpty { defaultScopes() }
+        // §7.7 — a SCOPELESS kind (endpoint, server) carries no scopes by design, so the
+        // default-scopes fallback must not apply to it: falling back would hand it `read` across
+        // the whole API and make "its authority is its bindings / its route family" false. Caught
+        // by the 074 E2E, which asserted the minted key's scope set was empty and found `[read]`.
+        val requested = if (kind in ApiKeyKind.SCOPELESS) emptySet() else scopes.ifEmpty { defaultScopes() }
         if (!ScopeMatrix.keyScopesWithinCreator(requested, creatorScopes)) {
             val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
             throw ScopeInsufficientException(required = overreach, held = creatorScopes)
+        }
+        // §7.7 — a SERVER key is the promotion receiver's whole credential: whoever holds it can
+        // write pipelines, templates and datasource references into this deployment. Minting one
+        // is therefore an ADMIN act, and the check is here rather than at a surface so that every
+        // caller — REST, the partial, a future CLI — inherits it. It is not a scope subset check
+        // (a server key HAS no scopes, so the guard above is vacuous for it) but a floor on the
+        // CREATOR, which is a different question and needs its own answer.
+        if (kind == ApiKeyKind.SERVER && !Scope.satisfies(creatorScopes, Scope.ADMIN)) {
+            throw ScopeInsufficientException(required = Scope.ADMIN, held = creatorScopes)
         }
         workspaceService.requireAccess(ownerId, Scope.satisfies(creatorScopes, Scope.ADMIN), workspaceId)
 
@@ -120,11 +129,7 @@ class ApiKeyService(
      * §13.7 code (`auth.api_key.invalid` / `auth.api_key.expired`).
      */
     fun validate(presentedKey: String): AuthenticatedPrincipal {
-        // Shape gate FIRST — before any cache or database touch (AUTH-SEC-4).
-        if (!ApiKeyCredential.hasValidShape(presentedKey)) throw ApiKeyInvalidException("Malformed API key")
-        val keyId = presentedKey.substringBefore('.')
-        val record = usableRecord(keyId)
-        verifySecret(record, presentedKey)
+        val record = verifiedRecord(presentedKey)
         val owner = liveOwner(record)
         return AuthenticatedPrincipal(
             userId = owner.id,
@@ -132,7 +137,7 @@ class ApiKeyService(
             displayName = owner.displayName,
             scopes = record.scopes,
             authMethod = AuthMethod.API_KEY,
-            keyId = keyId,
+            keyId = record.id,
             // D3: the key's pinned workspace IS the context — resolved at validation,
             // no per-request switch exists (design §5.2).
             workspaceName = record.workspaceName,
@@ -141,6 +146,41 @@ class ApiKeyService(
             // answer rather than re-deriving it.
             keyKind = record.kind,
         )
+    }
+
+    /**
+     * Validates a presented key as the promotion peer's credential (§7.7, versioning §10.6):
+     * the same shape gate, record read, revocation/expiry re-check, Argon2id verify and owner
+     * liveness check [validate] applies — and then the kind, which is the whole point.
+     *
+     * A key of any other kind is refused with the SAME [ApiKeyInvalidException] a wrong key
+     * gets, because `PromotionServerKeyFilter` answers every refusal with one code: a caller
+     * must not be able to tell "your key is the wrong kind" from "your key is wrong", which
+     * would turn the promotion route into an oracle for classifying stolen keys.
+     *
+     * Returns the RECORD, not a principal: the promotion filter authenticates the peer as R7's
+     * system service account (the credential is not a human, §10.6) and needs the key's id for
+     * the audit trail, not its owner's identity.
+     */
+    fun validateServerKey(presentedKey: String): ApiKey {
+        val record = verifiedRecord(presentedKey)
+        if (!record.isServerKey) throw ApiKeyInvalidException()
+        liveOwner(record)
+        return record
+    }
+
+    /**
+     * The shared half of every validation path (§7.3 steps 1-7): shape, record, revocation,
+     * expiry, secret. Extracted so [validate] and [validateServerKey] cannot drift on any of
+     * them — a second, laxer path for the promotion credential is exactly the §13 checklist
+     * item the Bearer form already has to answer for.
+     */
+    private fun verifiedRecord(presentedKey: String): ApiKey {
+        // Shape gate FIRST — before any cache or database touch (AUTH-SEC-4).
+        if (!ApiKeyCredential.hasValidShape(presentedKey)) throw ApiKeyInvalidException("Malformed API key")
+        val record = usableRecord(presentedKey.substringBefore('.'))
+        verifySecret(record, presentedKey)
+        return record
     }
 
     /** Loads the key record and applies the D13 revocation + expiry re-checks (§7.3 steps 3-5). */

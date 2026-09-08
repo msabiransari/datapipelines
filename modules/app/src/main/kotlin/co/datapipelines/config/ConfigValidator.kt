@@ -51,7 +51,7 @@ class ConfigValidator(
          * fails the build when the two disagree (021/F10: the literal had already drifted
          * once, and a number in a log line has no other reader to notice).
          */
-        internal const val CHECK_COUNT = 22
+        internal const val CHECK_COUNT = 23
 
         /** §3.17 — the legal `datapipelines.workspaces.provisioning-mode` wire values. */
         private val PROVISIONING_MODES = setOf("auto-per-user", "self-serve", "closed")
@@ -109,6 +109,7 @@ class ConfigValidator(
             checkBootstrapActorConfigured(snapshot, violations)
             checkReservedProviderNames(snapshot, violations)
             checkPromotionTarget(snapshot, violations)
+            checkPromotionServerKeyDeprecated(snapshot, warnings)
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkRedisAuthWarning(snapshot, warnings)
@@ -578,6 +579,30 @@ class ConfigValidator(
         }
 
         /**
+         * §7 / §3.19 — the RECEIVER half's deprecated pre-shared value (091, auth.md §7.7).
+         *
+         * `datapipelines.deployment.promotion.server-key` is superseded by a `server`-kind API
+         * key: mintable by an admin on the API screen, expiring, revocable, rotatable without a
+         * restart, and visible in the key list like every other credential. A configured value
+         * still works for ONE release so an upgrade does not break an existing promotion pair —
+         * and it WARNs here, because a credential that only a file knows about is exactly the
+         * kind that outlives the person who set it.
+         *
+         * Presence, never the value: the key is a bearer secret and the §7 report is logged.
+         */
+        private fun checkPromotionServerKeyDeprecated(
+            snapshot: ConfigSnapshot,
+            warnings: MutableList<String>,
+        ) {
+            if (!snapshot.promotionServerKeySet) return
+            warnings +=
+                "datapipelines.deployment.promotion.server-key is DEPRECATED (§3.19, auth.md §7.7) and will be " +
+                "removed in the next release. Mint a 'server'-kind API key on the API screen and give it to the " +
+                "sending deployment as its datapipelines.deployment.promotion.target.server-key, then unset this " +
+                "value. Both credentials are accepted until then."
+        }
+
+        /**
          * §7 / §3.2 — the executor concurrency key rename's one-release alias (050/R2).
          *
          * `max-concurrent-executions-global` is deprecated in favour of
@@ -736,6 +761,8 @@ class ConfigValidator(
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
                 promotionTargetKeySet =
                     !environment.getProperty("datapipelines.deployment.promotion.target.server-key").isNullOrBlank(),
+                promotionServerKeySet =
+                    !environment.getProperty("datapipelines.deployment.promotion.server-key").isNullOrBlank(),
                 // §3.21 (calculators design §0.1) — org facts. Raw strings so a malformed value
                 // becomes a NAMED violation here instead of a binder crash at bean creation.
                 orgCurrencyName = environment.getProperty("datapipelines.org.currency.name"),
@@ -909,6 +936,8 @@ internal data class ConfigSnapshot(
     val promotionTargetBaseUrl: String? = null,
     /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
     val promotionTargetKeySet: Boolean = false,
+    /** §3.19 (091) — the RECEIVER's deprecated pre-shared value; presence only, never the value. */
+    val promotionServerKeySet: Boolean = false,
     /** §3.21 — org facts, raw. Never secrets; they are in every Context and every report. */
     val orgCurrencyName: String? = null,
     val orgCurrencySymbol: String? = null,

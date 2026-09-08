@@ -56,15 +56,16 @@ class McpAuthFilter(
             reject(request, response, principal)
             return
         }
-        // §7.7 — an ENDPOINT-kind key authorises published endpoints and the cursor of executions
-        // it started, and nothing else. `/mcp` is a SERVLET, so `ScopeInterceptor`'s central
-        // confinement (which only sees MVC handlers) never runs here — the refusal has to be made
-        // again, at this filter. Without it an endpoint key could reach `tools/list` and
+        // §7.7 — a SCOPELESS kind (endpoint, server) authorises a surface `/mcp` is not on: an
+        // endpoint key gets published endpoints and the cursor of executions it started, a server
+        // key gets the promotion route family. `/mcp` is a SERVLET, so `ScopeInterceptor`'s
+        // central confinement (which only sees MVC handlers) never runs here — the refusal has to
+        // be made again, at this filter. Without it such a key could reach `tools/list` and
         // enumerate the surface: it could call nothing (a scopeless key fails every tool's scope
-        // check) but it could READ the tool catalogue, which is more than "exactly the endpoints
-        // it is bound to". Found by probing the live stack, not by any test.
-        if (principal.isEndpointKey) {
-            rejectEndpointKey(request, response, principal)
+        // check) but it could READ the tool catalogue, which is more than either kind authorises.
+        // Found by probing the live stack, not by any test (074); kept and widened in 091.
+        if (principal.isEndpointKey || principal.isServerKey) {
+            rejectConfinedKind(request, response, principal)
             return
         }
         val correlationId = correlationId(request)
@@ -76,21 +77,31 @@ class McpAuthFilter(
         filterChain.doFilter(request, response)
     }
 
-    /** §7.7 — `/mcp` is not on an endpoint key's surface; refused with the catalogued code. */
-    private fun rejectEndpointKey(
+    /** §7.7 — `/mcp` is on no confined kind's surface; refused with the catalogued code. */
+    private fun rejectConfinedKind(
         request: HttpServletRequest,
         response: HttpServletResponse,
         principal: AuthenticatedPrincipal,
     ) {
-        log.info("Rejected an endpoint-kind key on /mcp (key={}): it authorises published endpoints only", principal.keyId)
+        val endpointKind = principal.isEndpointKey
+        log.info(
+            "Rejected a {}-kind key on /mcp (key={}): /mcp is not on its surface",
+            if (endpointKind) "endpoint" else "server",
+            principal.keyId,
+        )
         errorWriter.write(
             request = request,
             response = response,
             status = HTTP_FORBIDDEN,
             code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
-            message = "An endpoint key may only call published endpoints and read the results of executions it started.",
+            message =
+                if (endpointKind) {
+                    "An endpoint key may only call published endpoints and read the results of executions it started."
+                } else {
+                    "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment."
+                },
             userMessage = "This kind of API key can't be used here.",
-            details = mapOf("reason" to "endpoint_key_off_surface"),
+            details = mapOf("reason" to if (endpointKind) "endpoint_key_off_surface" else "server_key_off_surface"),
         )
     }
 

@@ -20,7 +20,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import java.util.UUID
 
 /**
- * §7.7 — an `endpoint`-kind key cannot reach `/mcp`.
+ * §7.7 — a SCOPELESS key (`endpoint`, and since 091 `server`) cannot reach `/mcp`.
  *
  * This refusal is made HERE as well as in `ScopeInterceptor` because `/mcp` is a **servlet**, not
  * an MVC handler, so the interceptor's central confinement never sees it. Without this filter
@@ -55,6 +55,25 @@ class McpEndpointKeyRefusalTest {
     }
 
     @Test
+    fun `a server key is refused on mcp too, and the chain never runs`() {
+        // 091 — the same P32 shape for the third kind. `/mcp` is a SERVLET, so the interceptor's
+        // central confinement never sees it; without this branch a promotion credential could
+        // read the whole tool catalogue through `tools/list`.
+        authenticate(ApiKeyKind.SERVER)
+        val response = MockHttpServletResponse()
+        val chain = MockFilterChain()
+
+        filter.doFilter(MockHttpServletRequest("POST", "/mcp"), response, chain)
+
+        assertAll(
+            { response.status shouldBe 403 },
+            { error(response)["code"] shouldBe "endpoint.key_kind_refused" },
+            { (error(response)["details"] as Map<*, *>)["reason"] shouldBe "server_key_off_surface" },
+            { chain.request shouldBe null },
+        )
+    }
+
+    @Test
     fun `a user key still reaches the transport`() {
         // The complement — the confinement must not close /mcp for ordinary agent keys.
         authenticate(ApiKeyKind.USER)
@@ -71,7 +90,7 @@ class McpEndpointKeyRefusalTest {
                 userId = UUID.randomUUID(),
                 email = "a@b.c",
                 displayName = "A",
-                scopes = if (kind == ApiKeyKind.ENDPOINT) emptySet() else setOf(Scope.AUTHOR),
+                scopes = if (kind in ApiKeyKind.SCOPELESS) emptySet() else setOf(Scope.AUTHOR),
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ABCDEFGHIJKL",
                 workspaceName = "default",

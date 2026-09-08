@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -568,6 +569,35 @@ class ConfigValidatorTest {
         report.violations.shouldHaveSize(1)
         report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password")
         report.violations.single().shouldContain("datapipelines.auth.local.bootstrap-password-hash")
+    }
+
+    // ------------------------------------------------------------------ §3.19 promotion server-key deprecation (091)
+
+    @Test
+    fun `the deprecated promotion server-key is a WARN naming its replacement - not a violation`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(promotionServerKeySet = true),
+            )
+
+        report.violations.shouldBeEmpty()
+        report.warnings.shouldHaveSize(1)
+        report.warnings.single().shouldContain("datapipelines.deployment.promotion.server-key")
+        report.warnings.single().shouldContain("server")
+    }
+
+    @Test
+    fun `the deprecation warning never carries the secret itself`() {
+        // The snapshot holds PRESENCE, not the value — this asserts the shape that makes the
+        // §7 report safe to log at all: there is no value here to leak.
+        val report = ConfigValidator.validate(validSnapshot().copy(promotionServerKeySet = true))
+
+        report.warnings.single().shouldNotContain("=")
+    }
+
+    @Test
+    fun `a receiver with no configured value warns about nothing`() {
+        ConfigValidator.validate(validSnapshot()).warnings.shouldBeEmpty()
     }
 
     // ------------------------------------------------------------------ §3.2 executor concurrency alias (050/R2)

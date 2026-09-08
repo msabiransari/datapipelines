@@ -44,6 +44,7 @@ import java.util.UUID
  */
 class PromotionServerKeyFilterTest {
     private val userService = mockk<UserService>()
+    private val apiKeyRepository = mockk<ApiKeyRepository>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val errorWriter = AuthErrorWriter(ObjectMapper())
     private val clientAddressResolver = ClientAddressResolver(emptyList())
@@ -184,6 +185,109 @@ class PromotionServerKeyFilterTest {
         authorities shouldBe listOf("SCOPE_author")
     }
 
+    // -------------------------------------------------------------------- 5: the stored server key (091)
+
+    @Test
+    fun `a stored server key authenticates the peer as the same system actor, and stamps its usage`() {
+        val chain = MockFilterChain()
+        val key = serverKeyRecord()
+
+        // No configured value at all — the deployment has migrated off it entirely.
+        filter(configuredKey = null, stored = key)
+            .doFilter(promotionRequest(header = key.plaintextFixture()), MockHttpServletResponse(), chain)
+
+        chain.request.shouldNotBeNull()
+        val principal = SecurityContextHolder.getContext().authentication?.principal as AuthenticatedPrincipal
+        // The ACTOR is the deployment's system account, never the admin who minted the key: a
+        // promoted version must not be stamped with a person who did not perform the promotion.
+        principal.userId shouldBe systemActor.id
+        principal.authMethod shouldBe AuthMethod.PROMOTION
+        principal.scopes shouldBe setOf(Scope.AUTHOR)
+        principal.workspace shouldBe null
+        // The key's id rides along so the audit trail can name WHICH key across a rotation.
+        principal.keyId shouldBe key.id
+        principal.keyKind shouldBe ApiKeyKind.SERVER
+        principal.isServerKey shouldBe true
+        verify(exactly = 1) { apiKeyRepository.touchUsage(key.id, any(), any()) }
+    }
+
+    @Test
+    fun `the configured value is still accepted, and does not become a key principal`() {
+        // The one-release overlap: an operator who has not migrated keeps working, and their
+        // request is NOT attributed to a stored key that does not exist.
+        val chain = MockFilterChain()
+
+        filter(configuredKey = KEY).doFilter(promotionRequest(header = KEY), MockHttpServletResponse(), chain)
+
+        chain.request.shouldNotBeNull()
+        val principal = SecurityContextHolder.getContext().authentication?.principal as AuthenticatedPrincipal
+        principal.keyId shouldBe null
+        principal.keyKind shouldBe null
+        verify(exactly = 0) { apiKeyRepository.touchUsage(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a key the store refuses is refused here, with the one answer and no stamp`() {
+        // Wrong kind, revoked, expired, unknown, malformed, deactivated owner — the store
+        // answers all of them the same way, and so must this filter. `stored = null` IS that
+        // answer; distinguishing them here would turn the route into a key-classification
+        // oracle for anyone holding a stolen credential.
+        val response = MockHttpServletResponse()
+        val chain = MockFilterChain()
+
+        filter(configuredKey = KEY, stored = null)
+            .doFilter(promotionRequest(header = "dpk_ZZZZZZZZZZZZ.$SECRET_HALF"), response, chain)
+
+        response.status shouldBe 401
+        errorCodeOf(response) shouldBe AuthErrorCodes.PROMOTION_KEY_INVALID
+        chain.request shouldBe null
+        SecurityContextHolder.getContext().authentication shouldBe null
+        verify(exactly = 0) { apiKeyRepository.touchUsage(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the configured value is compared FIRST - a matching config value never reaches the key store`() {
+        // A deployment that has not migrated pays no database read per promotion request. The
+        // proof is the strict mock: the store would throw "no answer found" if it were called.
+        val keyService = mockk<ApiKeyService>()
+        val chain = MockFilterChain()
+
+        PromotionServerKeyFilter(
+            PromotionProperties(serverKey = KEY),
+            userService,
+            errorWriter,
+            auditLogger,
+            clientAddressResolver,
+            keyService,
+            apiKeyRepository,
+        ).doFilter(promotionRequest(header = KEY), MockHttpServletResponse(), chain)
+
+        chain.request.shouldNotBeNull()
+        verify(exactly = 0) { keyService.validateServerKey(any()) }
+    }
+
+    @Test
+    fun `a stored key is not consulted off the promotion route either`() {
+        val keyService = mockk<ApiKeyService>()
+        val key = serverKeyRecord()
+        val request =
+            MockHttpServletRequest("GET", "/api/v1/pipelines")
+                .apply { addHeader(PromotionServerKeyFilter.HEADER, key.plaintextFixture()) }
+
+        PromotionServerKeyFilter(
+            PromotionProperties(serverKey = null),
+            userService,
+            errorWriter,
+            auditLogger,
+            clientAddressResolver,
+            keyService,
+            apiKeyRepository,
+        ).doFilter(request, MockHttpServletResponse(), MockFilterChain())
+
+        verify(exactly = 0) { keyService.validateServerKey(any()) }
+        SecurityContextHolder.getContext().authentication shouldBe null
+    }
+
     // -------------------------------------------------------------------- the redaction property
 
     @Test
@@ -229,14 +333,36 @@ class PromotionServerKeyFilterTest {
 
     // -------------------------------------------------------------------- helpers
 
-    private fun filter(configuredKey: String?) =
-        PromotionServerKeyFilter(
+    /**
+     * The filter under test. [stored] is what the key store answers for a presented credential:
+     * a record (accepted), or nothing — the store then throws the ordinary invalid-key
+     * exception, which is what it does for a malformed, unknown, revoked, expired, wrong-kind
+     * key or a deactivated owner. One knob, because the filter must treat all of them alike.
+     */
+    private fun filter(
+        configuredKey: String?,
+        stored: ApiKey? = null,
+    ): PromotionServerKeyFilter {
+        val keyService = mockk<ApiKeyService>()
+        if (stored == null) {
+            every { keyService.validateServerKey(any()) } throws ApiKeyInvalidException()
+        } else {
+            every { keyService.validateServerKey(stored.plaintextFixture()) } returns stored
+            every { keyService.validateServerKey(neq(stored.plaintextFixture())) } throws ApiKeyInvalidException()
+        }
+        return PromotionServerKeyFilter(
             PromotionProperties(serverKey = configuredKey),
             userService,
             errorWriter,
             auditLogger,
             clientAddressResolver,
+            keyService,
+            apiKeyRepository,
         )
+    }
+
+    /** The plaintext a fixture record is presented as — the id half is enough for a mock's match. */
+    private fun ApiKey.plaintextFixture(): String = "$id.$SECRET_HALF"
 
     private fun promotionRequest(header: String?): MockHttpServletRequest =
         MockHttpServletRequest("POST", PROMOTION_PATH).apply {
@@ -262,7 +388,27 @@ class PromotionServerKeyFilterTest {
 
         /** Fixtures, deliberately low-entropy — see PromotionServerKeysTest's note. */
         const val KEY = "promotion-fixture-key-not-a-real-secret"
+
+        /** The secret half of a fixture `dpk_` credential. Shape only; nothing verifies it here. */
+        const val SECRET_HALF = "FIXTURESECRETNOTAREALSECRETAAAAAAAAAAAAAAAAAAAAAA"
         const val PRESENTED = "promotion-fixture-wrong-key-also-not-a-secret"
+
+        /** A `server`-kind row as the store would return it (091, auth.md §7.7). */
+        fun serverKeyRecord(): ApiKey =
+            ApiKey(
+                id = "dpk_SERVERKEY12",
+                userId = UUID.randomUUID(),
+                name = "uat receiver",
+                keyHash = "argon2-hash-not-verified-here",
+                scopes = emptySet(),
+                isRevoked = false,
+                createdAt = Instant.EPOCH,
+                lastUsedAt = null,
+                expiresAt = null,
+                workspaceId = UUID.randomUUID(),
+                workspaceName = "default",
+                kind = ApiKeyKind.SERVER,
+            )
 
         val systemActor =
             User(

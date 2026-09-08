@@ -210,8 +210,11 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 |---|---|
 | `user` | Every key that existed before round 074, and the default for any key minted without an explicit kind: scopes, a pinned workspace, and the whole API surface those scopes allow |
 | `endpoint` | A credential for published endpoints only: no scopes are consulted, workspace-pinned, and it authorises exactly the endpoints its bindings cover plus the result cursor of executions it started |
+| `server` | The promotion peer's credential (091): minted by an `admin`, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. No scopes are consulted; its authority is that route family |
 
 > A kind is **not** a scope and is deliberately not modelled as one. Scopes answer "how much may this credential do?" along one hierarchy; a kind answers "what kind of credential is this?", and the two axes do not compose — an endpoint key is not "a user key with fewer scopes". The wire form is the lowercase name, as with [`Scope`](#8-scope--api-key-authorization-scope).
+
+> **A `server` key authenticates nothing outside the promotion routes.** Presented as an ordinary `DP-API-Key` it is refused on every route — REST, htmx partials, `/mcp` and every UI page — with `endpoint.key_kind_refused`. Same rule as the endpoint kind, different family.
 
 > **An endpoint key with no binding on any ancestor of the path it presents at authorises nothing.** The absence of a binding is never a fall-through to the user-key rule; if it were, publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
 
@@ -488,6 +491,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-08 | v1.8 | 091 keys | §8A `ApiKeyKind` gains **`server`** — the promotion peer's credential as a stored key (auth.md §7.7, V15). Three kinds now, and the note that a scopeless kind is refused everywhere off its own family, `/mcp` and the UI pages included. |
 | 2026-09-02 | v1.7 | 046 typed templates | New §6A `TemplateType` (`sql` \| `html`, template-hierarchy-design §5) beside `TemplateEngine` — a template's kind, chosen at create and immutable across versions; the cross-reference table gains its row. |
 | 2026-08-05 | v1.0 | initial draft | Initial enums reference: 18 enum categories cataloged, cross-reference table, validation discipline |
 | 2026-08-07 | v1.1 | consistency campaign | Case/serialization convention added; `OutputTarget` default → `caller` (D1); `ResultDelivery` removed (D9); `execution_aborted` SSE event added (D7); `AuthAuditEvent` synced to auth §10.1 (no password/lockout events); §16 reduced to domain registry pointing at the single concrete catalog (pipeline-contract §13), D5 renames applied; single authority per enum; broken source links fixed. See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

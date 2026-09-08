@@ -200,6 +200,8 @@ class AuthConfiguration {
                     authErrorWriter,
                     auditLogger,
                     clientAddressResolver,
+                    apiKeyService,
+                    apiKeyRepository,
                 ),
             workspaceResolution =
                 WorkspaceResolutionFilter(
