@@ -70,6 +70,17 @@ class AlpineCloakAuditTest {
         violations shouldBe emptyList()
     }
 
+    /**
+     * The exception list is the audit's weak point: with both of today's roots named in it,
+     * the sweep above would stay green while saying nothing. Pinning its SIZE is what makes
+     * a third exception a deliberate, reviewed act instead of a one-line regex tweak — the
+     * same reason `InlineWidthAuditTest` asserts its allowlist is empty.
+     */
+    @Test
+    fun `the named exceptions are exactly the two that are argued for`() {
+        CLOAKED_BY_ANCESTOR.size shouldBe 2
+    }
+
     @Test
     fun `the cloak rule is declared in the app-wide stylesheet, not in a page-scoped one`() {
         val appCss =
@@ -87,10 +98,26 @@ class AlpineCloakAuditTest {
         val X_DATA_TAG = Regex("""<[a-zA-Z][^>]*\sx-data[^>]*>""")
 
         /**
-         * Alpine roots whose visibility is already owned by a cloaked ancestor. One entry:
-         * `pipelines/editor.html`'s per-result failure view, which lives inside
-         * `#pe-pane-results` — a dock pane that carries `x-cloak` itself.
+         * The two Alpine roots that do not carry their own `x-cloak`, each with the reason
+         * recorded so it has to be re-argued rather than inherited — the house allowlist
+         * pattern (`InlineWidthAuditTest.ALLOWED`).
+         *
+         *  - the per-result failure view lives inside `#pe-pane-results`, a dock pane that
+         *    carries `x-cloak` itself, so it is already hidden with its ancestor;
+         *  - `.pe-root` MUST NOT be cloaked. Measured (090): `display:none` on it hides
+         *    `#cy-canvas` while Cytoscape initialises against that element, so the graph is
+         *    built in a zero-size container and never recovers — no node cards render, and
+         *    `PipelineEditorDetailsBrowserTest` waits out its 30s on a `.pe-card-open` that
+         *    resolves in the DOM and never becomes visible. The unbound content inside this
+         *    root (the banner, the six dock panes) is cloaked individually, which is where
+         *    the flash would have been; the root itself is a flex container of
+         *    server-rendered chrome. Cloaking it trades a flash nobody measured for an
+         *    editor that does not work.
          */
-        val CLOAKED_BY_ANCESTOR = setOf("""x-data="{ view: failureView(entry.record) }"""")
+        val CLOAKED_BY_ANCESTOR =
+            setOf(
+                """x-data="{ view: failureView(entry.record) }"""",
+                """x-data="pipelineEditor()"""",
+            )
     }
 }

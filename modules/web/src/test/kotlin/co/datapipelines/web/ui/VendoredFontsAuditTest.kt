@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import java.security.MessageDigest
@@ -166,10 +167,16 @@ class VendoredFontsAuditTest {
             .filter { it.endsWith(".woff2") }
             .forEach { path -> css shouldContain "url(\"../${path}\")" }
         css.split("@font-face").size - 1 shouldBe EXPECTED_FACES
-        // Every face swaps: text must never be invisible while a font downloads. The
-        // DECLARATION is counted (trailing semicolon), not the phrase — the block comment
-        // above the faces names the property too, and a prose mention is not a guarantee.
-        css.split("font-display: swap;").size - 1 shouldBe EXPECTED_FACES
+        // Every face declares `optional` (090 §B, was 079's `swap`): text must never be
+        // invisible while a font downloads, AND a face that arrives after the paint must
+        // not reflow it — measured at +8.2px on the dashboard heading under `swap`, which
+        // is text changing after it has been read. The DECLARATION is counted (trailing
+        // semicolon), not the phrase: the block comment above the faces names the property
+        // several times, and a prose mention is not a guarantee.
+        css.split("font-display: optional;").size - 1 shouldBe EXPECTED_FACES
+        // And the property the round replaced is gone, so a half-applied revert cannot
+        // leave two faces on each policy with the count still adding up.
+        css shouldNotContain "font-display: swap;"
     }
 
     private companion object {

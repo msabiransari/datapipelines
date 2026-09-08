@@ -169,9 +169,13 @@ class UserSettingsControllerTest {
 
     @Test
     fun `the password screen delivers its 400s inline through its own listener`() {
+        // 090 §C: the card — form, result bin and the listener that fills it — moved into
+        // `partials/password-card.html`, which BOTH `settings/password` (shell) and
+        // `settings/password-forced` (auth layout) render. Reading the partial is reading
+        // the one copy; the two page templates are four lines of decoration each.
         val template =
-            checkNotNull(javaClass.getResource("/templates/settings/password.html")) {
-                "settings/password.html not on the test classpath"
+            checkNotNull(javaClass.getResource("/templates/partials/password-card.html")) {
+                "partials/password-card.html not on the test classpath"
             }.readText()
 
         // The failures are field-level/credential validation — they stay inline (§5.1),
