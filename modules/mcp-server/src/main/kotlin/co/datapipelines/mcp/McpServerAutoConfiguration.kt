@@ -106,7 +106,7 @@ class McpServerAutoConfiguration {
                 executionRunner = executionRunner.getIfAvailable(),
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner),
-            PipelinesCreateTool(pipelineService),
+            PipelinesCreateTool(pipelineService, pipelines),
             PipelinesUpdateTool(pipelineService),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),

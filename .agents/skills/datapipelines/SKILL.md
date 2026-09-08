@@ -298,8 +298,12 @@ which fails coercion with `pipeline.execution.invalid_parameter_type`.
 
 0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
    to see which roots this workspace already uses, then drill in with `{"prefix": "<root>"}`.
-   Reuse a root; ask the human before minting a new one. Everything you create in the steps
-   below goes under the prefix you settle on here — and it cannot be moved later.
+   Reuse a root. **A new root is refused until you confirm it: ask the person first, then pass
+   `confirm_new_root: true`** — `pipelines_create` and `templates_create` answer
+   `pipeline.validation.new_root_requires_confirmation` /
+   `template.validation.new_root_requires_confirmation` with `details.existing_roots` listing
+   what already exists. `test/` never needs it. Everything you create in the steps below goes
+   under the prefix you settle on here — and it cannot be moved later.
 1. **Verify the source.** `datasources_test` (or `datasources_list`/`datasources_get`)
    to confirm name + dialect + connectivity, then introspect the schema:
    `datasources_get_schemas` → `datasources_get_tables(namespace)` →

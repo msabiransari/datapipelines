@@ -10,6 +10,9 @@ import java.io.File
 object SpecFiles {
     const val MCP_SPEC_PATH: String = "docs/mcp-server.md"
 
+    /** The agent-facing skill (094): the surface's own instructions, which drift like any doc. */
+    const val SKILL_PATH: String = ".agents/skills/datapipelines/SKILL.md"
+
     private val root: File by lazy {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
         while (dir != null && !File(dir, "settings.gradle.kts").exists()) {

@@ -61,7 +61,7 @@ class McpServerWiringTest {
                 datasources,
                 co.datapipelines.datasources.SqlRunner(datasources),
             ),
-            PipelinesCreateTool(service),
+            PipelinesCreateTool(service, pipelines),
             PipelinesUpdateTool(service),
             TemplatesListTool(templates),
             TemplatesGetTool(templates),

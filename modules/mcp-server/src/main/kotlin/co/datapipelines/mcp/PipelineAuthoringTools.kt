@@ -2,8 +2,10 @@ package co.datapipelines.mcp
 
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.Pipeline
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import io.modelcontextprotocol.spec.McpSchema
@@ -117,6 +119,12 @@ internal object PipelineToolPayloads {
 /** `pipelines_create` (mcp-server.md §6.2.4). Scope: `author`. */
 class PipelinesCreateTool(
     private val pipelines: PipelineService,
+    /**
+     * The folder tree, for the 094 new-root rule alone — the SAME one-level query
+     * `pipelines_list {prefix: ""}` serves the agent, so the roots the refusal names are exactly
+     * the roots the agent would have seen had it looked first.
+     */
+    private val tree: PipelineRepository,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -129,8 +137,10 @@ class PipelinesCreateTool(
                     "against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog " +
                     "function and writes a typed value into the execution Context under context_key, which downstream " +
                     "nodes bind as :context_key — call calculators_list first for the kinds and their input names, and " +
-                    "remember that a node referencing another node's context_key must depend_on it. Returns the " +
-                    "created pipeline with server-assigned id and version 1.",
+                    "remember that a node referencing another node's context_key must depend_on it. A NEW top-level " +
+                    "folder is refused until you confirm it: reuse an existing root, or ask the person first and " +
+                    "then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and " +
+                    "version 1.",
             schema = SCHEMA,
         )
 
@@ -138,11 +148,19 @@ class PipelinesCreateTool(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
+        // 094 addendum, and BEFORE the write: a root nobody has used is a permanent decision
+        // (there is no rename), so an agent must have been told yes. `test/` is exempt.
+        val workspaceId = ctx.principal.requireWorkspace().id
+        NewRootConfirmation.require(
+            name = args.string("name"),
+            confirmed = args.boolean(NewRootConfirmation.ARG),
+            code = PipelineErrorCodes.Validation.NEW_ROOT_REQUIRES_CONFIRMATION,
+        ) { tree.listFolder(workspaceId).folders.map { it.segment } }
         // The authoring capability check (versioning §5.5), the §12 validation and the write are
         // all PipelineService.create's — the same call PUT /pipelines makes.
         val saved =
             pipelines.create(
-                ctx.principal.requireWorkspace().id,
+                workspaceId,
                 PipelineToolPayloads.bodyJson(args),
                 ctx.principal.userId,
             )
@@ -161,7 +179,8 @@ class PipelinesCreateTool(
                 "description": {"type": "string"},
                 "parameters": {"type": "object", "description": "${PipelineToolPayloads.PARAMETERS_DESCRIPTION}"},
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
-                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"}
+                "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
+                "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
               },
               "additionalProperties": false
             }

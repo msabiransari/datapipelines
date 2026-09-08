@@ -321,7 +321,7 @@ Create a new pipeline.
 ```json
 {
   "name": "pipelines_create",
-  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. Returns the created pipeline with server-assigned id and version 1.",
+  "description": "Create a new pipeline. The body must satisfy the Pipeline Contract: nodes must form a DAG; at most one DQL node may resolve to output.target='caller' (a node that omits its output block resolves to 'caller' by default); zero caller nodes is legal for pure write-back pipelines; all datasource references must exist in this environment; all template references must exist and dry-render against the declared parameters. A node may also be type='CALCULATOR': it evaluates one catalog function and writes a typed value into the execution Context under context_key, which downstream nodes bind as :context_key — call calculators_list first for the kinds and their input names, and remember that a node referencing another node's context_key must depend_on it. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the created pipeline with server-assigned id and version 1.",
   "inputSchema": {
     "type": "object",
     "required": ["name", "display_name", "nodes"],
@@ -334,7 +334,8 @@ Create a new pipeline.
       "nodes": {
         "type": "array",
         "description": "Pipeline nodes. Each node has type (DQL/DML/DDL/PIPELINE), source, template ref, depends_on array, and — for DQL only — an optional output block. Omitting output on a DQL node means output.target='caller'; at most one node per pipeline may resolve to 'caller'. A node whose data downstream nodes query must declare output.target='tempdb' with a table name explicitly. A PIPELINE node instead carries a pipeline ref {name, version} pinning an existing pipeline version to execute as a child execution, an optional parameters map (typed literals, or '${parent_param}' to pass a parent parameter through), and an optional output block allowed only when the pinned child has a caller node; it declares neither source nor template."
-      }
+      },
+      "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it."}
     },
     "additionalProperties": false
   }
@@ -342,6 +343,7 @@ Create a new pipeline.
 ```
 
 Returns: created pipeline (with id, version, etc.).
+**A new ROOT folder needs the person's say-so (094).** The root segment says who owns a thing and there is no rename, so this tool REFUSES a name whose first segment has nothing under it yet — `pipeline.validation.new_root_requires_confirmation`, with `details.root` and `details.existing_roots` (the same one-level query `pipelines_list {"prefix": ""}` serves). Reuse one of those roots, or ask the person and retry with `confirm_new_root: true`. `test/` is always allowed. This is an AGENT-surface rule only: REST, the UI and `pipelines_update` are unaffected — a person choosing a folder in a form has already decided, and an update cannot change a name. It replaces an INSTRUCTION with a GUARANTEE: the schema and the SKILL already told an agent to list the roots and ask, and a model that did not, did not.
 
 The whole pipeline is validated before it is stored — no invalid pipeline ever reaches the database ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)). Validation failures come back as a tool result with `isError: true` carrying the pipeline validation code (§9.2); the agent should fix and retry rather than assume partial creation.
 
@@ -430,7 +432,7 @@ Create a new template.
 ```json
 {
   "name": "templates_create",
-  "description": "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine.",
+  "description": "Create a new template. Templates use Freemarker syntax. A template declares NO parameters of its own: the variables its body may reference are exactly the parameters declared by the pipeline that calls it, with defaults applied. Describe the variables you expect in 'description' — that free text is how humans and agents discover them. Macros from library templates are made available by listing them in 'imports'; the body must NOT contain import or include directives, they are synthesized from the imports array. The 'type' is chosen here and never changes afterwards: 'sql' (default) requires a dialect and is what pipeline nodes reference; 'html' takes no dialect and renders through an auto-escaping engine. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true.",
   "inputSchema": {
     "type": "object",
     "required": ["display_name", "description", "body"],
@@ -456,12 +458,15 @@ Create a new template.
         }
       },
       "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
-      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
+      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."},
+      "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it."}
     },
     "additionalProperties": false
   }
 }
 ```
+
+**A new ROOT folder needs the person's say-so (094).** Same rule as [§6.2.4](#624-pipelines_create), same `confirm_new_root` argument, same `details.root` / `details.existing_roots` shape — the code is `template.validation.new_root_requires_confirmation` and the roots come from `templates_list {"prefix": ""}`. An OMITTED `id` is generated under `test/` and needs no confirmation.
 
 Save-time validation is **parse-only** — syntax, forbidden constructs, import resolution, and the type/dialect consistency rules (`sql` requires `dialect`, `html` forbids it; a payload trying to change an existing template's `type` is refused — [Templates §7.1](templates.md#71-save-time-validation-is-parse-only)). A template is never rendered against a sample context at save time, because it does not know its callers' parameters; the dry-render check happens when a *pipeline* referencing it is saved ([Templates §7.2](templates.md#72-the-dry-render-rule-owned-by-pipeline-validation)). An agent authoring a template should therefore call `templates_render` (§6.2.9) with a representative context to confirm the output it produces.
 
@@ -1375,3 +1380,4 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 | 2026-09-05 | v1.20 | mandatory folders (077) | No new tools; two `pattern`s and two descriptions. §6.2.4/§6.2.5 `pipelines_create`/`pipelines_update` `name` narrows to the 2–10-segment grammar ([Template Hierarchy §4.1](template-hierarchy-design.md#41-grammar)) — rendered from `PipelineNameGrammar.pattern` itself, so it moved with the rule. §6.2.8 `templates_create` `id` **gains a `pattern` for the first time** and it is `TemplateNameGrammar.pattern`: the schema had been advertising the pre-043 flat `[a-z0-9_.-]+` in prose, three grammar changes stale (audit T129, 2026-09-05). Both descriptions now state that a folder is required, that `details.reason='folder_required'` is how the refusal is recognised, and that experiments go under `test/`. An omitted `templates_create` id is generated under `test/`. |
 | 2026-09-07 | v1.21 | 087 connector seams | No new tools. §6.2.22 `datasources_create` gains the `credential` object ([Datasources §3.4](datasources.md#34-credential-kinds)) and drops `username`/`password` from `required` — either shape is accepted, both together are refused; the dialect enum gains `LAKE`; the result carries `credential.kind` and a derived `password_set`. §6.2.16 `datasources_get_schemas` returns `entries: [{namespace, label}]` beside the legacy `schemas` array — two catalogs' same-named schemas are two entries, which a list of bare labels could not express. §6.2.17/§6.2.18 gain a `namespace` array argument beside `schema` (which now also accepts the dotted form), and every table row carries `namespace` beside `schema`. |
 | 2026-09-07 | v1.22 | 094 the agent boundary | Tool surface 28 → **27**: `datasources_create` REMOVED. §6.2.22 becomes the policy it was an exception to — **no credential travels through an agent**; the section number is kept so §6.2.23 onward do not shift. 068 accepted the hazard with a warning in the tool's own description; a description is not a control. Datasource create, update and delete are UI/REST-only; every read and probe tool is unchanged. §4.1's scope-enforcement paragraph, §5.1's `listChanged` count, §6.1's list, §6.2.10's scope note, §8's admission-rule count and §14's omission entry all follow. |
+| 2026-09-07 | v1.23 | 094 new-root confirmation | §6.2.4 `pipelines_create` and §6.2.8 `templates_create` gain **`confirm_new_root`** (boolean) and REFUSE a name whose root segment has nothing under it yet — `pipeline.validation.new_root_requires_confirmation` / `template.validation.new_root_requires_confirmation` ([Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog)), with `details.root` and `details.existing_roots` from the same one-level query `pipelines_list`/`templates_list` `{prefix: ""}` serve. `test/` is exempt; an omitted `templates_create` id (generated under `test/`) is exempt. **Agent surface only**: REST, the UI and `pipelines_update` are unchanged, and no tool other than these two accepts the argument. 067/077 had already told an agent to list the roots and ask; this is the same sentence as a guarantee. No tool-count change. |
