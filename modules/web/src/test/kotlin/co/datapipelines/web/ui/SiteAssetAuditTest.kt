@@ -37,7 +37,7 @@ class SiteAssetAuditTest {
 
     @Test
     fun `the sweep covers every public template`() {
-        // Non-vacuity: nine site templates plus the two public docs views. A resolver that
+        // Non-vacuity: ten site templates plus the two public docs views. A resolver that
         // stopped matching would make both audits below pass by auditing nothing.
         templates.size shouldBe PUBLIC_TEMPLATES
     }
@@ -111,8 +111,8 @@ class SiteAssetAuditTest {
             .toList()
 
     private companion object {
-        /** index + 7 cluster templates + _layout, and the two docs public views. */
-        const val PUBLIC_TEMPLATES = 12
+        /** index + 8 cluster templates (089 added dp-lake) + _layout, and the two docs public views. */
+        const val PUBLIC_TEMPLATES = 13
 
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:th:)?(?:href|src)="([^"]*)"""")

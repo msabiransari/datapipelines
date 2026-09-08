@@ -70,9 +70,46 @@ class SiteJsonLdTest {
         bad shouldBe emptyList()
     }
 
+    /**
+     * The dp-lake page's structured data (089 §G) — one FAQPage block, held to the homepage's
+     * rules: valid JSON off the RENDER (Thymeleaf is between the template and the serve), real
+     * questions, substantial answers that cite the spec they restate.
+     */
+    @Test
+    fun `the dp-lake page publishes one valid FAQ block with cited answers`() {
+        val lakeBlocks =
+            LD_JSON
+                .findAll(SitePageRenderer.render(SitePages.DP_LAKE))
+                .map { MAPPER.readTree(it.groupValues[1]) }
+                .toList()
+        lakeBlocks.size shouldBe 1
+        val faq = lakeBlocks.single()
+        faq["@type"].asText() shouldBe "FAQPage"
+        faq["@context"].asText() shouldBe "https://schema.org"
+
+        val questions = faq["mainEntity"]
+        (questions.size() in LAKE_FAQ_MIN..LAKE_FAQ_MAX) shouldBe true
+        val bad =
+            questions.mapNotNull { q ->
+                val name = q["name"]?.asText().orEmpty()
+                val answer = q["acceptedAnswer"]?.get("text")?.asText().orEmpty()
+                when {
+                    q["@type"].asText() != "Question" -> "not a Question: $name"
+                    !name.endsWith("?") -> "not a question: $name"
+                    q["acceptedAnswer"]?.get("@type")?.asText() != "Answer" -> "answer is not an Answer: $name"
+                    answer.length < MIN_ANSWER_CHARS -> "answer too thin ($name)"
+                    !answer.contains("docs/") -> "answer cites no doc ($name)"
+                    else -> null
+                }
+            }
+        bad shouldBe emptyList()
+    }
+
     private companion object {
         const val FAQ_MIN = 5
         const val FAQ_MAX = 6
+        const val LAKE_FAQ_MIN = 2
+        const val LAKE_FAQ_MAX = 4
         const val MIN_ANSWER_CHARS = 120
         const val AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
 

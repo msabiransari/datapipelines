@@ -39,6 +39,7 @@ class SiteClaimCitationTest {
                 "ai-data-pipeline.html",
                 "compare-airflow.html",
                 "compare-dbt.html",
+                "dp-lake.html",
                 "engine.html",
                 "federated-query.html",
                 "index.html",

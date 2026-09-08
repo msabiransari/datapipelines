@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <!--/* 089 §G — structured data for the dp-lake page, parsed by SiteJsonLdTest. Every FAQ
+       answer restates something this site or the specs claim WITH its citation, so the
+       schema cannot say more than the docs do (the index.html rule). */-->
+  <!-- claim: docs/datasources.md §8C — FAQ "what is dp-lake" -->
+  <!-- claim: docs/datasources.md §8C.2 — FAQ "partition pruning" -->
+  <!-- claim: docs/datasources.md §8C.7 — FAQ "Iceberg" -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is dp-lake?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "A way to query Parquet and Apache Iceberg tables on S3 or S3-compatible object storage in place: no warehouse, no load step, read-only. DuckDB is the engine, and the catalog is the server's own registry, dp-catalog, because the engine cannot list a bucket - tables are registered by REST or over MCP. See docs/datasources.md section 8C."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does dp-lake copy my data out of S3?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Every registered table becomes a view at connect over the objects in your bucket, and the engine reads only what a query's predicates name - a filter on the partition column reads only the matching partitions. Nothing is downloaded at registration or at demo start; reads are in place, at query time. See docs/datasources.md section 8C.2."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I register an Iceberg table in dp-lake?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "By its current metadata file - s3://bucket/table/metadata/00042-<uuid>.metadata.json - not by the table root: DuckDB 1.5.5 cannot resolve a pyiceberg table's root, so the registry row names the file, and you re-register when the table commits. See docs/datasources.md section 8C.7."
+        }
+      }
+    ]
+  }
+  </script>
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">dp-lake</li>
+    </ol>
+  </nav>
+
+  <section class="section page-hero" aria-labelledby="lake-title">
+    <div class="container">
+      <p class="kicker">dp-lake</p>
+      <h1 id="lake-title" class="ds-display">Your data is already in S3. Ask it a question.</h1>
+      <p class="section-lede">
+        dp-lake reads Parquet and Apache Iceberg tables on S3 or S3-compatible object storage
+        <strong>in place</strong> — no warehouse to buy, no loader to run, nothing copied.
+        DuckDB is the engine, the catalog is ours, and the answer comes back through the same
+        pipeline, the same UI, the same agent and the same API as every other query here.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/datasources}">Read the dp-lake spec</a>
+        <a class="btn btn-secondary" th:href="@{/federated-query}">How the join works</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ships-title">
+    <div class="container">
+      <p class="kicker">What ships</p>
+      <h2 id="ships-title" class="ds-headline">Exactly this, and nothing more</h2>
+      <ol class="steps">
+        <li>
+          <h3>Parquet and Iceberg, on S3 or S3-compatible</h3>
+          <!-- claim: docs/datasources.md §8C.1 -->
+          <p>Tables in <code>parquet</code> or <code>iceberg</code> format, addressed by <code>s3://</code> (or <code>file://</code> for an on-prem volume). S3-compatible stores — MinIO included — work through the datasource's endpoint and URL-style settings.</p>
+        </li>
+        <li>
+          <h3>Read in place — no warehouse, no loader</h3>
+          <!-- claim: docs/datasources.md §8C.2 -->
+          <p>Every registered table becomes a view at connect over the objects in your bucket. Nothing is downloaded at registration, nothing is restored into an engine, and there is no load step to keep fresh. The data stays where it is.</p>
+        </li>
+        <li>
+          <h3>Read-only, by design</h3>
+          <!-- claim: docs/datasources.md §8C.8 -->
+          <p>dp-lake is a read connector. There is no write path to the object store — a lake datasource answers questions and never mutates the bucket.</p>
+        </li>
+        <li>
+          <h3>DuckDB as the engine</h3>
+          <!-- claim: docs/datasources.md §8C.4 -->
+          <p>An in-memory DuckDB instance per pooled connection, with operator-set memory, threads and spill limits, and the engine extensions bundled into the published image — a hardened deployment needs no egress to an extension repository.</p>
+        </li>
+        <li>
+          <h3>dp-catalog — our own registry</h3>
+          <!-- claim: docs/datasources.md §8C.1 -->
+          <p>The engine cannot list a bucket, so which tables exist is declared: a small Postgres registry, written over REST or by an agent through the <code>lake_tables_*</code> MCP tools, and shown read-only on the datasource's page. External catalogs (Glue, S3 Tables, REST) are not read — yet.</p>
+        </li>
+        <li>
+          <h3>Partition pruning</h3>
+          <!-- claim: docs/datasources.md §8C.2 -->
+          <p>Hive-partitioned Parquet is scanned with partition pruning: a predicate on the partition column reads only the partitions it names. A date filter is the difference between reading a day and reading two years.</p>
+        </li>
+        <li>
+          <h3>Joined to the databases you already run</h3>
+          <!-- claim: docs/staging.md §1 -->
+          <p>A lake table is one node in a pipeline. Its rows stage into the execution's in-memory database and join your Postgres, MySQL or SQLite with ordinary SQL — the lake and the operational databases answer one question together.</p>
+        </li>
+        <li>
+          <h3>From the UI, from an agent, or as an API</h3>
+          <!-- claim: docs/mcp-server.md §6.2.29, docs/rest-api.md §19 -->
+          <p>Query it from the browser, let an agent register tables and author the pipeline over MCP, then publish the released pipeline as a governed GET endpoint — the lake becomes an API your applications call.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="demo-title">
+    <div class="container">
+      <p class="kicker">The demo</p>
+      <h2 id="demo-title" class="ds-headline">Half a billion rideshare trips, read in place</h2>
+      <!-- claim: docs/deployment.md Appendix B (dp-lake — the family with no loader) -->
+      <p class="section-lede">
+        The published demo bucket holds <strong>24 months of NYC TLC high-volume for-hire
+        trips</strong> — Uber, Lyft, Via and Juno, roughly <strong>half a billion rides</strong> —
+        as day-partitioned Parquet, plus a pre-aggregated zone-and-day table and the licence
+        lookup. Nothing is downloaded at demo start: the lake family has no loader, and a query
+        fetches only the partitions it names.
+      </p>
+      <!-- claim: docs/environments.md §5 -->
+      <p>
+        The seeded showcase pipeline <code>nyc/mobility/taxi_vs_rideshare</code> asks one question
+        across four engines: rideshare zone-days from the lake, yellow-taxi trips from Postgres,
+        the borough lookup from SQLite and the day's rainfall from MySQL — taxi share versus
+        rideshare share, dry days against rainy ones. It ships with
+        <code>./app.sh --start --demo nyc,trade,lake</code>, which needs egress to S3 (or a mirror
+        you configure) whenever a lake query runs.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="honest-title">
+    <div class="container">
+      <p class="kicker">Where this fits</p>
+      <h2 id="honest-title" class="ds-headline">And where it does not</h2>
+      <ul class="fact-list fact-list-plain">
+        <li>
+          <!-- claim: docs/datasources.md §8C.2 -->
+          <strong>Egress is real, and the partition column is the lever.</strong> A query's bytes cross the network from S3 when the engine scans them. A predicate on the partition column reads only the matching partitions; an unfiltered scan of the trip table reads ~7 GB of objects per run. Write the date filter into the query by default.
+        </li>
+        <li>
+          <!-- claim: docs/datasources.md §8C.7 -->
+          <strong>Iceberg tables register by their metadata file.</strong> DuckDB 1.5.5 cannot resolve a pyiceberg table by its root, so the registry names the table's current metadata file — and a table that still receives commits is re-registered to follow it.
+        </li>
+        <li>
+          <!-- claim: docs/datasources.md §8C.8 -->
+          <strong>No scheduler, no dashboards.</strong> A pipeline runs when you run it, or when something calls its published endpoint. Recurring cadence and a dashboard surface are not shipped — nothing on this page should read as a promise of either.
+        </li>
+        <li>
+          <!-- claim: docs/datasources.md §8C.3 -->
+          <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is half a billion rows behind a result cap. Push the aggregation into the lake node — that is what the engine and the pruning are for — and let the pipeline carry the answer, not the raw rows.
+        </li>
+      </ul>
+      <p><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;
+         <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a> &middot;
+         <a th:href="@{/docs/environments}">Run the demo &rarr;</a></p>
+    </div>
+  </section>
+
+</th:block>
+</html>
