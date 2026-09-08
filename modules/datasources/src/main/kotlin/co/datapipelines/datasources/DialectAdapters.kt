@@ -31,8 +31,32 @@ abstract class AbstractDialectAdapter(
      * status on connection level", duckdb_jdbc 1.5.5.1 — found live by the 089 §F MinIO
      * suite), so the two DuckDB-family adapters override this to false and the D6 layer-2a
      * executor re-check carries their enforcement alone.
+     *
+     * What HikariCP 6.3.3 actually does (read from `PoolBase.setupConnection` bytecode,
+     * 2026-09-08): `if (connection.isReadOnly() != pool.isReadOnly) connection.setReadOnly(pool.isReadOnly)`.
+     * So for a driver that refuses to CHANGE the flag, the pool's flag must MIRROR the state
+     * the connection opens in — see [poolReadOnlyFlag]. "Never set it" (089) broke the other
+     * half: a DuckDB file opened `access_mode=READ_ONLY` reports `isReadOnly() == true`, the
+     * pool's `false` differed, Hikari called `setReadOnly(false)`, and every `--demo trade`
+     * pool failed to build (093 §2, 2026-09-08).
      */
     protected open val driverSupportsConnectionReadOnly: Boolean get() = true
+
+    /**
+     * The value of the pool's `readOnly` flag for [datasource]: the datasource's own flag when
+     * the driver can be asked to change it; otherwise whatever state the connection OPENS in
+     * ([connectionOpensReadOnly]), so HikariCP's mirror check never calls `setReadOnly` at all.
+     */
+    protected fun poolReadOnlyFlag(datasource: Datasource): Boolean =
+        if (driverSupportsConnectionReadOnly) datasource.isReadonly else connectionOpensReadOnly(datasource)
+
+    /**
+     * Whether a NEW physical connection to [datasource] reports `isReadOnly() == true` at open
+     * time, from the driver's own open-mode setting. False by default; the DuckDB adapter reads
+     * `properties.jdbc.access_mode` (datasources.md §8A.5 — the property form is the one the
+     * driver honors).
+     */
+    protected open fun connectionOpensReadOnly(datasource: Datasource): Boolean = false
 
     final override val typeMapper: IngressTypeMapper get() = TypeMappers.forDialect(dialect)
 
@@ -106,7 +130,7 @@ abstract class AbstractDialectAdapter(
         // 089 §F MinIO suite) would fail the ENTIRE pool build of a readonly datasource, which
         // is every lake the demo ships. The DuckDB-family adapters declare false; their D6
         // layer-2a executor re-check and their engine posture are the enforcement that remains.
-        if (datasource.isReadonly && driverSupportsConnectionReadOnly) config.isReadOnly = true
+        config.isReadOnly = poolReadOnlyFlag(datasource)
         // Note: queryTimeoutSeconds is an execution-layer policy (§5.5), applied per-statement
         // by the executor — deliberately NOT a pool or connection property here.
 
@@ -350,6 +374,23 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
 
     /** The DuckDB driver throws from `Connection.setReadOnly` — see the declaration's KDoc. */
     override val driverSupportsConnectionReadOnly: Boolean get() = false
+
+    /**
+     * `properties.jdbc.access_mode: READ_ONLY` opens the file read-only and the connection then
+     * reports `isReadOnly() == true`; the pool flag mirrors it (see [poolReadOnlyFlag]). The
+     * URL-query spelling is ignored by the driver (the census bootstrap file says so), so only
+     * the property is consulted.
+     */
+    override fun connectionOpensReadOnly(datasource: Datasource): Boolean =
+        datasource.properties.jdbc[ACCESS_MODE_KEY]
+            ?.toString()
+            ?.trim()
+            .equals(READ_ONLY_ACCESS_MODE, ignoreCase = true)
+
+    private companion object {
+        const val ACCESS_MODE_KEY = "access_mode"
+        const val READ_ONLY_ACCESS_MODE = "READ_ONLY"
+    }
 }
 
 /**
