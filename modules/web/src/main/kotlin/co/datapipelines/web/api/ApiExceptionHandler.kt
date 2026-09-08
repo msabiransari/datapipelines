@@ -2,6 +2,7 @@ package co.datapipelines.web.api
 
 import co.datapipelines.auth.AuthException
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
@@ -242,7 +243,16 @@ class ApiExceptionHandler {
             // Keyed on the code: other 502s (query_execution_failed) can be our bug and stay
             // at ERROR with the stack.
             code in ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN -> {
-                log.warn("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
+                // Messages only, never the stack — but the CHAIN: the static message alone left
+                // an operator reproducing a lake connect by hand to learn it was an S3 403.
+                log.warn(
+                    "{} {} {}: {}{}",
+                    status.value(),
+                    request.method,
+                    request.requestURI,
+                    error.message,
+                    CauseChain.summarize(error),
+                )
             }
 
             status.is5xxServerError -> {

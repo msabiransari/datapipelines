@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.CauseChain
 import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
@@ -86,7 +87,14 @@ class McpToolDispatcher(
         } catch (e: DatapipelinesException) {
             // A catalogued domain failure is CONTENT, not a protocol error (§9.2).
             audit(tool.name, request, ctx, outcome = "error", code = e.code, startedAt = startedAt, invoked = true)
-            log.info("MCP tool {} failed code={} correlation_id={}", tool.name, e.code, ctx.correlationId)
+            // The cause chain (driver text) goes to the LOG only; the envelope stays static.
+            log.info(
+                "MCP tool {} failed code={} correlation_id={}{}",
+                tool.name,
+                e.code,
+                ctx.correlationId,
+                CauseChain.summarize(e),
+            )
             McpToolResults.error(McpErrorPayload.of(e), ctx.correlationId)
         } catch (e: McpError) {
             audit(tool.name, request, ctx, outcome = "invalid_params", startedAt = startedAt, invoked = true)

@@ -37,6 +37,7 @@ class ApiExceptionHandlerTest {
                 code = PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                 message = "Datasource 'pg-prod' could not be reached for schema introspection.",
                 details = mapOf("datasource" to "pg-prod"),
+                cause = java.sql.SQLException("Pool init failed", java.io.IOException("HTTP 403 Forbidden on listing")),
             )
 
         @GetMapping("/probe/query-failed")
@@ -92,6 +93,9 @@ class ApiExceptionHandlerTest {
                 { levels shouldContain "WARN" },
                 { levels shouldNotContain "ERROR" },
                 { appender.list.single().throwableProxy shouldBe null },
+                // …but the driver's reason is IN the line: the static message alone had an
+                // operator reproducing a lake connect by hand to learn it was an S3 403.
+                { appender.list.single().formattedMessage shouldContain "IOException: HTTP 403 Forbidden on listing" },
             )
         } finally {
             logger.detachAppender(appender)
