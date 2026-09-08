@@ -1200,6 +1200,13 @@ button.app-busy::after {
   margin: 0;
 }
 
+/* In a full-bleed table card the header band is followed by the <thead> band directly;
+   without its own bottom padding the title sat ON the column labels (owner's
+   /api-console screenshot, 2026-09-08). The dashboard's table cards share the rule. */
+.app-card-table > .app-card-h {
+  padding-bottom: var(--gap-sm);
+}
+
 .app-card-b {
   padding: var(--gap-md);
   min-width: 0;
@@ -1424,7 +1431,10 @@ button.app-busy::after {
   border-radius: var(--radius-lg);
 }
 
-.app-empty b {
+/* Only the empty state's TITLE is a block — the first bold child. A bold word later
+   in the sentence ("Create one with <strong>New key</strong>.") stays inline; as `b`
+   it was breaking the sentence over three lines with the full stop on its own. */
+.app-empty > b:first-child {
   display: block;
   color: var(--text-primary);
   font-weight: var(--weight-semibold);

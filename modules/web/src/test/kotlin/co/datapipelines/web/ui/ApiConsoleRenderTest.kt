@@ -308,6 +308,29 @@ class ApiConsoleRenderTest {
     }
 
     @Test
+    fun `the two sections share one stack, and the empty state's call to action stays inline`() {
+        // Owner's screenshot, 2026-09-08: the full-width keys card and the two-column row
+        // touched, and the keys empty state broke "Create one with / New key / ." over three
+        // lines. The gap comes from the sections being siblings inside `.app-stack`; the
+        // inline call to action from it NOT being a `<b>` — `.app-empty > b:first-child` is
+        // the block-level title, and only the first.
+        val html = render { }
+        val stack = html.indexOf("class=\"app-stack\"")
+        val stackEnd = html.indexOf("id=\"key-modal\"")
+        stack shouldBe html.lastIndexOf("class=\"app-stack\"") // exactly one stack
+        withClue("both sections sit inside the stack") {
+            val keys = html.indexOf("id=\"keys-table\"")
+            val grid = html.indexOf("app-grid-wide-left")
+            (stack < keys && keys < stackEnd) shouldBe true
+            (stack < grid && grid < stackEnd) shouldBe true
+        }
+        withClue("the empty state's action is not a second block-level <b>") {
+            val empty = html.substring(html.indexOf("No API keys"), html.indexOf("New key</strong>") + 16)
+            empty shouldNotContain "<b>"
+        }
+    }
+
+    @Test
     fun `the page carries no inline style attribute`() {
         // §D widened the inline-style ban to every app template with an EMPTY allowlist;
         // a new screen is exactly where the habit comes back.
