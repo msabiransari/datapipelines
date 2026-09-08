@@ -20,39 +20,6 @@ path** — see *Folders* below), `display_name`, `description`, `parameters` (ty
 map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
 create.
 
-**Node** — one SQL step, rendered from a template:
-- `id` — unique within the pipeline, `[a-z0-9_]+`, stable
-- `type` — `DQL` (SELECT → rows), `DML` (INSERT/UPDATE/DELETE/MERGE → row count),
-  `DDL` (CREATE/ALTER/DROP → success/failure), `PIPELINE` (run a pinned child
-  pipeline `{"name": "...", "version": N}` as a sub-execution — declares `pipeline`
-  plus optional parameter bindings instead of `source`/`template`), or `CALCULATOR`
-  (compute one typed value into the Context — see **Calculators** below)
-- `source` — a registered datasource name, or the reserved literal `"tempdb"` for the
-  per-execution in-memory H2
-- `template` — `{"id": "...sql", "version": N}` (immutable pin)
-- `output` — where a DQL node's rows go (see below); forbidden on DML/DDL
-- `depends_on` — parent node ids; must exist, no cycles
-
-**Output targets (DQL only):**
-- omitted → `{"target": "caller"}` — the pipeline's result. **At most one caller node per
-  pipeline; zero is legal** (pure write-back: stats only, no rows)
-- `{"target": "tempdb", "table": "stg_x"}` — stage into H2 for downstream nodes
-  (`source: "tempdb"`)
-- `{"target": "datasource", "datasource": "...", "table": "...", "mode": "replace"|"append"}`
-  — write-back to an external table (must exist, or be created by a preceding DDL node)
-
-**Template** — Freemarker SQL: `id` — always a folder path, e.g.
-`nyc/mobility/daily_by_zone.sql` (2–10 `/`-separated segments, each starting `[a-z0-9]`,
-≤ 64 chars per segment, ≤ 200 total; a bare `fetch_orders.sql` is refused), `dialect` (one of
-`POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`, `LAKE`), `display_name`,
-`description`, `imports` (`[{"id","version","alias"}]` for library macros), `body`,
-`is_library`. **There is no params_schema field** — the variables a body may reference
-are exactly the calling pipeline's `parameters` keys (defaults applied). A declared
-parameter is referenced in the SQL as a **bind parameter**: `WHERE id = :customer_id`.
-The body must **never** contain `<#import>` / `<#include>` — imports come from the `imports` array and
-the body calls macros by alias (`<@dates.date_range …/>`). Library templates
-(`is_library: true`) contain only `<#macro>`/`<#function>` definitions.
-
 **Versioning** — create lands v1 RELEASED and immediately executable; every later save is
 draft-first: the first save after a release opens a DRAFT (copy-on-write), later saves
 overwrite that one draft in place. A save whose body is identical to the released one is a
@@ -63,13 +30,6 @@ design, D4; there is no release tool and that absence is deliberate). Pipeline n
 template versions immutably; updating a template does not change existing pipelines until
 you update the node reference. Drafts are executable — running your own draft is the
 expected test loop.
-
-**Parameters** — typed with the canonical logical types: `BOOLEAN`, `INTEGER`,
-`BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `DATE`, `TIMESTAMP`, etc. (11 total —
-see type-system.md §3). Each declares `type`, `required`, optional `default`,
-`description`. **`DECIMAL` parameters must also declare `precision`** — omitting it
-fails the save with `pipeline.validation.parameter_precision_missing`; `BIGDECIMAL`
-precision is optional (omitted = unbounded).
 
 **In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
 never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the
@@ -131,239 +91,6 @@ workspace is organised, and there is no rename to take it back. Never mint a roo
 leaves. `q` is a flat substring search across full paths. Use `prefix` to learn the shape,
 `q` to find a thing you can already half-name.
 
-**Worked example (the shipped demo).** The NYC family keeps its pipelines and the templates
-they read under one prefix:
-
-```
-nyc/mobility/revenue_by_borough      (pipeline)
-nyc/mobility/mobility_briefing       (pipeline — a PIPELINE node invoking borough_od_matrix)
-nyc/mobility/daily_by_zone.sql       (template the pipelines read)
-nyc/lib/metrics.sql                  (shared macros)
-```
-
-A new NYC mobility pipeline goes under `nyc/mobility/`; a first finance pipeline is a new
-root, so you ask.
-
-**What folders are NOT:**
-
-- **Not permissions.** Workspaces are.
-- **Not a rename mechanism.** A name is the asset's identity — child references
-  (`{name, version}`), pins, execution history and promotion all key on it. **Choose the
-  folder at creation**; there is no move, for either kind.
-- **Not optional.** Every name has one. There is no root-level pipeline or template and no
-  way to create one.
-- **Not a schema dimension.** No folder column, no folder ids. A folder exists exactly as
-  long as something is named under it, and disappears with the last thing in it.
-
-## Calculators — computing a value the SQL then binds
-
-A `CALCULATOR` node evaluates one **pure function the server ships** and writes ONE typed value
-into the execution Context. Downstream nodes bind it exactly like a parameter.
-
-```json
-{ "id": "fiscal_q", "type": "CALCULATOR",
-  "kind": "fiscal_quarter",
-  "inputs": {"date": "$current_date", "fiscal_start": "$org_fiscal_start_date"},
-  "context_key": "run_fiscal_quarter",
-  "depends_on": [] }
-```
-
-…and then, in a node that `depends_on: ["fiscal_q"]`:
-
-```sql
-SELECT region, SUM(amount) AS total
-FROM orders
-WHERE fiscal_quarter = :run_fiscal_quarter
-GROUP BY region
-```
-
-**Call `calculators_list` before you author one.** The kind names and their input names are not
-guessable; the tool returns every kind with typed inputs, its output type and a worked example.
-`calculators_get {kind}` is the same entry for one kind.
-
-Four rules, and the third is the one that bites:
-
-1. **`$name` is a reference, anything else is a literal.** `"fiscal_start": "$org_fiscal_start_date"`
-   reads the deployment's setting; `"fiscal_start": "09-15"` pins this pipeline's own. Literals are
-   type-checked at save.
-2. **`context_key` is not `output`.** It names a Context value, never a table. A CALCULATOR node
-   carries no `source`, no `template` and no `output` — declaring any of them is refused.
-3. **Sequencing is `depends_on`, not array order.** A node that references another node's
-   `context_key` — in `inputs` OR as a `:bind` in its SQL — must depend on the producer, directly
-   or transitively. Otherwise the save is refused with
-   `pipeline.validation.calculator_input_unordered`, and the fix is one entry in `depends_on`.
-4. **Row-level transforms are NOT calculators.** A calculator computes one value for the whole
-   run. Transforming columns is SQL's job — on the source engine, in tempdb, or through a library
-   template macro. There is no row calculator and there is not going to be one.
-
-### Context keys you can reference without declaring anything
-
-| Key | Type | What it is |
-|---|---|---|
-| `org_currency_name`, `org_currency_symbol` | STRING | The deployment's currency |
-| `org_fiscal_start_date` | STRING | `MM-DD` — when the fiscal year starts |
-| `org_week_start` | STRING | `monday` or `sunday` |
-| `org_timezone` | STRING | IANA zone id |
-| `current_date` | DATE | Today, in `org_timezone`, fixed at execution start |
-| `current_timestamp` | TIMESTAMP | The execution's start instant |
-| `execution_id` | STRING | This execution's id |
-
-Precedence, lowest first — **org config < platform < declared `parameters` < execute-time inputs
-< calculator outputs**. Declaring a parameter named `org_timezone` overrides the deployment's, and
-that override is visible in the body, which is the point. A calculator may shadow an org or
-platform key; it may **never** shadow a declared parameter (`calculator_output_collision`), and
-two nodes may not write the same key.
-
-After a run, `executions_get` shows each CALCULATOR node's `context_key` and `context_value` in
-its `node_stats` entry, and `parameters` carries the fully resolved Context — every tier, the
-calculator outputs included. That is where you look when a computed number is not what you
-expected.
-
-**Overriding a calculator.** Every calculator `context_key` is also an implicit OPTIONAL input
-of `pipelines_execute` — `pipelines_get` lists these under `parameters` with `"derived": true`.
-Supply the key and the node is **skipped**: the supplied value is what downstream nodes bind,
-and the node's `executions_get.node_stats[]` entry shows `provided_by: "caller"`. Omit it and
-the node computes from the Context exactly as before. The value is typed by the kind's output,
-so a backfill passes the right JSON type: a pipeline whose `fiscal_quarter` calculator derives
-the run quarter from `$current_date` can be re-run for an old quarter with
-`"run_fiscal_quarter": 4` — a JSON **number** (the kind outputs INTEGER), never `"2025-Q4"`,
-which fails coercion with `pipeline.execution.invalid_parameter_type`.
-
-## Connecting
-
-- **Which host?** The user's own deployment — this product is self-hosted, so there is no
-  default endpoint and you must ask for one rather than assume `localhost`. If the user has
-  no server yet, one command on a machine with Docker gives them a working one with sample
-  data in it: `./app.sh --start --demo nyc` from a checkout. That deployment is
-  `DATAPIPELINES_ENV=local` under the `development` posture, and `app.sh` prints the login
-  that exists after it is healthy. A deployment their organisation runs will be named
-  something else and may be `hardened`, which refuses authoring writes — see the
-  `*.authoring.disabled` row in the error table.
-
-- **MCP:** Streamable HTTP at `POST {host}/mcp` — stateless, protocol pinned to
-  `2025-06-18`. Auth is API-key-only: `DP-API-Key: dpk_<id>.<secret>` or
-  `Authorization: Bearer dpk_<id>.<secret>`. Browser session cookies are rejected on
-  `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
-  envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
-
-- **30 MCP tools:** `pipelines_list`, `pipelines_get`, `pipelines_execute`,
-  `pipelines_execute_node`, `pipelines_create`, `pipelines_update`, `templates_list`,
-  `templates_get`, `templates_used_by`, `templates_create`, `templates_render`,
-  `datasources_list`, `datasources_get`, `datasources_test`,
-  `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`,
-  `datasources_preview_rows`, `executions_list`,
-  `executions_get`, `executions_get_result`, `endpoints_create`, `endpoints_list`,
-  `endpoints_get`, `endpoints_delete`, `calculators_list`, `calculators_get`,
-  `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`.
-
-- **3 prompts:** `analyze_pipeline` (read-only structural review of a pipeline),
-  `create_pipeline_for_question` (ground a new pipeline's SQL in the introspection
-  tools, then author it), `debug_failed_execution` (walk a failed execution to a
-  diagnosis).
-
-- **Which key you need, and why not `admin`.** Your credential is a **`user` key** — the kind
-  the UI calls "Agent / API key" (one kind, two surfaces: MCP and REST). Ask for the LOWEST
-  scope that covers what you were asked to do: `read` to inspect, `execute` to run, `author` to
-  create or change. **Do not ask for `admin`.** No MCP tool requires it, so it buys you nothing
-  you can use — and it turns a key that lives in a config file, a transcript and a client's logs
-  into one that can manage users and workspaces. If a tool answers `auth.scope.insufficient`,
-  name the ONE scope you need and why. The other two key kinds are not yours: an `endpoint` key
-  serves published endpoints, a `server` key is one deployment's credential for another, and
-  `/mcp` refuses both with `endpoint.key_kind_refused`.
-
-- **Scopes** (hierarchical: `admin ⊃ author ⊃ execute ⊃ read`): `read` = list/get;
-  `execute` = run; `author` = create/update pipelines + templates (also template render,
-  datasource test, schema introspection, the three `lake_tables_*` dp-lake registry writes,
-  and workspace-bound datasource mutation). Creating, updating and deleting a datasource are
-  REST/UI only — **no credential travels through an agent** (094): ask a person to add the
-  datasource in the UI, then use it by name. Mutating a GLOBAL datasource's lake registry needs
-  `admin`. A tool or endpoint rejects with
-  `auth.scope.insufficient` when the key's scope is too low.
-
-- **You cannot register a datasource, and there is no tool that lets you.** **No credential
-  travels through an agent.** A secret passed through you transits your context, your transcript
-  and any logging the client does — a property of handing a secret to an agent, which no server
-  can undo. So datasource create, update and delete are UI/REST-only. If the datasource you need
-  does not exist, **ask the person to add it in the UI**, then read it back with
-  `datasources_list`. (There was a `datasources_create` tool; it carried a warning in its own
-  description, and a description is not a control, so it was removed.)
-
-- **What you CAN do with a datasource:** `datasources_list` / `datasources_get` to find one,
-  `datasources_test` to confirm it connects, `datasources_get_schemas` / `_get_tables` /
-  `_get_columns` to read its shape, `datasources_preview_rows` for up to 50 rows of a table.
-  That is everything authoring a pipeline needs. `datasources_get` also reports the connection
-  POOL's effective settings (`pool`: each value with its unit and which layer supplied it), which
-  is what a pool-timeout failure is usually explained by.
-
-- **`credential.kind`, on the read side.** `datasources_get` reports WHAT a datasource
-  authenticates with, never the secret: `password` (a login), `token` (a bearer or personal
-  access token), `private_key` and `service_account_json` (in the contract for the warehouse
-  connectors; no shipped dialect accepts them yet), and `none` — an IAM role, OS auth, or a FILE
-  database with no authentication at all. It is the fact that explains an authentication failure
-  you are asked to diagnose.
-
-- **Namespaces, not just schemas.** `datasources_get_schemas` returns `entries: [{namespace,
-  label}]`. `namespace` is the ordered path (outermost first) and `label` is its last segment. On
-  a two-level engine — `catalog.schema`, `project.dataset` — two entries can share a label and
-  differ only by their outer segment, so **pass the whole `namespace` array back** to
-  `datasources_get_tables`/`_get_columns`, not the label. The legacy `schemas` array of bare
-  labels and the `schema` argument still work; they cannot express the difference. An unqualified
-  `datasources_get_columns` on a two-level engine can merge same-named tables from different
-  catalogs, which is why the namespace is worth passing.
-
-## dp-lake — register your bucket, register tables, ask
-
-A **LAKE** datasource reads Parquet and Apache Iceberg tables on S3 or S3-compatible object
-storage **in place** — no warehouse, no load step, nothing copied — and it is **read-only**.
-DuckDB is the engine; the catalog is the server's own registry (dp-catalog), because the
-engine cannot list a bucket: a LAKE datasource's tables are exactly the rows you register.
-
-The workflow is three steps:
-
-1. **Register the bucket.** `datasources_create` with `dialect: "LAKE"`,
-   `jdbc_url: "jdbc:duckdb::memory:"`, and `properties.dialect` naming how the data is
-   addressed — `catalog.kind: "s3"` + `region` for AWS, plus `endpoint` (and
-   `url_style: "path"`) for an S3-compatible store like MinIO. Credentials:
-   `credential: {"kind": "none"}` is the IAM credential chain; `{"kind": "password",
-   "username": "<key-id>", "secret": "<secret>"}` is an explicit key pair; and a PUBLIC
-   bucket adds `unsigned: "true"` — NO S3 secret at all, because the credential chain
-   validates at create time and fails on a credentials-free box. Follow with
-   `datasources_test`.
-2. **Register the tables.** `lake_tables_register` for one (`namespace`, `table`, `format`,
-   `location`, optional `partition_column`), or `lake_tables_import` for a manifest's
-   `tables[]` — inline, or a `manifest_url` fetched server-side from the datasource's OWN
-   bucket/endpoint only (arbitrary URLs are refused). Import is idempotent; re-running it is
-   safe.
-3. **Ask.** `datasources_get_tables` lists the registered tables (reported as type `VIEW`,
-   with the format in remarks) — then author a template with `dialect: "LAKE"` and a normal
-   pipeline over it. A lake node stages into tempdb and joins Postgres/MySQL/SQLite nodes in
-   the same pipeline like any other source.
-
-**Bare vs qualified table names.** When ALL of the datasource's registered tables share
-exactly ONE namespace, the server sets the search path at connect, so a template reads
-`FROM hvfhv_zone_day` bare (the demo's choice). With several namespaces there is no default —
-use the full three-part name, `FROM nyc.mobility.hvfhv_zone_day`.
-
-**Iceberg: register the metadata FILE, not the table root.** DuckDB 1.5.5 cannot
-`iceberg_scan` a pyiceberg table by its root (its version-hint filenames never match the
-`%05d-<uuid>.metadata.json` files pyiceberg writes), so `location` is the table's CURRENT
-metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still
-receives commits gets a new metadata file per commit: re-register to follow it.
-
-**Every query prunes on the partition column — egress is real.** A lake table's bytes cross
-the network from S3 when the engine scans them, and you pay for what you scan: a predicate on
-the partition column (`WHERE pickup_date = DATE '2024-06-01'` or
-`WHERE pickup_date BETWEEN :start_date AND :end_date`) makes the engine read only the
-matching partitions, while an unfiltered `SELECT *` over a partitioned table downloads every
-partition. Write the predicate into the template by default, not as an afterthought:
-
-```sql
-SELECT pickup_date, pu_location_id, SUM(trip_count) AS trips
-FROM hvfhv_zone_day
-WHERE pickup_date BETWEEN :start_date AND :end_date
-GROUP BY pickup_date, pu_location_id
-```
-
 ## The golden path (authoring a new pipeline)
 
 0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
@@ -401,26 +128,6 @@ GROUP BY pickup_date, pu_location_id
 6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`.
    Page the remainder with `executions_get_result` (`offset`/`limit`) **within the
    TTL** — afterwards the result is gone (`result.expired`).
-
-Minimal single-node pipeline (Postgres source, the single DQL node IS the caller node):
-
-```json
-{
-  "schema_version": 1,
-  "name": "acme/reporting/active_users",
-  "display_name": "Active Users",
-  "description": "List all active users from local PG",
-  "parameters": {},
-  "nodes": [{
-    "id": "fetch_active_users",
-    "description": "Fetch active users",
-    "type": "DQL",
-    "source": "pg-local",
-    "template": {"id": "acme/reporting/active_users.sql", "version": 1},
-    "depends_on": []
-  }]
-}
-```
 
 ## Execution semantics agents must know
 
@@ -470,23 +177,6 @@ What that means in practice:
 Every failure is structured — REST envelopes and MCP tool results (`isError: true`)
 carry the same catalogued codes. The registry of record is pipeline-contract.md §13.
 Codes you will meet most often:
-
-| Code | Meaning | Agent response |
-|---|---|---|
-| `auth.api_key.missing` / `auth.api_key.invalid` | Credential problem | Ask the user for a fresh key |
-| `auth.scope.insufficient` | Key lacks the required scope | Ask for a broader key, or change what you asked |
-| `pipeline.validation.*` (`cycle_detected`, `dangling_dependency`, `duplicate_node_id`, `parameter_precision_missing`, …) | Pipeline JSON is invalid | Fix the JSON — never retry as-is |
-| `template.validation.*` (`syntax_error`, `dangerous_construct`, …) | Template body rejected | Fix the Freemarker and re-render |
-| `template.not_found` / `datasource.not_found` | Reference points at nothing | Create the referenced entity or fix the id |
-| `pipeline.version.conflict` | The pipeline changed after you loaded it (stale `expected_hash`) | Re-read with `pipelines_get`, rebase your edit onto the current body/hash, retry — NEVER retry blindly |
-| `pipeline.version.not_draft` | Release/discard hit a pipeline with no draft | Nothing to act on for an agent — the draft was already released or discarded |
-| `pipeline.authoring.disabled` / `template.authoring.disabled` | This server has authoring turned off — it is a promotion receiver | Do not retry; tell the user this server only receives promoted content. Reads, execution and import still work |
-| `pipeline.validation.duplicate_name` (on update) | Your draft renames onto a taken name | Pick a different `name`; this fails at write time now, not at release |
-| `pipeline.execution.datasource_unreachable` | Source DB down/bad credentials | `datasources_test` to confirm |
-| `pipeline.node.query_execution_failed` | A node's SQL failed | Read `node_stats` + `executions_get` for the node error, re-render its template with the failed parameters |
-| `pipeline.node.sql_parameter_missing` | The rendered SQL references a `:name` no pipeline parameter declares | Name a declared parameter — or interpolate structure instead |
-| `template.validation.parameter_interpolated` | A declared parameter appears inside `${}` | Write `:name` for it — bound values are never parsed as SQL |
-| `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
 
 Rule of thumb: validation errors are your bug — fix the document, don't retry.
 Reachability and TTL errors are the world's state — probe, then retry once.
@@ -566,120 +256,31 @@ the UI did on 2026-09-02 (T85): the answer was in the event all along.
     Verified empirically against the pinned driver 2.3.232 — plain DECIMAL gave 2448.00
     where DOUBLE gave the correct 2456.81 (2026-09-04, congestion/tip/OD pipelines).
 
-## Credential encryption and key providers
+## References — open one when you need it
 
-Three facts, and where to go for the rest:
+Each line says when to open the file; none of them is required reading first.
 
-- **Datasource credentials are write-only** — whatever kind they are. They are stored AES-256-GCM encrypted, bound to the
-  datasource name, and no endpoint, tool or resource ever returns one — reads carry
-  `password_set: true` instead. Never try to read a password back, and never echo one you were
-  given into a pipeline body, a template, a commit message or a chat summary.
-- **Every stored credential carries a key VERSION** (its first byte), so a deployment can rotate
-  keys lazily: rows keep decrypting under the key they were written with, and move to the
-  current key the next time their password is saved. The operator flow is
-  `docs/datasources.md` §7.3 — there is deliberately no rotation endpoint or CLI to call.
-- **Where the keys come from is a seam, not a constant.** `datapipelines.db.key-provider`
-  selects a `KeyProvider`; `env` ships and is the default. Implementing an AWS/GCP/Azure/Vault
-  provider is a written procedure with a shared contract suite every implementation must pass:
-  **`docs/key-providers.md`**. If you are asked to "add KMS support", that document is the task
-  — do not redesign the crypto.
+- **`references/pipeline-schema.md`** — writing or reading a pipeline body: the
+  `parameters` block's fields and types, and a minimal complete pipeline to copy.
+- **`references/node-types.md`** — wiring the DAG: what a node declares, the five node
+  types, and where a DQL node's rows go.
+- **`references/templates.md`** — writing SQL: what a template is, how library imports
+  work, and how a CALCULATOR node computes a value the SQL then binds.
+- **`references/naming.md`** — choosing where a new pipeline or template lives, or
+  explaining the folder rules to a human.
+- **`references/connecting.md`** — your first call against a deployment, a refusal for
+  scope or credential reasons, or a client with no MCP transport.
+- **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.
+- **`references/endpoints.md`** — a released read-only pipeline has to answer a plain
+  HTTP GET.
+- **`references/error-codes.md`** — a tool answered `isError: true` and you need the
+  code's meaning and the response it calls for.
+- **`references/tools.md`** — every MCP tool with its arguments, scope and whether it
+  writes. Generated from the server's own catalog at build time, so it is never stale.
 
-## Publishing a pipeline as a GET endpoint
-
-A released, **read-only** pipeline can be served at a stable URL under `/api/x`, so an
-application fetches rows with one `GET` and no event handling. Three steps: publish, bind a key,
-call it.
-
-```
-endpoints_create {"path": "/nyc/revenue/{borough}", "pipeline": "revenue_by_borough",
-                  "timeout_seconds": 60}
-→ url: /api/x/nyc/revenue/{borough}
-```
-
-Then mint a key for it and bind it (REST or the UI — there is no key-minting MCP tool, on
-purpose: a minted key is a live credential and a tool result travels through your context and
-transcript):
-
-```bash
-curl -s http://localhost:8080/api/v1/auth/api-keys -X POST \
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
-  -d '{"name": "nyc-serving", "kind": "endpoint", "bindings": ["/nyc"]}'
-# the plaintext key is in this response ONCE
-
-curl -s http://localhost:8080/api/x/nyc/revenue/Manhattan -H "DP-API-Key: dpk_..."
-```
-
-The `200` body is the `data_ready` payload you already know from `pipelines_execute`:
-`execution_id`, `schema`, `rows`, `row_count`, `total_rows`, `has_more`, `result_url`,
-`expires_at`, `ttl_seconds`. `DP-Result-Page-Rows` sizes the inline page.
-
-**Only side-effect-free pipelines can be published.** Every node must be `DQL` into tempdb or
-the caller (or `CALCULATOR`), transitively through `PIPELINE` nodes. A `DML`/`DDL` node — or a
-DQL node writing back to a datasource, which is a write wearing a read's type — is refused with
-`endpoint.pipeline_not_readonly` naming the node. This is not a formality: `GET` is retried on
-timeout, preloaded by browsers and followed by crawlers, so a write behind one of these URLs
-would happen repeatedly and unbidden. The rule is re-checked on every serve, because an endpoint
-pins a pipeline and serves its latest RELEASED version — a later release can change the body.
-
-**An unknown query parameter is a `400`, on purpose.** `?start_dt=2024-01-01` on an endpoint
-declaring `start_date` is refused with `endpoint.request.parameter_unknown` rather than ignored.
-The execute body tolerates extra keys; this surface must not, because a typo that silently ran
-the default would return plausible, wrong rows — and wrong rows that look right are worse than
-an error. Every defect in a request comes back **together**, in one `400` whose
-`details.errors[]` lists each `{parameter, code, message}`, so you fix the URL once.
-
-**A slow pipeline answers `202`, not an error.** When the endpoint's `timeout_seconds` elapses
-the execution is **not** cancelled — you get `202` with `{execution_id, result_url, status_url,
-expires_at}` and come back to the cursor when it is ready (`GET /executions/{id}` reports
-status; the cursor `404`s until the result exists). Do not treat a `202` as a failure and do not
-retry it as a new run: the answer is already coming, and retrying starts a second execution.
-
-**Keys are bound to tree NODES, and a deeper binding replaces a shallower one.** A key bound at
-`/nyc` authorises everything beneath it — until some node deeper down carries its own binding,
-which then decides for that subtree alone. An endpoint with no binding on any ancestor accepts
-`user` keys of its workspace holding `execute`; an `endpoint` key with no binding authorises
-nothing at all. An endpoint key reaches published endpoints and the cursor of executions it
-started, and nothing else — not `/mcp`, not `/api/v1`.
-
-`endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface. Deleting an
-endpoint stops the URL answering and leaves the pipeline untouched.
-
-## REST fallback (when the client has no MCP transport)
-
-Same server, HTTP + JSON, authenticated with `-H "DP-API-Key: dpk_..."`:
-
-```bash
-curl -s http://localhost:8080/api/v1/pipelines                     # list
-curl -s http://localhost:8080/api/v1/datasources -X POST           # register (admin)
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." -d '{...}'
-curl -s http://localhost:8080/api/v1/pipelines/{id}/execute -X POST # run (SSE stream)
-  -H "Accept: text/event-stream" -H "DP-API-Key: dpk_..." -d '{"parameters": {}}'
-curl -s http://localhost:8080/api/v1/executions/{id}/result?offset=0&limit=100
-curl -s http://localhost:8080/api/v1/executions/{id} -X DELETE     # cancel
-```
-
-**Template addressing (rest-api v2.0):** a template name NEVER travels in a URL path
-segment — a name may contain `/`, and an encoded `%2F` in the path is refused `400` by the
-container before routing. Address templates by query parameter or body field instead:
-
-```bash
-curl -s "http://localhost:8080/api/v1/templates?name=acme/finance/report"        # one template
-curl -s "http://localhost:8080/api/v1/templates/versions?name=acme/finance/report&version=1"
-curl -s http://localhost:8080/api/v1/templates/render -X POST \
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
-  -d '{"name": "acme/finance/report", "version": 1, "context": {}}'
-```
-
-`GET /api/v1/templates` answers two shapes on one route: the single-resource envelope
-(`404 template.not_found` on a miss) when `name` is present, the paged list when it is not.
-`PUT /api/v1/templates` takes the `id` in the JSON body; release/draft-discard are
-`POST /api/v1/templates/release` and `/draft/discard` with `{"name": ...}` in the body.
-
-The execution endpoint answers with an SSE stream of events
-(`execution_started`, `node_started`, `node_completed`, `pipeline_completed`,
-`data_ready`, …) — the agent-facing MCP tool turns that into one blocking call with
-`node_stats` in the result. Everything the MCP tools do is a thin adapter over these
-endpoints; error codes are identical.
+The MCP resource `datapipelines://docs/skill/<name>` serves each of these, and a
+deployment serves them at `GET /skill/<name>.md`; inside a checkout they are files in
+`references/` beside this one.
 
 ## References (when working inside the repo)
 
