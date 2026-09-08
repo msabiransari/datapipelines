@@ -66,6 +66,5 @@ class UiController(
      * [UiWorkspaceAdvice] answers for the layout's `authenticated` attribute — asked here
      * from the controller because a redirect has to happen before the model is built.
      */
-    private fun signedIn(): Boolean =
-        SecurityContextHolder.getContext().authentication?.principal is AuthenticatedPrincipal
+    private fun signedIn(): Boolean = SecurityContextHolder.getContext().authentication?.principal is AuthenticatedPrincipal
 }

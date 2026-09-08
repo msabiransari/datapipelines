@@ -212,6 +212,7 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
                     )
                     page.waitForSelector(".tplx-tree")
                     page.waitForLoadState(LoadState.NETWORKIDLE)
+                    openFirstFolder()
                     assertPanes("full load $route at ${width}px rail-collapsed=$collapsed", page.evaluate(geometryProbe))
                 }
             }
