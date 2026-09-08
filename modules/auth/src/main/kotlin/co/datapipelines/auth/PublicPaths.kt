@@ -214,15 +214,6 @@ object PublicPaths {
                 "The site icon, requested by the browser on the login page before any credential exists.",
                 "P3d",
             ),
-            // P3d, and unreasoned until 096: the servlet path Spring Boot's webjars
-            // locator serves dependency-supplied JS from. It is a ** glob over a namespace
-            // whose contents are decided by the dependency graph rather than by this
-            // repository — 096 §B vendors its one artifact (htmx) and removes this entry.
-            PublicPath(
-                "/webjars/**",
-                "The webjar asset namespace, needed by the login page's htmx; a glob over dependency-supplied files.",
-                "P3d",
-            ),
             // P8: Boot's BasicErrorController with the shipped defaults — no stack trace, no
             // exception message, so the body is {timestamp,status,error,path}. It must be
             // reachable anonymously or an unauthenticated error becomes a redirect loop

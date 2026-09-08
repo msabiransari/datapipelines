@@ -927,7 +927,6 @@ Two things are deliberately **not** rows in this table:
 | `/css/**` | The application stylesheets, which the unauthenticated login and error pages already render. | P3d |
 | `/js/**` | The application scripts, which the unauthenticated login and error pages already render. | P3d |
 | `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | P3d |
-| `/webjars/**` | The webjar asset namespace, needed by the login page's htmx; a glob over dependency-supplied files. | P3d |
 | `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | P8 |
 
 

@@ -108,7 +108,6 @@ class ForcedPasswordChangeInterceptor(
                 "/css/**",
                 "/js/**",
                 "/favicon.ico",
-                "/webjars/**",
             )
     }
 }

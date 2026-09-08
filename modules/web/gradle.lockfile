@@ -291,7 +291,6 @@ org.testcontainers:testcontainers:1.21.4=testCompileClasspath,testRuntimeClasspa
 org.thymeleaf:thymeleaf-spring6:3.1.5.RELEASE=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 org.thymeleaf:thymeleaf:3.1.5.RELEASE=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 org.unbescape:unbescape:1.1.6.RELEASE=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
-org.webjars.npm:htmx.org:2.0.10=runtimeClasspath,testRuntimeClasspath
 org.xerial:sqlite-jdbc:3.49.1.0=runtimeClasspath,testRuntimeClasspath
 org.xmlunit:xmlunit-core:2.10.4=testCompileClasspath,testRuntimeClasspath
 org.yaml:snakeyaml:2.4=compileClasspath,testCompileClasspath

@@ -57,7 +57,6 @@ class PublicPathsTest {
                 "/css/**",
                 "/js/**",
                 "/favicon.ico",
-                "/webjars/**",
                 "/error",
             )
     }
@@ -76,7 +75,7 @@ class PublicPathsTest {
             withClue(entry.pattern) {
                 entry.reason.shouldNotBeBlank()
                 // A reason shorter than this is a label, not a decision. `/favicon.ico`,
-                // `/error` and `/webjars/**` shipped with NO reason at all until 096.
+                // `/error` and the `webjars` glob shipped with NO reason at all until 096.
                 (entry.reason.length >= MIN_REASON_LENGTH) shouldBe true
                 entry.since.shouldNotBeBlank()
                 // The §8.3 table is pipe-delimited Markdown; a pipe in a reason would split
@@ -129,8 +128,9 @@ class PublicPathsTest {
         /**
          * 27 rows: the 033 site pair, the seven 073 intent-cluster pages, 089's `/dp-lake`,
          * the docs pair, 095's skill pair, the two crawler files, three probes, the
-         * login/OIDC trio, four static-asset patterns, the `webjars` glob and `/error`.
+         * login/OIDC trio, four static-asset patterns and `/error`. 096 §B removed the
+         * `webjars` glob (28 -> 27) when htmx was vendored under `static/vendor`.
          */
-        const val DOCUMENTED_ROWS = 28
+        const val DOCUMENTED_ROWS = 27
     }
 }
