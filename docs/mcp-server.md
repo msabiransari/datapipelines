@@ -1255,7 +1255,13 @@ datapipelines://datasources/{name}                             → metadata, no 
 datapipelines://datasources                                    → list
 datapipelines://executions/{execution_id}                      → execution metadata
 datapipelines://executions/{execution_id}/events               → SSE event replay as text
+datapipelines://docs/skill                                     → the agent skill's operating core (Markdown)
+datapipelines://docs/skill/{reference}                         → one reference file of the skill
 ```
+
+The `docs` kind is not an entity: it is the manual the server ships (§7.2.4). Every other
+form addresses stored content and is workspace-scoped; `docs/*` is the same bytes for every
+caller on a given build.
 
 ### 7.2 Resource examples
 
@@ -1272,6 +1278,16 @@ Returns the template body (Freemarker SQL), content-type `text/x-freemarker-sql`
 #### 7.2.3 `datapipelines://datasources/{name}`
 
 Returns datasource metadata as JSON, with the password field redacted. Workspace-scoped like every datasource read (§2 principle 6): a name bound to another workspace resolves as not-found; `datapipelines://datasources` lists exactly the pinned workspace's visible set (bound + global).
+
+#### 7.2.4 `datapipelines://docs/skill`
+
+Returns the agent skill's `SKILL.md`, content-type `text/markdown` — the same bytes the
+deployment serves at `GET /skill.md` and the same file the repository holds at
+`.agents/skills/datapipelines/SKILL.md` (§15). `datapipelines://docs/skill/{reference}`
+returns one file of `references/` by name, with or without the `.md` suffix
+(`…/skill/templates` and `…/skill/templates.md` are the same resource); an unknown name is
+`RESOURCE_NOT_FOUND` like any other unknown URI. `{reference}` is a NAME, never a path — it
+is looked up in a map of packaged files, so no caller string reaches a file system.
 
 ### 7.3 Resource discovery
 
@@ -1293,7 +1309,7 @@ Returns a page of resource descriptors (URI, name, description, MIME type) plus 
 - **Page size is fixed at 100** descriptors. It is not client-controllable — an agent asking for "everything" must page.
 - `cursor` is an **opaque server-issued token**. Clients MUST treat it as an opaque string: do not parse, construct, or persist it across server restarts. A cursor the server cannot decode → JSON-RPC `-32602` invalid params.
 - The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
-- Enumeration order is stable within a paging run (pipelines, then templates, then datasources, then executions; each by id). Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
+- Enumeration order is stable within a paging run (docs, then pipelines, then templates, then datasources, then executions; each by id).  The `docs` rows lead because they are the only constant-size kind — the skill plus one row per reference, identical on every server — so they cannot push an entity off a page, and an agent that lists resources at all meets the manual before it meets content. Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
 
 **Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions) **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
 

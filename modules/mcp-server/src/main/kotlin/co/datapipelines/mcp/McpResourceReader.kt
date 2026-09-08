@@ -24,6 +24,12 @@ import java.util.UUID
  *
  * An unknown or malformed URI is the SDK's `RESOURCE_NOT_FOUND` JSON-RPC error, which is a
  * protocol-level answer (§9.1) — `resources/read` has no `isError` content channel.
+ *
+ * The one kind that is not an entity is the skill (095 §C2): `datapipelines://docs/skill` and
+ * `…/skill/{reference}` serve the packaged Markdown ([SkillDocs]) — the same bytes the
+ * deployment serves at `GET /skill.md`, and the same file a checkout holds at
+ * `.agents/skills/datapipelines/`. It is workspace-independent and needs `read` like every
+ * other resource; an unknown reference is not-found in the same shape as an unknown pipeline.
  */
 class McpResourceReader(
     private val pipelines: PipelineRepository,
@@ -83,6 +89,14 @@ class McpResourceReader(
 
                 is McpResourceUri.ExecutionEvents -> {
                     text(uri, eventReplay(workspaceId, parsed.executionId, ctx, uri))
+                }
+
+                is McpResourceUri.Skill -> {
+                    markdown(uri, SkillDocs.skill)
+                }
+
+                is McpResourceUri.SkillReference -> {
+                    markdown(uri, SkillDocs.reference(parsed.reference) ?: throw notFound(uri))
                 }
             }
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
@@ -175,6 +189,12 @@ class McpResourceReader(
         uri: String,
         body: String,
     ): McpSchema.TextResourceContents = McpSchema.TextResourceContents(uri, MIME_EVENT_STREAM, body, null)
+
+    /** The skill and its references (095 §C2) — the packaged bytes, never a second copy. */
+    private fun markdown(
+        uri: String,
+        body: String,
+    ): McpSchema.TextResourceContents = McpSchema.TextResourceContents(uri, McpResourceCatalog.MIME_MARKDOWN, body, null)
 
     private fun notFound(uri: String): McpError = McpError.RESOURCE_NOT_FOUND.apply(uri)
 

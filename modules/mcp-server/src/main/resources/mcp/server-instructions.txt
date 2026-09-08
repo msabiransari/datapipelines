@@ -1,0 +1,13 @@
+This server is workspace-scoped: every tool and resource operates inside the workspace the API key is pinned to. Pipelines, templates and executions belong to exactly one workspace; datasources are either bound to that workspace or global (shared). Content in other workspaces does not exist from this connection's point of view — it is not hidden, it is absent: another workspace's pipeline id, template id or datasource name resolves as not-found. Names are per-workspace for pipelines and templates, and datasource names are globally unique across the whole server.
+
+AUTHORING FLOW. Ground every pipeline in the real schema, in this order: datasources_get_schemas -> datasources_get_tables(namespace) -> datasources_get_columns -> templates_create -> templates_render (preview the SQL before a pipeline exists) -> pipelines_create -> pipelines_execute -> executions_get_result (page within ttl_seconds). Never write SQL against recalled column names.
+
+NAMES ARE FOLDER PATHS. A pipeline or template name is 2-10 lower-case segments separated by "/" (nyc/mobility/daily_by_zone.sql); a bare name with no folder is refused, and there is no rename afterwards. List the roots first — pipelines_list {"prefix": ""} and templates_list {"prefix": ""} — and reuse one. A name under a root that does not exist yet is refused with pipeline.validation.new_root_requires_confirmation until you ASK THE PERSON and then pass confirm_new_root: true. Experiments go under test/.
+
+AGENTS DESCRIBE DATASOURCES, HUMANS REGISTER THEM. No credential travels through an agent, so no tool creates or edits a datasource: ask a person to add it in the UI, then use it by name. You can list, get, test, introspect and preview rows.
+
+WHEN SOMETHING FAILS. (1) pipeline.version.conflict means the pipeline changed after you read it: re-read with pipelines_get, rebase your edit onto the current body and body_hash, then retry — never retry blindly, that overwrites a human's edit. (2) A validation error is YOUR bug: fix the document, do not resend it unchanged; a datasource_unreachable or result.expired is the world's state, so probe and retry once. (3) On a failed execution the root cause is the LAST entry of error.exception.caused_by, and error.correlation_id is what a human needs to find it in the log — report both, never just "it failed".
+
+Your saves land as a DRAFT and are not live until a person releases them. Say so, and never claim otherwise. Promotion between deployments is a human action with no tool.
+
+Before authoring anything beyond a one-node pipeline, read the resource datapipelines://docs/skill.

@@ -13,7 +13,11 @@ object SpecFiles {
     /** The agent-facing skill (094): the surface's own instructions, which drift like any doc. */
     const val SKILL_PATH: String = ".agents/skills/datapipelines/SKILL.md"
 
-    private val root: File by lazy {
+    /** The skill DIRECTORY (095): `SKILL.md` plus `references/` — packaged, served and copied whole. */
+    const val SKILL_DIR: String = ".agents/skills/datapipelines"
+
+    /** Public since 095: the doc renderer and the packaging guards address files by repo path too. */
+    val root: File by lazy {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
         while (dir != null && !File(dir, "settings.gradle.kts").exists()) {
             dir = dir.parentFile

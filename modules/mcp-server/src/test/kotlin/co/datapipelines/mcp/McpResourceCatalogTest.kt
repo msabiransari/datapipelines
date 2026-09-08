@@ -36,6 +36,15 @@ class McpResourceCatalogTest {
 
     private val catalog = McpResourceCatalog(pipelines, templates, datasources, executions, clock)
 
+    /**
+     * The constant rows every listing now opens with (095): the skill and one row per
+     * reference file. Derived from the packaged skill, never a literal — the reference set
+     * grows, and a hand-typed copy here would be the exact drift the skill's own tools.md
+     * exists to prevent.
+     */
+    private val skillUris: List<String> =
+        listOf(McpResourceUri.skill()) + SkillDocs.references.keys.map { McpResourceUri.skillReference(it) }
+
     private fun emptyWorld() {
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
@@ -58,23 +67,26 @@ class McpResourceCatalogTest {
         val second = catalog.list(ctx, first.nextCursor)
         val third = catalog.list(ctx, second.nextCursor)
 
+        // 250 pipelines + the always-present `datapipelines://datasources` collection URI (§7.1)
+        // + the constant docs rows (095).
+        val total = 251 + skillUris.size
+
         assertAll(
             { first.resources.size shouldBe McpResourceCatalog.PAGE_SIZE },
             { first.nextCursor.shouldNotBeNull() },
             { second.resources.size shouldBe McpResourceCatalog.PAGE_SIZE },
-            // 250 pipelines + the always-present `datapipelines://datasources` collection URI (§7.1).
-            { third.resources.size shouldBe 51 },
+            { third.resources.size shouldBe total - 2 * McpResourceCatalog.PAGE_SIZE },
             // The last page omits nextCursor — its presence is the only "there is more" signal.
             { third.nextCursor.shouldBeNull() },
             // No entity is served twice across the run.
             {
-                (first.resources + second.resources + third.resources).map { it.uri() }.toSet().size shouldBe 251
+                (first.resources + second.resources + third.resources).map { it.uri() }.toSet().size shouldBe total
             },
         )
     }
 
     @Test
-    fun `enumeration order is pipelines, then templates, then datasources, then executions`() {
+    fun `enumeration order is docs, then pipelines, then templates, then datasources, then executions`() {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
@@ -84,6 +96,7 @@ class McpResourceCatalogTest {
         val page = catalog.list(ctx, null)
 
         page.resources.map { it.uri() } shouldContainExactly
+            skillUris +
             listOf(
                 "datapipelines://pipelines/${McpFixtures.PIPELINE_ID}",
                 "datapipelines://templates/test/revenue.sql",
@@ -106,9 +119,10 @@ class McpResourceCatalogTest {
 
         val page = catalog.list(ctx, null)
 
-        // The datasource collection URI (§7.1) is always present; only one execution is in the window.
+        // The datasource collection URI (§7.1) and the docs rows are always present; only one
+        // execution is in the window.
         page.resources.map { it.uri() } shouldContainExactly
-            listOf("datapipelines://datasources", "datapipelines://executions/${McpFixtures.EXECUTION_ID}")
+            skillUris + listOf("datapipelines://datasources", "datapipelines://executions/${McpFixtures.EXECUTION_ID}")
     }
 
     @Test
@@ -131,12 +145,18 @@ class McpResourceCatalogTest {
         every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(ctx, null)
+        val entities = page.resources.drop(skillUris.size)
 
         assertAll(
-            { page.resources[0].name() shouldBe "monthly_revenue" },
-            { page.resources[0].mimeType() shouldBe McpResourceCatalog.MIME_JSON },
-            { page.resources[0].description().shouldNotBeNull() },
-            { page.resources[1].mimeType() shouldBe McpResourceCatalog.MIME_FREEMARKER_SQL },
+            { page.resources[0].name() shouldBe "skill" },
+            { page.resources[0].mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
+            // Every reference advertises its own H1, so a client picking one from the listing
+            // is choosing on the file's actual subject rather than on its file name.
+            { page.resources[1].description() shouldContain "reference of the datapipelines skill" },
+            { entities[0].name() shouldBe "monthly_revenue" },
+            { entities[0].mimeType() shouldBe McpResourceCatalog.MIME_JSON },
+            { entities[0].description().shouldNotBeNull() },
+            { entities[1].mimeType() shouldBe McpResourceCatalog.MIME_FREEMARKER_SQL },
         )
     }
 
@@ -189,8 +209,10 @@ class McpResourceCatalogTest {
      */
     @Test
     fun `a single page scans the pipeline table only once`() {
+        // Exactly enough to FILL one page beside the constant docs rows — a full page is what
+        // makes the walk probe for a 101st row, which is the double-scan this asserts against.
         every { pipelines.findAll(any(), null) } returns
-            (1..McpResourceCatalog.PAGE_SIZE).map {
+            (1..McpResourceCatalog.PAGE_SIZE - skillUris.size).map {
                 McpFixtures.pipelineRecord(id = UUID.fromString("11111111-0000-0000-0000-%012d".format(it)), name = "p$it")
             }
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
@@ -223,8 +245,9 @@ class McpResourceCatalogTest {
         val page = catalog.list(ctx, null)
 
         assertAll(
-            // Only the collection URI §7.1 always defines — no pipelines, templates or executions.
-            { page.resources.map { it.uri() } shouldContainExactly listOf("datapipelines://datasources") },
+            // Only the docs rows and the collection URI §7.1 always defines — no pipelines,
+            // templates or executions.
+            { page.resources.map { it.uri() } shouldContainExactly skillUris + listOf("datapipelines://datasources") },
             { page.nextCursor.shouldBeNull() },
         )
     }

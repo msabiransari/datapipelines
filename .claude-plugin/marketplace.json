@@ -1,0 +1,21 @@
+{
+  "name": "datapipelines",
+  "owner": {
+    "name": "datapipelines.co",
+    "url": "https://datapipelines.co"
+  },
+  "plugins": [
+    {
+      "name": "datapipelines",
+      "source": "./plugins/datapipelines",
+      "description": "Author, run and debug declarative SQL pipelines on a datapipelines.co deployment: the agent skill plus the MCP server connection.",
+      "author": {
+        "name": "datapipelines.co",
+        "url": "https://datapipelines.co"
+      },
+      "homepage": "https://datapipelines.co",
+      "license": "AGPL-3.0-only",
+      "keywords": ["sql", "data-pipelines", "mcp", "etl", "duckdb", "postgres"]
+    }
+  ]
+}

@@ -22,7 +22,10 @@ data class McpResourcePage(
  * - **Page size is fixed at 100** and is not client-controllable.
  * - The **cursor is opaque** ([McpResourceCursor]); an undecodable one is `-32602`.
  * - `nextCursor` is absent on the last page — its presence is the only "there is more" signal.
- * - **Enumeration order** is pipelines, then templates, then datasources, then executions.
+ * - **Enumeration order** is docs, then pipelines, then templates, then datasources, then
+ *   executions. Docs come first (095) and are the only constant-size kind: the skill and its
+ *   references are the same 1 + N rows on every server, so they cannot push an entity off a
+ *   page, and an agent that lists resources at all sees the manual before it sees content.
  *   Entities created mid-run may be missed: the listing is a discovery aid, not a snapshot.
  *
  * **Scope filtering** (§7.3, §13 checklist): the listing shows only what the calling key may read.
@@ -108,12 +111,42 @@ class McpResourceCatalog(
         scan: RequestScan,
     ): List<McpSchema.Resource> =
         when (kind) {
+            McpResourceUri.DOCS -> skillDescriptors(offset, limit)
             McpResourceUri.PIPELINES -> pipelineDescriptors(offset, limit, scan)
             McpResourceUri.TEMPLATES -> templateDescriptors(offset, limit, scan.workspaceId)
             McpResourceUri.DATASOURCES -> datasourceDescriptors(offset, limit, scan)
             McpResourceUri.EXECUTIONS -> executionDescriptors(offset, limit, ctx)
             else -> emptyList()
         }
+
+    /**
+     * The skill (095 §C2): its operating core plus one row per reference file, read from the
+     * packaged copy so the listing cannot advertise a reference the server would 404.
+     */
+    private fun skillDescriptors(
+        offset: Int,
+        limit: Int,
+    ): List<McpSchema.Resource> {
+        val core =
+            descriptor(
+                uri = McpResourceUri.skill(),
+                name = "skill",
+                description =
+                    "How to author, execute and debug pipelines on this server — read this before " +
+                        "authoring anything beyond a one-node pipeline.",
+                mimeType = MIME_MARKDOWN,
+            )
+        val references =
+            SkillDocs.references.keys.map {
+                descriptor(
+                    uri = McpResourceUri.skillReference(it),
+                    name = it,
+                    description = "${SkillDocs.title(it)} — a reference of the datapipelines skill.",
+                    mimeType = MIME_MARKDOWN,
+                )
+            }
+        return (listOf(core) + references).drop(offset).take(limit)
+    }
 
     private fun pipelineDescriptors(
         offset: Int,
@@ -234,9 +267,13 @@ class McpResourceCatalog(
         /** §7.2.2 — a template resource is its Freemarker body, not a JSON wrapper. */
         const val MIME_FREEMARKER_SQL: String = "text/x-freemarker-sql"
 
+        /** 095 — the skill and its references are Markdown, on both the MCP and the HTTP surface. */
+        const val MIME_MARKDOWN: String = "text/markdown"
+
         /** §7.3 — the enumeration order, and the cursor's `kind` alphabet. */
         val KINDS: List<String> =
             listOf(
+                McpResourceUri.DOCS,
                 McpResourceUri.PIPELINES,
                 McpResourceUri.TEMPLATES,
                 McpResourceUri.DATASOURCES,

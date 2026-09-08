@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "datapipelines": {
+      "type": "http",
+      "url": "${user_config.url}/mcp",
+      "headers": {
+        "DP-API-Key": "${user_config.api_key}"
+      }
+    }
+  }
+}
