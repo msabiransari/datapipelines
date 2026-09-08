@@ -592,13 +592,6 @@
 
         <div class="shots">
           <figure class="shot">
-            <!-- screenshot: the /promotion screen against a real receiver deployment — untouched capture from `./gradlew siteShots` (070 §C) -->
-            <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
-              <img th:src="@{/site/img/promotion.png}" width="1440" height="900" alt="The promotion screen. A banner reads: promoting workspace nyc-demo to uat. A table lists seven released pipelines, each with a send checkbox, its version here (v1) and its version on the target (absent). A Promote button sits below, beside a note saying the templates each pipeline pins and the child pipelines it runs are sent with it, in dependency order." loading="lazy">
-            </div>
-            <figcaption>Promotion to one configured higher environment. Only released versions newer than the target's are listed, and each one travels with its closure — the templates it pins and the child pipelines it runs.</figcaption>
-          </figure>
-          <figure class="shot">
             <!-- screenshot: the /executions history with successes, failures and a composed child run — untouched capture from `./gradlew siteShots` (070 §C) -->
             <div class="shot-scroll" tabindex="0" role="group" aria-label="Screenshot — scrolls horizontally on narrow screens">
               <img th:src="@{/site/img/executions.png}" width="1440" height="900" alt="The execution history screen, newest first, with filters for pipeline, status and date range. Rows carry the pipeline&#39;s display name above its full path, the version, a status pill, the start time, the duration in milliseconds, the row count and the trigger. Both outcomes are here: Success rows for nyc/mobility/taxi_vs_rideshare at 12 rows and nyc/mobility/weather_sensitivity_by_borough at 29, and Failed rows for test/probe/trip_probe with a dash where the row count would be. Every row reads REST under Via." loading="lazy">
